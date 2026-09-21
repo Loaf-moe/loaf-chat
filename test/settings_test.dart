@@ -63,10 +63,46 @@ void main() {
   testWidgets('closing returns to the app', (tester) async {
     await _open(tester, const Size(1440, 900));
 
-    await tester.tap(find.byType(IconButton).first);
+    await tester.tap(find.byTooltip('Close'));
     await tester.pumpAndSettle();
 
     expect(find.text('devices'), findsNothing);
     expect(find.text('open'), findsOneWidget);
+  });
+
+  testWidgets('close stays available inside a narrow section', (tester) async {
+    await _open(tester, const Size(390, 844));
+    expect(find.byTooltip('Close'), findsOneWidget);
+    expect(find.byTooltip('Back'), findsNothing);
+
+    await tester.tap(find.text('appearance'));
+    await tester.pumpAndSettle();
+
+    // The close button belongs to the card, so entering a section must not
+    // take it away — and back appears only now that there is a level to go
+    // back to.
+    expect(find.byTooltip('Close'), findsOneWidget);
+    expect(find.byTooltip('Back'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+    expect(find.text('open'), findsOneWidget);
+  });
+
+  testWidgets('back steps out of a section before closing the card', (
+    tester,
+  ) async {
+    await _open(tester, const Size(390, 844));
+    await tester.tap(find.text('appearance'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+
+    // Back to the nav, still inside settings. (The app stays mounted behind
+    // the modal, so its button remains findable — that is the point of it.)
+    expect(find.text('devices'), findsOneWidget);
+    expect(find.byTooltip('Back'), findsNothing);
+    expect(find.byTooltip('Close'), findsOneWidget);
   });
 }

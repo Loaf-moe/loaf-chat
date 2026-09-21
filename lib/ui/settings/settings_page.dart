@@ -64,22 +64,47 @@ class _SettingsModalState extends State<SettingsModal> {
     final tokens = LoafTokens.of(context);
     final screen = MediaQuery.sizeOf(context);
     final wide = screen.width >= _twoPaneFrom;
+    final inDetail = !wide && _pushed != null;
 
-    return Dialog(
-      backgroundColor: tokens.page,
-      clipBehavior: Clip.antiAlias,
-      elevation: 0,
-      // Full-bleed on a phone, a floating card on anything larger.
-      insetPadding: wide
-          ? const EdgeInsets.all(LoafSpace.x10)
-          : EdgeInsets.zero,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(wide ? LoafRadius.xxl : 0),
-        side: wide ? BorderSide(color: tokens.border) : BorderSide.none,
-      ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 960, maxHeight: 680),
-        child: SafeArea(child: wide ? _twoPane() : _onePane(tokens)),
+    return PopScope(
+      // Back steps out of a section before it closes the card. Without this
+      // the system back gesture skips a level and dismisses everything.
+      canPop: !inDetail,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) setState(() => _pushed = null);
+      },
+      child: Dialog(
+        backgroundColor: tokens.page,
+        clipBehavior: Clip.antiAlias,
+        elevation: 0,
+        // Full-bleed on a phone, a floating card on anything larger.
+        insetPadding: wide
+            ? const EdgeInsets.all(LoafSpace.x10)
+            : EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(wide ? LoafRadius.xxl : 0),
+          side: wide ? BorderSide(color: tokens.border) : BorderSide.none,
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 960, maxHeight: 680),
+          child: SafeArea(
+            child: Column(
+              children: [
+                // One header for every state. Close belongs to the card, so
+                // it never disappears; back appears only when there is a
+                // level to go back to.
+                _CardHeader(
+                  title: inDetail ? _pushed!.label : 'settings',
+                  onBack: inDetail
+                      ? () => setState(() => _pushed = null)
+                      : null,
+                  onClose: () => Navigator.of(context).pop(),
+                ),
+                Expanded(child: wide ? _twoPane() : _onePane()),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -92,46 +117,80 @@ class _SettingsModalState extends State<SettingsModal> {
         child: _Nav(
           selected: _section,
           onSelect: (s) => setState(() => _section = s),
-          onClose: () => Navigator.of(context).pop(),
         ),
       ),
       Expanded(child: _Detail(section: _section)),
     ],
   );
 
-  Widget _onePane(LoafTokens tokens) {
+  Widget _onePane() {
     final pushed = _pushed;
     if (pushed == null) {
-      return _Nav(
-        selected: null,
-        onSelect: (s) => setState(() => _pushed = s),
-        onClose: () => Navigator.of(context).pop(),
-      );
+      return _Nav(selected: null, onSelect: (s) => setState(() => _pushed = s));
     }
+    return _Detail(section: pushed);
+  }
+}
 
-    return Column(
-      children: [
-        _DetailBar(
-          title: pushed.label,
-          onBack: () => setState(() => _pushed = null),
-        ),
-        Expanded(child: _Detail(section: pushed)),
-      ],
+/// The card's header. Same height, same type, same close button in every
+/// state — only the title and the presence of a back arrow change.
+class _CardHeader extends StatelessWidget {
+  const _CardHeader({required this.title, required this.onClose, this.onBack});
+
+  final String title;
+  final VoidCallback onClose;
+  final VoidCallback? onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x2),
+      decoration: BoxDecoration(
+        color: tokens.sidebar,
+        border: Border(bottom: BorderSide(color: tokens.border)),
+      ),
+      child: Row(
+        children: [
+          if (onBack != null)
+            IconButton(
+              onPressed: onBack,
+              iconSize: 20,
+              color: tokens.textBody,
+              tooltip: 'Back',
+              icon: const Icon(LucideIcons.arrowLeft),
+            )
+          else
+            const SizedBox(width: LoafSpace.x2),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: loafDisplay(17, 600).copyWith(color: tokens.textStrong),
+            ),
+          ),
+          IconButton(
+            onPressed: onClose,
+            iconSize: 18,
+            color: tokens.textMuted,
+            tooltip: 'Close',
+            icon: const Icon(LucideIcons.x),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _Nav extends StatelessWidget {
-  const _Nav({
-    required this.selected,
-    required this.onSelect,
-    required this.onClose,
-  });
+  const _Nav({required this.selected, required this.onSelect});
 
   /// Null on the narrow layout, where nothing is selected in place.
   final SettingsSection? selected;
   final ValueChanged<SettingsSection> onSelect;
-  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -142,36 +201,14 @@ class _Nav extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              LoafSpace.x4,
-              LoafSpace.x4,
-              LoafSpace.x2,
-              LoafSpace.x3,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'settings',
-                    style: loafDisplay(
-                      20,
-                      600,
-                    ).copyWith(color: tokens.textStrong),
-                  ),
-                ),
-                IconButton(
-                  onPressed: onClose,
-                  iconSize: 18,
-                  color: tokens.textMuted,
-                  icon: const Icon(LucideIcons.x),
-                ),
-              ],
-            ),
-          ),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x2),
+              padding: const EdgeInsets.fromLTRB(
+                LoafSpace.x2,
+                LoafSpace.x3,
+                LoafSpace.x2,
+                LoafSpace.x2,
+              ),
               children: [
                 for (final section in SettingsSection.values)
                   _NavItem(
@@ -263,41 +300,6 @@ class _SignOut extends StatelessWidget {
       ),
     ),
   );
-}
-
-/// The narrow layout's header over a pushed section.
-class _DetailBar extends StatelessWidget {
-  const _DetailBar({required this.title, required this.onBack});
-
-  final String title;
-  final VoidCallback onBack;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = LoafTokens.of(context);
-
-    return Container(
-      height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x2),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: tokens.border)),
-      ),
-      child: Row(
-        children: [
-          IconButton(
-            onPressed: onBack,
-            iconSize: 20,
-            color: tokens.textBody,
-            icon: const Icon(LucideIcons.arrowLeft),
-          ),
-          Text(
-            title,
-            style: loafDisplay(17, 600).copyWith(color: tokens.textStrong),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _Detail extends StatelessWidget {
