@@ -25,7 +25,13 @@ class UserBar extends StatelessWidget {
   final VoidCallback? onToggleMute;
   final VoidCallback? onSettings;
 
-  static const height = 56.0;
+  static const height = 52.0;
+
+  /// Gap between the panel and the edges it floats over.
+  static const inset = 8.0;
+
+  /// What the columns behind it must keep clear so nothing hides underneath.
+  static const clearance = height + inset * 2;
 
   @override
   Widget build(BuildContext context) {
@@ -33,17 +39,21 @@ class UserBar extends StatelessWidget {
 
     return Container(
       height: height,
-      // Navy in both themes, like the rail above it: the mark at the top and
-      // you at the bottom bookend the navigation.
-      color: tokens.rail,
+      // The raised surface, so the panel reads as floating over the rail and
+      // the channel list rather than as a third column of its own.
+      decoration: BoxDecoration(
+        color: tokens.card,
+        borderRadius: BorderRadius.circular(LoafRadius.xl),
+        border: Border.all(color: tokens.border),
+        boxShadow: tokens.shadowMd,
+      ),
       child: Row(
         children: [
-          // Sized to the rail so the avatar lands on the same centreline as
-          // the space avatars stacked above it.
-          SizedBox(
-            width: LoafShell.railWidth,
-            child: Center(child: _Avatar(tokens: tokens)),
-          ),
+          // Inset by [inset], so this padding puts the avatar's centre back
+          // on the rail's centreline.
+          const SizedBox(width: LoafShell.railWidth / 2 - inset - 18),
+          _Avatar(tokens: tokens),
+          const SizedBox(width: LoafSpace.x3),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -53,7 +63,7 @@ class UserBar extends StatelessWidget {
                   currentUser.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: loafBody(13, 600).copyWith(color: tokens.onRail),
+                  style: loafBody(13, 600).copyWith(color: tokens.textStrong),
                 ),
                 Text(
                   currentUser.id,

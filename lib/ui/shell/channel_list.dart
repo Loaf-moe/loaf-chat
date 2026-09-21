@@ -6,6 +6,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import 'user_bar.dart';
 
 class ChannelList extends StatefulWidget {
   const ChannelList({
@@ -47,7 +48,8 @@ class _ChannelListState extends State<ChannelList> {
           _SearchField(tokens: tokens),
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.only(bottom: 8),
+              // Clears the account panel floating over the bottom.
+              padding: const EdgeInsets.only(bottom: UserBar.clearance),
               children: [
                 for (final category in widget.space.categories)
                   _CategorySection(

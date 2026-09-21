@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import 'user_bar.dart';
 
 class SpacesRail extends StatelessWidget {
   const SpacesRail({
@@ -44,6 +45,8 @@ class SpacesRail extends StatelessWidget {
                     const SizedBox(height: 8),
                   ],
                   _CreateSpaceButton(tokens: tokens),
+                  // Clears the account panel floating over the bottom.
+                  const SizedBox(height: UserBar.clearance),
                 ],
               ),
             ),

@@ -149,32 +149,38 @@ class _AppShellState extends State<AppShell> {
   /// Rail and channel list side by side, over one account bar that spans
   /// both. The bar is shared so your avatar appears once, not once per
   /// column.
+  /// Rail and channel list side by side, with the account panel floating
+  /// over the bottom of both. Overlaid rather than stacked, so the columns
+  /// still run the full height behind it and your avatar appears once.
   Widget get _navigation => SafeArea(
     right: false,
-    child: Column(
+    child: Stack(
       children: [
-        Expanded(
-          child: Row(
-            children: [
-              SpacesRail(
-                spaces: mockSpaces,
-                selectedSpaceId: _spaceId,
-                onSelect: _selectSpace,
+        Row(
+          children: [
+            SpacesRail(
+              spaces: mockSpaces,
+              selectedSpaceId: _spaceId,
+              onSelect: _selectSpace,
+            ),
+            Expanded(
+              child: ChannelList(
+                space: _space,
+                selectedChannelId: _channel.id,
+                onSelect: _selectChannel,
               ),
-              Expanded(
-                child: ChannelList(
-                  space: _space,
-                  selectedChannelId: _channel.id,
-                  onSelect: _selectChannel,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
-        UserBar(
-          muted: _muted,
-          onToggleMute: () => setState(() => _muted = !_muted),
-          onSettings: () {},
+        Positioned(
+          left: UserBar.inset,
+          right: UserBar.inset,
+          bottom: UserBar.inset,
+          child: UserBar(
+            muted: _muted,
+            onToggleMute: () => setState(() => _muted = !_muted),
+            onSettings: () {},
+          ),
         ),
       ],
     ),

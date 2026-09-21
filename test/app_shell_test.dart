@@ -150,11 +150,17 @@ void main() {
     expect(find.byType(UserBar), findsOneWidget);
     expect(find.text('@faore'), findsOneWidget);
 
+    // It floats over both columns, inset from each edge.
     final bar = tester.getRect(find.byType(UserBar));
     expect(
       bar.width,
-      LoafShell.railWidth + LoafShell.sidebarWidth,
-      reason: 'the bar should run under both navigation columns',
+      LoafShell.railWidth + LoafShell.sidebarWidth - UserBar.inset * 2,
+      reason: 'the panel should span both navigation columns',
+    );
+    expect(
+      bar.left,
+      UserBar.inset,
+      reason: 'the panel should start in the rail column, not after it',
     );
   });
 
