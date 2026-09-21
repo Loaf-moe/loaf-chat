@@ -17,12 +17,20 @@ class UserBar extends StatelessWidget {
   const UserBar({
     super.key,
     this.muted = false,
+    this.deafened = false,
     this.onToggleMute,
+    this.onToggleDeafen,
     this.onSettings,
   });
 
   final bool muted;
+
+  /// Deafened means you hear nobody. It implies muted — talking to people you
+  /// cannot hear is not a state worth offering.
+  final bool deafened;
+
   final VoidCallback? onToggleMute;
+  final VoidCallback? onToggleDeafen;
   final VoidCallback? onSettings;
 
   static const height = 52.0;
@@ -75,10 +83,16 @@ class UserBar extends StatelessWidget {
             ),
           ),
           _BarAction(
-            icon: muted ? LucideIcons.micOff : LucideIcons.mic,
+            icon: muted || deafened ? LucideIcons.micOff : LucideIcons.mic,
             tooltip: muted ? 'Unmute' : 'Mute',
-            tinted: muted,
+            tinted: muted || deafened,
             onTap: onToggleMute,
+          ),
+          _BarAction(
+            icon: deafened ? LucideIcons.headphoneOff : LucideIcons.headphones,
+            tooltip: deafened ? 'Undeafen' : 'Deafen',
+            tinted: deafened,
+            onTap: onToggleDeafen,
           ),
           _BarAction(
             icon: LucideIcons.settings,

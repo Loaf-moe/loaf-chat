@@ -45,6 +45,7 @@ class _AppShellState extends State<AppShell> {
   Channel? _connected;
   String? _connectedSpaceName;
   bool _muted = false;
+  bool _deafened = false;
 
   Space get _space => mockSpaces.firstWhere((s) => s.id == _spaceId);
 
@@ -193,7 +194,18 @@ class _AppShellState extends State<AppShell> {
           bottom: UserBar.inset,
           child: UserBar(
             muted: _muted,
-            onToggleMute: () => setState(() => _muted = !_muted),
+            deafened: _deafened,
+            // Deafening implies muting. Coming back out restores you to
+            // unmuted rather than leaving you silently muted for a reason
+            // you never chose.
+            onToggleMute: () => setState(() {
+              _muted = !_muted;
+              if (!_muted) _deafened = false;
+            }),
+            onToggleDeafen: () => setState(() {
+              _deafened = !_deafened;
+              if (!_deafened) _muted = false;
+            }),
             onSettings: () => showSettings(context),
           ),
         ),

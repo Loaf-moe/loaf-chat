@@ -164,6 +164,32 @@ void main() {
     );
   });
 
+  testWidgets('deafening implies muting, and undeafening restores both', (
+    tester,
+  ) async {
+    await _pumpShell(tester, const Size(1440, 900));
+
+    expect(find.byTooltip('Mute'), findsOneWidget);
+    expect(find.byTooltip('Deafen'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Deafen'));
+    await tester.pumpAndSettle();
+
+    // Talking to people you cannot hear is not a state worth offering.
+    expect(find.byTooltip('Undeafen'), findsOneWidget);
+    expect(find.byIcon(LucideIcons.micOff), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Undeafen'));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Deafen'), findsOneWidget);
+    expect(
+      find.byTooltip('Mute'),
+      findsOneWidget,
+      reason: 'coming back should not leave you silently muted',
+    );
+  });
+
   testWidgets('switching spaces remembers where you were', (tester) async {
     await _pumpShell(tester, const Size(1440, 900));
 
