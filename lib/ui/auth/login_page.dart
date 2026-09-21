@@ -382,11 +382,14 @@ class _Field extends StatelessWidget {
               height: 1.4,
             ).copyWith(color: tokens.textBody),
             decoration: InputDecoration(
-              isDense: true,
+              // Collapsed, so the field contributes exactly its line box and
+              // the Row's centring does the vertical work. The composer needs
+              // an asymmetric nudge because it bottom-aligns against taller
+              // controls; that constant is specific to that layout and does
+              // not transfer here.
+              isCollapsed: true,
               border: InputBorder.none,
-              // Same calibration as the composer: Outfit paints low inside
-              // its line box, so the padding is asymmetric on purpose.
-              contentPadding: const EdgeInsets.only(top: 6, bottom: 14),
+              contentPadding: EdgeInsets.zero,
               hintText: hint,
               hintStyle: loafBody(
                 15,

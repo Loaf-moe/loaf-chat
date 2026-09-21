@@ -12,6 +12,12 @@ import '../theme/loaf_theme.dart';
 /// make `CrossAxisAlignment.end` also read as vertically centred.
 const _controlSize = 40.0;
 
+/// Composer text metrics. The line box is centred in the control height by
+/// arithmetic rather than by a calibrated nudge.
+const _textSize = 15.0;
+const _textHeight = 1.4;
+const _fieldPad = (_controlSize - _textSize * _textHeight) / 2;
+
 class Composer extends StatefulWidget {
   const Composer({super.key, required this.channelName});
 
@@ -70,34 +76,36 @@ class _ComposerState extends State<Composer> {
         children: [
           _IconAction(icon: LucideIcons.plus, onTap: () {}),
           Expanded(
-            child: TextField(
-              controller: _controller,
-              minLines: 1,
-              maxLines: 5,
-              // An explicit line height keeps the field's height independent
-              // of whatever the theme's bodyLarge happens to be.
-              style: loafBody(
-                15,
-                400,
-                height: 1.4,
-              ).copyWith(color: tokens.textBody),
-              decoration: InputDecoration(
-                isDense: true,
-                border: InputBorder.none,
-                // Asymmetric on purpose. Outfit's glyphs paint lower inside
-                // their line box than its declared metrics predict, so
-                // symmetric padding leaves the text visibly below the icons
-                // even though the boxes are centred. The 4px difference is
-                // measured off the rendered pixels, not derived.
-                // ponytail: calibrated for Outfit at 15px; re-measure if the
-                // UI face or composer text size changes.
-                contentPadding: const EdgeInsets.only(top: 6, bottom: 14),
-                hintText: 'Message #${widget.channelName}',
-                hintStyle: loafBody(
-                  15,
+            child: Padding(
+              // Centres the line box in the control height. Arithmetic, not
+              // calibration — see _fieldPad.
+              padding: const EdgeInsets.symmetric(vertical: _fieldPad),
+              child: TextField(
+                controller: _controller,
+                minLines: 1,
+                maxLines: 5,
+                // An explicit line height keeps the field's height
+                // independent of whatever the theme's bodyLarge happens to be.
+                style: loafBody(
+                  _textSize,
                   400,
-                  height: 1.4,
-                ).copyWith(color: tokens.textMuted),
+                  height: _textHeight,
+                ).copyWith(color: tokens.textBody),
+                decoration: InputDecoration(
+                  // Collapsed so the field is exactly its line box and the
+                  // padding above does the centring. Left to itself the
+                  // decorator adds its own vertical padding, which is what
+                  // pushed this text off the icons' centreline.
+                  isCollapsed: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                  hintText: 'Message #${widget.channelName}',
+                  hintStyle: loafBody(
+                    _textSize,
+                    400,
+                    height: _textHeight,
+                  ).copyWith(color: tokens.textMuted),
+                ),
               ),
             ),
           ),
