@@ -92,6 +92,49 @@ void main() {
     expect(find.text('Voice connected'), findsNothing);
   });
 
+  testWidgets('reaction pills hug their content and sit on one row', (
+    tester,
+  ) async {
+    await _pumpShell(tester, const Size(1440, 900));
+
+    // The most recent message carries three reactions.
+    final pills = [find.text('😍 7'), find.text('🔥 3'), find.text('🥖 1')];
+    for (final pill in pills) {
+      expect(pill, findsOneWidget, reason: 'fixture reaction missing');
+    }
+
+    final boxes = pills.map(tester.getRect).toList();
+
+    // A Container with an alignment and no width expands to the parent's
+    // width, which puts one pill per line. Content-width pills are narrow.
+    for (final box in boxes) {
+      expect(
+        box.width,
+        lessThan(80),
+        reason:
+            'a reaction pill went '
+            'full-bleed instead of hugging its label',
+      );
+    }
+    // Same row, left to right.
+    expect(boxes[1].top, boxes.first.top);
+    expect(boxes[2].top, boxes.first.top);
+    expect(boxes[1].left, greaterThan(boxes[0].left));
+    expect(boxes[2].left, greaterThan(boxes[1].left));
+  });
+
+  testWidgets('composer controls share one baseline', (tester) async {
+    await _pumpShell(tester, const Size(1440, 900));
+
+    final send = tester.getRect(find.byIcon(LucideIcons.send));
+    final attach = tester.getRect(find.byIcon(LucideIcons.plus).last);
+    final emoji = tester.getRect(find.byIcon(LucideIcons.smile));
+
+    // Equal-height controls bottom-aligned means their centres match too.
+    expect((send.center.dy - emoji.center.dy).abs(), lessThan(1.0));
+    expect((attach.center.dy - emoji.center.dy).abs(), lessThan(1.0));
+  });
+
   testWidgets('switching spaces remembers where you were', (tester) async {
     await _pumpShell(tester, const Size(1440, 900));
 

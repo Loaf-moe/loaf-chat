@@ -8,6 +8,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
 
+/// Every control in the composer row is this tall. Equal heights are what
+/// make `CrossAxisAlignment.end` also read as vertically centred.
+const _controlSize = 40.0;
+
 class Composer extends StatefulWidget {
   const Composer({super.key, required this.channelName});
 
@@ -46,44 +50,45 @@ class _ComposerState extends State<Composer> {
         LoafSpace.x4,
         LoafSpace.x3,
       ),
-      constraints: const BoxConstraints(minHeight: 46),
       decoration: BoxDecoration(
         color: tokens.card,
         borderRadius: BorderRadius.circular(LoafRadius.xxl),
         border: Border.all(color: tokens.border),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x2),
+      // Every control is exactly [_controlSize] tall, so bottom-aligning them
+      // also lines up their centres. The 3px band above and below makes the
+      // single-line composer 46 tall without a minHeight that would strand
+      // the controls at the bottom of an over-tall row.
+      padding: const EdgeInsets.symmetric(
+        horizontal: LoafSpace.x2,
+        vertical: 3,
+      ),
       child: Row(
+        // End, not centre: as the field grows to five lines the buttons stay
+        // beside the last line rather than floating to the middle.
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           _IconAction(icon: LucideIcons.plus, onTap: () {}),
           Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
-              child: TextField(
-                controller: _controller,
-                minLines: 1,
-                maxLines: 5,
-                style: loafBody(15, 400).copyWith(color: tokens.textBody),
-                decoration: InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  hintText: 'Message #${widget.channelName}',
-                  hintStyle: loafBody(
-                    15,
-                    400,
-                  ).copyWith(color: tokens.textMuted),
-                ),
+            child: TextField(
+              controller: _controller,
+              minLines: 1,
+              maxLines: 5,
+              style: loafBody(15, 400).copyWith(color: tokens.textBody),
+              decoration: InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                // Centres one line of text inside the control height.
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                hintText: 'Message #${widget.channelName}',
+                hintStyle: loafBody(15, 400).copyWith(color: tokens.textMuted),
               ),
             ),
           ),
           _IconAction(icon: LucideIcons.smile, onTap: () {}),
           _IconAction(icon: LucideIcons.paperclip, onTap: () {}),
           const SizedBox(width: LoafSpace.x1),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: LoafSpace.x1),
-            child: _SendButton(enabled: _hasText, onTap: () {}),
-          ),
+          _SendButton(enabled: _hasText, onTap: () {}),
         ],
       ),
     );
@@ -121,8 +126,9 @@ class _IconActionState extends State<_IconAction> {
         scale: _pressed ? LoafMotion.iconPressScale : 1.0,
         duration: LoafMotion.fast,
         curve: LoafMotion.ease,
-        child: Padding(
-          padding: const EdgeInsets.all(LoafSpace.x2),
+        child: SizedBox(
+          width: _controlSize,
+          height: _controlSize,
           child: Icon(widget.icon, size: 20, color: tokens.textMuted),
         ),
       ),
@@ -155,23 +161,33 @@ class _SendButtonState extends State<_SendButton> {
       onTapUp: widget.enabled ? (_) => _setPressed(false) : null,
       onTapCancel: widget.enabled ? () => _setPressed(false) : null,
       onTap: widget.enabled ? widget.onTap : null,
-      child: AnimatedScale(
-        scale: _pressed ? LoafMotion.iconPressScale : 1.0,
-        duration: LoafMotion.fast,
-        curve: LoafMotion.ease,
-        child: AnimatedOpacity(
-          opacity: widget.enabled ? 1.0 : 0.4,
-          duration: LoafMotion.normal,
-          curve: LoafMotion.ease,
-          child: Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: tokens.accent,
-              shape: BoxShape.circle,
-              boxShadow: widget.enabled ? tokens.shadowAccent : null,
+      child: SizedBox(
+        width: _controlSize,
+        height: _controlSize,
+        child: Center(
+          child: AnimatedScale(
+            scale: _pressed ? LoafMotion.iconPressScale : 1.0,
+            duration: LoafMotion.fast,
+            curve: LoafMotion.ease,
+            child: AnimatedOpacity(
+              opacity: widget.enabled ? 1.0 : 0.4,
+              duration: LoafMotion.normal,
+              curve: LoafMotion.ease,
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: tokens.accent,
+                  shape: BoxShape.circle,
+                  boxShadow: widget.enabled ? tokens.shadowAccent : null,
+                ),
+                child: Icon(
+                  LucideIcons.send,
+                  size: 16,
+                  color: tokens.textOnAccent,
+                ),
+              ),
             ),
-            child: Icon(LucideIcons.send, size: 16, color: tokens.textOnAccent),
           ),
         ),
       ),

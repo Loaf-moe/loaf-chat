@@ -224,10 +224,17 @@ class _ReactionsWrap extends StatelessWidget {
                 color: reaction.mine ? tokens.accent : tokens.border,
               ),
             ),
-            alignment: Alignment.center,
-            child: Text(
-              '${reaction.emoji} ${reaction.count}',
-              style: loafBody(11, 600).copyWith(color: tokens.textBody),
+            // A Container with `alignment` and no width expands to the
+            // parent's max width, which makes every pill full-bleed and
+            // forces one per line. A min-size Row hugs the text instead.
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${reaction.emoji} ${reaction.count}',
+                  style: loafBody(11, 600).copyWith(color: tokens.textBody),
+                ),
+              ],
             ),
           ),
         Container(
