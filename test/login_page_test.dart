@@ -24,7 +24,9 @@ Future<void> _pump(WidgetTester tester) async {
 Future<void> _useServer(WidgetTester tester, String server) async {
   await tester.tap(find.text('loaf.moe'));
   await tester.pumpAndSettle();
-  await tester.enterText(find.byType(TextField).first, server);
+  // The server field is last in the column; in password mode the username
+  // and password fields come before it.
+  await tester.enterText(find.byType(TextField).last, server);
   await tester.tap(find.text('connect'));
   await tester.pumpAndSettle(const Duration(seconds: 2));
 }
@@ -39,16 +41,54 @@ void main() {
     // showing a password box would be a lie.
     expect(find.text('password'), findsNothing);
     expect(find.text('username'), findsNothing);
+    // …and so would offering a link to one that goes nowhere.
+    expect(find.text('use a username and password'), findsNothing);
   });
 
-  testWidgets('a password-capable server gets a password form', (tester) async {
+  testWidgets('a password-capable server offers the form behind a link', (
+    tester,
+  ) async {
     await _pump(tester);
     await _useServer(tester, 'matrix.org');
 
     expect(tester.takeException(), isNull);
+    // SSO stays primary; the form is one tap away, not stacked underneath.
+    expect(find.text('continue with single sign-on'), findsOneWidget);
+    expect(find.text('username'), findsNothing);
+
+    await tester.tap(find.text('use a username and password'));
+    await tester.pumpAndSettle();
+
     expect(find.text('username'), findsOneWidget);
     expect(find.text('password'), findsOneWidget);
     expect(find.text('sign in'), findsOneWidget);
+
+    // And it is reversible.
+    await tester.tap(find.text('back to single sign-on'));
+    await tester.pumpAndSettle();
+    expect(find.text('continue with single sign-on'), findsOneWidget);
+    expect(find.text('username'), findsNothing);
+  });
+
+  testWidgets('switching homeservers drops the password choice', (
+    tester,
+  ) async {
+    await _pump(tester);
+    await _useServer(tester, 'matrix.org');
+    await tester.tap(find.text('use a username and password'));
+    await tester.pumpAndSettle();
+    expect(find.text('username'), findsOneWidget);
+
+    // Back to a server with no password flow: the form must not persist.
+    await tester.tap(find.text('matrix.org'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, 'loaf.moe');
+    await tester.tap(find.text('connect'));
+    await tester.pumpAndSettle(const Duration(seconds: 2));
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('username'), findsNothing);
+    expect(find.text('continue with loaf.moe'), findsOneWidget);
   });
 
   testWidgets('an unreachable server explains itself and offers a retry', (

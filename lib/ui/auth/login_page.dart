@@ -69,6 +69,10 @@ class _LoginPageState extends State<LoginPage> {
   String? _error;
   var _editingServer = false;
 
+  /// Set when the user chooses the password form on a server that offers
+  /// both. SSO stays the default because it is the one that always works.
+  var _usePassword = false;
+
   @override
   void initState() {
     super.initState();
@@ -89,6 +93,7 @@ class _LoginPageState extends State<LoginPage> {
       _discovery = _Discovery.probing;
       _error = null;
       _flows = null;
+      _usePassword = false;
     });
     try {
       final flows = await _discover(server);
@@ -167,16 +172,11 @@ class _LoginPageState extends State<LoginPage> {
       ];
     }
 
-    return [
-      if (flows.sso)
-        _PrimaryButton(
-          label: 'continue with ${flows.ssoProviderName}',
-          icon: LucideIcons.logIn,
-          onTap: widget.onSignedIn,
-        ),
-      // Only servers that actually advertise m.login.password get a form.
-      if (flows.password) ...[
-        if (flows.sso) _OrDivider(tokens: tokens),
+    // Only servers advertising m.login.password can show the form at all.
+    final showPassword = flows.password && (_usePassword || !flows.sso);
+
+    if (showPassword) {
+      return [
         _Field(
           tokens: tokens,
           controller: _user,
@@ -193,13 +193,37 @@ class _LoginPageState extends State<LoginPage> {
         ),
         const SizedBox(height: LoafSpace.x3),
         _PrimaryButton(label: 'sign in', onTap: widget.onSignedIn),
-      ],
-      if (!flows.sso && !flows.password)
-        Text(
-          "that server doesn't offer a sign-in method this app supports yet",
-          textAlign: TextAlign.center,
-          style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+        if (flows.sso)
+          _TextLink(
+            label: 'back to ${flows.ssoProviderName}',
+            onTap: () => setState(() => _usePassword = false),
+          ),
+      ];
+    }
+
+    if (flows.sso) {
+      return [
+        _PrimaryButton(
+          label: 'continue with ${flows.ssoProviderName}',
+          icon: LucideIcons.logIn,
+          onTap: widget.onSignedIn,
         ),
+        // Offered only where it leads somewhere. loaf.moe hands every login
+        // to Kanidm and advertises no password flow, so it gets no link.
+        if (flows.password)
+          _TextLink(
+            label: 'use a username and password',
+            onTap: () => setState(() => _usePassword = true),
+          ),
+      ];
+    }
+
+    return [
+      Text(
+        "that server doesn't offer a sign-in method this app supports yet",
+        textAlign: TextAlign.center,
+        style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+      ),
     ];
   }
 }
@@ -333,6 +357,34 @@ class _PrimaryButtonState extends State<_PrimaryButton> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A quiet secondary action. Text only — the brand keeps one red moment per
+/// zone, and the primary button already spent it.
+class _TextLink extends StatelessWidget {
+  const _TextLink({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: LoafSpace.x3),
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: loafBody(13, 600).copyWith(color: tokens.textBody),
         ),
       ),
     );
@@ -496,30 +548,6 @@ class _ProbingNote extends StatelessWidget {
             style: loafBody(13, 400).copyWith(color: tokens.textMuted),
           ),
         ),
-      ],
-    ),
-  );
-}
-
-class _OrDivider extends StatelessWidget {
-  const _OrDivider({required this.tokens});
-
-  final LoafTokens tokens;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: LoafSpace.x4),
-    child: Row(
-      children: [
-        Expanded(child: Divider(color: tokens.border, height: 1)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
-          child: Text(
-            'or',
-            style: loafBody(11, 600).copyWith(color: tokens.textMuted),
-          ),
-        ),
-        Expanded(child: Divider(color: tokens.border, height: 1)),
       ],
     ),
   );
