@@ -13,6 +13,7 @@ import '../channel/channel_view.dart';
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import 'channel_list.dart';
+import 'loaf_banner.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
 
@@ -35,6 +36,10 @@ class _AppShellState extends State<AppShell> {
   /// Where you were in each space. Switching away and back should not dump
   /// you in the first channel again.
   final _channelBySpace = <String, String>{};
+
+  /// Mockup state: which app notices are showing.
+  var _showUpdate = true;
+  final _showVerify = true;
 
   Channel? _connected;
   String? _connectedSpaceName;
@@ -102,6 +107,15 @@ class _AppShellState extends State<AppShell> {
         final channel = ChannelView(
           channel: _channel,
           messages: _messages,
+          banners: [
+            if (_showVerify) LoafBanner.verify(onAction: () {}),
+            if (_showUpdate)
+              LoafBanner.update(
+                version: '0.3.0',
+                onAction: () {},
+                onDismiss: () => setState(() => _showUpdate = false),
+              ),
+          ],
           callBar: _buildCallBar(),
           onOpenNavigation: wide
               ? null

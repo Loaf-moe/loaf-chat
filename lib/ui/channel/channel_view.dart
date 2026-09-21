@@ -44,10 +44,15 @@ class ChannelView extends StatelessWidget {
     this.onOpenNavigation,
     this.onToggleMembers,
     this.callBar,
+    this.banners = const [],
   });
 
   final Channel channel;
   final List<Message> messages;
+
+  /// App-level notices — an update, an unverified session. They sit under
+  /// the header rather than over the timeline, so they never cover a message.
+  final List<Widget> banners;
 
   /// The connected-voice bar, when the user is in a voice channel. It sits
   /// between the timeline and the composer rather than below the composer,
@@ -73,6 +78,7 @@ class ChannelView extends StatelessWidget {
             onOpenNavigation: onOpenNavigation,
             onToggleMembers: onToggleMembers,
           ),
+          ...banners,
           Expanded(child: _Timeline(messages: messages)),
           ?callBar,
           Composer(channelName: channel.name),
