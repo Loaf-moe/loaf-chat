@@ -106,6 +106,11 @@ TextStyle _variable(
   fontWeight: FontWeight.values.firstWhere((w) => w.value == weight),
   fontVariations: [FontVariation('wght', weight.toDouble())],
   height: height,
+  // Outfit declares a 1.000em ascent against a 0.260em descent, and Flutter's
+  // default proportional leading splits a line's slack in that same ratio —
+  // which drops the visible glyphs below the optical centre of their box.
+  // Even leading splits the slack equally and makes centred text look centred.
+  leadingDistribution: TextLeadingDistribution.even,
   letterSpacing: letterSpacing,
   fontStyle: style,
 );
@@ -132,7 +137,12 @@ TextStyle loafDisplay(
 /// IBM Plex Mono — code and other tool surfaces. Static weights, so no
 /// variation axis is needed.
 TextStyle loafMono(double size, {FontWeight weight = FontWeight.w400}) =>
-    TextStyle(fontFamily: 'IBM Plex Mono', fontSize: size, fontWeight: weight);
+    TextStyle(
+      fontFamily: 'IBM Plex Mono',
+      fontSize: size,
+      fontWeight: weight,
+      leadingDistribution: TextLeadingDistribution.even,
+    );
 
 // ── Theme extension ────────────────────────────────────────────────────────
 
@@ -142,6 +152,7 @@ TextStyle loafMono(double size, {FontWeight weight = FontWeight.w400}) =>
 class LoafTokens extends ThemeExtension<LoafTokens> {
   const LoafTokens({
     required this.rail,
+    required this.onRail,
     required this.sidebar,
     required this.page,
     required this.sunken,
@@ -164,6 +175,11 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
 
   /// Spaces rail. Navy-900 in both themes — the brand's anchor surface.
   final Color rail;
+
+  /// Foreground for anything sitting on the rail. Cream in both themes,
+  /// because the rail itself is navy in both: deriving this from [sidebar]
+  /// makes the loaf mark near-black on near-black in the dark palette.
+  final Color onRail;
 
   /// Channel list. Cream in the light theme, the darkest step above the rail
   /// in the dark one.
@@ -205,6 +221,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
   @override
   LoafTokens copyWith({
     Color? rail,
+    Color? onRail,
     Color? sidebar,
     Color? page,
     Color? sunken,
@@ -225,6 +242,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
     List<BoxShadow>? shadowAccent,
   }) => LoafTokens(
     rail: rail ?? this.rail,
+    onRail: onRail ?? this.onRail,
     sidebar: sidebar ?? this.sidebar,
     page: page ?? this.page,
     sunken: sunken ?? this.sunken,
@@ -253,6 +271,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
         BoxShadow.lerpList(a, b, t)!;
     return LoafTokens(
       rail: c(rail, other.rail),
+      onRail: c(onRail, other.onRail),
       sidebar: c(sidebar, other.sidebar),
       page: c(page, other.page),
       sunken: c(sunken, other.sunken),
@@ -279,6 +298,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
 
 const _lightTokens = LoafTokens(
   rail: _primary900,
+  onRail: _cream,
   sidebar: _cream,
   page: _white,
   sunken: _subtle,
@@ -311,6 +331,7 @@ const _lightTokens = LoafTokens(
 // surface ramp for depth and keeps only a soft black lift.
 const _darkTokens = LoafTokens(
   rail: _darkRail,
+  onRail: _cream,
   sidebar: _darkSidebar,
   page: _darkPage,
   sunken: Color(0xFF00121F),

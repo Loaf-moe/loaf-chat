@@ -69,7 +69,7 @@ class _LoafMark extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 6),
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: tokens.sidebar,
+        color: tokens.onRail,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Text.rich(

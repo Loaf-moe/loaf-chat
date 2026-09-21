@@ -133,6 +133,21 @@ void main() {
     // Equal-height controls bottom-aligned means their centres match too.
     expect((send.center.dy - emoji.center.dy).abs(), lessThan(1.0));
     expect((attach.center.dy - emoji.center.dy).abs(), lessThan(1.0));
+
+    // The text BOX deliberately sits above the icon centreline. Outfit paints
+    // its glyphs low inside the line box, so a centred box renders visibly
+    // low; the composer's asymmetric contentPadding lifts it by 4px, measured
+    // off real pixels. Asserting box-centre equality here would re-introduce
+    // the bug, so assert the offset instead.
+    final hint = tester.getRect(find.text('Message #general'));
+    final lift = emoji.center.dy - hint.center.dy;
+    expect(
+      lift,
+      closeTo(4.5, 1.5),
+      reason:
+          'the composer text lift no longer matches the padding that was '
+          'calibrated against the rendered glyphs',
+    );
   });
 
   testWidgets('switching spaces remembers where you were', (tester) async {

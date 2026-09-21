@@ -74,14 +74,30 @@ class _ComposerState extends State<Composer> {
               controller: _controller,
               minLines: 1,
               maxLines: 5,
-              style: loafBody(15, 400).copyWith(color: tokens.textBody),
+              // An explicit line height keeps the field's height independent
+              // of whatever the theme's bodyLarge happens to be.
+              style: loafBody(
+                15,
+                400,
+                height: 1.4,
+              ).copyWith(color: tokens.textBody),
               decoration: InputDecoration(
                 isDense: true,
                 border: InputBorder.none,
-                // Centres one line of text inside the control height.
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                // Asymmetric on purpose. Outfit's glyphs paint lower inside
+                // their line box than its declared metrics predict, so
+                // symmetric padding leaves the text visibly below the icons
+                // even though the boxes are centred. The 4px difference is
+                // measured off the rendered pixels, not derived.
+                // ponytail: calibrated for Outfit at 15px; re-measure if the
+                // UI face or composer text size changes.
+                contentPadding: const EdgeInsets.only(top: 6, bottom: 14),
                 hintText: 'Message #${widget.channelName}',
-                hintStyle: loafBody(15, 400).copyWith(color: tokens.textMuted),
+                hintStyle: loafBody(
+                  15,
+                  400,
+                  height: 1.4,
+                ).copyWith(color: tokens.textMuted),
               ),
             ),
           ),
