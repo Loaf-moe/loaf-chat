@@ -59,18 +59,16 @@ class _AccountSectionState extends State<AccountSection> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                'account',
-                style: loafDisplay(24, 600).copyWith(color: tokens.textStrong),
-              ),
-              const SizedBox(height: LoafSpace.x1),
-              Text(
-                'how you look everywhere on matrix, not just here',
-                style: loafBody(13, 400).copyWith(color: tokens.textMuted),
-              ),
-              const SizedBox(height: LoafSpace.x6),
-
+              // No page title: the nav says which section this is, and on a
+              // phone so does the card header. A third one is just noise.
               _FieldLabel(tokens: tokens, label: 'profile'),
+              Padding(
+                padding: const EdgeInsets.only(bottom: LoafSpace.x4),
+                child: Text(
+                  'how you look everywhere on matrix, not just here',
+                  style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+                ),
+              ),
               _AvatarRow(tokens: tokens),
               const SizedBox(height: LoafSpace.x6),
 
