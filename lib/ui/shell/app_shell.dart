@@ -14,6 +14,7 @@ import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import 'channel_list.dart';
 import 'spaces_rail.dart';
+import 'user_bar.dart';
 
 /// Below this width the navigation collapses into a drawer.
 const _wideBreakpoint = 900.0;
@@ -114,8 +115,10 @@ class _AppShellState extends State<AppShell> {
             backgroundColor: tokens.page,
             body: Row(
               children: [
-                _rail,
-                SizedBox(width: LoafShell.sidebarWidth, child: _list),
+                SizedBox(
+                  width: LoafShell.railWidth + LoafShell.sidebarWidth,
+                  child: _navigation,
+                ),
                 Expanded(child: channel),
               ],
             ),
@@ -135,12 +138,7 @@ class _AppShellState extends State<AppShell> {
             width: drawerWidth,
             shape: const RoundedRectangleBorder(),
             backgroundColor: tokens.sidebar,
-            child: Row(
-              children: [
-                _rail,
-                Expanded(child: _list),
-              ],
-            ),
+            child: _navigation,
           ),
           body: channel,
         );
@@ -148,21 +146,37 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget get _rail => SafeArea(
+  /// Rail and channel list side by side, over one account bar that spans
+  /// both. The bar is shared so your avatar appears once, not once per
+  /// column.
+  Widget get _navigation => SafeArea(
     right: false,
-    child: SpacesRail(
-      spaces: mockSpaces,
-      selectedSpaceId: _spaceId,
-      onSelect: _selectSpace,
-    ),
-  );
-
-  Widget get _list => SafeArea(
-    left: false,
-    child: ChannelList(
-      space: _space,
-      selectedChannelId: _channel.id,
-      onSelect: _selectChannel,
+    child: Column(
+      children: [
+        Expanded(
+          child: Row(
+            children: [
+              SpacesRail(
+                spaces: mockSpaces,
+                selectedSpaceId: _spaceId,
+                onSelect: _selectSpace,
+              ),
+              Expanded(
+                child: ChannelList(
+                  space: _space,
+                  selectedChannelId: _channel.id,
+                  onSelect: _selectChannel,
+                ),
+              ),
+            ],
+          ),
+        ),
+        UserBar(
+          muted: _muted,
+          onToggleMute: () => setState(() => _muted = !_muted),
+          onSettings: () {},
+        ),
+      ],
     ),
   );
 }

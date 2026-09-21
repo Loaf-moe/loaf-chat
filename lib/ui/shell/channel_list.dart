@@ -61,7 +61,6 @@ class _ChannelListState extends State<ChannelList> {
               ],
             ),
           ),
-          _UserChip(tokens: tokens),
         ],
       ),
     );
@@ -342,90 +341,6 @@ class _MemberAvatar extends StatelessWidget {
       child: Text(
         member.initials,
         style: loafBody(9, 600).copyWith(color: Colors.white),
-      ),
-    );
-  }
-}
-
-class _UserChip extends StatelessWidget {
-  const _UserChip({required this.tokens});
-
-  final LoafTokens tokens;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: tokens.sidebar,
-        border: Border(top: BorderSide(color: tokens.border, width: 1)),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 32,
-            height: 32,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: currentUser.color,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    currentUser.initials,
-                    style: loafBody(12, 600).copyWith(color: Colors.white),
-                  ),
-                ),
-                if (currentUser.online)
-                  Positioned(
-                    right: -1,
-                    bottom: -1,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: tokens.online,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: tokens.sidebar, width: 2),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  currentUser.name,
-                  overflow: TextOverflow.ellipsis,
-                  style: loafBody(13, 600).copyWith(color: tokens.textStrong),
-                ),
-                Text(
-                  currentUser.id,
-                  overflow: TextOverflow.ellipsis,
-                  style: loafBody(11, 400).copyWith(color: tokens.textMuted),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            icon: Icon(LucideIcons.mic, size: 18, color: tokens.textMuted),
-            onPressed: () {},
-            visualDensity: VisualDensity.compact,
-          ),
-          IconButton(
-            icon: Icon(LucideIcons.settings, size: 18, color: tokens.textMuted),
-            onPressed: () {},
-            visualDensity: VisualDensity.compact,
-          ),
-        ],
       ),
     );
   }

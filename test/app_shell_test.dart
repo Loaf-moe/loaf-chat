@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
+import 'package:loaf_native/ui/shell/user_bar.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 
 /// Renders the shell at [size] and returns once it has settled. A layout
@@ -138,6 +139,23 @@ void main() {
     // with a stub font (ascent 0.75em / descent 0.25em) rather than Outfit,
     // so any text-geometry assertion here measures the wrong typeface and
     // passes or fails for reasons unrelated to the real app.
+  });
+
+  testWidgets('the account panel appears once, spanning both columns', (
+    tester,
+  ) async {
+    await _pumpShell(tester, const Size(1440, 900));
+
+    // The rail and the channel list each used to carry their own avatar.
+    expect(find.byType(UserBar), findsOneWidget);
+    expect(find.text('@faore'), findsOneWidget);
+
+    final bar = tester.getRect(find.byType(UserBar));
+    expect(
+      bar.width,
+      LoafShell.railWidth + LoafShell.sidebarWidth,
+      reason: 'the bar should run under both navigation columns',
+    );
   });
 
   testWidgets('switching spaces remembers where you were', (tester) async {

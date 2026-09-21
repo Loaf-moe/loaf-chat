@@ -48,8 +48,6 @@ class SpacesRail extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          _CurrentUserAvatar(tokens: tokens),
         ],
       ),
     );
@@ -279,48 +277,4 @@ class _DashedBorderPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _DashedBorderPainter oldDelegate) =>
       oldDelegate.color != color;
-}
-
-class _CurrentUserAvatar extends StatelessWidget {
-  const _CurrentUserAvatar({required this.tokens});
-
-  final LoafTokens tokens;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 36,
-      height: 36,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              color: currentUser.color,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              currentUser.initials,
-              style: loafBody(13, 600).copyWith(color: Colors.white),
-            ),
-          ),
-          if (currentUser.online)
-            Positioned(
-              right: -1,
-              bottom: -1,
-              child: Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: tokens.online,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: tokens.rail, width: 2),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
 }
