@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'ui/auth/login_page.dart';
 import 'ui/shell/app_shell.dart';
 import 'ui/theme/loaf_theme.dart';
 
@@ -34,16 +33,9 @@ class LoafApp extends StatelessWidget {
                 : ThemeMode.dark;
           },
         },
-        child: Focus(
-          autofocus: true,
-          child: Builder(
-            builder: (context) => LoginPage(
-              onSignedIn: () => Navigator.of(
-                context,
-              ).push(MaterialPageRoute<void>(builder: (_) => const AppShell())),
-            ),
-          ),
-        ),
+        // Opens on whichever screen is being designed. LoginPage is the
+        // other entry point; swap it in here to work on sign-in.
+        child: const Focus(autofocus: true, child: AppShell()),
       ),
     ),
   );
