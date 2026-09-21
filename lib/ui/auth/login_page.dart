@@ -1,9 +1,11 @@
-/// Sign-in: pick a homeserver, then use whatever it actually supports.
+/// Sign-in, as a design mockup. Static: nothing probes a homeserver and
+/// nothing authenticates.
 ///
-/// loaf.moe delegates all human auth to Kanidm over OIDC, so it advertises
-/// `m.login.sso` and no password flow at all. Other homeservers do offer
-/// passwords, so the screen renders what discovery reports rather than
-/// assuming either. A mockup: discovery is faked, nothing authenticates.
+/// Homeservers differ in what they accept, so the real screen will render
+/// whatever `/_matrix/client/v3/login` reports. loaf.moe advertises both
+/// `m.login.sso` (delegated to Kanidm, named "loaf.moe") and
+/// `m.login.password`; other servers offer one or the other. Those
+/// possibilities are the [LoginLook]s below, so each can be looked at.
 library;
 
 import 'package:flutter/material.dart';
@@ -11,73 +13,51 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
 
-/// What a homeserver told us it supports, from `/_matrix/client/v3/login`.
-class LoginFlows {
-  const LoginFlows({
-    required this.sso,
-    required this.password,
-    this.ssoProviderName,
-  });
+/// The states this screen has to look right in.
+enum LoginLook {
+  /// What loaf.moe actually offers: SSO first, password behind a link.
+  ssoAndPassword,
 
-  final bool sso;
-  final bool password;
+  /// A server with no password flow — no link, because it would dead-end.
+  ssoOnly,
 
-  /// The identity provider's display name, shown on the SSO button.
-  final String? ssoProviderName;
+  /// A server with no SSO: the form, with nothing to go back to.
+  passwordOnly,
+
+  /// Waiting on the homeserver.
+  probing,
+
+  /// Nothing answered.
+  unreachable,
 }
-
-enum _Discovery { idle, probing, ready, failed }
-
-/// Fake `.well-known` + login-flow discovery, so the states feel real.
-Future<LoginFlows> _discover(String server) async {
-  await Future<void>.delayed(const Duration(milliseconds: 700));
-  if (server.contains('nope') || !server.contains('.')) {
-    throw const FormatException('no homeserver there');
-  }
-  if (server.endsWith('loaf.moe')) {
-    return const LoginFlows(
-      sso: true,
-      password: false,
-      ssoProviderName: 'loaf.moe',
-    );
-  }
-  return const LoginFlows(
-    sso: true,
-    password: true,
-    ssoProviderName: 'single sign-on',
-  );
-}
-
-const _defaultServer = 'loaf.moe';
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key, required this.onSignedIn});
+  const LoginPage({
+    super.key,
+    required this.onSignedIn,
+    this.look = LoginLook.ssoAndPassword,
+    this.server = 'loaf.moe',
+    this.ssoProviderName = 'loaf.moe',
+  });
 
   final VoidCallback onSignedIn;
+  final LoginLook look;
+  final String server;
+  final String ssoProviderName;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _server = TextEditingController(text: _defaultServer);
+  late final _server = TextEditingController(text: widget.server);
   final _user = TextEditingController();
   final _password = TextEditingController();
 
-  var _discovery = _Discovery.idle;
-  LoginFlows? _flows;
-  String? _error;
+  /// Which face of the form is showing. Presentation only, like the drawer
+  /// or a collapsed category.
+  var _showingPassword = false;
   var _editingServer = false;
-
-  /// Set when the user chooses the password form on a server that offers
-  /// both. SSO stays the default because it is the one that always works.
-  var _usePassword = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _probe();
-  }
 
   @override
   void dispose() {
@@ -85,30 +65,6 @@ class _LoginPageState extends State<LoginPage> {
     _user.dispose();
     _password.dispose();
     super.dispose();
-  }
-
-  Future<void> _probe() async {
-    final server = _server.text.trim();
-    setState(() {
-      _discovery = _Discovery.probing;
-      _error = null;
-      _flows = null;
-      _usePassword = false;
-    });
-    try {
-      final flows = await _discover(server);
-      if (!mounted) return;
-      setState(() {
-        _flows = flows;
-        _discovery = _Discovery.ready;
-      });
-    } on FormatException {
-      if (!mounted) return;
-      setState(() {
-        _discovery = _Discovery.failed;
-        _error = "couldn't reach a matrix server at that address";
-      });
-    }
   }
 
   @override
@@ -138,14 +94,14 @@ class _LoginPageState extends State<LoginPage> {
                     controller: _server,
                     editing: _editingServer,
                     onEdit: () => setState(() => _editingServer = true),
-                    onSubmit: () {
-                      setState(() => _editingServer = false);
-                      _probe();
-                    },
+                    onSubmit: () => setState(() => _editingServer = false),
                   ),
-                  if (_error != null) ...[
+                  if (widget.look == LoginLook.unreachable) ...[
                     const SizedBox(height: LoafSpace.x3),
-                    _ErrorNote(tokens: tokens, message: _error!),
+                    _ErrorNote(
+                      tokens: tokens,
+                      message: "couldn't reach a matrix server at that address",
+                    ),
                   ],
                 ],
               ),
@@ -157,25 +113,31 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   List<Widget> _authSection(LoafTokens tokens) {
-    final flows = _flows;
+    final sso =
+        widget.look == LoginLook.ssoAndPassword ||
+        widget.look == LoginLook.ssoOnly;
+    final password =
+        widget.look == LoginLook.ssoAndPassword ||
+        widget.look == LoginLook.passwordOnly;
 
-    if (_discovery == _Discovery.probing) {
-      return [_ProbingNote(tokens: tokens, server: _server.text.trim())];
+    switch (widget.look) {
+      case LoginLook.probing:
+        return [_ProbingNote(tokens: tokens, server: _server.text.trim())];
+      case LoginLook.unreachable:
+        return [
+          _PrimaryButton(
+            label: 'try again',
+            icon: LucideIcons.refreshCw,
+            onTap: () {},
+          ),
+        ];
+      case LoginLook.ssoAndPassword:
+      case LoginLook.ssoOnly:
+      case LoginLook.passwordOnly:
+        break;
     }
-    if (flows == null) {
-      return [
-        _PrimaryButton(
-          label: 'try again',
-          icon: LucideIcons.refreshCw,
-          onTap: _probe,
-        ),
-      ];
-    }
 
-    // Only servers advertising m.login.password can show the form at all.
-    final showPassword = flows.password && (_usePassword || !flows.sso);
-
-    if (showPassword) {
+    if (password && (_showingPassword || !sso)) {
       return [
         _Field(
           tokens: tokens,
@@ -193,43 +155,31 @@ class _LoginPageState extends State<LoginPage> {
         ),
         const SizedBox(height: LoafSpace.x3),
         _PrimaryButton(label: 'sign in', onTap: widget.onSignedIn),
-        if (flows.sso)
+        if (sso)
           _TextLink(
-            label: 'back to ${flows.ssoProviderName}',
-            onTap: () => setState(() => _usePassword = false),
-          ),
-      ];
-    }
-
-    if (flows.sso) {
-      return [
-        _PrimaryButton(
-          label: 'continue with ${flows.ssoProviderName}',
-          icon: LucideIcons.logIn,
-          onTap: widget.onSignedIn,
-        ),
-        // Offered only where it leads somewhere. loaf.moe hands every login
-        // to Kanidm and advertises no password flow, so it gets no link.
-        if (flows.password)
-          _TextLink(
-            label: 'use a username and password',
-            onTap: () => setState(() => _usePassword = true),
+            label: 'back to ${widget.ssoProviderName}',
+            onTap: () => setState(() => _showingPassword = false),
           ),
       ];
     }
 
     return [
-      Text(
-        "that server doesn't offer a sign-in method this app supports yet",
-        textAlign: TextAlign.center,
-        style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+      _PrimaryButton(
+        label: 'continue with ${widget.ssoProviderName}',
+        icon: LucideIcons.logIn,
+        onTap: widget.onSignedIn,
       ),
+      // Offered only where it leads somewhere: a server advertising no
+      // m.login.password gets no link to a form it would reject.
+      if (password)
+        _TextLink(
+          label: 'use a username and password',
+          onTap: () => setState(() => _showingPassword = true),
+        ),
     ];
   }
 }
 
-/// The brand mark, larger than the rail's. Cream tile, navy letter, red dot —
-/// the same in both palettes, because the tile is always cream.
 class _Wordmark extends StatelessWidget {
   const _Wordmark();
 
