@@ -28,7 +28,7 @@ Future<void> _open(WidgetTester tester, Size size) async {
 }
 
 void main() {
-  testWidgets('opens on the profile, over the app', (tester) async {
+  testWidgets('opens on the account, over the app', (tester) async {
     await _open(tester, const Size(1440, 900));
 
     expect(tester.takeException(), isNull);
@@ -41,8 +41,8 @@ void main() {
     await _open(tester, const Size(1440, 900));
 
     // Both panes at once: the nav entry and the profile content.
-    expect(find.text('sessions'), findsOneWidget);
-    expect(find.text('profile'), findsWidgets);
+    expect(find.text('devices'), findsOneWidget);
+    expect(find.text('account'), findsWidgets);
   });
 
   testWidgets('narrow shows the nav, then the detail in place', (tester) async {
@@ -56,7 +56,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // The detail replaced the nav inside the same card.
-    expect(find.text('sessions'), findsNothing);
+    expect(find.text('devices'), findsNothing);
     expect(find.textContaining('not designed yet'), findsOneWidget);
   });
 
@@ -66,7 +66,7 @@ void main() {
     await tester.tap(find.byType(IconButton).first);
     await tester.pumpAndSettle();
 
-    expect(find.text('sessions'), findsNothing);
+    expect(find.text('devices'), findsNothing);
     expect(find.text('open'), findsOneWidget);
   });
 }

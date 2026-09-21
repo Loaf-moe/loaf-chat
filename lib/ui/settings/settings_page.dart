@@ -14,30 +14,22 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
-import 'profile_section.dart';
+import 'account_section.dart';
 
 enum SettingsSection {
-  profile('profile', LucideIcons.user, SettingsGroup.you),
-  account('account', LucideIcons.keyRound, SettingsGroup.you),
-  sessions('sessions', LucideIcons.monitorSmartphone, SettingsGroup.you),
-  notifications('notifications', LucideIcons.bell, SettingsGroup.app),
-  appearance('appearance', LucideIcons.palette, SettingsGroup.app),
-  about('about', LucideIcons.info, SettingsGroup.app);
+  account('account', LucideIcons.circleUser),
+  appearance('appearance', LucideIcons.palette),
+  notifications('notifications', LucideIcons.bell),
+  devices('devices', LucideIcons.monitorSmartphone),
+  voice('voice & video', LucideIcons.video),
+  stickers('stickers', LucideIcons.sticker),
+  developer('developer', LucideIcons.terminal),
+  about('about', LucideIcons.info);
 
-  const SettingsSection(this.label, this.icon, this.group);
+  const SettingsSection(this.label, this.icon);
 
   final String label;
   final IconData icon;
-  final SettingsGroup group;
-}
-
-/// Nav grouping: your identity, then the app itself.
-enum SettingsGroup {
-  you('you'),
-  app('app');
-
-  const SettingsGroup(this.label);
-  final String label;
 }
 
 /// Below this the nav and the detail are separate screens.
@@ -51,9 +43,10 @@ Future<void> showSettings(BuildContext context) => showDialog<void>(
 );
 
 class SettingsModal extends StatefulWidget {
-  const SettingsModal({super.key, this.initial = SettingsSection.profile});
+  const SettingsModal({super.key, this.initial = SettingsSection.account});
 
-  /// Settings opens on the profile: it is the one people come here for.
+  /// Settings opens on the account, which carries the profile — the thing
+  /// people actually come here to change.
   final SettingsSection initial;
 
   @override
@@ -180,31 +173,12 @@ class _Nav extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x2),
               children: [
-                for (final group in SettingsGroup.values) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      LoafSpace.x2,
-                      LoafSpace.x3,
-                      LoafSpace.x2,
-                      LoafSpace.x1,
-                    ),
-                    child: Text(
-                      group.label.toUpperCase(),
-                      style: loafBody(11, 600).copyWith(
-                        color: tokens.textMuted,
-                        letterSpacing: 0.04 * 11,
-                      ),
-                    ),
+                for (final section in SettingsSection.values)
+                  _NavItem(
+                    section: section,
+                    active: section == selected,
+                    onTap: () => onSelect(section),
                   ),
-                  for (final section in SettingsSection.values.where(
-                    (s) => s.group == group,
-                  ))
-                    _NavItem(
-                      section: section,
-                      active: section == selected,
-                      onTap: () => onSelect(section),
-                    ),
-                ],
               ],
             ),
           ),
@@ -335,7 +309,7 @@ class _Detail extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
 
-    if (section == SettingsSection.profile) return const ProfileSection();
+    if (section == SettingsSection.account) return const AccountSection();
 
     // Honest placeholder: the IA is decided, these screens are not designed.
     return Center(

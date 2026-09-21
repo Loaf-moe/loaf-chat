@@ -1,4 +1,4 @@
-/// The profile page — what settings opens on.
+/// Account — what settings opens on, and where the profile lives.
 ///
 /// Matrix profiles are global: one display name and one avatar, seen in every
 /// room on every server. The copy says so, because people arriving from
@@ -27,14 +27,14 @@ enum Presence {
   final Color dot;
 }
 
-class ProfileSection extends StatefulWidget {
-  const ProfileSection({super.key});
+class AccountSection extends StatefulWidget {
+  const AccountSection({super.key});
 
   @override
-  State<ProfileSection> createState() => _ProfileSectionState();
+  State<AccountSection> createState() => _AccountSectionState();
 }
 
-class _ProfileSectionState extends State<ProfileSection> {
+class _AccountSectionState extends State<AccountSection> {
   final _name = TextEditingController(text: currentUser.name);
   final _status = TextEditingController(text: 'feeding the starter');
   var _presence = Presence.online;
@@ -60,7 +60,7 @@ class _ProfileSectionState extends State<ProfileSection> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'profile',
+                'account',
                 style: loafDisplay(24, 600).copyWith(color: tokens.textStrong),
               ),
               const SizedBox(height: LoafSpace.x1),
@@ -70,6 +70,7 @@ class _ProfileSectionState extends State<ProfileSection> {
               ),
               const SizedBox(height: LoafSpace.x6),
 
+              _FieldLabel(tokens: tokens, label: 'profile'),
               _AvatarRow(tokens: tokens),
               const SizedBox(height: LoafSpace.x6),
 
