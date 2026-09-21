@@ -13,6 +13,7 @@ import '../channel/channel_view.dart';
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import 'channel_list.dart';
+import '../settings/settings_page.dart';
 import 'loaf_banner.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
@@ -193,7 +194,7 @@ class _AppShellState extends State<AppShell> {
           child: UserBar(
             muted: _muted,
             onToggleMute: () => setState(() => _muted = !_muted),
-            onSettings: () {},
+            onSettings: () => showSettings(context),
           ),
         ),
       ],
