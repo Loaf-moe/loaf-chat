@@ -34,6 +34,27 @@ void main() {
     });
   }
 
+  testWidgets('picking a homeserver replaces the sign-in controls', (
+    tester,
+  ) async {
+    await _pump(tester, LoginLook.ssoAndPassword);
+    expect(find.text('continue with loaf.moe'), findsOneWidget);
+
+    await tester.tap(find.text('loaf.moe'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    // The picker takes over the view rather than stacking under the button.
+    expect(find.text('continue with loaf.moe'), findsNothing);
+    expect(find.text('use a username and password'), findsNothing);
+    expect(find.text('connect'), findsOneWidget);
+    expect(find.text('where does your account live?'), findsOneWidget);
+
+    await tester.tap(find.text('cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('continue with loaf.moe'), findsOneWidget);
+  });
+
   testWidgets('a long provider name ellipsises instead of overflowing', (
     tester,
   ) async {

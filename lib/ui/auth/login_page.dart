@@ -85,23 +85,29 @@ class _LoginPageState extends State<LoginPage> {
                 children: [
                   const _Wordmark(),
                   const SizedBox(height: LoafSpace.x6),
-                  _Heading(tokens: tokens),
+                  _Heading(tokens: tokens, editingServer: _editingServer),
                   const SizedBox(height: LoafSpace.x8),
-                  ..._authSection(tokens),
-                  const SizedBox(height: LoafSpace.x5),
-                  _ServerRow(
-                    tokens: tokens,
-                    controller: _server,
-                    editing: _editingServer,
-                    onEdit: () => setState(() => _editingServer = true),
-                    onSubmit: () => setState(() => _editingServer = false),
-                  ),
-                  if (widget.look == LoginLook.unreachable) ...[
-                    const SizedBox(height: LoafSpace.x3),
-                    _ErrorNote(
+                  // Choosing a homeserver replaces the sign-in controls
+                  // rather than sitting under them — otherwise the screen
+                  // asks two questions at once.
+                  if (_editingServer)
+                    ..._serverSection(tokens)
+                  else ...[
+                    ..._authSection(tokens),
+                    const SizedBox(height: LoafSpace.x5),
+                    _ServerRow(
                       tokens: tokens,
-                      message: "couldn't reach a matrix server at that address",
+                      server: _server.text.trim(),
+                      onEdit: () => setState(() => _editingServer = true),
                     ),
+                    if (widget.look == LoginLook.unreachable) ...[
+                      const SizedBox(height: LoafSpace.x3),
+                      _ErrorNote(
+                        tokens: tokens,
+                        message:
+                            "couldn't reach a matrix server at that address",
+                      ),
+                    ],
                   ],
                 ],
               ),
@@ -111,6 +117,27 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+
+  /// The homeserver picker, shown instead of the sign-in controls.
+  List<Widget> _serverSection(LoafTokens tokens) => [
+    _Field(
+      tokens: tokens,
+      controller: _server,
+      hint: 'homeserver',
+      icon: LucideIcons.server,
+      autofocus: true,
+      onSubmit: () => setState(() => _editingServer = false),
+    ),
+    const SizedBox(height: LoafSpace.x3),
+    _PrimaryButton(
+      label: 'connect',
+      onTap: () => setState(() => _editingServer = false),
+    ),
+    _TextLink(
+      label: 'cancel',
+      onTap: () => setState(() => _editingServer = false),
+    ),
+  ];
 
   List<Widget> _authSection(LoafTokens tokens) {
     final sso =
@@ -217,9 +244,10 @@ class _Wordmark extends StatelessWidget {
 }
 
 class _Heading extends StatelessWidget {
-  const _Heading({required this.tokens});
+  const _Heading({required this.tokens, this.editingServer = false});
 
   final LoafTokens tokens;
+  final bool editingServer;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -246,7 +274,9 @@ class _Heading extends StatelessWidget {
       ),
       const SizedBox(height: LoafSpace.x2),
       Text(
-        'sign in to pick up where you left off',
+        editingServer
+            ? 'where does your account live?'
+            : 'sign in to pick up where you left off',
         textAlign: TextAlign.center,
         style: loafBody(15, 400).copyWith(color: tokens.textMuted),
       ),
@@ -348,6 +378,7 @@ class _Field extends StatelessWidget {
     required this.hint,
     required this.icon,
     this.obscure = false,
+    this.autofocus = false,
     this.onSubmit,
   });
 
@@ -356,6 +387,7 @@ class _Field extends StatelessWidget {
   final String hint;
   final IconData icon;
   final bool obscure;
+  final bool autofocus;
   final VoidCallback? onSubmit;
 
   @override
@@ -375,6 +407,7 @@ class _Field extends StatelessWidget {
           child: TextField(
             controller: controller,
             obscureText: obscure,
+            autofocus: autofocus,
             onSubmitted: (_) => onSubmit?.call(),
             style: loafBody(
               15,
@@ -404,72 +437,40 @@ class _Field extends StatelessWidget {
   );
 }
 
-/// The homeserver line. Collapsed it is a quiet sentence; tapping it opens a
-/// field. Most people never touch it, so it does not get to look like a form.
+/// The homeserver, as a quiet line under the sign-in controls. Most people
+/// never touch it, so it does not get to look like a form until tapped.
 class _ServerRow extends StatelessWidget {
   const _ServerRow({
     required this.tokens,
-    required this.controller,
-    required this.editing,
+    required this.server,
     required this.onEdit,
-    required this.onSubmit,
   });
 
   final LoafTokens tokens;
-  final TextEditingController controller;
-  final bool editing;
+  final String server;
   final VoidCallback onEdit;
-  final VoidCallback onSubmit;
 
   @override
-  Widget build(BuildContext context) {
-    if (editing) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _Field(
-            tokens: tokens,
-            controller: controller,
-            hint: 'homeserver',
-            icon: LucideIcons.server,
-            onSubmit: onSubmit,
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onEdit,
+    behavior: HitTestBehavior.opaque,
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text('on ', style: loafBody(13, 400).copyWith(color: tokens.textMuted)),
+        Flexible(
+          child: Text(
+            server,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: loafBody(13, 600).copyWith(color: tokens.textBody),
           ),
-          const SizedBox(height: LoafSpace.x2),
-          GestureDetector(
-            onTap: onSubmit,
-            child: Text(
-              'connect',
-              textAlign: TextAlign.center,
-              style: loafBody(13, 600).copyWith(color: tokens.accent),
-            ),
-          ),
-        ],
-      );
-    }
-
-    return GestureDetector(
-      onTap: onEdit,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            'on ',
-            style: loafBody(13, 400).copyWith(color: tokens.textMuted),
-          ),
-          Flexible(
-            child: Text(
-              controller.text.trim(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: loafBody(13, 600).copyWith(color: tokens.textBody),
-            ),
-          ),
-          const SizedBox(width: LoafSpace.x1),
-          Icon(LucideIcons.pencil, size: 13, color: tokens.textMuted),
-        ],
-      ),
-    );
-  }
+        ),
+        const SizedBox(width: LoafSpace.x1),
+        Icon(LucideIcons.pencil, size: 13, color: tokens.textMuted),
+      ],
+    ),
+  );
 }
 
 class _ProbingNote extends StatelessWidget {
