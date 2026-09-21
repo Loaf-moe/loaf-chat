@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_button.dart';
 
 enum BannerTone { quiet, attention }
 
@@ -108,7 +109,14 @@ class LoafBanner extends StatelessWidget {
           final actions = Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _Action(label: actionLabel, loud: loud, onTap: onAction),
+              LoafButton(
+                label: actionLabel,
+                onTap: onAction,
+                emphasis: loud
+                    ? LoafButtonEmphasis.filled
+                    : LoafButtonEmphasis.outlined,
+                size: LoafButtonSize.small,
+              ),
               if (onDismiss != null)
                 IconButton(
                   onPressed: onDismiss,
@@ -149,45 +157,6 @@ class LoafBanner extends StatelessWidget {
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-/// Both tones get a real button; they differ in emphasis, not in kind. A
-/// filled pill for the loud one, an outlined pill for the quiet one — mixing
-/// a button with a text link reads as an inconsistency rather than as a
-/// hierarchy.
-class _Action extends StatelessWidget {
-  const _Action({required this.label, required this.loud, this.onTap});
-
-  final String label;
-  final bool loud;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = LoafTokens.of(context);
-
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        height: 30,
-        padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x4),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: loud ? tokens.accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(LoafRadius.full),
-          border: Border.all(color: loud ? tokens.accent : tokens.borderStrong),
-        ),
-        child: Text(
-          label,
-          style: loafBody(
-            13,
-            600,
-          ).copyWith(color: loud ? tokens.textOnAccent : tokens.textStrong),
-        ),
       ),
     );
   }

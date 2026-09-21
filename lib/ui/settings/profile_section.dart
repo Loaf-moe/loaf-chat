@@ -11,6 +11,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_button.dart';
 
 /// Matrix presence, in words people use. `busy` has no spec-level equivalent
 /// yet; it rides on the status message.
@@ -92,6 +93,30 @@ class _ProfileSectionState extends State<ProfileSection> {
                 tokens: tokens,
                 controller: _status,
                 hint: 'what are you up to?',
+              ),
+              const SizedBox(height: LoafSpace.x6),
+
+              // Left-aligned with the form rather than stretched: the fields
+              // are the subject here, not the button.
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    LoafButton(
+                      label: 'save changes',
+                      size: LoafButtonSize.small,
+                      onTap: () {},
+                    ),
+                    const SizedBox(width: LoafSpace.x2),
+                    LoafButton(
+                      label: 'discard',
+                      emphasis: LoafButtonEmphasis.quiet,
+                      size: LoafButtonSize.small,
+                      onTap: () {},
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

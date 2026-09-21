@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_button.dart';
 import 'profile_section.dart';
 
 enum SettingsSection {
@@ -277,15 +278,15 @@ class _SignOut extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.all(LoafSpace.x3),
-    child: Row(
-      children: [
-        Icon(LucideIcons.logOut, size: 17, color: tokens.accent),
-        const SizedBox(width: LoafSpace.x3),
-        Text(
-          'sign out',
-          style: loafBody(13, 600).copyWith(color: tokens.accent),
-        ),
-      ],
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: LoafButton(
+        label: 'sign out',
+        icon: LucideIcons.logOut,
+        emphasis: LoafButtonEmphasis.quiet,
+        size: LoafButtonSize.small,
+        onTap: () {},
+      ),
     ),
   );
 }

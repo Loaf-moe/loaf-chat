@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_button.dart';
 
 /// The states this screen has to look right in.
 enum LoginLook {
@@ -129,13 +130,18 @@ class _LoginPageState extends State<LoginPage> {
       onSubmit: () => setState(() => _editingServer = false),
     ),
     const SizedBox(height: LoafSpace.x3),
-    _PrimaryButton(
+    LoafButton(
       label: 'connect',
       onTap: () => setState(() => _editingServer = false),
     ),
-    _TextLink(
-      label: 'cancel',
-      onTap: () => setState(() => _editingServer = false),
+    Padding(
+      padding: const EdgeInsets.only(top: LoafSpace.x3),
+      child: LoafButton(
+        label: 'cancel',
+        onTap: () => setState(() => _editingServer = false),
+        emphasis: LoafButtonEmphasis.quiet,
+        size: LoafButtonSize.small,
+      ),
     ),
   ];
 
@@ -152,7 +158,7 @@ class _LoginPageState extends State<LoginPage> {
         return [_ProbingNote(tokens: tokens, server: _server.text.trim())];
       case LoginLook.unreachable:
         return [
-          _PrimaryButton(
+          LoafButton(
             label: 'try again',
             icon: LucideIcons.refreshCw,
             onTap: () {},
@@ -181,17 +187,22 @@ class _LoginPageState extends State<LoginPage> {
           obscure: true,
         ),
         const SizedBox(height: LoafSpace.x3),
-        _PrimaryButton(label: 'sign in', onTap: widget.onSignedIn),
+        LoafButton(label: 'sign in', onTap: widget.onSignedIn),
         if (sso)
-          _TextLink(
-            label: 'back to ${widget.ssoProviderName}',
-            onTap: () => setState(() => _showingPassword = false),
+          Padding(
+            padding: const EdgeInsets.only(top: LoafSpace.x3),
+            child: LoafButton(
+              label: 'back to ${widget.ssoProviderName}',
+              onTap: () => setState(() => _showingPassword = false),
+              emphasis: LoafButtonEmphasis.quiet,
+              size: LoafButtonSize.small,
+            ),
           ),
       ];
     }
 
     return [
-      _PrimaryButton(
+      LoafButton(
         label: 'continue with ${widget.ssoProviderName}',
         icon: LucideIcons.logIn,
         onTap: widget.onSignedIn,
@@ -199,9 +210,14 @@ class _LoginPageState extends State<LoginPage> {
       // Offered only where it leads somewhere: a server advertising no
       // m.login.password gets no link to a form it would reject.
       if (password)
-        _TextLink(
-          label: 'use a username and password',
-          onTap: () => setState(() => _showingPassword = true),
+        Padding(
+          padding: const EdgeInsets.only(top: LoafSpace.x3),
+          child: LoafButton(
+            label: 'use a username and password',
+            onTap: () => setState(() => _showingPassword = true),
+            emphasis: LoafButtonEmphasis.quiet,
+            size: LoafButtonSize.small,
+          ),
         ),
     ];
   }
@@ -282,93 +298,6 @@ class _Heading extends StatelessWidget {
       ),
     ],
   );
-}
-
-class _PrimaryButton extends StatefulWidget {
-  const _PrimaryButton({required this.label, required this.onTap, this.icon});
-
-  final String label;
-  final VoidCallback onTap;
-  final IconData? icon;
-
-  @override
-  State<_PrimaryButton> createState() => _PrimaryButtonState();
-}
-
-class _PrimaryButtonState extends State<_PrimaryButton> {
-  bool _pressed = false;
-
-  void _set(bool v) => _pressed == v ? null : setState(() => _pressed = v);
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = LoafTokens.of(context);
-    return GestureDetector(
-      onTapDown: (_) => _set(true),
-      onTapUp: (_) => _set(false),
-      onTapCancel: () => _set(false),
-      onTap: widget.onTap,
-      child: AnimatedScale(
-        scale: _pressed ? LoafMotion.pressScale : 1.0,
-        duration: LoafMotion.fast,
-        curve: LoafMotion.ease,
-        child: Container(
-          height: 48,
-          decoration: BoxDecoration(
-            color: tokens.accent,
-            borderRadius: BorderRadius.circular(LoafRadius.full),
-            boxShadow: _pressed ? null : tokens.shadowAccent,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (widget.icon != null) ...[
-                Icon(widget.icon, size: 18, color: tokens.textOnAccent),
-                const SizedBox(width: LoafSpace.x2),
-              ],
-              Flexible(
-                child: Text(
-                  widget.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: loafBody(15, 600).copyWith(color: tokens.textOnAccent),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A quiet secondary action. Text only — the brand keeps one red moment per
-/// zone, and the primary button already spent it.
-class _TextLink extends StatelessWidget {
-  const _TextLink({required this.label, required this.onTap});
-
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = LoafTokens.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(top: LoafSpace.x3),
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: loafBody(13, 600).copyWith(color: tokens.textBody),
-        ),
-      ),
-    );
-  }
 }
 
 class _Field extends StatelessWidget {
