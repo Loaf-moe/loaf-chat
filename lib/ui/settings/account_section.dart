@@ -60,15 +60,8 @@ class _AccountSectionState extends State<AccountSection> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // No page title: the nav says which section this is, and on a
-              // phone so does the card header. A third one is just noise.
-              _FieldLabel(tokens: tokens, label: 'profile'),
-              Padding(
-                padding: const EdgeInsets.only(bottom: LoafSpace.x4),
-                child: Text(
-                  'how you look everywhere on matrix, not just here',
-                  style: loafBody(13, 400).copyWith(color: tokens.textMuted),
-                ),
-              ),
+              // phone so does the card header.
+              _FieldLabel(tokens: tokens, label: 'avatar'),
               _AvatarRow(tokens: tokens),
               const SizedBox(height: LoafSpace.x6),
 
