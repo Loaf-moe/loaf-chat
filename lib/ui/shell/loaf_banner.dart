@@ -154,6 +154,10 @@ class LoafBanner extends StatelessWidget {
   }
 }
 
+/// Both tones get a real button; they differ in emphasis, not in kind. A
+/// filled pill for the loud one, an outlined pill for the quiet one — mixing
+/// a button with a text link reads as an inconsistency rather than as a
+/// hierarchy.
 class _Action extends StatelessWidget {
   const _Action({required this.label, required this.loud, this.onTap});
 
@@ -165,25 +169,6 @@ class _Action extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
 
-    // The loud tone gets a filled pill; the quiet one a text action, so two
-    // banners stacked together do not compete for the same attention.
-    if (!loud) {
-      return GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: LoafSpace.x2,
-            vertical: LoafSpace.x1,
-          ),
-          child: Text(
-            label,
-            style: loafBody(13, 600).copyWith(color: tokens.accent),
-          ),
-        ),
-      );
-    }
-
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
@@ -192,12 +177,16 @@ class _Action extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x4),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: tokens.accent,
+          color: loud ? tokens.accent : Colors.transparent,
           borderRadius: BorderRadius.circular(LoafRadius.full),
+          border: Border.all(color: loud ? tokens.accent : tokens.borderStrong),
         ),
         child: Text(
           label,
-          style: loafBody(13, 600).copyWith(color: tokens.textOnAccent),
+          style: loafBody(
+            13,
+            600,
+          ).copyWith(color: loud ? tokens.textOnAccent : tokens.textStrong),
         ),
       ),
     );
