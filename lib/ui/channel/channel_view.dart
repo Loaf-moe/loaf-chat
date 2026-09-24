@@ -69,20 +69,25 @@ class ChannelView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
+    // The page colour runs edge to edge while the content sits inside the
+    // insets, so the status bar and home indicator float over a continuous
+    // surface instead of covering the header and composer.
     return ColoredBox(
       color: tokens.page,
-      child: Column(
-        children: [
-          _ChannelHeader(
-            channel: channel,
-            onOpenNavigation: onOpenNavigation,
-            onToggleMembers: onToggleMembers,
-          ),
-          ...banners,
-          Expanded(child: _Timeline(messages: messages)),
-          ?callBar,
-          Composer(channelName: channel.name),
-        ],
+      child: SafeArea(
+        child: Column(
+          children: [
+            _ChannelHeader(
+              channel: channel,
+              onOpenNavigation: onOpenNavigation,
+              onToggleMembers: onToggleMembers,
+            ),
+            ...banners,
+            Expanded(child: _Timeline(messages: messages)),
+            ?callBar,
+            Composer(channelName: channel.name),
+          ],
+        ),
       ),
     );
   }
