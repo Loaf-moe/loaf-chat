@@ -12,6 +12,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/action_menu.dart';
 import 'timeline_controller.dart';
 
 enum MessageAction { reply, copy, edit, delete }
@@ -72,51 +73,27 @@ class _CopySelection extends _Pick {
   final String text;
 }
 
+List<ActionItem<_Pick>> _items(Message message, Member you) => [
+  for (final action in actionsFor(message, you))
+    ActionItem(
+      value: _Act(action),
+      icon: action.icon,
+      label: action.label,
+      destructive: action.destructive,
+    ),
+];
+
 /// Touch: long press. Rises from the bottom, reactions within thumb reach.
 Future<void> showMessageActionsSheet(
   BuildContext context,
   TimelineController controller,
   Message message,
 ) async {
-  final tokens = LoafTokens.of(context);
-  final pick = await showModalBottomSheet<_Pick>(
-    context: context,
-    backgroundColor: tokens.card,
-    showDragHandle: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(
-        top: Radius.circular(LoafRadius.xxxl),
-      ),
-    ),
-    builder: (context) => SafeArea(
-      top: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              LoafSpace.x4,
-              0,
-              LoafSpace.x4,
-              LoafSpace.x3,
-            ),
-            child: _ReactionRow(
-              size: 44,
-              onPick: (pick) => Navigator.pop(context, pick),
-            ),
-          ),
-          Divider(height: 1, color: tokens.border),
-          const SizedBox(height: LoafSpace.x2),
-          for (final action in actionsFor(message, controller.you))
-            _ActionTile(
-              action: action,
-              onTap: () => Navigator.pop(context, _Act(action)),
-            ),
-          const SizedBox(height: LoafSpace.x2),
-        ],
-      ),
-    ),
+  final pick = await showActionSheet<_Pick>(
+    context,
+    header: (context) =>
+        _ReactionRow(size: 44, onPick: (pick) => Navigator.pop(context, pick)),
+    items: _items(message, controller.you),
   );
   if (pick != null && context.mounted) {
     await _perform(context, controller, message, pick);
@@ -133,38 +110,18 @@ Future<void> showMessageContextMenu(
   Offset position, {
   String selection = '',
 }) async {
-  final tokens = LoafTokens.of(context);
-  final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
-  final pick = await showMenu<_Pick>(
-    context: context,
-    color: tokens.card,
-    elevation: 0,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(LoafRadius.lg),
-      side: BorderSide(color: tokens.border),
-    ),
-    position: RelativeRect.fromRect(
-      position & Size.zero,
-      Offset.zero & overlay.size,
-    ),
+  final pick = await showActionMenu<_Pick>(
+    context,
+    position: position,
+    leading: [_ReactionMenuEntry()],
     items: [
-      _ReactionMenuEntry(),
-      const PopupMenuDivider(height: 9),
       if (selection.isNotEmpty)
-        PopupMenuItem<_Pick>(
+        ActionItem(
           value: _CopySelection(selection),
-          height: 36,
-          child: const _MenuLabel(
-            icon: LucideIcons.textCursorInput,
-            label: 'Copy selection',
-          ),
+          icon: LucideIcons.textCursorInput,
+          label: 'Copy selection',
         ),
-      for (final action in actionsFor(message, controller.you))
-        PopupMenuItem<_Pick>(
-          value: _Act(action),
-          height: 36,
-          child: _ActionLabel(action: action, compact: true),
-        ),
+      ..._items(message, controller.you),
     ],
   );
   if (pick != null && context.mounted) {
@@ -327,79 +284,6 @@ class _ReactionMenuEntryState extends State<_ReactionMenuEntry> {
           onPick: (pick) => Navigator.pop(context, pick),
         ),
       ),
-    );
-  }
-}
-
-class _ActionTile extends StatelessWidget {
-  const _ActionTile({required this.action, required this.onTap});
-
-  final MessageAction action;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: LoafSpace.x5,
-          vertical: 14,
-        ),
-        child: _ActionLabel(action: action, compact: false),
-      ),
-    );
-  }
-}
-
-class _ActionLabel extends StatelessWidget {
-  const _ActionLabel({required this.action, required this.compact});
-
-  final MessageAction action;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) => _MenuLabel(
-    icon: action.icon,
-    label: action.label,
-    compact: compact,
-    destructive: action.destructive,
-  );
-}
-
-/// Icon and label for one row of the sheet or the menu.
-class _MenuLabel extends StatelessWidget {
-  const _MenuLabel({
-    required this.icon,
-    required this.label,
-    this.compact = true,
-    this.destructive = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool compact;
-  final bool destructive;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = LoafTokens.of(context);
-    return Row(
-      children: [
-        Icon(
-          icon,
-          size: compact ? 16 : 20,
-          color: destructive ? tokens.accent : tokens.textMuted,
-        ),
-        SizedBox(width: compact ? LoafSpace.x3 : LoafSpace.x4),
-        Text(
-          label,
-          style: loafBody(
-            compact ? 14 : 16,
-            500,
-          ).copyWith(color: destructive ? tokens.accent : tokens.textStrong),
-        ),
-      ],
     );
   }
 }
