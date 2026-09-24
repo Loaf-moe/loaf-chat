@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../call/connected_call_bar.dart';
 import '../channel/channel_view.dart';
+import '../members/member_list.dart';
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import 'channel_list.dart';
@@ -46,6 +47,10 @@ class _AppShellState extends State<AppShell> {
   String? _connectedSpaceName;
   bool _muted = false;
   bool _deafened = false;
+
+  /// Only consulted on wide layouts, where the member list is a column you
+  /// can put away. On a phone it is a drawer and opens on demand.
+  bool _showMembers = true;
 
   Space get _space => mockSpaces.firstWhere((s) => s.id == _spaceId);
 
@@ -122,8 +127,11 @@ class _AppShellState extends State<AppShell> {
           onOpenNavigation: wide
               ? null
               : () => _scaffoldKey.currentState?.openDrawer(),
-          onToggleMembers: () {},
+          onToggleMembers: wide
+              ? () => setState(() => _showMembers = !_showMembers)
+              : () => _scaffoldKey.currentState?.openEndDrawer(),
         );
+        final members = MemberList(members: _space.members);
 
         if (wide) {
           return Scaffold(
@@ -136,6 +144,16 @@ class _AppShellState extends State<AppShell> {
                   child: _navigation,
                 ),
                 Expanded(child: channel),
+                if (_showMembers)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border(left: BorderSide(color: tokens.border)),
+                    ),
+                    child: SizedBox(
+                      width: LoafShell.memberListWidth,
+                      child: members,
+                    ),
+                  ),
               ],
             ),
           );
@@ -155,6 +173,14 @@ class _AppShellState extends State<AppShell> {
             shape: const RoundedRectangleBorder(),
             backgroundColor: tokens.sidebar,
             child: _navigation,
+          ),
+          // The mirror of the navigation drawer: same width rules, same
+          // edge-to-edge surface.
+          endDrawer: Drawer(
+            width: drawerWidth.clamp(0.0, LoafShell.memberListWidth + 40),
+            shape: const RoundedRectangleBorder(),
+            backgroundColor: tokens.sidebar,
+            child: members,
           ),
           body: channel,
         );

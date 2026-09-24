@@ -11,13 +11,38 @@ import 'package:flutter/material.dart';
 
 enum ChannelKind { text, voice }
 
+/// What a member may do in a room, bucketed from their Matrix power level.
+/// Drives name colour everywhere — see "Name colour" in the design spec.
+enum Role { admin, moderator, member }
+
 class Member {
-  const Member(this.id, this.name, this.color, {this.online = true});
+  const Member(
+    this.id,
+    this.name,
+    this.color, {
+    this.online = true,
+    this.powerLevel = 0,
+  });
 
   final String id;
   final String name;
+
+  /// Avatar fallback background only — never a name colour. Matrix has no
+  /// user-chosen colour; real clients derive this from a hash of the MXID,
+  /// and these hardcoded values stand in for that.
   final Color color;
+
   final bool online;
+
+  /// Matrix `m.room.power_levels` value for this user.
+  final int powerLevel;
+
+  /// Matrix's own conventional thresholds: 100 is admin, 50 is moderator.
+  Role get role => switch (powerLevel) {
+    >= 100 => Role.admin,
+    >= 50 => Role.moderator,
+    _ => Role.member,
+  };
 
   String get initials {
     final parts = name.trim().split(RegExp(r'\s+'));
@@ -101,6 +126,7 @@ class Space {
     required this.name,
     required this.color,
     this.categories = const [],
+    this.members = const [],
     this.unread = 0,
     this.mentions = 0,
   });
@@ -109,6 +135,7 @@ class Space {
   final String name;
   final Color color;
   final List<ChannelCategory> categories;
+  final List<Member> members;
   final int unread;
   final int mentions;
 
@@ -188,11 +215,17 @@ List<TimelineEntry> groupTimeline(List<Message> messages) {
 
 // ── Fixture data ───────────────────────────────────────────────────────────
 
-const _you = Member('@faore', 'faore', Color(0xFFD62828));
+const _you = Member('@faore', 'faore', Color(0xFFD62828), powerLevel: 100);
 const _mika = Member('@mika', 'Mika Rye', Color(0xFF4E9E76));
 const _sam = Member('@sam', 'Sam Poolish', Color(0xFF3B82F6));
-const _jun = Member('@jun', 'Jun Levain', Color(0xFFD97B2A));
+const _jun = Member('@jun', 'Jun Levain', Color(0xFFD97B2A), powerLevel: 50);
 const _ada = Member('@ada', 'Ada Crumb', Color(0xFF8B5CF6), online: false);
+
+// Only in member lists, never in the timeline — enough people that the
+// offline half of a list has something to show.
+const _rosa = Member('@rosa', 'Rosa Brioche', Color(0xFFDB2777), online: false);
+const _theo = Member('@theo', 'Theo Crust', Color(0xFF0891B2));
+const _pim = Member('@pim', 'Pim Focaccia', Color(0xFF65A30D), online: false);
 
 const mockMembers = [_you, _mika, _sam, _jun, _ada];
 const currentUser = _you;
@@ -204,6 +237,7 @@ final mockSpaces = <Space>[
     color: const Color(0xFFD97B2A),
     unread: 12,
     mentions: 3,
+    members: const [_you, _mika, _sam, _jun, _ada, _rosa, _theo, _pim],
     categories: [
       ChannelCategory('general', [
         const Channel(
@@ -247,6 +281,7 @@ final mockSpaces = <Space>[
     name: 'Rye Devs',
     color: const Color(0xFF3B82F6),
     unread: 2,
+    members: const [_you, _sam, _theo],
     categories: [
       ChannelCategory('dev', [
         const Channel(id: 'loaf-native', name: 'loaf-native', unread: 2),
@@ -265,6 +300,7 @@ final mockSpaces = <Space>[
     name: 'Book Club',
     color: const Color(0xFF8B5CF6),
     mentions: 1,
+    members: const [_ada, _you, _mika, _rosa],
     categories: [
       ChannelCategory('reading', [
         const Channel(id: 'current', name: 'current-read', mentions: 1),

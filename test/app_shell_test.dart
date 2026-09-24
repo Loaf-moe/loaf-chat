@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:loaf_native/ui/members/member_list.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/user_bar.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -66,6 +67,37 @@ void main() {
           'should close once you have chosen where to go',
     );
     expect(find.text('kitchen'), findsOneWidget);
+  });
+
+  testWidgets('on a phone the members button opens the member drawer', (
+    tester,
+  ) async {
+    await _pumpShell(tester, const Size(390, 844));
+
+    expect(find.byType(MemberList), findsNothing);
+
+    await tester.tap(find.byIcon(LucideIcons.users));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(MemberList), findsOneWidget);
+    expect(find.text('ADMINS — 1'), findsOneWidget);
+  });
+
+  testWidgets('on a desktop the member column is shown and the button '
+      'toggles it', (tester) async {
+    await _pumpShell(tester, const Size(1440, 900));
+
+    expect(find.byType(MemberList), findsOneWidget);
+
+    await tester.tap(find.byIcon(LucideIcons.users));
+    await tester.pumpAndSettle();
+    expect(find.byType(MemberList), findsNothing);
+
+    await tester.tap(find.byIcon(LucideIcons.users));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byType(MemberList), findsOneWidget);
   });
 
   testWidgets('joining a voice channel shows the call bar and keeps you '

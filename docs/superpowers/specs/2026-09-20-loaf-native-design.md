@@ -147,6 +147,31 @@ The dark palette is derived from the navy scale and treated as an extension of
 the design system, not a departure from it. The cream palette remains available
 and is designed alongside it, so neither is retrofitted.
 
+**Name colour means power level, everywhere.** Wherever a person's name is
+drawn — timeline author, reply quote, member list — its colour says what they
+can do in the room, and nothing else:
+
+| Role | Power level | Colour |
+|---|---|---|
+| Admin | ≥ 100 | `accent` |
+| Moderator | ≥ 50 | `nameModerator` (a softer step of the accent ramp) |
+| Member | below 50 | `textStrong` |
+
+Identity is the avatar's job, not the name's. Matrix has no user-chosen colour —
+a profile is a display name and an avatar — so there is nothing for a name
+colour to reflect except permissions. Where an avatar has no image, its fallback
+background stands in for a colour derived from the MXID, as other clients do;
+that colour never reaches a name. Roles stay inside the brand's single warm hue
+rather than adding new ones. All name colours resolve through
+`LoafTokens.nameColor(role)` (`lib/ui/members/role_colors.dart`), so no widget
+picks its own.
+
+**The member list** mirrors the navigation drawer: a right drawer on phones, a
+column toggled by the members button on wide layouts. Admins get their own
+section at the top; moderators stay with members and stand out by colour, which
+keeps this short of the roles UI deferred to v2. Online people sort first, and
+offline people are dimmed rather than hidden.
+
 ## Process
 
 The UI is designed as Flutter mockups before any functionality is implemented —

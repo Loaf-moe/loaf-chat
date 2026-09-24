@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../members/role_colors.dart';
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 
@@ -37,7 +38,10 @@ class MessageGroupTile extends StatelessWidget {
                 children: [
                   Text(
                     author.name,
-                    style: loafBody(15, 600).copyWith(color: author.color),
+                    style: loafBody(
+                      15,
+                      600,
+                    ).copyWith(color: tokens.nameColor(author.role)),
                   ),
                   const SizedBox(width: LoafSpace.x2),
                   Text(
@@ -151,7 +155,7 @@ class _ReplyContext extends StatelessWidget {
                       style: loafBody(
                         11,
                         600,
-                      ).copyWith(color: replyTo.author.color),
+                      ).copyWith(color: tokens.nameColor(replyTo.author.role)),
                     ),
                     TextSpan(
                       text: '  ${replyTo.body}',

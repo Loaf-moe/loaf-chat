@@ -21,6 +21,7 @@ const _primary100 = Color(0xFFD9E0E4);
 const _accent900 = Color(0xFFA30000);
 const _accent700 = Color(0xFFD62828);
 const _accent500 = Color(0xFFDE5353);
+const _accent300 = Color(0xFFEB9494);
 const _accent100 = Color(0xFFF9DFDF);
 
 const _cream = Color(0xFFFFF7ED);
@@ -75,6 +76,7 @@ abstract final class LoafSpace {
 abstract final class LoafShell {
   static const railWidth = 76.0;
   static const sidebarWidth = 268.0;
+  static const memberListWidth = 240.0;
 }
 
 /// Press animation: buttons shrink slightly and drop their shadow.
@@ -166,6 +168,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
     required this.accent,
     required this.accentHover,
     required this.accentSoft,
+    required this.nameModerator,
     required this.online,
     required this.shadowSm,
     required this.shadowMd,
@@ -208,6 +211,11 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
   final Color accentHover;
   final Color accentSoft;
 
+  /// Moderator name colour: a softer step of the accent ramp, so power level
+  /// stays within the brand's single warm hue. Admins wear [accent] itself.
+  /// Resolve names through `nameColor` rather than reading this directly.
+  final Color nameModerator;
+
   final Color online;
 
   final List<BoxShadow> shadowSm;
@@ -235,6 +243,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
     Color? accent,
     Color? accentHover,
     Color? accentSoft,
+    Color? nameModerator,
     Color? online,
     List<BoxShadow>? shadowSm,
     List<BoxShadow>? shadowMd,
@@ -256,6 +265,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
     accent: accent ?? this.accent,
     accentHover: accentHover ?? this.accentHover,
     accentSoft: accentSoft ?? this.accentSoft,
+    nameModerator: nameModerator ?? this.nameModerator,
     online: online ?? this.online,
     shadowSm: shadowSm ?? this.shadowSm,
     shadowMd: shadowMd ?? this.shadowMd,
@@ -285,6 +295,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
       accent: c(accent, other.accent),
       accentHover: c(accentHover, other.accentHover),
       accentSoft: c(accentSoft, other.accentSoft),
+      nameModerator: c(nameModerator, other.nameModerator),
       online: c(online, other.online),
       shadowSm: s(shadowSm, other.shadowSm),
       shadowMd: s(shadowMd, other.shadowMd),
@@ -312,6 +323,7 @@ const _lightTokens = LoafTokens(
   accent: _accent700,
   accentHover: _accent900,
   accentSoft: _accent100,
+  nameModerator: _accent500,
   online: _success,
   shadowSm: [
     BoxShadow(color: Color(0x14003049), blurRadius: 3, offset: Offset(0, 1)),
@@ -345,6 +357,7 @@ const _darkTokens = LoafTokens(
   accent: _accent500,
   accentHover: _accent700,
   accentSoft: Color(0xFF3A1414),
+  nameModerator: _accent300,
   online: _success,
   shadowSm: [
     BoxShadow(color: Color(0x40000000), blurRadius: 3, offset: Offset(0, 1)),
