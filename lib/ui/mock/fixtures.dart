@@ -108,6 +108,7 @@ class Channel {
     this.private = false,
     this.topic,
     this.occupants = const [],
+    this.joined = true,
   });
 
   final String id;
@@ -121,6 +122,23 @@ class Channel {
   /// Who is currently in a voice channel. Live from MatrixRTC membership
   /// state, so it is populated without joining the call.
   final List<Member> occupants;
+
+  /// False for a channel the space offers but you are not in yet. Only
+  /// channels you could join in one tap (public, or restricted to the
+  /// space's members) are ever listed — see "Joining a space" in the spec.
+  final bool joined;
+
+  Channel copyWith({bool? joined}) => Channel(
+    id: id,
+    name: name,
+    kind: kind,
+    unread: unread,
+    mentions: mentions,
+    private: private,
+    topic: topic,
+    occupants: occupants,
+    joined: joined ?? this.joined,
+  );
 }
 
 /// A collapsible group in the channel list. Matrix subspaces map onto these.
@@ -159,6 +177,24 @@ class Space {
       .toUpperCase();
 
   Iterable<Channel> get allChannels => categories.expand((c) => c.channels);
+
+  /// This space as it looks after joining the channels in [ids] — the mock's
+  /// stand-in for membership arriving over sync.
+  Space withJoined(Set<String> ids) => Space(
+    id: id,
+    name: name,
+    color: color,
+    members: members,
+    unread: unread,
+    mentions: mentions,
+    categories: [
+      for (final category in categories)
+        ChannelCategory(category.name, [
+          for (final channel in category.channels)
+            ids.contains(channel.id) ? channel.copyWith(joined: true) : channel,
+        ]),
+    ],
+  );
 }
 
 // ── Timeline grouping ──────────────────────────────────────────────────────
@@ -257,6 +293,11 @@ final mockSpaces = <Space>[
           unread: 4,
           topic: 'the everything channel. be nice, bring snacks.',
         ),
+        const Channel(
+          id: 'announcements',
+          name: 'announcements',
+          joined: false,
+        ),
         const Channel(id: 'kitchen', name: 'kitchen', unread: 8, mentions: 3),
         const Channel(id: 'recipes', name: 'recipes'),
         const Channel(id: 'planning', name: 'planning', private: true),
@@ -273,6 +314,12 @@ final mockSpaces = <Space>[
           name: 'quiet baking',
           kind: ChannelKind.voice,
         ),
+        const Channel(
+          id: 'late',
+          name: 'late night vc',
+          kind: ChannelKind.voice,
+          joined: false,
+        ),
       ]),
       // A Matrix subspace, rendered as a category.
       ChannelCategory('game night', [
@@ -284,6 +331,7 @@ final mockSpaces = <Space>[
           kind: ChannelKind.voice,
           occupants: const [_ada],
         ),
+        const Channel(id: 'poker', name: 'poker', joined: false),
       ]),
     ],
   ),

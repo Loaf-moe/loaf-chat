@@ -155,10 +155,18 @@ class _CategorySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Collapsed categories still surface channels with pending mentions, so
-    // pings never get hidden behind a collapse.
+    // pings never get hidden behind a collapse. Channels you have not joined
+    // cannot have any, so a collapse always hides them.
+    //
+    // Unjoined channels sink to the bottom of their own category rather than
+    // a separate section: the category is structure the space's admins
+    // built, and the channel belongs in it.
     final visibleChannels = collapsed
-        ? category.channels.where((c) => c.mentions > 0)
-        : category.channels;
+        ? category.channels.where((c) => c.joined && c.mentions > 0)
+        : [
+            ...category.channels.where((c) => c.joined),
+            ...category.channels.where((c) => !c.joined),
+          ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -219,7 +227,8 @@ class _ChannelEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final unread = channel.unread > 0;
+    final joined = channel.joined;
+    final unread = joined && channel.unread > 0;
     final iconData = channel.kind == ChannelKind.voice
         ? LucideIcons.volume2
         : channel.private
@@ -229,7 +238,9 @@ class _ChannelEntry extends StatelessWidget {
         ? tokens.accent
         : unread
         ? tokens.textStrong
-        : tokens.textBody;
+        : joined
+        ? tokens.textBody
+        : tokens.textMuted;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
@@ -264,7 +275,10 @@ class _ChannelEntry extends StatelessWidget {
                                   .copyWith(color: fg),
                         ),
                       ),
-                      if (channel.mentions > 0) ...[
+                      if (!joined) ...[
+                        const SizedBox(width: 6),
+                        _JoinPill(tokens: tokens),
+                      ] else if (channel.mentions > 0) ...[
                         const SizedBox(width: 6),
                         _CountBadge(count: channel.mentions, tokens: tokens),
                       ],
@@ -302,6 +316,31 @@ class _ChannelEntry extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Marks a channel you can join with one tap. Not a separate button: the
+/// whole row joins, and this says so.
+class _JoinPill extends StatelessWidget {
+  const _JoinPill({required this.tokens});
+
+  final LoafTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x2),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(LoafRadius.full),
+        border: Border.all(color: tokens.borderStrong),
+      ),
+      child: Text(
+        'join',
+        style: loafBody(11, 600).copyWith(color: tokens.textBody),
       ),
     );
   }

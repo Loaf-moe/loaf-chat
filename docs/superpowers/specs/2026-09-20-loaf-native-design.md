@@ -123,6 +123,32 @@ channel: connected state, mute, disconnect, tap to expand to the full call UI.
 It survives navigating to other channels and other spaces. Without it, voice
 collapses back into a modal call.
 
+**Joining a space shows you all of it.** In Matrix, joining a space joins only
+the space room; its channels are listed by `m.space.child` events and read
+through `/hierarchy`, and other clients leave you to go and find them. Here:
+
+- **Categories are subspaces, joined silently.** Matrix has no category
+  concept, so a category is a child space. Joining a space also joins its
+  category subspaces, because a subspace's own changes — a channel added to
+  it — only reach you over sync if you are a member. They are plumbing; you
+  never meet them as rooms.
+- **Suggested channels join automatically.** Children the space's admins mark
+  `suggested` are joined along with the space, so it is populated from the
+  first second.
+- **Everything else you could join is listed, tagged.** Channels you are not in
+  sit at the bottom of their own category, in muted text with a *join* tag;
+  one tap joins them. A text channel then opens; a voice channel does not
+  connect, since membership and being in the call are separate steps. Only
+  channels joinable in one tap (join rule `public` or `restricted` to the
+  space) are listed; invite-only rooms you are not in stay out of sight.
+  Channels added later appear the same way.
+- **Edges.** Channels directly under the space, in no subspace, go at the top
+  uncategorised. Subspaces nested deeper than one level flatten into their
+  top-level category. A room that is a child of two subspaces appears in both.
+
+Leaving a channel returns it to its tagged, unjoined place rather than removing
+it from the list.
+
 **Rooms in multiple spaces appear in each.** No canonical-parent logic and no
 deduplication. Matrix permits it; pretending otherwise creates bugs.
 

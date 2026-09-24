@@ -181,6 +181,66 @@ void main() {
     expect(find.byKey(const ValueKey('navigation-attention')), findsOneWidget);
   });
 
+  group('channels you have not joined', () {
+    // The Starter Pack mock has three: #announcements, late night vc, #poker.
+    Finder pills() => find.text('join');
+
+    testWidgets('appear at the bottom of their own category, tagged', (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(1440, 900));
+
+      expect(pills(), findsNWidgets(3));
+      // Listed early in the fixture, but sorted after the joined channels.
+      final announcements = tester.getRect(find.text('announcements'));
+      expect(
+        announcements.top,
+        greaterThan(tester.getRect(find.text('planning')).top),
+      );
+      // …and still inside GENERAL, above the next category.
+      expect(
+        announcements.top,
+        lessThan(tester.getRect(find.text('VOICE')).top),
+      );
+    });
+
+    testWidgets('joining a text channel joins it and opens it', (tester) async {
+      await _pumpShell(tester, const Size(1440, 900));
+
+      await tester.tap(find.text('poker'));
+      await tester.pumpAndSettle();
+
+      expect(pills(), findsNWidgets(2));
+      // Open in the header as well as the list.
+      expect(find.text('poker'), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('joining a voice channel does not connect you', (tester) async {
+      await _pumpShell(tester, const Size(1440, 900));
+
+      await tester.tap(find.text('late night vc'));
+      await tester.pumpAndSettle();
+
+      expect(pills(), findsNWidgets(2));
+      expect(find.text('Voice connected'), findsNothing);
+
+      // Once joined, it behaves like any voice channel.
+      await tester.tap(find.text('late night vc'));
+      await tester.pumpAndSettle();
+      expect(find.text('Voice connected'), findsOneWidget);
+    });
+
+    testWidgets('are hidden when their category is collapsed', (tester) async {
+      await _pumpShell(tester, const Size(1440, 900));
+
+      await tester.tap(find.text('GAME NIGHT'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('poker'), findsNothing);
+    });
+  });
+
   testWidgets('joining a voice channel shows the call bar and keeps you '
       'in the channel you were reading', (tester) async {
     await _pumpShell(tester, const Size(1440, 900));

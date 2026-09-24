@@ -60,14 +60,19 @@ class _AppShellState extends State<AppShell> {
   /// can put away. On a phone it is a drawer and opens on demand.
   bool _showMembers = true;
 
-  Space get _space => mockSpaces.firstWhere((s) => s.id == _spaceId);
+  /// Channels joined during this session, on top of the fixtures' own.
+  final _joinedNow = <String>{};
+
+  Space get _space =>
+      mockSpaces.firstWhere((s) => s.id == _spaceId).withJoined(_joinedNow);
 
   Channel get _channel {
     final channels = _space.allChannels;
     final remembered = _channelBySpace[_spaceId];
     return channels.firstWhere(
       (c) => c.id == remembered,
-      orElse: () => channels.firstWhere((c) => c.kind == ChannelKind.text),
+      orElse: () =>
+          channels.firstWhere((c) => c.kind == ChannelKind.text && c.joined),
     );
   }
 
@@ -75,6 +80,14 @@ class _AppShellState extends State<AppShell> {
 
   void _selectChannel(String id) {
     final channel = _space.allChannels.firstWhere((c) => c.id == id);
+
+    // Tapping a channel you are not in joins it. A text channel then opens,
+    // since looking is why you joined; a voice channel does not connect —
+    // membership and being in the call are separate steps.
+    if (!channel.joined) {
+      setState(() => _joinedNow.add(id));
+      if (channel.kind == ChannelKind.voice) return;
+    }
 
     // Tapping a voice channel joins it rather than navigating — you stay
     // where you were reading. That is what makes voice ambient.
