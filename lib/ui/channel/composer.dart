@@ -16,7 +16,18 @@ const _controlSize = 40.0;
 /// arithmetic rather than by a calibrated nudge.
 const _textSize = 15.0;
 const _textHeight = 1.4;
-const _fieldPad = (_controlSize - _textSize * _textHeight) / 2;
+
+/// Vertical padding that centres one line of text in the control height.
+///
+/// Worked out from the *scaled* line box, because iOS Text Size shrinks or
+/// grows it: a constant pad only centres at the default size, and at the
+/// smallest setting left the text sitting visibly below the buttons. Past the
+/// point where a line no longer fits, the pad bottoms out at zero and the
+/// field simply stands taller than the controls.
+double _fieldPad(TextScaler scaler) {
+  final lineBox = scaler.scale(_textSize) * _textHeight;
+  return ((_controlSize - lineBox) / 2).clamp(0.0, _controlSize / 2);
+}
 
 class Composer extends StatefulWidget {
   const Composer({super.key, required this.channelName});
@@ -79,7 +90,9 @@ class _ComposerState extends State<Composer> {
             child: Padding(
               // Centres the line box in the control height. Arithmetic, not
               // calibration — see _fieldPad.
-              padding: const EdgeInsets.symmetric(vertical: _fieldPad),
+              padding: EdgeInsets.symmetric(
+                vertical: _fieldPad(MediaQuery.textScalerOf(context)),
+              ),
               child: TextField(
                 controller: _controller,
                 minLines: 1,
