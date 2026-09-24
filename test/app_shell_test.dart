@@ -100,6 +100,44 @@ void main() {
     expect(find.byType(MemberList), findsOneWidget);
   });
 
+  testWidgets('reply shows a chip above the composer that can be cancelled', (
+    tester,
+  ) async {
+    await _pumpShell(tester, const Size(390, 844));
+
+    await tester.longPress(
+      find.textContaining('ok that crumb is unreasonable'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reply'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('replying to '), findsOneWidget);
+    await tester.tap(find.byTooltip('Cancel reply'));
+    await tester.pumpAndSettle();
+    expect(find.text('replying to '), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('edit fills the composer with the message', (tester) async {
+    await _pumpShell(tester, const Size(390, 844));
+
+    await tester.longPress(
+      find.textContaining('ok that crumb is unreasonable'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('editing message'), findsOneWidget);
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller?.text, 'ok that crumb is unreasonable');
+
+    await tester.tap(find.byTooltip('Cancel edit'));
+    await tester.pumpAndSettle();
+    expect(field.controller?.text, isEmpty);
+  });
+
   testWidgets('joining a voice channel shows the call bar and keeps you '
       'in the channel you were reading', (tester) async {
     await _pumpShell(tester, const Size(1440, 900));

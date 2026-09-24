@@ -6,7 +6,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../members/role_colors.dart';
 import '../theme/loaf_theme.dart';
+import 'timeline_controller.dart';
 
 /// Every control in the composer row is this tall. Equal heights are what
 /// make `CrossAxisAlignment.end` also read as vertically centred.
@@ -30,9 +32,12 @@ double _fieldPad(TextScaler scaler) {
 }
 
 class Composer extends StatefulWidget {
-  const Composer({super.key, required this.channelName});
+  const Composer({super.key, required this.channelName, this.timeline});
 
   final String channelName;
+
+  /// Supplies the message being replied to or edited, if any.
+  final TimelineController? timeline;
 
   @override
   State<Composer> createState() => _ComposerState();
@@ -40,7 +45,9 @@ class Composer extends StatefulWidget {
 
 class _ComposerState extends State<Composer> {
   final _controller = TextEditingController();
+  final _focus = FocusNode();
   bool _hasText = false;
+  ComposerTarget? _target;
 
   @override
   void initState() {
@@ -49,21 +56,67 @@ class _ComposerState extends State<Composer> {
       final hasText = _controller.text.trim().isNotEmpty;
       if (hasText != _hasText) setState(() => _hasText = hasText);
     });
+    widget.timeline?.addListener(_onTimeline);
+  }
+
+  @override
+  void didUpdateWidget(Composer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.timeline != widget.timeline) {
+      oldWidget.timeline?.removeListener(_onTimeline);
+      widget.timeline?.addListener(_onTimeline);
+    }
+  }
+
+  /// Follows the timeline's target: editing loads the message into the field,
+  /// and leaving an edit clears it again rather than stranding the old text.
+  /// Either way the field takes focus, since typing is the next thing you do.
+  void _onTimeline() {
+    final next = widget.timeline?.target;
+    if (identical(next, _target)) return;
+    final wasEditing = _target?.mode == ComposerMode.edit;
+    setState(() => _target = next);
+
+    if (next?.mode == ComposerMode.edit) {
+      _controller.text = next!.message.body;
+    } else if (wasEditing) {
+      _controller.clear();
+    }
+    if (next != null) _focus.requestFocus();
   }
 
   @override
   void dispose() {
+    widget.timeline?.removeListener(_onTimeline);
     _controller.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
+    final target = _target;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (target != null)
+          _TargetChip(
+            target: target,
+            onCancel: () => widget.timeline?.clearTarget(),
+          ),
+        _field(tokens, hasTarget: target != null),
+      ],
+    );
+  }
+
+  Widget _field(LoafTokens tokens, {required bool hasTarget}) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(
+      margin: EdgeInsets.fromLTRB(
         LoafSpace.x4,
-        LoafSpace.x4,
+        // The chip already separates the field from the timeline.
+        hasTarget ? LoafSpace.x1 : LoafSpace.x4,
         LoafSpace.x4,
         LoafSpace.x3,
       ),
@@ -95,6 +148,7 @@ class _ComposerState extends State<Composer> {
               ),
               child: TextField(
                 controller: _controller,
+                focusNode: _focus,
                 minLines: 1,
                 maxLines: 5,
                 // An explicit line height keeps the field's height
@@ -126,6 +180,71 @@ class _ComposerState extends State<Composer> {
           _IconAction(icon: LucideIcons.paperclip, onTap: () {}),
           const SizedBox(width: LoafSpace.x1),
           _SendButton(enabled: _hasText, onTap: () {}),
+        ],
+      ),
+    );
+  }
+}
+
+/// "replying to Ada" or "editing message", just above the field, with a way
+/// back out.
+class _TargetChip extends StatelessWidget {
+  const _TargetChip({required this.target, required this.onCancel});
+
+  final ComposerTarget target;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    final muted = loafBody(13, 400).copyWith(color: tokens.textMuted);
+    final replying = target.mode == ComposerMode.reply;
+    final author = target.message.author;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LoafSpace.x6,
+        LoafSpace.x2,
+        LoafSpace.x3,
+        0,
+      ),
+      child: Row(
+        children: [
+          Icon(
+            replying ? LucideIcons.reply : LucideIcons.pencil,
+            size: 14,
+            color: tokens.textMuted,
+          ),
+          const SizedBox(width: LoafSpace.x2),
+          // One Expanded for the whole label: a Flexible name beside a
+          // Spacer would split the slack between them and strand the close
+          // button mid-row.
+          Expanded(
+            child: replying
+                ? Row(
+                    children: [
+                      Text('replying to ', style: muted),
+                      Flexible(
+                        child: Text(
+                          author.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: loafBody(
+                            13,
+                            600,
+                          ).copyWith(color: tokens.nameColor(author.role)),
+                        ),
+                      ),
+                    ],
+                  )
+                : Text('editing message', style: muted),
+          ),
+          IconButton(
+            tooltip: replying ? 'Cancel reply' : 'Cancel edit',
+            visualDensity: VisualDensity.compact,
+            onPressed: onCancel,
+            icon: Icon(LucideIcons.x, size: 16, color: tokens.textMuted),
+          ),
         ],
       ),
     );

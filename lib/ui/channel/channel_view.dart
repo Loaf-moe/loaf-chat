@@ -8,6 +8,7 @@ import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import 'composer.dart';
 import 'message_group_tile.dart';
+import 'timeline_controller.dart';
 
 const _narrowTopicWidth = 480.0;
 
@@ -35,12 +36,13 @@ String _formatDay(DateTime day) {
 }
 
 /// The channel a user is currently reading: header, message timeline and the
-/// composer to reply with. Pure UI over fake data — [messages] never mutates.
+/// composer to reply with. Fake data, but [timeline] is live: reactions,
+/// deletions and the composer's reply or edit target all go through it.
 class ChannelView extends StatelessWidget {
   const ChannelView({
     super.key,
     required this.channel,
-    required this.messages,
+    required this.timeline,
     this.onOpenNavigation,
     this.onToggleMembers,
     this.callBar,
@@ -48,7 +50,7 @@ class ChannelView extends StatelessWidget {
   });
 
   final Channel channel;
-  final List<Message> messages;
+  final TimelineController timeline;
 
   /// App-level notices — an update, an unverified session. They sit under
   /// the header rather than over the timeline, so they never cover a message.
@@ -83,9 +85,9 @@ class ChannelView extends StatelessWidget {
               onToggleMembers: onToggleMembers,
             ),
             ...banners,
-            Expanded(child: _Timeline(messages: messages)),
+            Expanded(child: _Timeline(controller: timeline)),
             ?callBar,
-            Composer(channelName: channel.name),
+            Composer(channelName: channel.name, timeline: timeline),
           ],
         ),
       ),
@@ -182,13 +184,18 @@ class _HeaderIconButton extends StatelessWidget {
 }
 
 class _Timeline extends StatelessWidget {
-  const _Timeline({required this.messages});
+  const _Timeline({required this.controller});
 
-  final List<Message> messages;
+  final TimelineController controller;
 
   @override
-  Widget build(BuildContext context) {
-    final entries = groupTimeline(messages).reversed.toList();
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: controller,
+    builder: (context, _) => _build(context),
+  );
+
+  Widget _build(BuildContext context) {
+    final entries = groupTimeline(controller.messages).reversed.toList();
     return ListView.builder(
       reverse: true,
       padding: const EdgeInsets.symmetric(
@@ -202,7 +209,7 @@ class _Timeline extends StatelessWidget {
           DaySeparator() => _DaySeparatorTile(entry: entry),
           MessageGroup() => Padding(
             padding: const EdgeInsets.only(bottom: LoafSpace.x4),
-            child: MessageGroupTile(group: entry),
+            child: MessageGroupTile(group: entry, controller: controller),
           ),
         };
       },

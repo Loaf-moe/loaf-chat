@@ -1,0 +1,281 @@
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:loaf_native/ui/channel/message_group_tile.dart';
+import 'package:loaf_native/ui/channel/timeline_controller.dart';
+import 'package:loaf_native/ui/mock/fixtures.dart';
+import 'package:loaf_native/ui/theme/loaf_theme.dart';
+
+const _you = Member('@you', 'you', Colors.red);
+const _them = Member('@them', 'them', Colors.blue);
+
+Future<TimelineController> _pump(WidgetTester tester, Member author) async {
+  tester.view.physicalSize = const Size(800, 900);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+
+  final controller = TimelineController([
+    Message(
+      id: '1',
+      author: author,
+      sentAt: DateTime(2026, 9, 24, 10),
+      body: 'fresh out of the oven',
+    ),
+  ], you: _you);
+  addTearDown(controller.dispose);
+
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: loafDarkTheme(),
+      home: Scaffold(
+        body: Padding(
+          padding: const EdgeInsets.only(top: 100),
+          child: ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => controller.messages.isEmpty
+                ? const SizedBox()
+                : MessageGroupTile(
+                    group: MessageGroup(controller.messages),
+                    controller: controller,
+                  ),
+          ),
+        ),
+      ),
+    ),
+  );
+  return controller;
+}
+
+final _body = find.text('fresh out of the oven');
+
+// Touch idioms on mobile, pointer idioms on desktop — see "Message actions"
+// in the design spec.
+final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
+final _desktop = TargetPlatformVariant({
+  TargetPlatform.macOS,
+  TargetPlatform.linux,
+  TargetPlatform.windows,
+});
+
+void _captureClipboard(WidgetTester tester, void Function(String?) onCopy) {
+  tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+    SystemChannels.platform,
+    (call) async {
+      if (call.method == 'Clipboard.setData') {
+        onCopy((call.arguments as Map)['text'] as String?);
+      }
+      return null;
+    },
+  );
+  addTearDown(
+    () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      null,
+    ),
+  );
+}
+
+void main() {
+  group('touch', () {
+    testWidgets('a long press opens the action sheet', variant: _mobile, (
+      tester,
+    ) async {
+      await _pump(tester, _them);
+
+      await tester.longPress(_body);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.text('Reply'), findsOneWidget);
+      expect(find.text('Copy text'), findsOneWidget);
+      expect(find.text('Edit'), findsNothing);
+      expect(find.text('🥖'), findsOneWidget, reason: 'quick reactions row');
+    });
+
+    testWidgets(
+      'a quick reaction from the sheet lands on the message',
+      variant: _mobile,
+      (tester) async {
+        final controller = await _pump(tester, _them);
+
+        await tester.longPress(_body);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('🥖'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(BottomSheet), findsNothing);
+        final reaction = controller.messages.single.reactions.single;
+        expect(
+          (reaction.emoji, reaction.count, reaction.mine),
+          ('🥖', 1, true),
+        );
+      },
+    );
+
+    testWidgets('copy puts the body on the clipboard', variant: _mobile, (
+      tester,
+    ) async {
+      String? copied;
+      _captureClipboard(tester, (text) => copied = text);
+      await _pump(tester, _them);
+
+      await tester.longPress(_body);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Copy text'));
+      await tester.pumpAndSettle();
+
+      expect(copied, 'fresh out of the oven');
+      expect(find.text('copied'), findsOneWidget);
+    });
+
+    testWidgets(
+      'delete asks first, and only then removes the message',
+      variant: _mobile,
+      (tester) async {
+        final controller = await _pump(tester, _you);
+
+        await tester.longPress(_body);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Delete'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AlertDialog), findsOneWidget);
+        await tester.tap(find.text('cancel'));
+        await tester.pumpAndSettle();
+        expect(controller.messages, hasLength(1), reason: 'cancel keeps it');
+
+        await tester.longPress(_body);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Delete'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('delete'));
+        await tester.pumpAndSettle();
+        expect(controller.messages, isEmpty);
+      },
+    );
+  });
+
+  group('pointer', () {
+    testWidgets('hovering with a mouse shows the toolbar', variant: _desktop, (
+      tester,
+    ) async {
+      await _pump(tester, _them);
+      expect(find.byTooltip('Reply'), findsNothing);
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(tester.getCenter(_body));
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('Reply'), findsOneWidget);
+      expect(find.byTooltip('More'), findsOneWidget);
+
+      await mouse.moveTo(const Offset(790, 890));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Reply'), findsNothing);
+    });
+
+    testWidgets(
+      'right-click opens the same actions as a menu',
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester, _you);
+
+        await tester.tap(_body, buttons: kSecondaryButton);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(BottomSheet), findsNothing);
+        for (final label in ['Reply', 'Copy text', 'Edit', 'Delete']) {
+          expect(find.text(label), findsOneWidget, reason: label);
+        }
+        expect(find.text('🥖'), findsOneWidget);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(find.text('Copy text'), findsNothing);
+      },
+    );
+
+    testWidgets('long press does nothing on a computer', variant: _desktop, (
+      tester,
+    ) async {
+      await _pump(tester, _them);
+
+      await tester.longPress(_body);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.text('Reply'), findsNothing);
+    });
+
+    testWidgets('message text is selectable on a computer', variant: _desktop, (
+      tester,
+    ) async {
+      await _pump(tester, _them);
+      expect(find.byType(SelectableText), findsOneWidget);
+    });
+
+    testWidgets(
+      'right-clicking a selection offers to copy just that',
+      variant: _desktop,
+      (tester) async {
+        String? copied;
+        _captureClipboard(tester, (text) => copied = text);
+        await _pump(tester, _them);
+
+        // Drag across the start of the body with the mouse to select it.
+        final box = tester.getRect(_body);
+        final drag = await tester.startGesture(
+          box.centerLeft + const Offset(1, 0),
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump();
+        await drag.moveTo(box.center);
+        await drag.up();
+        await tester.pumpAndSettle();
+
+        await tester.tap(_body, buttons: kSecondaryButton);
+        await tester.pumpAndSettle();
+        expect(find.text('Copy selection'), findsOneWidget);
+
+        await tester.tap(find.text('Copy selection'));
+        await tester.pumpAndSettle();
+        expect(copied, isNotEmpty);
+        expect('fresh out of the oven'.startsWith(copied!), isTrue);
+        expect(copied!.length, lessThan('fresh out of the oven'.length));
+      },
+    );
+
+    testWidgets(
+      'without a selection there is no copy-selection item',
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester, _them);
+
+        await tester.tap(_body, buttons: kSecondaryButton);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Copy text'), findsOneWidget);
+        expect(find.text('Copy selection'), findsNothing);
+      },
+    );
+  });
+
+  testWidgets(
+    'phones never show the hover toolbar or selectable text',
+    variant: _mobile,
+    (tester) async {
+      await _pump(tester, _them);
+      expect(find.byType(SelectableText), findsNothing);
+
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(tester.getCenter(_body));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('More'), findsNothing);
+    },
+  );
+}

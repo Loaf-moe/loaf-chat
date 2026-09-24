@@ -85,6 +85,17 @@ class Message {
   /// Set when the message is an image; the mockups draw a placeholder of this
   /// aspect ratio rather than loading anything.
   final double? imageAspect;
+
+  Message copyWith({List<Reaction>? reactions}) => Message(
+    id: id,
+    author: author,
+    sentAt: sentAt,
+    body: body,
+    reactions: reactions ?? this.reactions,
+    edited: edited,
+    replyTo: replyTo,
+    imageAspect: imageAspect,
+  );
 }
 
 class Channel {

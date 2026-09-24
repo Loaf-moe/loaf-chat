@@ -172,6 +172,22 @@ section at the top; moderators stay with members and stand out by colour, which
 keeps this short of the roles UI deferred to v2. Online people sort first, and
 offline people are dimmed rather than hidden.
 
+**Message actions split by platform, not input device.** The same actions —
+quick reactions, reply, copy, and edit or delete on your own messages — are
+reached the way each platform expects:
+
+- **Mobile (iOS, Android):** long press, with a haptic, opens a bottom sheet:
+  quick reactions within thumb reach, then the action list.
+- **Desktop (macOS, Linux, Windows):** no long press at all. Message text stays
+  selectable, because selecting part of a message is something people do on a
+  computer and losing it is not an acceptable trade. Hovering a message shows a
+  small toolbar on its top edge; right-click opens the action menu at the
+  pointer, leading with *Copy selection* when text is selected.
+
+Deleting someone else's message is moderation and stays out of v1; delete is
+offered on your own messages only, and always asks first, because a redaction
+cannot be undone.
+
 ## Process
 
 The UI is designed as Flutter mockups before any functionality is implemented —

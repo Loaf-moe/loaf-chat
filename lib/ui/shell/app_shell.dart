@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../call/connected_call_bar.dart';
 import '../channel/channel_view.dart';
+import '../channel/timeline_controller.dart';
 import '../members/member_list.dart';
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
@@ -31,7 +32,13 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-  final _messages = mockTimeline();
+  final _timeline = TimelineController(mockTimeline(), you: currentUser);
+
+  @override
+  void dispose() {
+    _timeline.dispose();
+    super.dispose();
+  }
 
   String _spaceId = mockSpaces.first.id;
 
@@ -113,7 +120,7 @@ class _AppShellState extends State<AppShell> {
 
         final channel = ChannelView(
           channel: _channel,
-          messages: _messages,
+          timeline: _timeline,
           banners: [
             if (_showVerify) LoafBanner.verify(onAction: () {}),
             if (_showUpdate)
