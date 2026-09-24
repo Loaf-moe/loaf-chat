@@ -1,5 +1,5 @@
-/// The leftmost rail: space avatars, mockup only (fake data, no navigation
-/// wired beyond the [onSelect] callback).
+/// The leftmost rail: space avatars, then any app notices pinned at the
+/// foot. Mockup only (fake data, no navigation wired beyond [onSelect]).
 library;
 
 import 'package:flutter/material.dart';
@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import 'app_notice.dart';
 import 'user_bar.dart';
 
 class SpacesRail extends StatelessWidget {
@@ -15,11 +16,16 @@ class SpacesRail extends StatelessWidget {
     required this.spaces,
     required this.selectedSpaceId,
     required this.onSelect,
+    this.notices = const [],
   });
 
   final List<Space> spaces;
   final String selectedSpaceId;
   final ValueChanged<String> onSelect;
+
+  /// Pinned below the scrolling spaces, just above the account panel, so
+  /// they stay put however many spaces you are in.
+  final List<AppNotice> notices;
 
   @override
   Widget build(BuildContext context) {
@@ -50,12 +56,18 @@ class SpacesRail extends StatelessWidget {
                         const SizedBox(height: 8),
                       ],
                       _CreateSpaceButton(tokens: tokens),
-                      // Clears the account panel floating over the bottom.
-                      const SizedBox(height: UserBar.clearance),
+                      const SizedBox(height: LoafSpace.x2),
                     ],
                   ),
                 ),
               ),
+              for (final notice in notices)
+                Padding(
+                  padding: const EdgeInsets.only(top: LoafSpace.x2),
+                  child: NoticeTile(notice: notice),
+                ),
+              // Clears the account panel floating over the bottom.
+              const SizedBox(height: UserBar.clearance),
             ],
           ),
         ),
@@ -236,12 +248,15 @@ class _CreateSpaceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _DashedBorderPainter(color: tokens.borderStrong),
-      child: SizedBox(
-        width: 52,
-        height: 52,
-        child: Icon(LucideIcons.plus, color: tokens.textMuted, size: 20),
+    return Tooltip(
+      message: 'Create a space',
+      child: CustomPaint(
+        painter: _DashedBorderPainter(color: tokens.borderStrong),
+        child: SizedBox(
+          width: 52,
+          height: 52,
+          child: Icon(LucideIcons.plus, color: tokens.textMuted, size: 20),
+        ),
       ),
     );
   }

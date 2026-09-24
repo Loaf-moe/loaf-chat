@@ -13,10 +13,11 @@ import '../channel/channel_view.dart';
 import '../channel/timeline_controller.dart';
 import '../members/member_list.dart';
 import '../mock/fixtures.dart';
+import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'channel_list.dart';
 import '../settings/settings_page.dart';
-import 'loaf_banner.dart';
+import 'app_notice.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
 
@@ -97,6 +98,17 @@ class _AppShellState extends State<AppShell> {
     _muted = false;
   });
 
+  List<AppNotice> get _notices => [
+    if (_showVerify) AppNotice.verify(onAction: () {}),
+    // Phones update through the App Store or TestFlight, never in-app.
+    if (_showUpdate && isDesktop)
+      AppNotice.update(
+        version: '0.3.0',
+        onAction: () {},
+        onDismiss: () => setState(() => _showUpdate = false),
+      ),
+  ];
+
   Widget? _buildCallBar() {
     final connected = _connected;
     if (connected == null) return null;
@@ -121,15 +133,7 @@ class _AppShellState extends State<AppShell> {
         final channel = ChannelView(
           channel: _channel,
           timeline: _timeline,
-          banners: [
-            if (_showVerify) LoafBanner.verify(onAction: () {}),
-            if (_showUpdate)
-              LoafBanner.update(
-                version: '0.3.0',
-                onAction: () {},
-                onDismiss: () => setState(() => _showUpdate = false),
-              ),
-          ],
+          navigationAttention: _notices.any((n) => n.loud),
           callBar: _buildCallBar(),
           onOpenNavigation: wide
               ? null
@@ -211,6 +215,7 @@ class _AppShellState extends State<AppShell> {
               spaces: mockSpaces,
               selectedSpaceId: _spaceId,
               onSelect: _selectSpace,
+              notices: _notices,
             ),
             Expanded(
               child: ChannelList(

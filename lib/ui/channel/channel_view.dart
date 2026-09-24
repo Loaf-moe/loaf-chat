@@ -46,15 +46,15 @@ class ChannelView extends StatelessWidget {
     this.onOpenNavigation,
     this.onToggleMembers,
     this.callBar,
-    this.banners = const [],
+    this.navigationAttention = false,
   });
 
   final Channel channel;
   final TimelineController timeline;
 
-  /// App-level notices — an update, an unverified session. They sit under
-  /// the header rather than over the timeline, so they never cover a message.
-  final List<Widget> banners;
+  /// Marks the menu button when a notice that must not be missed is waiting
+  /// in the rail. Only matters on a phone, where the rail hides in the drawer.
+  final bool navigationAttention;
 
   /// The connected-voice bar, when the user is in a voice channel. It sits
   /// between the timeline and the composer rather than below the composer,
@@ -83,8 +83,8 @@ class ChannelView extends StatelessWidget {
               channel: channel,
               onOpenNavigation: onOpenNavigation,
               onToggleMembers: onToggleMembers,
+              navigationAttention: navigationAttention,
             ),
-            ...banners,
             Expanded(child: _Timeline(controller: timeline)),
             ?callBar,
             Composer(channelName: channel.name, timeline: timeline),
@@ -100,11 +100,13 @@ class _ChannelHeader extends StatelessWidget {
     required this.channel,
     required this.onOpenNavigation,
     required this.onToggleMembers,
+    required this.navigationAttention,
   });
 
   final Channel channel;
   final VoidCallback? onOpenNavigation;
   final VoidCallback? onToggleMembers;
+  final bool navigationAttention;
 
   @override
   Widget build(BuildContext context) {
@@ -124,9 +126,31 @@ class _ChannelHeader extends StatelessWidget {
           return Row(
             children: [
               if (onOpenNavigation != null) ...[
-                _HeaderIconButton(
-                  icon: LucideIcons.menu,
-                  onTap: onOpenNavigation,
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    _HeaderIconButton(
+                      icon: LucideIcons.menu,
+                      onTap: onOpenNavigation,
+                    ),
+                    if (navigationAttention)
+                      Positioned(
+                        right: 8,
+                        top: 8,
+                        child: IgnorePointer(
+                          child: Container(
+                            key: const ValueKey('navigation-attention'),
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: tokens.accent,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: tokens.page, width: 2),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(width: LoafSpace.x2),
               ],

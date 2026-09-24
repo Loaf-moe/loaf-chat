@@ -2,7 +2,6 @@
 /// the run.
 library;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../members/role_colors.dart';
 import '../mock/fixtures.dart';
+import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'message_actions.dart';
 import 'timeline_controller.dart';
@@ -75,7 +75,7 @@ class MessageGroupTile extends StatelessWidget {
   Widget _interactive(Message message) {
     final controller = this.controller;
     if (controller == null) return _MessageBody(message: message);
-    return _isDesktop
+    return isDesktop
         ? _PointerMessage(message: message, controller: controller)
         : _TouchMessage(message: message, controller: controller);
   }
@@ -98,17 +98,6 @@ class _Avatar extends StatelessWidget {
     );
   }
 }
-
-/// Touch idioms on mobile, pointer idioms on desktop: the split is by
-/// platform, not input device. Long press has no business on a computer,
-/// and a computer must keep text selection. See "Message actions" in the
-/// design spec.
-bool get _isDesktop => switch (defaultTargetPlatform) {
-  TargetPlatform.macOS ||
-  TargetPlatform.linux ||
-  TargetPlatform.windows => true,
-  _ => false,
-};
 
 class _MessageBody extends StatelessWidget {
   const _MessageBody({required this.message, this.onSelectionChanged});

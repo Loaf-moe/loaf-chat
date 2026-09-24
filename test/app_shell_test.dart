@@ -138,6 +138,49 @@ void main() {
     expect(field.controller?.text, isEmpty);
   });
 
+  testWidgets('notices live in the rail, not as banners over the channel', (
+    tester,
+  ) async {
+    await _pumpShell(tester, const Size(1440, 900));
+
+    // Nothing app-level is spread across the reading surface…
+    expect(find.text('verify this session'), findsNothing);
+    // …it waits at the bottom of the rail instead.
+    expect(find.byTooltip('verify this session'), findsOneWidget);
+  });
+
+  testWidgets(
+    'a phone never shows the update notice',
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    (tester) async {
+      await _pumpShell(tester, const Size(390, 844));
+
+      await tester.tap(find.byIcon(LucideIcons.menu));
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('verify this session'), findsOneWidget);
+      expect(find.byTooltip('loaf 0.3.0 is ready'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a computer shows the update notice',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      await _pumpShell(tester, const Size(1440, 900));
+      expect(find.byTooltip('loaf 0.3.0 is ready'), findsOneWidget);
+    },
+  );
+
+  testWidgets('on a phone the menu button carries a dot while verification '
+      'is pending', (tester) async {
+    await _pumpShell(tester, const Size(390, 844));
+
+    // The rail is behind the drawer, so something outside it has to say
+    // there is a notice waiting.
+    expect(find.byKey(const ValueKey('navigation-attention')), findsOneWidget);
+  });
+
   testWidgets('joining a voice channel shows the call bar and keeps you '
       'in the channel you were reading', (tester) async {
     await _pumpShell(tester, const Size(1440, 900));
