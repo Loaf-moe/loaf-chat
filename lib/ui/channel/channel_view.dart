@@ -158,7 +158,8 @@ class _ChannelHeader extends StatelessWidget {
                 icon: LucideIcons.users,
                 onTap: onToggleMembers,
               ),
-              _HeaderIconButton(icon: LucideIcons.search, onTap: () {}),
+              // No search button: message search is a v1 non-goal, and in
+              // encrypted rooms it needs a client-side index (see the spec).
             ],
           );
         },
