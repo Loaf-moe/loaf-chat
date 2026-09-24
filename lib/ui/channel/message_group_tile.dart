@@ -100,9 +100,22 @@ class _Avatar extends StatelessWidget {
 }
 
 class _MessageBody extends StatelessWidget {
-  const _MessageBody({required this.message, this.onSelectionChanged});
+  const _MessageBody({
+    required this.message,
+    this.onSelectionChanged,
+    this.onReact,
+    this.onAddReaction,
+  });
 
   final Message message;
+
+  /// Tapping a reaction pill toggles your own on it: join the 🔥 or take
+  /// yours back. Null leaves the pills display-only.
+  final ValueChanged<String>? onReact;
+
+  /// The trailing + pill: opens the message's actions, reactions first.
+  /// Receives where it was tapped, for a menu to open at.
+  final ValueChanged<Offset>? onAddReaction;
 
   /// When set, the text is selectable and this hears the selected text.
   /// Desktop only: on a phone, selection would swallow the long press.
@@ -123,7 +136,11 @@ class _MessageBody extends StatelessWidget {
         ],
         if (message.reactions.isNotEmpty) ...[
           const SizedBox(height: LoafSpace.x2),
-          _ReactionsWrap(reactions: message.reactions),
+          _ReactionsWrap(
+            reactions: message.reactions,
+            onReact: onReact,
+            onAdd: onAddReaction,
+          ),
         ],
       ],
     );
@@ -237,9 +254,11 @@ class _ImagePlaceholder extends StatelessWidget {
 }
 
 class _ReactionsWrap extends StatelessWidget {
-  const _ReactionsWrap({required this.reactions});
+  const _ReactionsWrap({required this.reactions, this.onReact, this.onAdd});
 
   final List<Reaction> reactions;
+  final ValueChanged<String>? onReact;
+  final ValueChanged<Offset>? onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -249,39 +268,49 @@ class _ReactionsWrap extends StatelessWidget {
       runSpacing: LoafSpace.x2,
       children: [
         for (final reaction in reactions)
-          Container(
-            height: 26,
-            padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x2),
-            decoration: BoxDecoration(
-              color: reaction.mine ? tokens.accentSoft : tokens.card,
-              borderRadius: BorderRadius.circular(LoafRadius.full),
-              border: Border.all(
-                color: reaction.mine ? tokens.accent : tokens.border,
+          GestureDetector(
+            onTap: onReact == null ? null : () => onReact!(reaction.emoji),
+            child: Container(
+              height: 26,
+              padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x2),
+              decoration: BoxDecoration(
+                color: reaction.mine ? tokens.accentSoft : tokens.card,
+                borderRadius: BorderRadius.circular(LoafRadius.full),
+                border: Border.all(
+                  color: reaction.mine ? tokens.accent : tokens.border,
+                ),
+              ),
+              // A Container with `alignment` and no width expands to the
+              // parent's max width, which makes every pill full-bleed and
+              // forces one per line. A min-size Row hugs the text instead.
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '${reaction.emoji} ${reaction.count}',
+                    style: loafBody(11, 600).copyWith(color: tokens.textBody),
+                  ),
+                ],
               ),
             ),
-            // A Container with `alignment` and no width expands to the
-            // parent's max width, which makes every pill full-bleed and
-            // forces one per line. A min-size Row hugs the text instead.
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  '${reaction.emoji} ${reaction.count}',
-                  style: loafBody(11, 600).copyWith(color: tokens.textBody),
-                ),
-              ],
+          ),
+        GestureDetector(
+          onTapUp: onAdd == null ? null : (d) => onAdd!(d.globalPosition),
+          child: Container(
+            height: 26,
+            width: 26,
+            decoration: BoxDecoration(
+              color: tokens.card,
+              borderRadius: BorderRadius.circular(LoafRadius.full),
+              border: Border.all(color: tokens.border),
+            ),
+            alignment: Alignment.center,
+            child: Icon(
+              LucideIcons.smilePlus,
+              size: 14,
+              color: tokens.textMuted,
             ),
           ),
-        Container(
-          height: 26,
-          width: 26,
-          decoration: BoxDecoration(
-            color: tokens.card,
-            borderRadius: BorderRadius.circular(LoafRadius.full),
-            border: Border.all(color: tokens.border),
-          ),
-          alignment: Alignment.center,
-          child: Icon(LucideIcons.smilePlus, size: 14, color: tokens.textMuted),
         ),
       ],
     );
@@ -318,7 +347,12 @@ class _TouchMessageState extends State<_TouchMessage> {
     onLongPress: _openSheet,
     child: _Highlight(
       on: _active,
-      child: _MessageBody(message: widget.message),
+      child: _MessageBody(
+        message: widget.message,
+        onReact: (emoji) =>
+            widget.controller.toggleReaction(widget.message.id, emoji),
+        onAddReaction: (_) => _openSheet(),
+      ),
     ),
   );
 }
@@ -429,6 +463,9 @@ class _PointerMessageState extends State<_PointerMessage> {
               on: _active || _overMessage || _overToolbar,
               child: _MessageBody(
                 message: widget.message,
+                onReact: (emoji) =>
+                    widget.controller.toggleReaction(widget.message.id, emoji),
+                onAddReaction: _openMenu,
                 onSelectionChanged: (text) => _selection = text,
               ),
             ),

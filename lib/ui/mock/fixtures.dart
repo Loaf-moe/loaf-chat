@@ -107,16 +107,17 @@ class Message {
   /// aspect ratio rather than loading anything.
   final double? imageAspect;
 
-  Message copyWith({List<Reaction>? reactions}) => Message(
-    id: id,
-    author: author,
-    sentAt: sentAt,
-    body: body,
-    reactions: reactions ?? this.reactions,
-    edited: edited,
-    replyTo: replyTo,
-    imageAspect: imageAspect,
-  );
+  Message copyWith({List<Reaction>? reactions, String? body, bool? edited}) =>
+      Message(
+        id: id,
+        author: author,
+        sentAt: sentAt,
+        body: body ?? this.body,
+        reactions: reactions ?? this.reactions,
+        edited: edited ?? this.edited,
+        replyTo: replyTo,
+        imageAspect: imageAspect,
+      );
 }
 
 class Channel {

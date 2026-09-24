@@ -543,6 +543,165 @@ void main() {
     );
   });
 
+  group('sending', () {
+    final mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
+    final desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
+
+    Finder field() => find.byType(TextField);
+    String fieldText(WidgetTester tester) =>
+        tester.widget<TextField>(field()).controller!.text;
+
+    Future<void> openActions(WidgetTester tester, String body) async {
+      await tester.longPress(find.textContaining(body));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the send button posts your message and clears the field', (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(1440, 900));
+
+      await tester.enterText(field(), 'crumb shot incoming');
+      await tester.pump();
+      await tester.tap(find.byIcon(LucideIcons.send));
+      await tester.pumpAndSettle();
+
+      expect(find.text('crumb shot incoming'), findsOneWidget);
+      expect(fieldText(tester), isEmpty);
+    });
+
+    testWidgets('on a computer, enter sends', variant: desktop, (tester) async {
+      await _pumpShell(tester, const Size(1440, 900));
+
+      await tester.enterText(field(), 'enter sends');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+
+      expect(find.text('enter sends'), findsOneWidget);
+      expect(fieldText(tester), isEmpty);
+    });
+
+    testWidgets('on a computer, shift+enter does not send', variant: desktop, (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(1440, 900));
+
+      await tester.enterText(field(), 'still typing');
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+
+      expect(fieldText(tester), startsWith('still typing'));
+    });
+
+    testWidgets('on a phone, return is a newline, not send', variant: mobile, (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(390, 844));
+
+      await tester.enterText(field(), 'line one');
+      await tester.testTextInput.receiveAction(TextInputAction.newline);
+      await tester.pumpAndSettle();
+
+      expect(fieldText(tester), startsWith('line one'));
+    });
+
+    testWidgets('a reply is sent with its quote', (tester) async {
+      await _pumpShell(tester, const Size(390, 844));
+
+      await openActions(tester, 'first bake on the fixed oven');
+      await tester.tap(find.text('Reply'));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'that crumb!');
+      await tester.pump();
+      await tester.tap(find.byIcon(LucideIcons.send));
+      await tester.pumpAndSettle();
+
+      expect(find.text('that crumb!'), findsOneWidget);
+      expect(find.text('replying to '), findsNothing);
+      // The quote line under the new message names who it answers.
+      expect(
+        find.textContaining('first bake on the fixed oven'),
+        findsNWidgets(2),
+      );
+    });
+
+    testWidgets('saving an edit replaces the message', (tester) async {
+      await _pumpShell(tester, const Size(390, 844));
+
+      await openActions(tester, 'ok that crumb is unreasonable');
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), 'ok that crumb is outrageous');
+      await tester.pump();
+      await tester.tap(find.byIcon(LucideIcons.send));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('ok that crumb is outrageous'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('unreasonable'), findsNothing);
+    });
+
+    testWidgets('emptying an edit asks whether to delete', (tester) async {
+      await _pumpShell(tester, const Size(390, 844));
+
+      await openActions(tester, 'ok that crumb is unreasonable');
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      await tester.enterText(field(), '   ');
+      await tester.pump();
+      await tester.tap(find.byIcon(LucideIcons.send));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AlertDialog), findsOneWidget);
+      await tester.tap(find.text('cancel'));
+      await tester.pumpAndSettle();
+      // Still editing, message untouched.
+      expect(find.text('editing message'), findsOneWidget);
+      expect(find.textContaining('unreasonable'), findsWidgets);
+    });
+
+    testWidgets('on a computer, escape cancels a reply', variant: desktop, (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(1440, 900));
+
+      await tester.tap(
+        find.textContaining('first bake on the fixed oven'),
+        buttons: kSecondaryButton,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Reply'));
+      await tester.pumpAndSettle();
+      expect(find.text('replying to '), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('replying to '), findsNothing);
+    });
+
+    testWidgets('the reply card previews what you are answering', (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(390, 844));
+
+      await openActions(tester, 'first bake on the fixed oven');
+      await tester.tap(find.text('Reply'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('composer-target')),
+          matching: find.text('first bake on the fixed oven'),
+        ),
+        findsOneWidget,
+      );
+    });
+  });
+
   testWidgets('joining a voice channel shows the call bar and keeps you '
       'in the channel you were reading', (tester) async {
     await _pumpShell(tester, const Size(1440, 900));

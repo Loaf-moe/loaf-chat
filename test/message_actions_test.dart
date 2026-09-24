@@ -77,6 +77,47 @@ void _captureClipboard(WidgetTester tester, void Function(String?) onCopy) {
 }
 
 void main() {
+  testWidgets('tapping a reaction joins it, and tapping again takes it back', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final controller = TimelineController([
+      Message(
+        id: '1',
+        author: _them,
+        sentAt: DateTime(2026, 9, 24, 10),
+        body: 'look at this crumb',
+        reactions: const [Reaction('🔥', 3)],
+      ),
+    ], you: _you);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: loafDarkTheme(),
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: controller,
+            builder: (context, _) => MessageGroupTile(
+              group: MessageGroup(controller.messages),
+              controller: controller,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('🔥 3'));
+    await tester.pumpAndSettle();
+    expect(find.text('🔥 4'), findsOneWidget);
+    expect(controller.messages.single.reactions.single.mine, isTrue);
+
+    await tester.tap(find.text('🔥 4'));
+    await tester.pumpAndSettle();
+    expect(find.text('🔥 3'), findsOneWidget);
+  });
+
   group('touch', () {
     testWidgets('a long press opens the action sheet', variant: _mobile, (
       tester,

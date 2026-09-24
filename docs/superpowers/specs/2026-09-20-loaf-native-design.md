@@ -244,6 +244,15 @@ reached the way each platform expects:
   small toolbar on its top edge; right-click opens the action menu at the
   pointer, leading with *Copy selection* when text is selected.
 
+**Sending.** On desktop, Enter sends and Shift+Enter starts a new line; on
+mobile, Return is a new line and the send button sends. Replying or editing
+puts a card above the composer — the mode, who or what it is aimed at, and a
+line of the message itself — which Escape (desktop) or its close button backs
+out of. Emptying an edit and sending it asks whether to delete the message
+instead; saving an edit unchanged is not an edit. Tapping a reaction pill
+toggles your own reaction on it, and the trailing + opens the message's
+actions with the quick reactions first.
+
 Deleting someone else's message is moderation and stays out of v1; delete is
 offered on your own messages only, and always asks first, because a redaction
 cannot be undone.

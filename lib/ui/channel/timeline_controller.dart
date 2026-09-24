@@ -57,6 +57,40 @@ class TimelineController extends ChangeNotifier {
     notifyListeners();
   }
 
+  var _sent = 0;
+
+  /// Posts [text] as a message from [you], quoting the reply target if there
+  /// is one. Blank text never sends. The mock's stand-in for sending a room
+  /// event: it lands locally and immediately.
+  void send(String text) {
+    final body = text.trim();
+    if (body.isEmpty) return;
+    final target = _target;
+    _messages.add(
+      Message(
+        id: 'local-${_sent++}',
+        author: you,
+        sentAt: DateTime.now(),
+        body: body,
+        replyTo: target?.mode == ComposerMode.reply ? target!.message : null,
+      ),
+    );
+    _target = null;
+    notifyListeners();
+  }
+
+  /// Replaces a message's text. Saving it unchanged is not an edit, so it is
+  /// not marked as one.
+  void saveEdit(String messageId, String text) {
+    final index = _messages.indexWhere((m) => m.id == messageId);
+    final body = text.trim();
+    if (index >= 0 && body.isNotEmpty && body != _messages[index].body) {
+      _messages[index] = _messages[index].copyWith(body: body, edited: true);
+    }
+    _target = null;
+    notifyListeners();
+  }
+
   void delete(String messageId) {
     _messages.removeWhere((m) => m.id == messageId);
     if (_target?.message.id == messageId) _target = null;

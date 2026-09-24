@@ -208,20 +208,53 @@ class _HeaderIconButton extends StatelessWidget {
   }
 }
 
-class _Timeline extends StatelessWidget {
+class _Timeline extends StatefulWidget {
   const _Timeline({required this.controller});
 
   final TimelineController controller;
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: controller,
-    builder: (context, _) => _build(context),
-  );
+  State<_Timeline> createState() => _TimelineState();
+}
 
-  Widget _build(BuildContext context) {
+class _TimelineState extends State<_Timeline> {
+  final _scroll = ScrollController();
+  late int _count = widget.controller.messages.length;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onMessages);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onMessages);
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Sending brings you back to the newest message, even if you had
+  /// scrolled up to reread something. Other people's messages do not yank
+  /// you around.
+  void _onMessages() {
+    final messages = widget.controller.messages;
+    final grew = messages.length > _count;
+    _count = messages.length;
+    setState(() {});
+    if (grew &&
+        messages.last.author.id == widget.controller.you.id &&
+        _scroll.hasClients) {
+      _scroll.animateTo(0, duration: LoafMotion.normal, curve: LoafMotion.ease);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
     final entries = groupTimeline(controller.messages).reversed.toList();
     return ListView.builder(
+      controller: _scroll,
       reverse: true,
       padding: const EdgeInsets.symmetric(
         horizontal: LoafSpace.x4,

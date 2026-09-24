@@ -4,10 +4,13 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../members/role_colors.dart';
+import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import 'message_actions.dart';
 import 'timeline_controller.dart';
 
 /// Every control in the composer row is this tall. Equal heights are what
@@ -57,6 +60,52 @@ class _ComposerState extends State<Composer> {
       if (hasText != _hasText) setState(() => _hasText = hasText);
     });
     widget.timeline?.addListener(_onTimeline);
+    _focus.onKeyEvent = _onKey;
+  }
+
+  /// Desktop keys: Enter sends, Shift+Enter falls through to the field as a
+  /// newline, Escape backs out of a reply or edit. On a phone Return is a
+  /// newline and the send button sends, so none of this applies.
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (!isDesktop || event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    final enter =
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter;
+    // Enter that confirms an input-method composition is not a send.
+    final composing = _controller.value.composing.isValid;
+    if (enter && !composing && !HardwareKeyboard.instance.isShiftPressed) {
+      _submit();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.escape && _target != null) {
+      widget.timeline?.clearTarget();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// Sends, or saves an edit. An edit emptied out is a request to delete, so
+  /// it asks — cancelling leaves you in the edit.
+  Future<void> _submit() async {
+    final timeline = widget.timeline;
+    if (timeline == null) return;
+    final text = _controller.text;
+    final target = _target;
+
+    if (target != null && target.mode == ComposerMode.edit) {
+      if (text.trim().isNotEmpty) {
+        // Clearing the target clears the field: see _onTimeline.
+        timeline.saveEdit(target.message.id, text);
+      } else if (await confirmDeleteMessage(context)) {
+        timeline.delete(target.message.id);
+      }
+      return;
+    }
+
+    if (text.trim().isEmpty) return;
+    timeline.send(text);
+    _controller.clear();
   }
 
   @override
@@ -115,8 +164,8 @@ class _ComposerState extends State<Composer> {
     return Container(
       margin: EdgeInsets.fromLTRB(
         LoafSpace.x4,
-        // The chip already separates the field from the timeline.
-        hasTarget ? LoafSpace.x1 : LoafSpace.x4,
+        // The card already separates the field from the timeline.
+        hasTarget ? LoafSpace.x2 : LoafSpace.x4,
         LoafSpace.x4,
         LoafSpace.x3,
       ),
@@ -179,15 +228,22 @@ class _ComposerState extends State<Composer> {
           _IconAction(icon: LucideIcons.smile, onTap: () {}),
           _IconAction(icon: LucideIcons.paperclip, onTap: () {}),
           const SizedBox(width: LoafSpace.x1),
-          _SendButton(enabled: _hasText, onTap: () {}),
+          // Enabled for an emptied edit too: sending that is how you ask to
+          // delete the message.
+          _SendButton(
+            enabled: _hasText || _target?.mode == ComposerMode.edit,
+            onTap: _submit,
+          ),
         ],
       ),
     );
   }
 }
 
-/// "replying to Ada" or "editing message", just above the field, with a way
-/// back out.
+/// What the composer is aimed at — "replying to Ada" or "editing message" —
+/// as a raised card above the field, with a line of the message itself so
+/// you can see what you are answering or changing. An accent bar marks it as
+/// a mode you are in, not just a caption.
 class _TargetChip extends StatelessWidget {
   const _TargetChip({required this.target, required this.onCancel});
 
@@ -197,55 +253,93 @@ class _TargetChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
-    final muted = loafBody(13, 400).copyWith(color: tokens.textMuted);
     final replying = target.mode == ComposerMode.reply;
     final author = target.message.author;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        LoafSpace.x6,
+    final title = replying
+        ? Row(
+            children: [
+              Text(
+                'replying to ',
+                style: loafBody(13, 500).copyWith(color: tokens.textBody),
+              ),
+              Flexible(
+                child: Text(
+                  author.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: loafBody(
+                    13,
+                    600,
+                  ).copyWith(color: tokens.nameColor(author.role)),
+                ),
+              ),
+            ],
+          )
+        : Text(
+            'editing message',
+            style: loafBody(13, 600).copyWith(color: tokens.textStrong),
+          );
+
+    return Container(
+      key: const ValueKey('composer-target'),
+      margin: const EdgeInsets.fromLTRB(
+        LoafSpace.x4,
         LoafSpace.x2,
-        LoafSpace.x3,
+        LoafSpace.x4,
         0,
       ),
-      child: Row(
-        children: [
-          Icon(
-            replying ? LucideIcons.reply : LucideIcons.pencil,
-            size: 14,
-            color: tokens.textMuted,
-          ),
-          const SizedBox(width: LoafSpace.x2),
-          // One Expanded for the whole label: a Flexible name beside a
-          // Spacer would split the slack between them and strand the close
-          // button mid-row.
-          Expanded(
-            child: replying
-                ? Row(
-                    children: [
-                      Text('replying to ', style: muted),
-                      Flexible(
-                        child: Text(
-                          author.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: loafBody(
-                            13,
-                            600,
-                          ).copyWith(color: tokens.nameColor(author.role)),
-                        ),
-                      ),
-                    ],
-                  )
-                : Text('editing message', style: muted),
-          ),
-          IconButton(
-            tooltip: replying ? 'Cancel reply' : 'Cancel edit',
-            visualDensity: VisualDensity.compact,
-            onPressed: onCancel,
-            icon: Icon(LucideIcons.x, size: 16, color: tokens.textMuted),
-          ),
-        ],
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: tokens.card,
+        borderRadius: BorderRadius.circular(LoafRadius.lg),
+        border: Border.all(color: tokens.borderStrong),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(width: 3, color: tokens.accent),
+            const SizedBox(width: LoafSpace.x3),
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Icon(
+                replying ? LucideIcons.reply : LucideIcons.pencil,
+                size: 16,
+                color: tokens.accent,
+              ),
+            ),
+            const SizedBox(width: LoafSpace.x2),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    title,
+                    const SizedBox(height: 2),
+                    Text(
+                      target.message.body,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: loafBody(
+                        13,
+                        400,
+                      ).copyWith(color: tokens.textMuted),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: replying ? 'Cancel reply' : 'Cancel edit',
+              visualDensity: VisualDensity.compact,
+              onPressed: onCancel,
+              icon: Icon(LucideIcons.x, size: 16, color: tokens.textMuted),
+            ),
+          ],
+        ),
       ),
     );
   }

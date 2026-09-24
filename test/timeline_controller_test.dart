@@ -101,4 +101,49 @@ void main() {
       expect(c.target, isNull);
     });
   });
+
+  group('sending', () {
+    test('a sent message is yours, at the end, and clears the target', () {
+      final target = _msg('1', _them);
+      final c = TimelineController([target], you: _you);
+
+      c.startReply(target);
+      c.send('  hot out of the oven  ');
+
+      final sent = c.messages.last;
+      expect(sent.author.id, _you.id);
+      expect(sent.body, 'hot out of the oven');
+      expect(sent.replyTo?.id, '1', reason: 'the reply carries its quote');
+      expect(c.target, isNull);
+    });
+
+    test('blank text never sends', () {
+      final c = TimelineController([], you: _you);
+      c.send('   ');
+      expect(c.messages, isEmpty);
+    });
+
+    test('saving an edit replaces the text and marks it edited', () {
+      final mine = _msg('1', _you);
+      final c = TimelineController([mine], you: _you);
+
+      c.startEdit(mine);
+      c.saveEdit('1', 'a better crumb');
+
+      expect(c.messages.single.body, 'a better crumb');
+      expect(c.messages.single.edited, isTrue);
+      expect(c.target, isNull);
+    });
+
+    test('an unchanged edit is not marked edited', () {
+      final mine = _msg('1', _you);
+      final c = TimelineController([mine], you: _you);
+
+      c.startEdit(mine);
+      c.saveEdit('1', mine.body);
+
+      expect(c.messages.single.edited, isFalse);
+      expect(c.target, isNull);
+    });
+  });
 }

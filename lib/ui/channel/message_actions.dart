@@ -153,7 +153,7 @@ Future<void> _perform(
       await Clipboard.setData(ClipboardData(text: text));
       if (context.mounted) _toast(context, 'copied');
     case _Act(action: MessageAction.delete):
-      if (await _confirmDelete(context)) controller.delete(message.id);
+      if (await confirmDeleteMessage(context)) controller.delete(message.id);
   }
 }
 
@@ -179,7 +179,7 @@ void _toast(BuildContext context, String text) {
 }
 
 /// Redactions cannot be taken back, so this is the one action that asks.
-Future<bool> _confirmDelete(BuildContext context) async {
+Future<bool> confirmDeleteMessage(BuildContext context) async {
   final tokens = LoafTokens.of(context);
   final confirmed = await showDialog<bool>(
     context: context,
