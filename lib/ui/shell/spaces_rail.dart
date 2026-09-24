@@ -27,31 +27,38 @@ class SpacesRail extends StatelessWidget {
     return Container(
       width: LoafShell.railWidth,
       color: tokens.rail,
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      child: Column(
-        children: [
-          _LoafMark(tokens: tokens),
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  for (final space in spaces) ...[
-                    _SpaceItem(
-                      space: space,
-                      selected: space.id == selectedSpaceId,
-                      tokens: tokens,
-                      onTap: () => onSelect(space.id),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  _CreateSpaceButton(tokens: tokens),
-                  // Clears the account panel floating over the bottom.
-                  const SizedBox(height: UserBar.clearance),
-                ],
+      // The rail's colour runs the full height of the screen; only its
+      // contents keep clear of the status bar and home indicator.
+      child: SafeArea(
+        right: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Column(
+            children: [
+              _LoafMark(tokens: tokens),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [
+                      for (final space in spaces) ...[
+                        _SpaceItem(
+                          space: space,
+                          selected: space.id == selectedSpaceId,
+                          tokens: tokens,
+                          onTap: () => onSelect(space.id),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      _CreateSpaceButton(tokens: tokens),
+                      // Clears the account panel floating over the bottom.
+                      const SizedBox(height: UserBar.clearance),
+                    ],
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

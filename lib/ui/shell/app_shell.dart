@@ -162,15 +162,15 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  /// Rail and channel list side by side, over one account bar that spans
-  /// both. The bar is shared so your avatar appears once, not once per
-  /// column.
   /// Rail and channel list side by side, with the account panel floating
   /// over the bottom of both. Overlaid rather than stacked, so the columns
   /// still run the full height behind it and your avatar appears once.
-  Widget get _navigation => SafeArea(
-    right: false,
-    child: Stack(
+  ///
+  /// Deliberately not wrapped in a [SafeArea]: each column paints edge to
+  /// edge and insets only its own contents, so the rail and divider don't
+  /// stop short of the status bar and home indicator.
+  Widget get _navigation => Builder(
+    builder: (context) => Stack(
       children: [
         Row(
           children: [
@@ -189,9 +189,9 @@ class _AppShellState extends State<AppShell> {
           ],
         ),
         Positioned(
-          left: UserBar.inset,
+          left: UserBar.inset + MediaQuery.paddingOf(context).left,
           right: UserBar.inset,
-          bottom: UserBar.inset,
+          bottom: UserBar.inset + MediaQuery.paddingOf(context).bottom,
           child: UserBar(
             muted: _muted,
             deafened: _deafened,

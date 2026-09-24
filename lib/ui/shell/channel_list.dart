@@ -42,28 +42,33 @@ class _ChannelListState extends State<ChannelList> {
         color: tokens.sidebar,
         border: Border(right: BorderSide(color: tokens.border, width: 1)),
       ),
-      child: Column(
-        children: [
-          _Header(space: widget.space, tokens: tokens),
-          _SearchField(tokens: tokens),
-          Expanded(
-            child: ListView(
-              // Clears the account panel floating over the bottom.
-              padding: const EdgeInsets.only(bottom: UserBar.clearance),
-              children: [
-                for (final category in widget.space.categories)
-                  _CategorySection(
-                    category: category,
-                    collapsed: _collapsed.contains(category.name),
-                    selectedChannelId: widget.selectedChannelId,
-                    tokens: tokens,
-                    onToggle: () => _toggle(category.name),
-                    onSelect: widget.onSelect,
-                  ),
-              ],
+      // Background and divider run edge to edge; the rail beside us already
+      // owns the left inset, so only the top and bottom apply here.
+      child: SafeArea(
+        left: false,
+        child: Column(
+          children: [
+            _Header(space: widget.space, tokens: tokens),
+            _SearchField(tokens: tokens),
+            Expanded(
+              child: ListView(
+                // Clears the account panel floating over the bottom.
+                padding: const EdgeInsets.only(bottom: UserBar.clearance),
+                children: [
+                  for (final category in widget.space.categories)
+                    _CategorySection(
+                      category: category,
+                      collapsed: _collapsed.contains(category.name),
+                      selectedChannelId: widget.selectedChannelId,
+                      tokens: tokens,
+                      onToggle: () => _toggle(category.name),
+                      onSelect: widget.onSelect,
+                    ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
