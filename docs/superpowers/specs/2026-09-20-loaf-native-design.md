@@ -32,11 +32,13 @@ phone client with:
 - Notifications: APNs push via self-hosted Sygnal.
 - Voice: join MatrixRTC voice channels, with a persistent connected-call bar.
 
-**Platforms.** iOS is primary — correctness is judged there. Android is
-best-effort in v1: it gets whatever works for free and no dedicated native glue
-(no FCM, no Android call UI) until someone needs it. Desktop is out of scope for
-v1 but must not be designed out; layout and platform abstractions keep the door
-open.
+**Platforms.** iOS is primary — correctness is judged there, and most design
+attention goes to mobile. Desktop (macOS and Linux) is built alongside it rather
+than deferred: the early mockups showed Flutter makes it close to free, so every
+feature ships with its desktop form (pointer and keyboard idioms, wide layouts)
+at the same time as its mobile one. Android is best-effort in v1: it gets
+whatever works for free and no dedicated native glue (no FCM, no Android call
+UI) until someone needs it.
 
 **Distribution.** Paid Apple Developer account, TestFlight. App Store is not a
 v1 goal.
@@ -124,7 +126,7 @@ collapses back into a modal call.
 **Rooms in multiple spaces appear in each.** No canonical-parent logic and no
 deduplication. Matrix permits it; pretending otherwise creates bugs.
 
-**Desktop, later.** The loaf.moe design system's `ui_kits/app/` already
+**Desktop, alongside.** The loaf.moe design system's `ui_kits/app/` already
 specifies the desktop form of this IA: a 76px navy-900 spaces rail, a 268px
 cream sidebar, and a module view. Mobile collapses those columns into drawers,
 so desktop is an expansion of the same structure rather than a second design.
