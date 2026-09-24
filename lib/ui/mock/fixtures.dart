@@ -6,6 +6,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 // ── Models ─────────────────────────────────────────────────────────────────
 
@@ -109,6 +110,7 @@ class Channel {
     this.topic,
     this.occupants = const [],
     this.joined = true,
+    this.muted = false,
   });
 
   final String id;
@@ -128,17 +130,29 @@ class Channel {
   /// space's members) are ever listed — see "Joining a space" in the spec.
   final bool joined;
 
-  Channel copyWith({bool? joined}) => Channel(
-    id: id,
-    name: name,
-    kind: kind,
-    unread: unread,
-    mentions: mentions,
-    private: private,
-    topic: topic,
-    occupants: occupants,
-    joined: joined ?? this.joined,
-  );
+  /// Mentions still reach you; nothing else does. A single toggle with no
+  /// expiry, mapping to a mentions-only push rule.
+  final bool muted;
+
+  IconData get icon => kind == ChannelKind.voice
+      ? LucideIcons.volume2
+      : private
+      ? LucideIcons.lock
+      : LucideIcons.hash;
+
+  Channel copyWith({bool? joined, bool? muted, int? unread, int? mentions}) =>
+      Channel(
+        id: id,
+        name: name,
+        kind: kind,
+        unread: unread ?? this.unread,
+        mentions: mentions ?? this.mentions,
+        private: private,
+        topic: topic,
+        occupants: occupants,
+        joined: joined ?? this.joined,
+        muted: muted ?? this.muted,
+      );
 }
 
 /// A collapsible group in the channel list. Matrix subspaces map onto these.
@@ -178,9 +192,18 @@ class Space {
 
   Iterable<Channel> get allChannels => categories.expand((c) => c.channels);
 
-  /// This space as it looks after joining the channels in [ids] — the mock's
-  /// stand-in for membership arriving over sync.
-  Space withJoined(Set<String> ids) => Space(
+  /// This space with this session's changes layered over the fixtures — the
+  /// mock's stand-in for membership, read markers and push rules arriving
+  /// over sync. [membership] maps channel ids to joined (true) or left
+  /// (false); [muted] likewise; channels in [read] have nothing unread.
+  ///
+  /// A left invite-only channel is dropped entirely: only channels you could
+  /// join in one tap are ever listed.
+  Space withSession({
+    Map<String, bool> membership = const {},
+    Map<String, bool> muted = const {},
+    Set<String> read = const {},
+  }) => Space(
     id: id,
     name: name,
     color: color,
@@ -191,7 +214,13 @@ class Space {
       for (final category in categories)
         ChannelCategory(category.name, [
           for (final channel in category.channels)
-            ids.contains(channel.id) ? channel.copyWith(joined: true) : channel,
+            if (!(channel.private && membership[channel.id] == false))
+              channel.copyWith(
+                joined: membership[channel.id],
+                muted: muted[channel.id],
+                unread: read.contains(channel.id) ? 0 : null,
+                mentions: read.contains(channel.id) ? 0 : null,
+              ),
         ]),
     ],
   );

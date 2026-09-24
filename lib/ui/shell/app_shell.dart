@@ -18,6 +18,7 @@ import '../theme/loaf_theme.dart';
 import 'channel_list.dart';
 import '../settings/settings_page.dart';
 import 'app_notice.dart';
+import 'channel_actions.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
 
@@ -60,17 +61,20 @@ class _AppShellState extends State<AppShell> {
   /// can put away. On a phone it is a drawer and opens on demand.
   bool _showMembers = true;
 
-  /// Channels joined during this session, on top of the fixtures' own.
-  final _joinedNow = <String>{};
+  // This session's changes, layered over the fixtures by Space.withSession.
+  final _membership = <String, bool>{};
+  final _mutedNow = <String, bool>{};
+  final _read = <String>{};
 
-  Space get _space =>
-      mockSpaces.firstWhere((s) => s.id == _spaceId).withJoined(_joinedNow);
+  Space get _space => mockSpaces
+      .firstWhere((s) => s.id == _spaceId)
+      .withSession(membership: _membership, muted: _mutedNow, read: _read);
 
   Channel get _channel {
     final channels = _space.allChannels;
     final remembered = _channelBySpace[_spaceId];
     return channels.firstWhere(
-      (c) => c.id == remembered,
+      (c) => c.id == remembered && c.joined,
       orElse: () =>
           channels.firstWhere((c) => c.kind == ChannelKind.text && c.joined),
     );
@@ -85,7 +89,7 @@ class _AppShellState extends State<AppShell> {
     // since looking is why you joined; a voice channel does not connect —
     // membership and being in the call are separate steps.
     if (!channel.joined) {
-      setState(() => _joinedNow.add(id));
+      setState(() => _membership[id] = true);
       if (channel.kind == ChannelKind.voice) return;
     }
 
@@ -104,6 +108,27 @@ class _AppShellState extends State<AppShell> {
     setState(() => _channelBySpace[_spaceId] = id);
     _scaffoldKey.currentState?.closeDrawer();
   }
+
+  void _channelAction(String id, ChannelAction action) => setState(() {
+    switch (action) {
+      case ChannelAction.markRead:
+        _read.add(id);
+      case ChannelAction.mute:
+        _mutedNow[id] = true;
+      case ChannelAction.unmute:
+        _mutedNow[id] = false;
+      case ChannelAction.leave:
+        // Leaving the channel you are reading falls through to the space's
+        // first joined text channel: see _channel.
+        _membership[id] = false;
+        // Leaving a voice channel you are in takes you out of the call too.
+        if (_connected?.id == id) {
+          _connected = null;
+          _connectedSpaceName = null;
+          _muted = false;
+        }
+    }
+  });
 
   void _disconnect() => setState(() {
     _connected = null;
@@ -235,6 +260,7 @@ class _AppShellState extends State<AppShell> {
                 space: _space,
                 selectedChannelId: _channel.id,
                 onSelect: _selectChannel,
+                onAction: _channelAction,
               ),
             ),
           ],

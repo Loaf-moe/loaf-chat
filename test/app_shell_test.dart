@@ -1,4 +1,6 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
@@ -239,6 +241,178 @@ void main() {
 
       expect(find.text('poker'), findsNothing);
     });
+  });
+
+  group('channel actions', () {
+    final mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
+    final desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
+
+    Finder row(String id) => find.byKey(ValueKey('channel-$id'));
+    Finder inRow(String id, Finder matching) =>
+        find.descendant(of: row(id), matching: matching);
+
+    Future<void> rightClick(WidgetTester tester, String name) async {
+      await tester.tap(find.text(name).first, buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> pick(WidgetTester tester, String label) async {
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'a long press opens them as a sheet on a phone',
+      variant: mobile,
+      (tester) async {
+        await _pumpShell(tester, const Size(390, 844));
+        await tester.tap(find.byIcon(LucideIcons.menu));
+        await tester.pumpAndSettle();
+
+        await tester.longPress(find.text('kitchen'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(BottomSheet), findsOneWidget);
+        for (final label in ['Mark as read', 'Mute channel', 'Leave channel']) {
+          expect(find.text(label), findsOneWidget, reason: label);
+        }
+      },
+    );
+
+    testWidgets(
+      'a right-click opens them as a menu on a computer',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+
+        await rightClick(tester, 'kitchen');
+        expect(find.byType(BottomSheet), findsNothing);
+        expect(find.text('Leave channel'), findsOneWidget);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(find.text('Leave channel'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a channel with nothing unread offers no mark as read',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+        await rightClick(tester, 'recipes');
+        expect(find.text('Mark as read'), findsNothing);
+        expect(find.text('Leave channel'), findsOneWidget);
+      },
+    );
+
+    testWidgets('unjoined channels have no menu', variant: desktop, (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(1440, 900));
+      await rightClick(tester, 'poker');
+      expect(find.text('Leave channel'), findsNothing);
+    });
+
+    testWidgets('mark as read clears the badge', variant: desktop, (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(1440, 900));
+      expect(inRow('kitchen', find.text('3')), findsOneWidget);
+
+      await rightClick(tester, 'kitchen');
+      await pick(tester, 'Mark as read');
+
+      expect(inRow('kitchen', find.text('3')), findsNothing);
+    });
+
+    testWidgets(
+      'muting quiets a channel but mentions still show',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+
+        await rightClick(tester, 'kitchen');
+        await pick(tester, 'Mute channel');
+
+        expect(
+          inRow('kitchen', find.byIcon(LucideIcons.bellOff)),
+          findsOneWidget,
+        );
+        expect(inRow('kitchen', find.text('3')), findsOneWidget);
+
+        await rightClick(tester, 'kitchen');
+        await pick(tester, 'Unmute channel');
+        expect(
+          inRow('kitchen', find.byIcon(LucideIcons.bellOff)),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'leaving an open channel puts it back, tagged',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+
+        await rightClick(tester, 'recipes');
+        await pick(tester, 'Leave channel');
+
+        expect(
+          find.byType(AlertDialog),
+          findsNothing,
+          reason: 'rejoining is one tap',
+        );
+        expect(inRow('recipes', find.text('join')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'leaving an invite-only channel asks, then removes it',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+
+        await rightClick(tester, 'planning');
+        await pick(tester, 'Leave channel');
+        expect(find.byType(AlertDialog), findsOneWidget);
+
+        await pick(tester, 'leave');
+        expect(find.text('planning'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'leaving the channel you are reading moves you on',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+
+        await rightClick(tester, 'general');
+        await pick(tester, 'Leave channel');
+
+        expect(inRow('general', find.text('join')), findsOneWidget);
+        // The first joined text channel is now open: listed and in the header.
+        expect(find.text('kitchen'), findsNWidgets(2));
+      },
+    );
+
+    testWidgets(
+      'leaving a voice channel you are in disconnects you',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+        await tester.tap(find.text('the hangout'));
+        await tester.pumpAndSettle();
+        expect(find.text('Voice connected'), findsOneWidget);
+
+        await rightClick(tester, 'the hangout');
+        await pick(tester, 'Leave channel');
+
+        expect(find.text('Voice connected'), findsNothing);
+      },
+    );
   });
 
   testWidgets('joining a voice channel shows the call bar and keeps you '

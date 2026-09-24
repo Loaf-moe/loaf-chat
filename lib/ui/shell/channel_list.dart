@@ -2,10 +2,13 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
+import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import 'channel_actions.dart';
 import 'user_bar.dart';
 
 class ChannelList extends StatefulWidget {
@@ -14,11 +17,16 @@ class ChannelList extends StatefulWidget {
     required this.space,
     required this.selectedChannelId,
     required this.onSelect,
+    this.onAction,
   });
 
   final Space space;
   final String selectedChannelId;
   final ValueChanged<String> onSelect;
+
+  /// Receives what was picked from a channel's actions (long press on a
+  /// phone, right-click on a computer). Left null, channels have no menu.
+  final void Function(String channelId, ChannelAction action)? onAction;
 
   @override
   State<ChannelList> createState() => _ChannelListState();
@@ -63,6 +71,7 @@ class _ChannelListState extends State<ChannelList> {
                       tokens: tokens,
                       onToggle: () => _toggle(category.name),
                       onSelect: widget.onSelect,
+                      onAction: widget.onAction,
                     ),
                 ],
               ),
@@ -143,6 +152,7 @@ class _CategorySection extends StatelessWidget {
     required this.tokens,
     required this.onToggle,
     required this.onSelect,
+    required this.onAction,
   });
 
   final ChannelCategory category;
@@ -151,6 +161,7 @@ class _CategorySection extends StatelessWidget {
   final LoafTokens tokens;
   final VoidCallback onToggle;
   final ValueChanged<String> onSelect;
+  final void Function(String channelId, ChannelAction action)? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -206,6 +217,9 @@ class _CategorySection extends StatelessWidget {
             selected: channel.id == selectedChannelId,
             tokens: tokens,
             onTap: () => onSelect(channel.id),
+            onAction: onAction == null || !channel.joined
+                ? null
+                : (action) => onAction!(channel.id, action),
           ),
       ],
     );
@@ -218,22 +232,33 @@ class _ChannelEntry extends StatelessWidget {
     required this.selected,
     required this.tokens,
     required this.onTap,
+    required this.onAction,
   });
 
   final Channel channel;
   final bool selected;
   final LoafTokens tokens;
   final VoidCallback onTap;
+  final ValueChanged<ChannelAction>? onAction;
+
+  Future<void> _openActions(BuildContext context, {Offset? position}) async {
+    final onAction = this.onAction;
+    if (onAction == null) return;
+    final action = await showChannelActions(
+      context,
+      channel,
+      position: position,
+    );
+    if (action != null) onAction(action);
+  }
 
   @override
   Widget build(BuildContext context) {
     final joined = channel.joined;
-    final unread = joined && channel.unread > 0;
-    final iconData = channel.kind == ChannelKind.voice
-        ? LucideIcons.volume2
-        : channel.private
-        ? LucideIcons.lock
-        : LucideIcons.hash;
+    // Muted channels keep their mentions but lose the bold "something new"
+    // styling: that is the point of muting them.
+    final unread = joined && !channel.muted && channel.unread > 0;
+    final iconData = channel.icon;
     final fg = selected
         ? tokens.accent
         : unread
@@ -243,6 +268,7 @@ class _ChannelEntry extends StatelessWidget {
         : tokens.textMuted;
 
     return Padding(
+      key: ValueKey('channel-${channel.id}'),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -258,6 +284,20 @@ class _ChannelEntry extends StatelessWidget {
               type: MaterialType.transparency,
               child: InkWell(
                 onTap: onTap,
+                // Long press on a phone, right-click on a computer — the
+                // same split as message actions.
+                onLongPress: !isDesktop && onAction != null
+                    ? () {
+                        HapticFeedback.mediumImpact();
+                        _openActions(context);
+                      }
+                    : null,
+                onSecondaryTapUp: isDesktop && onAction != null
+                    ? (details) => _openActions(
+                        context,
+                        position: details.globalPosition,
+                      )
+                    : null,
                 hoverColor: tokens.card.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(LoafRadius.md),
                 child: Padding(
@@ -275,6 +315,14 @@ class _ChannelEntry extends StatelessWidget {
                                   .copyWith(color: fg),
                         ),
                       ),
+                      if (channel.muted) ...[
+                        const SizedBox(width: 6),
+                        Icon(
+                          LucideIcons.bellOff,
+                          size: 14,
+                          color: tokens.textMuted,
+                        ),
+                      ],
                       if (!joined) ...[
                         const SizedBox(width: 6),
                         _JoinPill(tokens: tokens),

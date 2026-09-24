@@ -146,8 +146,22 @@ through `/hierarchy`, and other clients leave you to go and find them. Here:
   uncategorised. Subspaces nested deeper than one level flatten into their
   top-level category. A room that is a child of two subspaces appears in both.
 
-Leaving a channel returns it to its tagged, unjoined place rather than removing
-it from the list.
+**Channel actions** — *Mark as read* (when there is something unread), *Mute* or
+*Unmute*, and *Leave* — open the same way message actions do: long press on
+mobile, right-click on desktop. Unjoined channels have none; joining is their
+one action and a tap does it.
+
+- **Mute is a single toggle with no expiry.** It maps to a mentions-only push
+  rule, so it syncs to every device, and mentions still reach you. A muted
+  channel loses its bold unread styling and shows a muted-bell mark; its
+  mention badge stays. Matrix has no expiring push rules, so there are no timed
+  mutes — they would depend on some client being awake to lift them.
+- **Leaving an open channel does not ask**: rejoining is one tap, and the
+  channel returns to its tagged place at the bottom of its category.
+  **Leaving an invite-only channel asks first**, since coming back needs a new
+  invite, and it then disappears from the list. Leaving the channel you are
+  reading moves you to the space's first joined text channel; leaving a voice
+  channel you are connected to disconnects you.
 
 **Rooms in multiple spaces appear in each.** No canonical-parent logic and no
 deduplication. Matrix permits it; pretending otherwise creates bugs.
