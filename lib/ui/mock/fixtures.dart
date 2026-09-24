@@ -8,6 +8,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../members/presence.dart';
+
 // ── Models ─────────────────────────────────────────────────────────────────
 
 enum ChannelKind { text, voice }
@@ -21,7 +23,8 @@ class Member {
     this.id,
     this.name,
     this.color, {
-    this.online = true,
+    this.presence = Presence.online,
+    this.statusMessage,
     this.powerLevel = 0,
   });
 
@@ -33,7 +36,12 @@ class Member {
   /// and these hardcoded values stand in for that.
   final Color color;
 
-  final bool online;
+  final Presence presence;
+
+  /// Matrix `status_msg`: free text, no expiry.
+  final String? statusMessage;
+
+  bool get online => presence.around;
 
   /// Matrix `m.room.power_levels` value for this user.
   final int powerLevel;
@@ -51,6 +59,18 @@ class Member {
     return (parts.first.characters.first + parts.last.characters.first)
         .toUpperCase();
   }
+
+  Member copyWith({Presence? presence, String? statusMessage}) => Member(
+    id,
+    name,
+    color,
+    presence: presence ?? this.presence,
+    // Empty clears it; null keeps it.
+    statusMessage: statusMessage == null
+        ? this.statusMessage
+        : (statusMessage.isEmpty ? null : statusMessage),
+    powerLevel: powerLevel,
+  );
 }
 
 class Reaction {
@@ -292,16 +312,48 @@ List<TimelineEntry> groupTimeline(List<Message> messages) {
 // ── Fixture data ───────────────────────────────────────────────────────────
 
 const _you = Member('@faore', 'faore', Color(0xFFD62828), powerLevel: 100);
-const _mika = Member('@mika', 'Mika Rye', Color(0xFF4E9E76));
-const _sam = Member('@sam', 'Sam Poolish', Color(0xFF3B82F6));
-const _jun = Member('@jun', 'Jun Levain', Color(0xFFD97B2A), powerLevel: 50);
-const _ada = Member('@ada', 'Ada Crumb', Color(0xFF8B5CF6), online: false);
+const _mika = Member(
+  '@mika',
+  'Mika Rye',
+  Color(0xFF4E9E76),
+  statusMessage: 'proofing overnight',
+);
+const _sam = Member(
+  '@sam',
+  'Sam Poolish',
+  Color(0xFF3B82F6),
+  presence: Presence.dnd,
+  statusMessage: 'deep in a sourdough experiment',
+);
+const _jun = Member(
+  '@jun',
+  'Jun Levain',
+  Color(0xFFD97B2A),
+  presence: Presence.idle,
+  powerLevel: 50,
+);
+const _ada = Member(
+  '@ada',
+  'Ada Crumb',
+  Color(0xFF8B5CF6),
+  presence: Presence.offline,
+);
 
 // Only in member lists, never in the timeline — enough people that the
 // offline half of a list has something to show.
-const _rosa = Member('@rosa', 'Rosa Brioche', Color(0xFFDB2777), online: false);
+const _rosa = Member(
+  '@rosa',
+  'Rosa Brioche',
+  Color(0xFFDB2777),
+  presence: Presence.offline,
+);
 const _theo = Member('@theo', 'Theo Crust', Color(0xFF0891B2));
-const _pim = Member('@pim', 'Pim Focaccia', Color(0xFF65A30D), online: false);
+const _pim = Member(
+  '@pim',
+  'Pim Focaccia',
+  Color(0xFF65A30D),
+  presence: Presence.offline,
+);
 
 const mockMembers = [_you, _mika, _sam, _jun, _ada];
 const currentUser = _you;

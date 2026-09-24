@@ -19,6 +19,8 @@ import 'channel_list.dart';
 import '../settings/settings_page.dart';
 import 'app_notice.dart';
 import 'channel_actions.dart';
+import 'profile_controller.dart';
+import 'status_picker.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
 
@@ -35,9 +37,21 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _timeline = TimelineController(mockTimeline(), you: currentUser);
+  final _profile = ProfileController();
+
+  @override
+  void initState() {
+    super.initState();
+    _profile.addListener(_onProfile);
+  }
+
+  void _onProfile() => setState(() {});
 
   @override
   void dispose() {
+    _profile
+      ..removeListener(_onProfile)
+      ..dispose();
     _timeline.dispose();
     super.dispose();
   }
@@ -180,7 +194,10 @@ class _AppShellState extends State<AppShell> {
               ? () => setState(() => _showMembers = !_showMembers)
               : () => _scaffoldKey.currentState?.openEndDrawer(),
         );
-        final members = MemberList(members: _space.members);
+        final me = _profile.me;
+        final members = MemberList(
+          members: [for (final m in _space.members) m.id == me.id ? me : m],
+        );
 
         if (wide) {
           return Scaffold(
@@ -283,7 +300,10 @@ class _AppShellState extends State<AppShell> {
               _deafened = !_deafened;
               if (!_deafened) _muted = false;
             }),
-            onSettings: () => showSettings(context),
+            onSettings: () => showSettings(context, profile: _profile),
+            me: _profile.me,
+            onAvatarTap: (anchor) =>
+                showStatusPicker(context, _profile, anchor: anchor),
           ),
         ),
       ],

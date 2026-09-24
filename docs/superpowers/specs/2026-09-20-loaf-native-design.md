@@ -208,6 +208,24 @@ rather than adding new ones. All name colours resolve through
 `LoafTokens.nameColor(role)` (`lib/ui/members/role_colors.dart`), so no widget
 picks its own.
 
+**Presence and status.** Tapping your avatar in the account panel opens a
+picker — a bottom sheet on mobile, a popover on desktop — with a status message
+and four presence choices. Settings edits the same presence; there is one
+source of truth. Each maps onto Matrix like so:
+
+| Choice | Others see | Matrix |
+|---|---|---|
+| Online | green dot | `online` |
+| Idle | amber dot | `unavailable`; also set automatically after inactivity, pinned when chosen |
+| Do not disturb | red dot with a bar | MSC3026 `busy` where the server supports it, **plus** the account's master push rule switched on, silencing every device; leaving DND switches it off |
+| Invisible | offline ring | sync with `set_presence=offline`: connected, but shown offline |
+
+The status message is `status_msg`, free text with no expiry — it stays until
+cleared. It shows as a muted line under the name in the member list. Presence
+is often disabled on homeservers because it is expensive, so people on servers
+without it must read as **unknown**, never as offline; the mockups do not show
+this yet.
+
 **The member list** mirrors the navigation drawer: a right drawer on phones, a
 column toggled by the members button on wide layouts. Admins get their own
 section at the top; moderators stay with members and stand out by colour, which

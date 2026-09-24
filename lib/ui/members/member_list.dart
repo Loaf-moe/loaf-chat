@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import 'presence_dot.dart';
 import 'role_colors.dart';
 
 /// Splits [members] into the two sections the list shows. Moderators stay
@@ -109,7 +110,9 @@ class _MemberRow extends StatelessWidget {
   Widget build(BuildContext context) {
     // Offline people fade back rather than disappearing: still findable,
     // clearly not around.
+    final status = member.statusMessage;
     return Opacity(
+      key: ValueKey('member-${member.id}'),
       opacity: member.online ? 1 : 0.5,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
@@ -123,14 +126,29 @@ class _MemberRow extends StatelessWidget {
                 _PresenceAvatar(member: member, tokens: tokens),
                 const SizedBox(width: LoafSpace.x3),
                 Expanded(
-                  child: Text(
-                    member.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: loafBody(
-                      15,
-                      500,
-                    ).copyWith(color: tokens.nameColor(member.role)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        member.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: loafBody(
+                          15,
+                          500,
+                        ).copyWith(color: tokens.nameColor(member.role)),
+                      ),
+                      if (status != null)
+                        Text(
+                          status,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: loafBody(
+                            12,
+                            400,
+                          ).copyWith(color: tokens.textMuted),
+                        ),
+                    ],
                   ),
                 ),
               ],
@@ -146,7 +164,6 @@ class _PresenceAvatar extends StatelessWidget {
   const _PresenceAvatar({required this.member, required this.tokens});
 
   static const _size = 32.0;
-  static const _dot = 12.0;
 
   final Member member;
   final LoafTokens tokens;
@@ -173,20 +190,7 @@ class _PresenceAvatar extends StatelessWidget {
           Positioned(
             right: -2,
             bottom: -2,
-            // The sidebar-coloured ring cuts the dot out of the avatar, so it
-            // reads as a badge rather than a blob touching the circle.
-            child: Container(
-              width: _dot,
-              height: _dot,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: member.online ? tokens.online : tokens.sidebar,
-                border: Border.all(
-                  color: member.online ? tokens.sidebar : tokens.textMuted,
-                  width: member.online ? 2.5 : 2,
-                ),
-              ),
-            ),
+            child: PresenceDot(presence: member.presence, ring: tokens.sidebar),
           ),
         ],
       ),

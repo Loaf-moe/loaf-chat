@@ -170,6 +170,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
     required this.accentSoft,
     required this.nameModerator,
     required this.online,
+    required this.idle,
     required this.shadowSm,
     required this.shadowMd,
     required this.shadowLg,
@@ -218,6 +219,9 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
 
   final Color online;
 
+  /// Presence: away. The design system's warning amber.
+  final Color idle;
+
   final List<BoxShadow> shadowSm;
   final List<BoxShadow> shadowMd;
   final List<BoxShadow> shadowLg;
@@ -245,6 +249,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
     Color? accentSoft,
     Color? nameModerator,
     Color? online,
+    Color? idle,
     List<BoxShadow>? shadowSm,
     List<BoxShadow>? shadowMd,
     List<BoxShadow>? shadowLg,
@@ -267,6 +272,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
     accentSoft: accentSoft ?? this.accentSoft,
     nameModerator: nameModerator ?? this.nameModerator,
     online: online ?? this.online,
+    idle: idle ?? this.idle,
     shadowSm: shadowSm ?? this.shadowSm,
     shadowMd: shadowMd ?? this.shadowMd,
     shadowLg: shadowLg ?? this.shadowLg,
@@ -297,6 +303,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
       accentSoft: c(accentSoft, other.accentSoft),
       nameModerator: c(nameModerator, other.nameModerator),
       online: c(online, other.online),
+      idle: c(idle, other.idle),
       shadowSm: s(shadowSm, other.shadowSm),
       shadowMd: s(shadowMd, other.shadowMd),
       shadowLg: s(shadowLg, other.shadowLg),
@@ -325,6 +332,7 @@ const _lightTokens = LoafTokens(
   accentSoft: _accent100,
   nameModerator: _accent500,
   online: _success,
+  idle: _warning,
   shadowSm: [
     BoxShadow(color: Color(0x14003049), blurRadius: 3, offset: Offset(0, 1)),
   ],
@@ -359,6 +367,7 @@ const _darkTokens = LoafTokens(
   accentSoft: Color(0xFF3A1414),
   nameModerator: _accent300,
   online: _success,
+  idle: _warning,
   shadowSm: [
     BoxShadow(color: Color(0x40000000), blurRadius: 3, offset: Offset(0, 1)),
   ],

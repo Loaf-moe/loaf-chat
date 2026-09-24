@@ -10,6 +10,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 
@@ -21,7 +22,16 @@ class UserBar extends StatelessWidget {
     this.onToggleMute,
     this.onToggleDeafen,
     this.onSettings,
+    this.onAvatarTap,
+    this.me = currentUser,
   });
+
+  /// You, with your current presence.
+  final Member me;
+
+  /// Opens the presence and status picker. Receives the avatar's bounds in
+  /// global coordinates, so a popover can anchor to it.
+  final ValueChanged<Rect>? onAvatarTap;
 
   final bool muted;
 
@@ -60,7 +70,7 @@ class UserBar extends StatelessWidget {
           // Inset by [inset], so this padding puts the avatar's centre back
           // on the rail's centreline.
           const SizedBox(width: LoafShell.railWidth / 2 - inset - 18),
-          _Avatar(tokens: tokens),
+          _Avatar(tokens: tokens, me: me, onTap: onAvatarTap),
           const SizedBox(width: LoafSpace.x3),
           Expanded(
             child: Column(
@@ -68,7 +78,7 @@ class UserBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  currentUser.name,
+                  me.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: loafBody(13, 600).copyWith(color: tokens.textStrong),
@@ -107,45 +117,53 @@ class UserBar extends StatelessWidget {
 }
 
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.tokens});
+  const _Avatar({required this.tokens, required this.me, this.onTap});
 
   final LoafTokens tokens;
+  final Member me;
+  final ValueChanged<Rect>? onTap;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 36,
-    height: 36,
-    child: Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          decoration: BoxDecoration(
-            color: currentUser.color,
-            shape: BoxShape.circle,
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            currentUser.initials,
-            style: loafBody(13, 600).copyWith(color: Colors.white),
+  Widget build(BuildContext context) {
+    final onTap = this.onTap;
+    return Tooltip(
+      message: 'Set your status',
+      child: GestureDetector(
+        key: const ValueKey('account-avatar'),
+        onTap: onTap == null
+            ? null
+            : () {
+                final box = context.findRenderObject()! as RenderBox;
+                onTap(box.localToGlobal(Offset.zero) & box.size);
+              },
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: me.color,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  me.initials,
+                  style: loafBody(13, 600).copyWith(color: Colors.white),
+                ),
+              ),
+              Positioned(
+                right: -2,
+                bottom: -2,
+                child: PresenceDot(presence: me.presence, ring: tokens.card),
+              ),
+            ],
           ),
         ),
-        if (currentUser.online)
-          Positioned(
-            right: -1,
-            bottom: -1,
-            child: Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                color: tokens.online,
-                shape: BoxShape.circle,
-                border: Border.all(color: tokens.rail, width: 2),
-              ),
-            ),
-          ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 class _BarAction extends StatelessWidget {

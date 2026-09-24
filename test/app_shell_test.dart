@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
+import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/user_bar.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -411,6 +412,133 @@ void main() {
         await pick(tester, 'Leave channel');
 
         expect(find.text('Voice connected'), findsNothing);
+      },
+    );
+  });
+
+  group('your presence and status', () {
+    final mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
+    final desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
+
+    Finder avatar() => find.byKey(const ValueKey('account-avatar'));
+    Finder myRow() => find.ancestor(
+      of: find.descendant(
+        of: find.byType(MemberList),
+        matching: find.text('faore'),
+      ),
+      matching: find.byKey(const ValueKey('member-@faore')),
+    );
+    Finder dot(Finder within, Presence p) => find.descendant(
+      of: within,
+      matching: find.byKey(ValueKey('presence-${p.name}')),
+    );
+
+    testWidgets(
+      'tapping your avatar opens a sheet on a phone',
+      variant: mobile,
+      (tester) async {
+        await _pumpShell(tester, const Size(390, 844));
+        await tester.tap(find.byIcon(LucideIcons.menu));
+        await tester.pumpAndSettle();
+
+        await tester.tap(avatar());
+        await tester.pumpAndSettle();
+
+        expect(find.byType(BottomSheet), findsOneWidget);
+        for (final label in ['online', 'idle', 'do not disturb', 'invisible']) {
+          expect(find.text(label), findsOneWidget, reason: label);
+        }
+      },
+    );
+
+    testWidgets('and a popover on a computer', variant: desktop, (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(1440, 900));
+
+      await tester.tap(avatar());
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BottomSheet), findsNothing);
+      expect(find.text('do not disturb'), findsOneWidget);
+    });
+
+    testWidgets(
+      'picking do not disturb shows on your avatar and in the list',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+        expect(dot(avatar(), Presence.online), findsOneWidget);
+
+        await tester.tap(avatar());
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('do not disturb'));
+        await tester.pumpAndSettle();
+
+        expect(dot(avatar(), Presence.dnd), findsOneWidget);
+        expect(dot(myRow(), Presence.dnd), findsOneWidget);
+      },
+    );
+
+    testWidgets('invisible shows you as offline', variant: desktop, (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(1440, 900));
+
+      await tester.tap(avatar());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('invisible'));
+      await tester.pumpAndSettle();
+
+      expect(dot(myRow(), Presence.offline), findsOneWidget);
+    });
+
+    testWidgets(
+      'a status message shows under your name, and clears',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+
+        await tester.tap(avatar());
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byType(TextField).last,
+          'shaping baguettes',
+        );
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.descendant(
+            of: myRow(),
+            matching: find.text('shaping baguettes'),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.tap(avatar());
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Clear status'));
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+
+        expect(find.text('shaping baguettes'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'settings and the picker share one presence',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+
+        await tester.tap(find.byTooltip('Settings'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('idle'));
+        await tester.pumpAndSettle();
+
+        expect(dot(avatar(), Presence.idle), findsOneWidget);
       },
     );
   });

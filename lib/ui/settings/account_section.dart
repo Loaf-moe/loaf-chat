@@ -9,26 +9,19 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../members/presence.dart';
+import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
+import '../shell/profile_controller.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
 
-/// Matrix presence, in words people use. `busy` has no spec-level equivalent
-/// yet; it rides on the status message.
-enum Presence {
-  online('online', Color(0xFF4E9E76)),
-  away('away', Color(0xFFD97B2A)),
-  busy('do not disturb', Color(0xFFD62828)),
-  invisible('invisible', Color(0xFF8098A4));
-
-  const Presence(this.label, this.dot);
-
-  final String label;
-  final Color dot;
-}
-
 class AccountSection extends StatefulWidget {
-  const AccountSection({super.key});
+  const AccountSection({super.key, this.profile});
+
+  /// Shared with the account panel's picker. Left null (in isolation, as in
+  /// tests), the section keeps a profile of its own.
+  final ProfileController? profile;
 
   @override
   State<AccountSection> createState() => _AccountSectionState();
@@ -36,11 +29,22 @@ class AccountSection extends StatefulWidget {
 
 class _AccountSectionState extends State<AccountSection> {
   final _name = TextEditingController(text: currentUser.name);
-  final _status = TextEditingController(text: 'feeding the starter');
-  var _presence = Presence.online;
+  late final _ownProfile = widget.profile == null ? ProfileController() : null;
+  ProfileController get _profile => widget.profile ?? _ownProfile!;
+  late final _status = TextEditingController(text: _profile.status);
+
+  @override
+  void initState() {
+    super.initState();
+    _profile.addListener(_onProfile);
+  }
+
+  void _onProfile() => setState(() {});
 
   @override
   void dispose() {
+    _profile.removeListener(_onProfile);
+    _ownProfile?.dispose();
     _name.dispose();
     _status.dispose();
     super.dispose();
@@ -74,9 +78,11 @@ class _AccountSectionState extends State<AccountSection> {
               const SizedBox(height: LoafSpace.x5),
 
               _FieldLabel(tokens: tokens, label: 'presence'),
+              // Applies at once, like the picker: presence is a switch, not
+              // a form field.
               _PresenceChips(
-                value: _presence,
-                onChanged: (p) => setState(() => _presence = p),
+                value: _profile.choice,
+                onChanged: _profile.choose,
               ),
               const SizedBox(height: LoafSpace.x5),
 
@@ -98,14 +104,14 @@ class _AccountSectionState extends State<AccountSection> {
                     LoafButton(
                       label: 'save changes',
                       size: LoafButtonSize.small,
-                      onTap: () {},
+                      onTap: () => _profile.setStatus(_status.text),
                     ),
                     const SizedBox(width: LoafSpace.x2),
                     LoafButton(
                       label: 'discard',
                       emphasis: LoafButtonEmphasis.quiet,
                       size: LoafButtonSize.small,
-                      onTap: () {},
+                      onTap: () => _status.text = _profile.status,
                     ),
                   ],
                 ),
@@ -285,8 +291,8 @@ class _ReadOnlyRow extends StatelessWidget {
 class _PresenceChips extends StatelessWidget {
   const _PresenceChips({required this.value, required this.onChanged});
 
-  final Presence value;
-  final ValueChanged<Presence> onChanged;
+  final PresenceChoice value;
+  final ValueChanged<PresenceChoice> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -296,42 +302,33 @@ class _PresenceChips extends StatelessWidget {
       spacing: LoafSpace.x2,
       runSpacing: LoafSpace.x2,
       children: [
-        for (final presence in Presence.values)
+        for (final choice in PresenceChoice.values)
           GestureDetector(
-            onTap: () => onChanged(presence),
+            onTap: () => onChanged(choice),
             behavior: HitTestBehavior.opaque,
             child: Container(
               height: 34,
               padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
               decoration: BoxDecoration(
-                color: presence == value ? tokens.card : Colors.transparent,
+                color: choice == value ? tokens.card : Colors.transparent,
                 borderRadius: BorderRadius.circular(LoafRadius.full),
                 border: Border.all(
-                  color: presence == value
-                      ? tokens.accent
-                      : tokens.borderStrong,
+                  color: choice == value ? tokens.accent : tokens.borderStrong,
                 ),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: presence.dot,
-                      shape: BoxShape.circle,
-                      // Invisible reads as a hollow dot, not a grey one.
-                      border: presence == Presence.invisible
-                          ? Border.all(color: presence.dot)
-                          : null,
-                    ),
+                  PresenceDot(
+                    presence: choice.shown,
+                    ring: choice == value ? tokens.card : tokens.page,
+                    size: 10,
                   ),
                   const SizedBox(width: LoafSpace.x2),
                   Text(
-                    presence.label,
-                    style: loafBody(13, presence == value ? 600 : 400).copyWith(
-                      color: presence == value
+                    choice.label,
+                    style: loafBody(13, choice == value ? 600 : 400).copyWith(
+                      color: choice == value
                           ? tokens.textStrong
                           : tokens.textBody,
                     ),

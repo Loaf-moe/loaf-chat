@@ -12,6 +12,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../shell/profile_controller.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
 import 'account_section.dart';
@@ -35,15 +36,23 @@ enum SettingsSection {
 /// Below this the nav and the detail are separate screens.
 const _twoPaneFrom = 900.0;
 
-/// Opens settings over the current screen.
-Future<void> showSettings(BuildContext context) => showDialog<void>(
-  context: context,
-  barrierColor: const Color(0x99000016),
-  builder: (_) => const SettingsModal(),
-);
+/// Opens settings over the current screen. [profile] is shared with the
+/// account panel's status picker, so both edit the same presence.
+Future<void> showSettings(BuildContext context, {ProfileController? profile}) =>
+    showDialog<void>(
+      context: context,
+      barrierColor: const Color(0x99000016),
+      builder: (_) => SettingsModal(profile: profile),
+    );
 
 class SettingsModal extends StatefulWidget {
-  const SettingsModal({super.key, this.initial = SettingsSection.account});
+  const SettingsModal({
+    super.key,
+    this.initial = SettingsSection.account,
+    this.profile,
+  });
+
+  final ProfileController? profile;
 
   /// Settings opens on the account, which carries the profile — the thing
   /// people actually come here to change.
@@ -119,7 +128,9 @@ class _SettingsModalState extends State<SettingsModal> {
           onSelect: (s) => setState(() => _section = s),
         ),
       ),
-      Expanded(child: _Detail(section: _section)),
+      Expanded(
+        child: _Detail(section: _section, profile: widget.profile),
+      ),
     ],
   );
 
@@ -128,7 +139,7 @@ class _SettingsModalState extends State<SettingsModal> {
     if (pushed == null) {
       return _Nav(selected: null, onSelect: (s) => setState(() => _pushed = s));
     }
-    return _Detail(section: pushed);
+    return _Detail(section: pushed, profile: widget.profile);
   }
 }
 
@@ -303,15 +314,18 @@ class _SignOut extends StatelessWidget {
 }
 
 class _Detail extends StatelessWidget {
-  const _Detail({required this.section});
+  const _Detail({required this.section, required this.profile});
 
   final SettingsSection section;
+  final ProfileController? profile;
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
 
-    if (section == SettingsSection.account) return const AccountSection();
+    if (section == SettingsSection.account) {
+      return AccountSection(profile: profile);
+    }
 
     // Honest placeholder: the IA is decided, these screens are not designed.
     return Center(
