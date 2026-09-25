@@ -12,6 +12,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/toast.dart';
 import '../widgets/action_menu.dart';
 import 'timeline_controller.dart';
 
@@ -141,41 +142,20 @@ Future<void> _perform(
     case _React(:final emoji):
       controller.toggleReaction(message.id, emoji);
     case _OpenPicker():
-      _toast(context, 'the full emoji picker is on its way');
+      showToast(context, 'the full emoji picker is on its way');
     case _Act(action: MessageAction.reply):
       controller.startReply(message);
     case _Act(action: MessageAction.edit):
       controller.startEdit(message);
     case _Act(action: MessageAction.copy):
       await Clipboard.setData(ClipboardData(text: message.body));
-      if (context.mounted) _toast(context, 'copied');
+      if (context.mounted) showToast(context, 'copied');
     case _CopySelection(:final text):
       await Clipboard.setData(ClipboardData(text: text));
-      if (context.mounted) _toast(context, 'copied');
+      if (context.mounted) showToast(context, 'copied');
     case _Act(action: MessageAction.delete):
       if (await confirmDeleteMessage(context)) controller.delete(message.id);
   }
-}
-
-void _toast(BuildContext context, String text) {
-  final tokens = LoafTokens.of(context);
-  ScaffoldMessenger.maybeOf(context)
-    ?..hideCurrentSnackBar()
-    ..showSnackBar(
-      SnackBar(
-        content: Text(
-          text,
-          style: loafBody(14, 500).copyWith(color: tokens.textStrong),
-        ),
-        backgroundColor: tokens.card,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(milliseconds: 1500),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(LoafRadius.full),
-          side: BorderSide(color: tokens.border),
-        ),
-      ),
-    );
 }
 
 /// Redactions cannot be taken back, so this is the one action that asks.

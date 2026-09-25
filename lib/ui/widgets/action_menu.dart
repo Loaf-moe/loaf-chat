@@ -60,19 +60,29 @@ Future<T?> showActionSheet<T>(
             ),
             Divider(height: 1, color: tokens.border),
           ],
-          const SizedBox(height: LoafSpace.x2),
-          for (final item in items)
-            InkWell(
-              onTap: () => Navigator.pop(context, item.value),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: LoafSpace.x5,
-                  vertical: 14,
-                ),
-                child: ActionLabel(item: item, compact: false),
+          // A long list scrolls rather than overflowing the sheet's height
+          // cap; a short one still hugs its content.
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final item in items)
+                    InkWell(
+                      onTap: () => Navigator.pop(context, item.value),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: LoafSpace.x5,
+                          vertical: 14,
+                        ),
+                        child: ActionLabel(item: item, compact: false),
+                      ),
+                    ),
+                ],
               ),
             ),
-          const SizedBox(height: LoafSpace.x2),
+          ),
         ],
       ),
     ),
@@ -134,12 +144,16 @@ class ActionLabel extends StatelessWidget {
           color: destructive ? tokens.accent : tokens.textMuted,
         ),
         SizedBox(width: compact ? LoafSpace.x3 : LoafSpace.x4),
-        Text(
-          item.label,
-          style: loafBody(
-            compact ? 14 : 16,
-            500,
-          ).copyWith(color: destructive ? tokens.accent : tokens.textStrong),
+        Flexible(
+          child: Text(
+            item.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: loafBody(
+              compact ? 14 : 16,
+              500,
+            ).copyWith(color: destructive ? tokens.accent : tokens.textStrong),
+          ),
         ),
       ],
     );
