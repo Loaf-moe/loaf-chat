@@ -550,19 +550,14 @@ void main() {
       );
     });
 
-    testWidgets(
-      'the DM Home opens to counts as read',
-      variant: _desktop,
-      (tester) async {
-        await _pumpShell(tester, _wide);
-        await _openHome(tester);
+    testWidgets('the DM Home opens to counts as read', variant: _desktop, (
+      tester,
+    ) async {
+      await _pumpShell(tester, _wide);
+      await _openHome(tester);
 
-        final mika = find.byKey(const ValueKey('channel-dm-mika'));
-        expect(
-          find.descendant(of: mika, matching: find.text('1')),
-          findsNothing,
-        );
-      },
-    );
+      final mika = find.byKey(const ValueKey('channel-dm-mika'));
+      expect(find.descendant(of: mika, matching: find.text('1')), findsNothing);
+    });
   });
 }
