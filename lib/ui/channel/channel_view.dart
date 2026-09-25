@@ -265,6 +265,7 @@ class _TimelineState extends State<_Timeline> {
         final entry = entries[index];
         return switch (entry) {
           DaySeparator() => _DaySeparatorTile(entry: entry),
+          CallEntry() => _CallLineTile(message: entry.message),
           MessageGroup() => Padding(
             padding: const EdgeInsets.only(bottom: LoafSpace.x4),
             child: MessageGroupTile(group: entry, controller: controller),
@@ -296,6 +297,47 @@ class _DaySeparatorTile extends StatelessWidget {
               _formatDay(entry.day),
               style: loafBody(11, 600).copyWith(color: tokens.textMuted),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A call's system line: small, centred and quiet, so a DM's history of
+/// calls reads as punctuation between messages rather than as messages.
+class _CallLineTile extends StatelessWidget {
+  const _CallLineTile({required this.message});
+
+  final Message message;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    final missed = message.callLine == CallLine.missed;
+    final at = message.sentAt;
+    final time =
+        '${at.hour.toString().padLeft(2, '0')}:'
+        '${at.minute.toString().padLeft(2, '0')}';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: LoafSpace.x4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            missed ? LucideIcons.phoneMissed : LucideIcons.phone,
+            size: 14,
+            color: missed ? tokens.accent : tokens.textMuted,
+          ),
+          const SizedBox(width: LoafSpace.x2),
+          Text(
+            message.body,
+            style: loafBody(13, 500).copyWith(color: tokens.textBody),
+          ),
+          const SizedBox(width: LoafSpace.x2),
+          Text(
+            time,
+            style: loafBody(11, 400).copyWith(color: tokens.textMuted),
           ),
         ],
       ),

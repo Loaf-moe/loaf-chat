@@ -79,6 +79,20 @@ class TimelineController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Lands a call's system line, attributed to whoever the call was with.
+  void addCall(String label, CallLine kind, {required Member from}) {
+    _messages.add(
+      Message(
+        id: 'local-${_sent++}',
+        author: from,
+        sentAt: DateTime.now(),
+        body: label,
+        callLine: kind,
+      ),
+    );
+    notifyListeners();
+  }
+
   /// Replaces a message's text. Saving it unchanged is not an edit, so it is
   /// not marked as one.
   void saveEdit(String messageId, String text) {

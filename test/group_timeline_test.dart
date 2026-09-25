@@ -106,4 +106,24 @@ void main() {
       expect(mika.messages, hasLength(2));
     },
   );
+
+  test('a call line stands alone, splitting the messages around it', () {
+    final call = Message(
+      id: 'call',
+      author: _a,
+      sentAt: _at(24, 10, 1),
+      body: 'call · 12m',
+      callLine: CallLine.ended,
+    );
+    final entries = groupTimeline([
+      _msg(_a, _at(24, 10, 0)),
+      call,
+      _msg(_a, _at(24, 10, 2)),
+    ]);
+
+    expect(entries, hasLength(4));
+    expect(entries[2], isA<CallEntry>());
+    expect((entries[2] as CallEntry).message, call);
+    expect((entries[3] as MessageGroup).messages, hasLength(1));
+  });
 }

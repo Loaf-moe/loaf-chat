@@ -146,4 +146,14 @@ void main() {
       expect(c.target, isNull);
     });
   });
+
+  test('addCall lands a call line at the end of the timeline', () {
+    final c = TimelineController([_msg('1', _them)], you: _you);
+
+    c.addCall('missed call', CallLine.missed, from: _them);
+
+    expect(c.messages.last.body, 'missed call');
+    expect(c.messages.last.callLine, CallLine.missed);
+    expect(c.messages.last.author, _them);
+  });
 }

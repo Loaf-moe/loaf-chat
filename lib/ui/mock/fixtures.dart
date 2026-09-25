@@ -12,7 +12,9 @@ import '../members/presence.dart';
 
 // ── Models ─────────────────────────────────────────────────────────────────
 
-enum ChannelKind { text, voice }
+/// A direct chat is a Matrix room flagged in `m.direct`. It lives in the
+/// Home pseudo-space rather than in any space's channel list.
+enum ChannelKind { text, voice, direct }
 
 /// What a member may do in a room, bucketed from their Matrix power level.
 /// Drives name colour everywhere — see "Name colour" in the design spec.
@@ -81,6 +83,9 @@ class Reaction {
   final bool mine;
 }
 
+/// The two looks a call's system line takes in a DM timeline.
+enum CallLine { ended, missed }
+
 class Message {
   const Message({
     required this.id,
@@ -91,6 +96,7 @@ class Message {
     this.edited = false,
     this.replyTo,
     this.imageAspect,
+    this.callLine,
   });
 
   final String id;
@@ -107,6 +113,10 @@ class Message {
   /// aspect ratio rather than loading anything.
   final double? imageAspect;
 
+  /// Set when this is a line a call left behind rather than something
+  /// anyone said; [body] is then its label, such as "call · 12m".
+  final CallLine? callLine;
+
   Message copyWith({List<Reaction>? reactions, String? body, bool? edited}) =>
       Message(
         id: id,
@@ -117,6 +127,7 @@ class Message {
         edited: edited ?? this.edited,
         replyTo: replyTo,
         imageAspect: imageAspect,
+        callLine: callLine,
       );
 }
 
@@ -132,6 +143,7 @@ class Channel {
     this.occupants = const [],
     this.joined = true,
     this.muted = false,
+    this.members = const [],
   });
 
   final String id;
@@ -155,25 +167,36 @@ class Channel {
   /// expiry, mapping to a mentions-only push rule.
   final bool muted;
 
-  IconData get icon => kind == ChannelKind.voice
-      ? LucideIcons.volume2
-      : private
-      ? LucideIcons.lock
-      : LucideIcons.hash;
+  /// For a direct chat: everyone in it except you. One person is a 1:1
+  /// DM, more is a group DM.
+  final List<Member> members;
 
-  Channel copyWith({bool? joined, bool? muted, int? unread, int? mentions}) =>
-      Channel(
-        id: id,
-        name: name,
-        kind: kind,
-        unread: unread ?? this.unread,
-        mentions: mentions ?? this.mentions,
-        private: private,
-        topic: topic,
-        occupants: occupants,
-        joined: joined ?? this.joined,
-        muted: muted ?? this.muted,
-      );
+  IconData get icon => switch (kind) {
+    ChannelKind.voice => LucideIcons.volume2,
+    ChannelKind.direct => LucideIcons.atSign,
+    _ when private => LucideIcons.lock,
+    _ => LucideIcons.hash,
+  };
+
+  Channel copyWith({
+    bool? joined,
+    bool? muted,
+    int? unread,
+    int? mentions,
+    List<Member>? occupants,
+  }) => Channel(
+    id: id,
+    name: name,
+    kind: kind,
+    unread: unread ?? this.unread,
+    mentions: mentions ?? this.mentions,
+    private: private,
+    topic: topic,
+    occupants: occupants ?? this.occupants,
+    joined: joined ?? this.joined,
+    muted: muted ?? this.muted,
+    members: members,
+  );
 }
 
 /// A collapsible group in the channel list. Matrix subspaces map onto these.
@@ -220,16 +243,21 @@ class Space {
   ///
   /// A left invite-only channel is dropped entirely: only channels you could
   /// join in one tap are ever listed.
+  ///
+  /// [occupants] replaces who is in a call, for the call you are in; [unread]
+  /// adds to a channel's count, for the missed calls a DM has picked up.
   Space withSession({
     Map<String, bool> membership = const {},
     Map<String, bool> muted = const {},
     Set<String> read = const {},
+    Map<String, List<Member>> occupants = const {},
+    Map<String, int> unread = const {},
   }) => Space(
     id: id,
     name: name,
     color: color,
     members: members,
-    unread: unread,
+    unread: this.unread,
     mentions: mentions,
     categories: [
       for (final category in categories)
@@ -239,8 +267,13 @@ class Space {
               channel.copyWith(
                 joined: membership[channel.id],
                 muted: muted[channel.id],
-                unread: read.contains(channel.id) ? 0 : null,
+                // Reading clears what the fixture had; anything that lands
+                // afterwards, such as a missed call, counts again.
+                unread:
+                    (read.contains(channel.id) ? 0 : channel.unread) +
+                    (unread[channel.id] ?? 0),
                 mentions: read.contains(channel.id) ? 0 : null,
+                occupants: occupants[channel.id],
               ),
         ]),
     ],
@@ -271,6 +304,13 @@ class MessageGroup extends TimelineEntry {
   DateTime get sentAt => messages.first.sentAt;
 }
 
+/// A line a call left behind. Always its own entry, never part of a group.
+class CallEntry extends TimelineEntry {
+  const CallEntry(this.message);
+
+  final Message message;
+}
+
 /// How long a gap breaks a run of messages from the same author.
 const groupingWindow = Duration(minutes: 5);
 
@@ -295,7 +335,13 @@ List<TimelineEntry> groupTimeline(List<Message> messages) {
       flush();
       entries.add(DaySeparator(day));
       currentDay = day;
-    } else if (group.isNotEmpty) {
+    }
+    if (message.callLine != null) {
+      flush();
+      entries.add(CallEntry(message));
+      continue;
+    }
+    if (group.isNotEmpty) {
       final previous = group.last;
       final sameAuthor = previous.author.id == message.author.id;
       final closeEnough =
@@ -450,6 +496,119 @@ final mockSpaces = <Space>[
     ],
   ),
 ];
+
+/// Home: DMs, as far as calls need them. Favourites and rooms in no space
+/// arrive with the full Home design.
+final mockHome = Space(
+  id: 'home',
+  name: 'Home',
+  color: const Color(0xFF003049),
+  members: const [_you, _mika, _sam, _ada, _jun],
+  categories: [
+    ChannelCategory('direct messages', [
+      const Channel(
+        id: 'dm-mika',
+        name: 'Mika Rye',
+        kind: ChannelKind.direct,
+        members: [_mika],
+        unread: 1,
+      ),
+      const Channel(
+        id: 'dm-crew',
+        name: 'weekend crew',
+        kind: ChannelKind.direct,
+        members: [_mika, _jun, _sam],
+      ),
+      const Channel(
+        id: 'dm-sam',
+        name: 'Sam Poolish',
+        kind: ChannelKind.direct,
+        members: [_sam],
+      ),
+      const Channel(
+        id: 'dm-ada',
+        name: 'Ada Crumb',
+        kind: ChannelKind.direct,
+        members: [_ada],
+      ),
+    ]),
+  ],
+);
+
+/// A little history per DM, with a past call or two among the messages.
+List<Message> mockDirectTimeline(String id) {
+  final now = DateTime.now();
+  DateTime at(int daysAgo, int hour, int minute) =>
+      DateTime(now.year, now.month, now.day - daysAgo, hour, minute);
+
+  return switch (id) {
+    'dm-mika' => [
+      Message(
+        id: '$id-1',
+        author: _mika,
+        sentAt: at(1, 21, 40),
+        body: 'are you up? doughlores is doing something weird',
+      ),
+      Message(
+        id: '$id-2',
+        author: _you,
+        sentAt: at(1, 21, 44),
+        body: 'calling you',
+      ),
+      Message(
+        id: '$id-3',
+        author: _mika,
+        sentAt: at(1, 22, 3),
+        body: 'call · 18m',
+        callLine: CallLine.ended,
+      ),
+      Message(
+        id: '$id-4',
+        author: _mika,
+        sentAt: at(0, 8, 12),
+        body: 'she lives!! thank you',
+      ),
+    ],
+    'dm-crew' => [
+      Message(
+        id: '$id-1',
+        author: _jun,
+        sentAt: at(2, 18, 0),
+        body: 'bake-along saturday? i have too much flour',
+      ),
+      Message(
+        id: '$id-2',
+        author: _sam,
+        sentAt: at(2, 18, 20),
+        body: "i'm in, starting the levain friday night",
+      ),
+      Message(id: '$id-3', author: _mika, sentAt: at(2, 18, 21), body: 'same'),
+    ],
+    'dm-sam' => [
+      Message(
+        id: '$id-1',
+        author: _sam,
+        sentAt: at(3, 14, 2),
+        body: 'missed call',
+        callLine: CallLine.missed,
+      ),
+      Message(
+        id: '$id-2',
+        author: _sam,
+        sentAt: at(3, 14, 5),
+        body: 'sorry, hands in dough. later?',
+      ),
+    ],
+    _ => [
+      Message(
+        id: '$id-1',
+        author: _ada,
+        sentAt: at(5, 11, 0),
+        body: 'lending you my banneton, collect whenever',
+      ),
+    ],
+  };
+}
 
 /// A day's worth of conversation in #general, built to exercise the timeline:
 /// grouped runs, a reply, an image, reactions, a long message and a short one.
