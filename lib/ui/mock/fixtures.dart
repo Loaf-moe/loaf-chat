@@ -668,6 +668,23 @@ class Invite {
       : '${inviter.name} invited you';
 }
 
+const _sourdough = Space(
+  id: 'sourdough',
+  name: 'Sourdough Society',
+  color: Color(0xFF65A30D),
+  members: [_theo, _you, _pim, _rosa],
+  categories: [
+    ChannelCategory('welcome', [
+      Channel(
+        id: 'sourdough-welcome',
+        name: 'welcome',
+        topic: 'say hi, share your starter\'s name',
+      ),
+      Channel(id: 'crumb-shots', name: 'crumb-shots'),
+    ]),
+  ],
+);
+
 final mockInvites = <Invite>[
   Invite(
     id: 'invite-rosa',
@@ -683,7 +700,7 @@ final mockInvites = <Invite>[
       lastActivity: _ago(hours: 1),
     ),
   ),
-  const Invite(
+  Invite(
     id: 'invite-sourdough',
     kind: InviteKind.space,
     name: 'Sourdough Society',
@@ -691,22 +708,7 @@ final mockInvites = <Invite>[
     color: Color(0xFF65A30D),
     topic: 'starters, schedules, and crumb shots',
     memberCount: 128,
-    space: Space(
-      id: 'sourdough',
-      name: 'Sourdough Society',
-      color: Color(0xFF65A30D),
-      members: [_theo, _you, _pim, _rosa],
-      categories: [
-        ChannelCategory('welcome', [
-          Channel(
-            id: 'sourdough-welcome',
-            name: 'welcome',
-            topic: 'say hi, share your starter\'s name',
-          ),
-          Channel(id: 'crumb-shots', name: 'crumb-shots'),
-        ]),
-      ],
-    ),
+    space: _sourdough,
   ),
 ];
 
@@ -955,3 +957,149 @@ final mockActiveChannel = mockSpaces.first.categories.first.channels.first;
 
 /// The voice channel the connected-call bar reports, when connected.
 final mockConnectedChannel = mockSpaces.first.categories[1].channels.first;
+
+// ── Space directory ────────────────────────────────────────────────────────
+
+/// A space seen from outside: what `/hierarchy` and `/publicRooms` tell you
+/// before you join. [space] is what joining brings in.
+class SpacePreview {
+  const SpacePreview({
+    required this.alias,
+    required this.space,
+    this.topic,
+    this.memberCount = 0,
+    this.inviteOnly = false,
+  });
+
+  final String alias;
+  final Space space;
+  final String? topic;
+  final int memberCount;
+
+  /// Join rule `invite`: nothing to do from here but ask someone inside.
+  final bool inviteOnly;
+
+  String get server => alias.split(':').last;
+}
+
+const _pizza = Space(
+  id: 'pizza',
+  name: 'Pizza Night',
+  color: Color(0xFFDC2626),
+  members: [_rosa, _theo, _you],
+  categories: [
+    ChannelCategory('', [
+      Channel(id: 'pizza-general', name: 'general'),
+      Channel(id: 'pizza-dough', name: 'dough-balls'),
+      Channel(id: 'pizza-oven', name: 'oven-talk', kind: ChannelKind.voice),
+    ]),
+  ],
+);
+
+const _glutenFree = Space(
+  id: 'gf-crew',
+  name: 'Gluten-Free Crew',
+  color: Color(0xFF0D9488),
+  members: [_pim, _ada, _you],
+  categories: [
+    ChannelCategory('', [
+      Channel(id: 'gf-general', name: 'general'),
+      Channel(id: 'gf-flours', name: 'flour-blends'),
+    ]),
+  ],
+);
+
+const _openBakers = Space(
+  id: 'open-bakers',
+  name: 'Open Bakers',
+  color: Color(0xFF2563EB),
+  members: [_you],
+  categories: [
+    ChannelCategory('', [
+      Channel(id: 'open-general', name: 'general'),
+      Channel(id: 'open-help', name: 'help'),
+    ]),
+  ],
+);
+
+const _staff = Space(
+  id: 'staff',
+  name: 'loaf.moe staff',
+  color: Color(0xFF64748B),
+);
+
+/// Each server's public space directory, as `/publicRooms` filtered to
+/// `m.space` would return it.
+final mockDirectories = <String, List<SpacePreview>>{
+  'loaf.moe': [
+    const SpacePreview(
+      alias: '#sourdough:loaf.moe',
+      space: _sourdough,
+      topic: 'starters, schedules, and crumb shots',
+      memberCount: 128,
+    ),
+    SpacePreview(
+      alias: '#starterpack:loaf.moe',
+      space: mockSpaces.first,
+      topic: 'the everything space. be nice, bring snacks.',
+      memberCount: 8,
+    ),
+    const SpacePreview(
+      alias: '#pizza:loaf.moe',
+      space: _pizza,
+      topic: 'friday dough, saturday pies',
+      memberCount: 23,
+    ),
+    const SpacePreview(
+      alias: '#glutenfree:loaf.moe',
+      space: _glutenFree,
+      topic: 'yes it can be good. no, really.',
+      memberCount: 41,
+    ),
+  ],
+  'matrix.org': [
+    const SpacePreview(
+      alias: '#bakers:matrix.org',
+      space: _openBakers,
+      topic: 'the big open bread space on matrix',
+      memberCount: 2140,
+    ),
+  ],
+};
+
+/// Every address the mock can resolve: the directories, plus a space that
+/// is listed nowhere and joinable only by invite.
+Map<String, SpacePreview> get mockSpaceAddresses => {
+  for (final entries in mockDirectories.values)
+    for (final entry in entries) entry.alias: entry,
+  '#staff:loaf.moe': const SpacePreview(
+    alias: '#staff:loaf.moe',
+    space: _staff,
+    topic: 'people who keep the ovens on',
+    memberCount: 3,
+    inviteOnly: true,
+  ),
+};
+
+/// History for channels in spaces joined this session. A space you have
+/// just made has none.
+List<Message> mockSpaceTimeline(String channelId) {
+  final now = DateTime.now();
+  return switch (channelId) {
+    'pizza-general' => [
+      Message(
+        id: '$channelId-1',
+        author: _rosa,
+        sentAt: now.subtract(const Duration(hours: 3)),
+        body: 'who is bringing the good tomatoes this week',
+      ),
+      Message(
+        id: '$channelId-2',
+        author: _theo,
+        sentAt: now.subtract(const Duration(hours: 2)),
+        body: 'me, and a regrettable amount of basil',
+      ),
+    ],
+    _ => const [],
+  };
+}

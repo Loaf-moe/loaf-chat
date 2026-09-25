@@ -21,6 +21,7 @@ import '../channel/timeline_controller.dart';
 import '../home/direct_messages.dart';
 import '../home/home_sections.dart';
 import '../home/new_message_picker.dart';
+import '../spaces/add_space.dart';
 import '../home/invite_preview.dart';
 import '../members/member_list.dart';
 import '../mock/call_fixtures.dart';
@@ -57,8 +58,8 @@ class _AppShellState extends State<AppShell> {
     onRecord: _onCallRecord,
   );
 
-  /// Each DM has its own conversation; the spaces' channels share the one
-  /// mock timeline.
+  /// Conversations of their own: Home's rooms, and channels in spaces
+  /// joined or made this session. See _timelineFor.
   final _directTimelines = <String, TimelineController>{};
 
   @override
@@ -218,11 +219,19 @@ class _AppShellState extends State<AppShell> {
   static bool _inHome(Channel c) =>
       c.kind == ChannelKind.direct || c.kind == ChannelKind.room;
 
-  TimelineController _timelineFor(Channel channel) => !_inHome(channel)
+  /// The original spaces' channels share one mock conversation. Anything
+  /// joined or made this session, and every Home room, has its own.
+  static bool _sharesMockTimeline(Channel c) =>
+      mockSpaces.any((s) => s.allChannels.any((x) => x.id == c.id));
+
+  TimelineController _timelineFor(Channel channel) =>
+      _sharesMockTimeline(channel)
       ? _timeline
       : _directTimelines.putIfAbsent(channel.id, () {
           final timeline = TimelineController(
-            mockHomeTimeline(channel.id),
+            _inHome(channel)
+                ? mockHomeTimeline(channel.id)
+                : mockSpaceTimeline(channel.id),
             you: currentUser,
           );
           var count = timeline.messages.length;
@@ -332,6 +341,56 @@ class _AppShellState extends State<AppShell> {
         _open(space.id, target.id);
       }
     });
+  }
+
+  // ── Adding spaces ──────────────────────────────────────────────────
+
+  var _made = 0;
+
+  Future<void> _addSpace() async {
+    final result = await showAddSpace(
+      context,
+      joined: {for (final s in _spaces) s.id},
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      switch (result) {
+        case OpenSpace(:final id):
+          _spaceId = id;
+        case JoinSpace(:final space):
+          _acceptedSpaces.add(space);
+          // Joining a space you were invited to answers the invite.
+          for (final invite in mockInvites) {
+            if (invite.space?.id == space.id) _answeredInvites.add(invite.id);
+          }
+          _spaceId = space.id;
+        case CreateSpace(:final name):
+          // The mock's space creation: the space room, then #general and a
+          // voice channel as its children, both restricted to its members.
+          final id = 'made-${_made++}';
+          _acceptedSpaces.add(
+            Space(
+              id: id,
+              name: name,
+              color: spaceColorFor(name),
+              members: [_profile.me],
+              categories: [
+                ChannelCategory('', [
+                  Channel(id: '$id-general', name: 'general'),
+                  Channel(
+                    id: '$id-hangout',
+                    name: 'hangout',
+                    kind: ChannelKind.voice,
+                  ),
+                ]),
+              ],
+            ),
+          );
+          _open(id, '$id-general');
+      }
+      _fullscreen = false;
+    });
+    _scaffoldKey.currentState?.closeDrawer();
   }
 
   // ── New messages ───────────────────────────────────────────────────
@@ -754,6 +813,7 @@ class _AppShellState extends State<AppShell> {
               onHome: () => _selectSpace(mockHome.id),
               homeBadge: _homeBadge,
               homeRinging: _calls.incoming != null,
+              onAddSpace: _addSpace,
             ),
             Expanded(
               child: ChannelList(

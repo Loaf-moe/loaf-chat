@@ -183,6 +183,27 @@ through `/hierarchy`, and other clients leave you to go and find them. Here:
   channels joinable in one tap (join rule `public` or `restricted` to the
   space) are listed; invite-only rooms you are not in stay out of sight.
   Channels added later appear the same way.
+
+**Adding a space.** The dashed "+" at the foot of the rail opens one panel (a
+sheet on a phone, a dialog on a computer) with three paths. Whatever would be
+joined is previewed first — name, avatar, topic, member count and its first
+channels — from `/hierarchy` (MSC2946):
+
+- **Join with a link.** An alias with or without its `#`, a room id, or a
+  `matrix.to` link (encoded or not, `?via=` hints dropped) is resolved through
+  `/directory/room` and previewed. An address with nothing behind it says so;
+  an invite-only space says to ask someone inside, with no join button. Knock
+  (`knock` join rule) is treated as invite-only for now.
+- **Explore public spaces.** `/publicRooms` with `room_types: ["m.space"]`,
+  searchable, for loaf.moe by default and switchable to matrix.org or any
+  server by name. Spaces you are in are marked and open instead.
+- **Create a space.** A name; the avatar is its initials on a colour taken
+  from the name. It is created as a space room (`creation_content.type:
+  m.space`) with `#general` and a voice channel called `hangout` as children
+  (`m.space.child` / `m.space.parent`), both `restricted` to the space. No
+  categories; adding channels afterwards is space settings, not this.
+
+Joining a space you hold an invite to answers the invite.
 - **Edges.** Channels directly under the space, in no subspace, go at the top
   uncategorised. Subspaces nested deeper than one level flatten into their
   top-level category. A room that is a child of two subspaces appears in both.

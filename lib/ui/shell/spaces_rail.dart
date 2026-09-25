@@ -21,7 +21,11 @@ class SpacesRail extends StatelessWidget {
     this.onHome,
     this.homeBadge = 0,
     this.homeRinging = false,
+    this.onAddSpace,
   });
+
+  /// The dashed "+": join, explore or create a space.
+  final VoidCallback? onAddSpace;
 
   static const homeKey = ValueKey('home');
 
@@ -78,7 +82,7 @@ class SpacesRail extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                       ],
-                      _CreateSpaceButton(tokens: tokens),
+                      _AddSpaceButton(tokens: tokens, onTap: onAddSpace),
                       const SizedBox(height: LoafSpace.x2),
                     ],
                   ),
@@ -340,21 +344,25 @@ class _CountBadge extends StatelessWidget {
   }
 }
 
-class _CreateSpaceButton extends StatelessWidget {
-  const _CreateSpaceButton({required this.tokens});
+class _AddSpaceButton extends StatelessWidget {
+  const _AddSpaceButton({required this.tokens, this.onTap});
 
   final LoafTokens tokens;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Create a space',
-      child: CustomPaint(
-        painter: _DashedBorderPainter(color: tokens.borderStrong),
-        child: SizedBox(
-          width: 52,
-          height: 52,
-          child: Icon(LucideIcons.plus, color: tokens.textMuted, size: 20),
+      message: 'Add a space',
+      child: GestureDetector(
+        onTap: onTap,
+        child: CustomPaint(
+          painter: _DashedBorderPainter(color: tokens.borderStrong),
+          child: SizedBox(
+            width: 52,
+            height: 52,
+            child: Icon(LucideIcons.plus, color: tokens.textMuted, size: 20),
+          ),
         ),
       ),
     );

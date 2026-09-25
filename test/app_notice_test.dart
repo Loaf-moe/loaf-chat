@@ -39,7 +39,7 @@ void main() {
     await _pumpRail(tester, [AppNotice.verify(onAction: () {})]);
 
     final tile = tester.getRect(find.byTooltip('verify this session'));
-    final addSpace = tester.getRect(find.byTooltip('Create a space'));
+    final addSpace = tester.getRect(find.byTooltip('Add a space'));
     expect(tile.top, greaterThan(addSpace.bottom));
     expect(tester.takeException(), isNull);
   });

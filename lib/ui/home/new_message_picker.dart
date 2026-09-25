@@ -8,8 +8,8 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
-import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/adaptive_panel.dart';
 import '../widgets/loaf_button.dart';
 import 'direct_messages.dart';
 
@@ -19,60 +19,10 @@ Future<StartMessage?> showNewMessagePicker(
   BuildContext context, {
   required List<Member> people,
   required List<Channel> rooms,
-}) {
-  final tokens = LoafTokens.of(context);
-  final picker = NewMessagePicker(people: people, rooms: rooms);
-  if (isDesktop) {
-    return showDialog<StartMessage>(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: tokens.card,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(LoafRadius.xl),
-          side: BorderSide(color: tokens.border),
-        ),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 440, maxHeight: 580),
-          child: picker,
-        ),
-      ),
-    );
-  }
-  // Read outside the sheet: a bottom sheet strips the top inset from its
-  // own MediaQuery.
-  final statusBar = MediaQuery.paddingOf(context).top;
-  return showModalBottomSheet<StartMessage>(
-    context: context,
-    backgroundColor: tokens.card,
-    showDragHandle: true,
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(
-        top: Radius.circular(LoafRadius.xxxl),
-      ),
-    ),
-    // Rides up with the keyboard, and never taller than the room it
-    // leaves: past that the drag handle slides under the status bar.
-    builder: (context) {
-      final media = MediaQuery.of(context);
-      // The drag handle sits above the picker and takes its own height.
-      const handle = LoafSpace.x12;
-      final room =
-          media.size.height -
-          media.viewInsets.bottom -
-          statusBar -
-          handle -
-          LoafSpace.x4;
-      return Padding(
-        padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
-        child: SizedBox(
-          height: room.clamp(0.0, media.size.height * 0.8),
-          child: SafeArea(top: false, child: picker),
-        ),
-      );
-    },
-  );
-}
+}) => showAdaptivePanel(
+  context,
+  child: NewMessagePicker(people: people, rooms: rooms),
+);
 
 class NewMessagePicker extends StatefulWidget {
   const NewMessagePicker({

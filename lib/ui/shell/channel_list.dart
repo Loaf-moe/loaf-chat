@@ -349,13 +349,15 @@ class _CategorySection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _CategoryHeading(
-          name: category.name,
-          collapsed: collapsed,
-          tokens: tokens,
-          onToggle: onToggle,
-          onAdd: onAdd,
-        ),
+        // A space's own channels, outside any category, have no heading.
+        if (category.name.isNotEmpty)
+          _CategoryHeading(
+            name: category.name,
+            collapsed: collapsed,
+            tokens: tokens,
+            onToggle: onToggle,
+            onAdd: onAdd,
+          ),
         if (onReorder != null && !collapsed)
           _Reorderable(
             channels: visibleChannels,

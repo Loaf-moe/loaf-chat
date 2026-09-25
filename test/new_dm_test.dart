@@ -105,9 +105,7 @@ void main() {
     });
   });
 
-  testWidgets('picking someone clears the search for the next', (
-    tester,
-  ) async {
+  testWidgets('picking someone clears the search for the next', (tester) async {
     await _pumpShell(tester, _wide);
     await _openPicker(tester);
 
