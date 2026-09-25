@@ -27,9 +27,13 @@ class ChannelList extends StatefulWidget {
     this.selectedInviteId,
     this.onOpenInvite,
     this.onReorderFavourites,
+    this.onNewMessage,
   });
 
   final Space space;
+
+  /// Home only: the "+" on the direct messages heading.
+  final VoidCallback? onNewMessage;
 
   /// Home rather than a space: sections instead of admin-made categories,
   /// no space menu, and rows that can be tagged.
@@ -124,6 +128,9 @@ class _ChannelListState extends State<ChannelList> {
                       onReorder: widget.home && category.name == 'favourites'
                           ? widget.onReorderFavourites
                           : null,
+                      onAdd: widget.home && category.name == 'direct messages'
+                          ? widget.onNewMessage
+                          : null,
                     ),
                 ],
               ),
@@ -210,12 +217,16 @@ class _CategoryHeading extends StatelessWidget {
     required this.collapsed,
     required this.tokens,
     required this.onToggle,
+    this.onAdd,
   });
 
   final String name;
   final bool collapsed;
   final LoafTokens tokens;
   final VoidCallback onToggle;
+
+  /// A "+" at the heading's end, for starting something in this section.
+  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -236,14 +247,32 @@ class _CategoryHeading extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            Text(
-              name.toUpperCase(),
-              style: loafBody(
-                11,
-                600,
-                height: 1.3,
-              ).copyWith(color: tokens.textMuted, letterSpacing: 0.04 * 11),
+            Expanded(
+              child: Text(
+                name.toUpperCase(),
+                style: loafBody(
+                  11,
+                  600,
+                  height: 1.3,
+                ).copyWith(color: tokens.textMuted, letterSpacing: 0.04 * 11),
+              ),
             ),
+            if (onAdd != null)
+              Tooltip(
+                message: 'New message',
+                child: InkWell(
+                  onTap: onAdd,
+                  borderRadius: BorderRadius.circular(LoafRadius.sm),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(
+                      LucideIcons.plus,
+                      size: 16,
+                      color: tokens.textMuted,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -263,9 +292,13 @@ class _CategorySection extends StatelessWidget {
     this.ringingId,
     this.home = false,
     this.onReorder,
+    this.onAdd,
   });
 
   final ChannelCategory category;
+
+  /// Home's direct messages only: starts a new one.
+  final VoidCallback? onAdd;
   final String? ringingId;
   final bool collapsed;
   final String? selectedChannelId;
@@ -282,7 +315,10 @@ class _CategorySection extends StatelessWidget {
   _ChannelEntry _entry(Channel channel, {bool longPressActions = true}) =>
       _ChannelEntry(
         channel: channel,
-        selected: channel.id == selectedChannelId,
+        // An older duplicate lights up the row that stands for it.
+        selected:
+            channel.id == selectedChannelId ||
+            channel.earlier.any((c) => c.id == selectedChannelId),
         ringing: channel.id == ringingId,
         tokens: tokens,
         home: home,
@@ -318,6 +354,7 @@ class _CategorySection extends StatelessWidget {
           collapsed: collapsed,
           tokens: tokens,
           onToggle: onToggle,
+          onAdd: onAdd,
         ),
         if (onReorder != null && !collapsed)
           _Reorderable(

@@ -135,6 +135,22 @@ and decline. Accepting a DM or room opens it in its section; accepting a space
 adds it to the rail. The Home badge counts DM unreads, room mentions and
 invites.
 
+**Starting a DM never makes a duplicate.** The "+" on the direct messages
+heading opens a picker (a sheet on a phone, a dialog on a computer) that
+searches names and ids (`/user_directory/search`, or a typed full id). Each
+person is listed with their existing 1:1 rooms right under them. The button
+opens rather than creates whenever it can: the newest 1:1 room with one person,
+or a group DM with exactly the people picked. Only then does it create one —
+`createRoom` with `is_direct` and the `trusted_private_chat` preset, the people
+invited, and the room added to `m.direct` — which opens at once with a
+"waiting for … to join" line until they do.
+
+Duplicates made elsewhere (another client, or both people starting at once)
+fold into one row per person: the newest room opens, the row counts every
+room's unreads, and the rest are under "Older conversations" in its menu.
+Group DMs are not merged. Nothing is ever left automatically; leaving loses a
+room's history on this device.
+
 **Voice channels are identified by room type.** A room is a voice channel when
 its room type marks it as one (Element's video rooms use `m.call`, unstable
 `org.matrix.msc3417.call`). Live occupancy comes from MatrixRTC membership state

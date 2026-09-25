@@ -149,6 +149,8 @@ class Channel {
     this.favouriteOrder,
     this.lowPriority = false,
     this.lastActivity,
+    this.earlier = const [],
+    this.waitingFor = const [],
   });
 
   final String id;
@@ -186,6 +188,13 @@ class Channel {
   /// The newest event, which is what orders DMs.
   final DateTime? lastActivity;
 
+  /// Older 1:1 rooms with the same person, folded into this row so Home
+  /// shows each person once. Matrix allows duplicates; loaf hides them.
+  final List<Channel> earlier;
+
+  /// Invited to a DM you started, and not in it yet.
+  final List<Member> waitingFor;
+
   IconData get icon => switch (kind) {
     ChannelKind.voice => LucideIcons.volume2,
     ChannelKind.direct => LucideIcons.atSign,
@@ -204,6 +213,7 @@ class Channel {
     double? favouriteOrder,
     bool? lowPriority,
     DateTime? lastActivity,
+    List<Channel>? earlier,
   }) => Channel(
     id: id,
     name: name,
@@ -220,6 +230,8 @@ class Channel {
     favouriteOrder: favouriteOrder ?? this.favouriteOrder,
     lowPriority: lowPriority ?? this.lowPriority,
     lastActivity: lastActivity ?? this.lastActivity,
+    earlier: earlier ?? this.earlier,
+    waitingFor: waitingFor,
   );
 }
 
@@ -559,6 +571,16 @@ final mockHomeRooms = <Channel>[
     members: const [_sam],
     lastActivity: _ago(days: 3),
   ),
+  // An older 1:1 with Sam that another client made: a duplicate, which Home
+  // folds into Sam's one row.
+  Channel(
+    id: 'dm-sam-old',
+    name: 'Sam Poolish',
+    kind: ChannelKind.direct,
+    members: const [_sam],
+    unread: 2,
+    lastActivity: _ago(days: 40),
+  ),
   Channel(
     id: 'dm-ada',
     name: 'Ada Crumb',
@@ -811,7 +833,21 @@ List<Message> mockHomeTimeline(String id) {
         body: 'hi! saw your crumb shot in the starter pack, had to say hello',
       ),
     ],
-    _ => [
+    'dm-sam-old' => [
+      Message(
+        id: '$id-1',
+        author: _sam,
+        sentAt: at(40, 19, 12),
+        body: 'did you ever try the rye sour from that book?',
+      ),
+      Message(
+        id: '$id-2',
+        author: _sam,
+        sentAt: at(40, 19, 13),
+        body: 'the one with the ridiculous cover',
+      ),
+    ],
+    'dm-ada' => [
       Message(
         id: '$id-1',
         author: _ada,
@@ -819,6 +855,8 @@ List<Message> mockHomeTimeline(String id) {
         body: 'lending you my banneton, collect whenever',
       ),
     ],
+    // A DM you just started has no history yet.
+    _ => const [],
   };
 }
 

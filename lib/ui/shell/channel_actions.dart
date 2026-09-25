@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../home/direct_messages.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
@@ -16,6 +17,7 @@ enum ChannelAction {
   unfavourite,
   lowPriority,
   notLowPriority,
+  olderConversations,
   mute,
   unmute,
   leave,
@@ -34,6 +36,7 @@ List<ChannelAction> actionsFor(Channel channel, {bool home = false}) => [
     channel.lowPriority
         ? ChannelAction.notLowPriority
         : ChannelAction.lowPriority,
+    if (channel.earlier.isNotEmpty) ChannelAction.olderConversations,
   ],
   channel.muted ? ChannelAction.unmute : ChannelAction.mute,
   ChannelAction.leave,
@@ -73,6 +76,11 @@ ActionItem<ChannelAction> _item(ChannelAction action, String noun) =>
         value: ChannelAction.notLowPriority,
         icon: LucideIcons.arrowUpToLine,
         label: 'Not low priority',
+      ),
+      ChannelAction.olderConversations => const ActionItem(
+        value: ChannelAction.olderConversations,
+        icon: LucideIcons.history,
+        label: 'Older conversations',
       ),
       // Muting keeps mentions: it maps to a mentions-only push rule, synced to
       // every device, with no expiry — Matrix has none to offer.
@@ -174,4 +182,46 @@ class _SheetHeader extends StatelessWidget {
       ],
     );
   }
+}
+
+/// The rooms folded into [channel]'s row, newest first, to pick one from.
+/// A sheet on a phone; on a computer, a small dialog, since the menu that
+/// led here has already closed. Returns the chosen room's id.
+Future<String?> showOlderConversations(BuildContext context, Channel channel) {
+  final now = DateTime.now();
+  final items = [
+    for (final room in channel.earlier)
+      ActionItem(
+        value: room.id,
+        icon: LucideIcons.messageCircle,
+        label: room.lastActivity == null
+            ? 'older conversation'
+            : 'conversation · ${activeLabel(room.lastActivity!, now)}',
+      ),
+  ];
+  if (!isDesktop) {
+    return showActionSheet(
+      context,
+      header: (context) => _SheetHeader(channel: channel),
+      items: items,
+    );
+  }
+  final tokens = LoafTokens.of(context);
+  return showDialog<String>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      backgroundColor: tokens.card,
+      title: Text(
+        'older conversations with ${channel.name}',
+        style: loafBody(16, 600).copyWith(color: tokens.textStrong),
+      ),
+      children: [
+        for (final item in items)
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, item.value),
+            child: ActionLabel(item: item, compact: true),
+          ),
+      ],
+    ),
+  );
 }

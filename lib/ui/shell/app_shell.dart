@@ -18,7 +18,9 @@ import '../call/incoming_call_card.dart';
 import '../call/voice_channel_page.dart';
 import '../channel/channel_view.dart';
 import '../channel/timeline_controller.dart';
+import '../home/direct_messages.dart';
 import '../home/home_sections.dart';
+import '../home/new_message_picker.dart';
 import '../home/invite_preview.dart';
 import '../members/member_list.dart';
 import '../mock/call_fixtures.dart';
@@ -151,19 +153,19 @@ class _AppShellState extends State<AppShell> {
               : null,
           lowPriority: _lowPriority[room.id],
           lastActivity: _activity[room.id],
+          // Read state is applied per room here, before duplicates fold
+          // together, so an older room's unreads still count on the row.
+          unread:
+              (_read.contains(room.id) ? 0 : room.unread) +
+              (_missedCalls[room.id] ?? 0),
+          mentions: _read.contains(room.id) ? 0 : room.mentions,
         ),
   ];
 
-  Space get _space =>
-      (_home
-              ? Space(
-                  id: mockHome.id,
-                  name: mockHome.name,
-                  color: mockHome.color,
-                  members: mockHome.members,
-                  categories: homeSections(_homeRooms),
-                )
-              : _spaces.firstWhere((s) => s.id == _spaceId))
+  Space get _space {
+    if (!_home) {
+      return _spaces
+          .firstWhere((s) => s.id == _spaceId)
           .withSession(
             membership: _membership,
             muted: _mutedNow,
@@ -171,6 +173,20 @@ class _AppShellState extends State<AppShell> {
             occupants: _callOccupants,
             unread: _missedCalls,
           );
+    }
+    // Home's rooms already carry their read state; see _homeRooms.
+    return Space(
+      id: mockHome.id,
+      name: mockHome.name,
+      color: mockHome.color,
+      members: mockHome.members,
+      categories: homeSections(collapseDuplicates(_homeRooms)),
+    ).withSession(
+      membership: _membership,
+      muted: _mutedNow,
+      occupants: _callOccupants,
+    );
+  }
 
   /// Who is in the call you are in, you included — so its channel or DM
   /// lists you under it like everyone else.
@@ -188,7 +204,9 @@ class _AppShellState extends State<AppShell> {
   }
 
   Channel get _channel {
-    final channels = _space.allChannels;
+    final rows = _space.allChannels;
+    // An older duplicate DM is not a row of its own, but can be open.
+    final channels = [...rows, for (final row in rows) ...row.earlier];
     final remembered = _channelBySpace[_spaceId];
     return channels.firstWhere(
       (c) => c.id == remembered && c.joined,
@@ -262,7 +280,18 @@ class _AppShellState extends State<AppShell> {
     _calls.joinVoice(channel, spaceName: space.name);
   }
 
-  void _channelAction(String id, ChannelAction action) => setState(() {
+  Future<void> _channelAction(String id, ChannelAction action) async {
+    if (action == ChannelAction.olderConversations) {
+      final row = _space.allChannels.firstWhere((c) => c.id == id);
+      final chosen = await showOlderConversations(context, row);
+      if (chosen != null) setState(() => _open(mockHome.id, chosen));
+      _scaffoldKey.currentState?.closeDrawer();
+      return;
+    }
+    setState(() => _applyChannelAction(id, action));
+  }
+
+  void _applyChannelAction(String id, ChannelAction action) {
     switch (action) {
       case ChannelAction.markRead:
         _read.add(id);
@@ -274,6 +303,8 @@ class _AppShellState extends State<AppShell> {
         _lowPriority[id] = true;
       case ChannelAction.notLowPriority:
         _lowPriority[id] = false;
+      case ChannelAction.olderConversations:
+        break; // Handled before any state changes: it asks first.
       case ChannelAction.mute:
         _mutedNow[id] = true;
       case ChannelAction.unmute:
@@ -285,7 +316,7 @@ class _AppShellState extends State<AppShell> {
         // Leaving a voice channel you are in takes you out of the call too.
         if (_calls.session?.target.id == id) _calls.leave();
     }
-  });
+  }
 
   /// Back to wherever the call lives: its voice channel, or its DM.
   void _goToCall() {
@@ -301,6 +332,53 @@ class _AppShellState extends State<AppShell> {
         _open(space.id, target.id);
       }
     });
+  }
+
+  // ── New messages ───────────────────────────────────────────────────
+
+  var _started = 0;
+
+  Future<void> _newMessage() async {
+    final me = _profile.me;
+    final people = <String, Member>{
+      for (final space in _spaces)
+        for (final m in space.members)
+          if (m.id != me.id) m.id: m,
+      for (final room in _homeRooms)
+        for (final m in room.members)
+          if (m.id != me.id) m.id: m,
+    };
+    final start = await showNewMessagePicker(
+      context,
+      people: people.values.toList(),
+      rooms: [
+        for (final room in _homeRooms)
+          if (room.kind == ChannelKind.direct) room,
+      ],
+    );
+    if (start == null || !mounted) return;
+    setState(() {
+      switch (start) {
+        case OpenExisting(:final room):
+          _open(mockHome.id, room.id);
+        case CreateDirect(:final members):
+          // The mock's createRoom: is_direct, trusted_private_chat, the
+          // people invited, and the room added to m.direct.
+          final room = Channel(
+            id: 'dm-new-${_started++}',
+            name: members.length == 1
+                ? members.single.name
+                : members.map((m) => m.name.split(' ').first).join(', '),
+            kind: ChannelKind.direct,
+            members: members,
+            waitingFor: members,
+          );
+          _acceptedRooms.add(room);
+          _activity[room.id] = DateTime.now();
+          _open(mockHome.id, room.id);
+      }
+    });
+    _scaffoldKey.currentState?.closeDrawer();
   }
 
   // ── Invites ────────────────────────────────────────────────────────────
@@ -647,13 +725,7 @@ class _AppShellState extends State<AppShell> {
   /// Everything in a DM is addressed to you, so a DM's unreads count; a
   /// room counts only its mentions, like a channel. Invites wait on you too.
   int get _homeBadge {
-    final rooms = Space(
-      id: mockHome.id,
-      name: mockHome.name,
-      color: mockHome.color,
-      categories: [ChannelCategory('all', _homeRooms)],
-    ).withSession(read: _read, unread: _missedCalls).allChannels;
-    return rooms.fold(
+    return _homeRooms.fold(
           0,
           (sum, c) =>
               sum + (c.kind == ChannelKind.direct ? c.unread : c.mentions),
@@ -694,6 +766,7 @@ class _AppShellState extends State<AppShell> {
                 invites: _home ? _invites : const [],
                 selectedInviteId: _previewInvite,
                 onOpenInvite: _openInvite,
+                onNewMessage: _newMessage,
                 onReorderFavourites: (ids) => setState(
                   () => _favourites
                     ..clear()

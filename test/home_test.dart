@@ -256,11 +256,11 @@ void main() {
     testWidgets('count towards the Home badge', (tester) async {
       await _pumpShell(tester, _wide);
 
-      // Mika's one unread plus two invites.
+      // Mika's one unread, Sam's older conversation's two, and two invites.
       expect(
         find.descendant(
           of: find.byKey(SpacesRail.homeKey),
-          matching: find.text('3'),
+          matching: find.text('5'),
         ),
         findsOneWidget,
       );

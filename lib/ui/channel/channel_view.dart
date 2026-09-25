@@ -104,6 +104,8 @@ class ChannelView extends StatelessWidget {
             else ...[
               ?callPanel,
               Expanded(child: _Timeline(controller: timeline)),
+              if (channel.waitingFor.isNotEmpty)
+                _WaitingLine(people: channel.waitingFor),
               ?callBar,
               Composer(
                 channelName: channel.name,
@@ -402,6 +404,45 @@ class _CallLineTile extends StatelessWidget {
           Text(
             time,
             style: loafBody(11, 400).copyWith(color: tokens.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A DM you started, before the people you asked have joined. Messages
+/// still send — they read them on joining — so it says so.
+class _WaitingLine extends StatelessWidget {
+  const _WaitingLine({required this.people});
+
+  final List<Member> people;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    final names = switch (people) {
+      [final one] => one.name,
+      [...final rest, final last] =>
+        '${rest.map((m) => m.name).join(', ')} and ${last.name}',
+      _ => '',
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LoafSpace.x4,
+        0,
+        LoafSpace.x4,
+        LoafSpace.x2,
+      ),
+      child: Row(
+        children: [
+          Icon(LucideIcons.hourglass, size: 14, color: tokens.textMuted),
+          const SizedBox(width: LoafSpace.x2),
+          Expanded(
+            child: Text(
+              'waiting for $names to join. you can already write.',
+              style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+            ),
           ),
         ],
       ),
