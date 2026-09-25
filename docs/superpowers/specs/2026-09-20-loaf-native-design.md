@@ -121,7 +121,8 @@ during implementation; the IA depends only on the marker existing.
 **The connected-call bar** sits above the composer once you join a voice
 channel: connected state, mute, disconnect, tap to expand to the full call UI.
 It survives navigating to other channels and other spaces. Without it, voice
-collapses back into a modal call.
+collapses back into a modal call. The expanded call UI, DM calls and ringing are
+designed in `2026-09-24-calls-design.md`.
 
 **Joining a space shows you all of it.** In Matrix, joining a space joins only
 the space room; its channels are listed by `m.space.child` events and read
@@ -268,7 +269,7 @@ Mockups proceed in waves so feel can be judged early:
 
 1. **The premise** — app shell, channel view, voice channels with participants,
    connected-call bar.
-2. **Depth** — expanded call UI, member list, message long-press actions,
+2. **Depth** — expanded call UI and DM calls (see the calls spec), member list, message long-press actions,
    Home/DM list, space browse.
 3. **Edges** — login and server discovery, settings, search, media viewer.
 
