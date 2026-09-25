@@ -7,6 +7,7 @@ import 'package:loaf_native/ui/call/call_controller.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
 import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
+import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/shell/user_bar.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 
@@ -325,6 +326,29 @@ void main() {
       await pick(tester, 'Mark as read');
 
       expect(inRow('kitchen', find.text('3')), findsNothing);
+    });
+
+    testWidgets('the rail badge recounts as you read', variant: desktop, (
+      tester,
+    ) async {
+      await _pumpShell(tester, const Size(1440, 900));
+      Finder railBadge(String count) => find.descendant(
+        of: find.byType(SpacesRail),
+        matching: find.text(count),
+      );
+      // The Starter Pack: kitchen's 3 mentions win over the unread count.
+      expect(railBadge('3'), findsOneWidget);
+
+      await rightClick(tester, 'kitchen');
+      await pick(tester, 'Mark as read');
+      // No mentions left, so the badge counts what is unread: 4 in
+      // #general and 2 in #chess.
+      expect(railBadge('3'), findsNothing);
+      expect(railBadge('6'), findsOneWidget);
+
+      await rightClick(tester, 'chess');
+      await pick(tester, 'Mark as read');
+      expect(railBadge('4'), findsOneWidget);
     });
 
     testWidgets(

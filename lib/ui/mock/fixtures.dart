@@ -250,8 +250,6 @@ class Space {
     required this.color,
     this.categories = const [],
     this.members = const [],
-    this.unread = 0,
-    this.mentions = 0,
   });
 
   final String id;
@@ -259,8 +257,16 @@ class Space {
   final Color color;
   final List<ChannelCategory> categories;
   final List<Member> members;
-  final int unread;
-  final int mentions;
+
+  /// Mentions waiting across the channels you are in. What the rail's
+  /// badge shows first, since a mention is addressed to you.
+  int get mentions =>
+      allChannels.where((c) => c.joined).fold(0, (sum, c) => sum + c.mentions);
+
+  /// Unread messages across the channels you are in and have not muted.
+  int get unread => allChannels
+      .where((c) => c.joined && !c.muted)
+      .fold(0, (sum, c) => sum + c.unread);
 
   String get initials => name
       .trim()
@@ -293,8 +299,6 @@ class Space {
     name: name,
     color: color,
     members: members,
-    unread: this.unread,
-    mentions: mentions,
     categories: [
       for (final category in categories)
         ChannelCategory(category.name, [
@@ -446,8 +450,6 @@ final mockSpaces = <Space>[
     id: 'starter',
     name: 'The Starter Pack',
     color: const Color(0xFFD97B2A),
-    unread: 12,
-    mentions: 3,
     members: const [_you, _mika, _sam, _jun, _ada, _rosa, _theo, _pim],
     categories: [
       ChannelCategory('general', [
@@ -503,7 +505,6 @@ final mockSpaces = <Space>[
     id: 'ryedevs',
     name: 'Rye Devs',
     color: const Color(0xFF3B82F6),
-    unread: 2,
     members: const [_you, _sam, _theo],
     categories: [
       ChannelCategory('dev', [
@@ -522,7 +523,6 @@ final mockSpaces = <Space>[
     id: 'bookclub',
     name: 'Book Club',
     color: const Color(0xFF8B5CF6),
-    mentions: 1,
     members: const [_ada, _you, _mika, _rosa],
     categories: [
       ChannelCategory('reading', [

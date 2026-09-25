@@ -805,7 +805,15 @@ class _AppShellState extends State<AppShell> {
         Row(
           children: [
             SpacesRail(
-              spaces: _spaces,
+              // With this session's reading applied, so badges recount.
+              spaces: [
+                for (final space in _spaces)
+                  space.withSession(
+                    membership: _membership,
+                    muted: _mutedNow,
+                    read: _read,
+                  ),
+              ],
               selectedSpaceId: _spaceId,
               onSelect: _selectSpace,
               notices: _notices,
