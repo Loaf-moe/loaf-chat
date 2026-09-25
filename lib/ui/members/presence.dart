@@ -13,11 +13,16 @@ enum Presence {
   /// MSC3026's `busy` where the server has it. Choosing it also turns on the
   /// account's master push rule, silencing every device.
   dnd,
-  offline;
+  offline,
+
+  /// Nothing known. Presence is optional for a server: when theirs, or
+  /// yours, does not share it, no presence ever arrives — which is not the
+  /// same as being offline, so it is not drawn as offline.
+  unknown;
 
   /// Online, idle and do-not-disturb people are all around; lists sort them
   /// ahead of offline ones.
-  bool get around => this != offline;
+  bool get around => this == online || this == idle || this == dnd;
 }
 
 /// What you can choose for yourself. Invisible is a choice, not a state

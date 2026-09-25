@@ -285,8 +285,18 @@ source of truth. Each maps onto Matrix like so:
 The status message is `status_msg`, free text with no expiry — it stays until
 cleared. It shows as a muted line under the name in the member list. Presence
 is often disabled on homeservers because it is expensive, so people on servers
-without it must read as **unknown**, never as offline; the mockups do not show
-this yet.
+without it must read as **unknown**, never as offline. Presence reaches you
+through your own homeserver, so there are two cases:
+
+- **Their server shares none** (matrix.org runs this way): that person is
+  unknown. No dot, not faded, and sorted between people who are around and
+  people who are away.
+- **Your server shares none:** nobody's presence arrives and yours goes
+  nowhere. Every dot disappears, nobody is faded, and the status picker keeps
+  only the status message, saying "this server doesn't share presence".
+
+Absent means absent: a question mark on every avatar would be noise when a
+whole server has none.
 
 **The member list** mirrors the navigation drawer: a right drawer on phones, a
 column toggled by the members button on wide layouts. Admins get their own

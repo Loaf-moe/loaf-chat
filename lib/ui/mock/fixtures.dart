@@ -1009,11 +1009,27 @@ const _glutenFree = Space(
   ],
 );
 
+// People on matrix.org, which runs with presence switched off: nothing about
+// them ever arrives, so loaf draws no presence rather than "offline".
+const _proofer = Member(
+  '@proofer:matrix.org',
+  'proofer',
+  Color(0xFFCA8A04),
+  presence: Presence.unknown,
+);
+const _lamination = Member(
+  '@lamination:matrix.org',
+  'lamination',
+  Color(0xFF7C3AED),
+  presence: Presence.unknown,
+  powerLevel: 100,
+);
+
 const _openBakers = Space(
   id: 'open-bakers',
   name: 'Open Bakers',
   color: Color(0xFF2563EB),
-  members: [_you],
+  members: [_you, _proofer, _lamination],
   categories: [
     ChannelCategory('', [
       Channel(id: 'open-general', name: 'general'),

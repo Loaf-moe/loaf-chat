@@ -1,0 +1,57 @@
+/// Mock-only levers for states the fake data never reaches on its own: an
+/// incoming ring, a dropped connection, a denied permission, a server that
+/// shares no presence.
+library;
+
+import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../platform.dart';
+import '../widgets/action_menu.dart';
+
+enum MockDebug {
+  ringFromMika,
+  ringFromCrew,
+  reconnecting,
+  failNext,
+  encryption,
+  micBlocked,
+  cameraBlocked,
+  remoteShare,
+  presence,
+}
+
+/// [presenceShared] words the presence lever for the state it would change.
+Future<MockDebug?> showMockDebug(
+  BuildContext context,
+  Rect anchor, {
+  required bool presenceShared,
+}) {
+  ActionItem<MockDebug> item(MockDebug d, IconData icon, String label) =>
+      ActionItem(value: d, icon: icon, label: label);
+  final items = [
+    item(MockDebug.ringFromMika, LucideIcons.phoneIncoming, 'call from Mika'),
+    item(MockDebug.ringFromCrew, LucideIcons.users, 'call from weekend crew'),
+    item(MockDebug.reconnecting, LucideIcons.wifiOff, 'toggle reconnecting'),
+    item(MockDebug.failNext, LucideIcons.circleX, 'fail the next connection'),
+    item(MockDebug.encryption, LucideIcons.lock, 'toggle encryption'),
+    item(MockDebug.micBlocked, LucideIcons.micOff, 'block the microphone'),
+    item(MockDebug.cameraBlocked, LucideIcons.videoOff, 'block the camera'),
+    item(
+      MockDebug.remoteShare,
+      LucideIcons.screenShare,
+      'someone shares their screen',
+    ),
+    item(
+      MockDebug.presence,
+      LucideIcons.circleDashed,
+      presenceShared
+          ? 'turn presence off on this server'
+          : 'turn presence back on',
+    ),
+  ];
+  if (isDesktop) {
+    return showActionMenu(context, position: anchor.topLeft, items: items);
+  }
+  return showActionSheet(context, items: items);
+}

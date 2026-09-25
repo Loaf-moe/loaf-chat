@@ -180,50 +180,64 @@ class _PickerContentState extends State<_PickerContent> {
             ),
           ),
           const SizedBox(height: LoafSpace.x2),
-          for (final choice in PresenceChoice.values)
-            InkWell(
-              borderRadius: BorderRadius.circular(LoafRadius.md),
-              onTap: () => _choose(choice),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: LoafSpace.x2,
-                  vertical: 10,
-                ),
-                child: Row(
-                  children: [
-                    PresenceDot(
-                      presence: choice.shown,
-                      ring: tokens.card,
-                      size: 14,
-                    ),
-                    const SizedBox(width: LoafSpace.x3),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            choice.label,
-                            style: loafBody(
-                              14,
-                              600,
-                            ).copyWith(color: tokens.textStrong),
-                          ),
-                          Text(
-                            choice.description,
-                            style: loafBody(
-                              12,
-                              400,
-                            ).copyWith(color: tokens.textMuted),
-                          ),
-                        ],
+          // Presence needs the server's help; without it, only a status
+          // message means anything to anyone.
+          if (!widget.profile.presenceShared)
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: LoafSpace.x2,
+                vertical: LoafSpace.x2,
+              ),
+              child: Text(
+                "this server doesn't share presence",
+                style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+              ),
+            )
+          else
+            for (final choice in PresenceChoice.values)
+              InkWell(
+                borderRadius: BorderRadius.circular(LoafRadius.md),
+                onTap: () => _choose(choice),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: LoafSpace.x2,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      PresenceDot(
+                        presence: choice.shown,
+                        ring: tokens.card,
+                        size: 14,
                       ),
-                    ),
-                    if (choice == current)
-                      Icon(LucideIcons.check, size: 16, color: tokens.accent),
-                  ],
+                      const SizedBox(width: LoafSpace.x3),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              choice.label,
+                              style: loafBody(
+                                14,
+                                600,
+                              ).copyWith(color: tokens.textStrong),
+                            ),
+                            Text(
+                              choice.description,
+                              style: loafBody(
+                                12,
+                                400,
+                              ).copyWith(color: tokens.textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (choice == current)
+                        Icon(LucideIcons.check, size: 16, color: tokens.accent),
+                    ],
+                  ),
                 ),
               ),
-            ),
         ],
       ),
     );

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
 import 'package:loaf_native/ui/members/presence.dart';
+import 'package:loaf_native/ui/members/presence_dot.dart';
 import 'package:loaf_native/ui/members/role_colors.dart';
 import 'package:loaf_native/ui/mock/fixtures.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -125,6 +126,69 @@ void main() {
       expect(colorOf('bea'), tokens.nameColor(Role.member));
       // Three roles, three distinct colours.
       expect({colorOf('zed'), colorOf('Mo'), colorOf('bea')}, hasLength(3));
+    });
+  });
+
+  group('unknown presence', () {
+    const unknown = Member('@u', 'Una', _grey, presence: Presence.unknown);
+
+    test('sorts between people around and people away', () {
+      final groups = groupMembers([_away, unknown, _bea]);
+
+      expect(groups.members.map((m) => m.name), ['bea', 'Una', 'abe']);
+    });
+
+    testWidgets('draws no dot', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Center(
+            child: PresenceDot(presence: Presence.unknown, ring: _grey),
+          ),
+        ),
+      );
+
+      expect(
+        tester.getSize(find.byKey(const ValueKey('presence-unknown'))),
+        Size.zero,
+      );
+    });
+
+    testWidgets("isn't faded like someone offline", (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: const Scaffold(body: MemberList(members: [unknown, _away])),
+        ),
+      );
+
+      double opacityOf(String id) =>
+          tester.widget<Opacity>(find.byKey(ValueKey('member-$id'))).opacity;
+      expect(opacityOf('@u'), 1);
+      expect(opacityOf('@f'), lessThan(1));
+    });
+
+    testWidgets('a server without presence hides every dot', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: const Scaffold(
+            body: PresenceScope(
+              shared: false,
+              child: MemberList(members: [_bea, _away]),
+            ),
+          ),
+        ),
+      );
+
+      for (final dot in find.byType(PresenceDot).evaluate()) {
+        expect((dot.renderObject! as RenderBox).size, Size.zero);
+      }
+      expect(
+        tester.widget<Opacity>(find.byKey(const ValueKey('member-@f'))).opacity,
+        1,
+        reason: 'nobody is known to be away',
+      );
     });
   });
 }

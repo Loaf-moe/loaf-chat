@@ -11,7 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../call/call_controller.dart';
-import '../call/call_debug.dart';
 import '../call/connected_call_bar.dart';
 import '../call/dm_call_panel.dart';
 import '../call/incoming_call_card.dart';
@@ -24,11 +23,13 @@ import '../home/new_message_picker.dart';
 import '../spaces/add_space.dart';
 import '../home/invite_preview.dart';
 import '../members/member_list.dart';
+import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'channel_list.dart';
+import 'mock_debug.dart';
 import '../settings/settings_page.dart';
 import 'app_notice.dart';
 import 'channel_actions.dart';
@@ -514,24 +515,30 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _debug(Rect anchor) async {
-    final pick = await showCallDebug(context, anchor);
+    final pick = await showMockDebug(
+      context,
+      anchor,
+      presenceShared: _profile.presenceShared,
+    );
     if (pick == null) return;
     switch (pick) {
-      case CallDebug.ringFromMika:
+      case MockDebug.ringFromMika:
         _ring('dm-mika', '@mika');
-      case CallDebug.ringFromCrew:
+      case MockDebug.ringFromCrew:
         _ring('dm-crew', '@jun');
-      case CallDebug.reconnecting:
+      case MockDebug.reconnecting:
         _calls.toggleReconnecting();
-      case CallDebug.failNext:
+      case MockDebug.failNext:
         _calls.failNextConnection();
-      case CallDebug.encryption:
+      case MockDebug.encryption:
         _calls.toggleEncryption();
-      case CallDebug.micBlocked:
+      case MockDebug.micBlocked:
         _calls.toggleMicBlocked();
-      case CallDebug.cameraBlocked:
+      case MockDebug.cameraBlocked:
         _calls.toggleCameraBlocked();
-      case CallDebug.remoteShare:
+      case MockDebug.presence:
+        _profile.togglePresenceShared();
+      case MockDebug.remoteShare:
         final someone = _calls.session?.participants
             .where((p) => p.present)
             .firstOrNull;
@@ -759,23 +766,26 @@ class _AppShellState extends State<AppShell> {
     );
 
     final ring = _calls.incoming;
-    return CallbackShortcuts(
-      bindings: _shortcuts,
-      child: Focus(
-        autofocus: true,
-        child: Stack(
-          children: [
-            shell,
-            if (ring != null && !_callKit)
-              _IncomingPosition(
-                child: IncomingCallCard(
-                  ring: ring,
-                  onAccept: _accept,
-                  onDecline: _calls.decline,
-                  onOpen: _openIncoming,
+    return PresenceScope(
+      shared: _profile.presenceShared,
+      child: CallbackShortcuts(
+        bindings: _shortcuts,
+        child: Focus(
+          autofocus: true,
+          child: Stack(
+            children: [
+              shell,
+              if (ring != null && !_callKit)
+                _IncomingPosition(
+                  child: IncomingCallCard(
+                    ring: ring,
+                    onAccept: _accept,
+                    onDecline: _calls.decline,
+                    onOpen: _openIncoming,
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

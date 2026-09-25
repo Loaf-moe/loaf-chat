@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import 'presence.dart';
 import 'presence_dot.dart';
 import 'role_colors.dart';
 
@@ -15,11 +16,20 @@ import 'role_colors.dart';
 ///
 /// Within each section online people come first, then alphabetical — the
 /// people you could talk to right now are the ones you are looking for.
+///
+/// Someone whose presence is unknown sorts between the two: they may well
+/// be around, but nothing says so.
 ({List<Member> admins, List<Member> members}) groupMembers(
   Iterable<Member> members,
 ) {
+  int rank(Member m) => switch (m.presence) {
+    Presence.unknown => 1,
+    Presence.offline => 2,
+    _ => 0,
+  };
   int byPresenceThenName(Member a, Member b) {
-    if (a.online != b.online) return a.online ? -1 : 1;
+    final byRank = rank(a).compareTo(rank(b));
+    if (byRank != 0) return byRank;
     return a.name.toLowerCase().compareTo(b.name.toLowerCase());
   }
 
@@ -38,7 +48,12 @@ class MemberList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
-    final groups = groupMembers(members);
+    // On a server without presence, everyone is unknown: one list by role
+    // and name, nobody faded.
+    final groups = groupMembers([
+      for (final m in members)
+        m.copyWith(presence: PresenceScope.effective(context, m.presence)),
+    ]);
 
     return ColoredBox(
       color: tokens.sidebar,
@@ -113,7 +128,7 @@ class _MemberRow extends StatelessWidget {
     final status = member.statusMessage;
     return Opacity(
       key: ValueKey('member-${member.id}'),
-      opacity: member.online ? 1 : 0.5,
+      opacity: member.presence == Presence.offline ? 0.5 : 1,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
         child: InkWell(

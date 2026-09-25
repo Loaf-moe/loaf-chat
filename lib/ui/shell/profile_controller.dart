@@ -16,6 +16,17 @@ class ProfileController extends ChangeNotifier {
   PresenceChoice _choice;
   String _status;
 
+  /// Whether your homeserver shares presence at all. When it doesn't,
+  /// nobody's arrives and yours goes nowhere; only a status message
+  /// survives. A mock toggle for now; the SDK reports it.
+  bool get presenceShared => _presenceShared;
+  var _presenceShared = true;
+
+  void togglePresenceShared() {
+    _presenceShared = !_presenceShared;
+    notifyListeners();
+  }
+
   PresenceChoice get choice => _choice;
   String get status => _status;
 

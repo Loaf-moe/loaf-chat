@@ -20,13 +20,15 @@ class PresenceDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Absent means absent: no question mark on every avatar.
+    if (!PresenceScope.known(context, presence)) return const SizedBox.shrink();
     final tokens = LoafTokens.of(context);
     final offline = presence == Presence.offline;
     final fill = switch (presence) {
       Presence.online => tokens.online,
       Presence.idle => tokens.idle,
       Presence.dnd => tokens.accent,
-      Presence.offline => ring,
+      Presence.offline || Presence.unknown => ring,
     };
     // Every state draws the same inner disc inside the same ring, so a
     // hollow offline mark is exactly as big as a filled one.
@@ -62,4 +64,30 @@ class PresenceDot extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Whether your own server shares presence at all. Presence reaches you
+/// through your homeserver, so when it is off there, nobody's arrives —
+/// and every dot, fade and presence choice goes with it.
+class PresenceScope extends InheritedWidget {
+  const PresenceScope({super.key, required this.shared, required super.child});
+
+  final bool shared;
+
+  /// Shared unless something above says otherwise.
+  static bool sharedOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<PresenceScope>()?.shared ??
+      true;
+
+  /// [presence] as this screen can know it: unknown on a server that
+  /// shares none.
+  static Presence effective(BuildContext context, Presence presence) =>
+      sharedOf(context) ? presence : Presence.unknown;
+
+  static bool known(BuildContext context, Presence presence) =>
+      effective(context, presence) != Presence.unknown;
+
+  @override
+  bool updateShouldNotify(PresenceScope oldWidget) =>
+      shared != oldWidget.shared;
 }
