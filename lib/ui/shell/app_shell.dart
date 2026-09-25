@@ -6,12 +6,20 @@
 /// screen — Discord's phone layout, which is the solved version of this.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../call/call_controller.dart';
+import '../call/call_debug.dart';
 import '../call/connected_call_bar.dart';
+import '../call/dm_call_panel.dart';
+import '../call/incoming_call_card.dart';
+import '../call/voice_channel_page.dart';
 import '../channel/channel_view.dart';
 import '../channel/timeline_controller.dart';
 import '../members/member_list.dart';
+import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
@@ -38,21 +46,38 @@ class _AppShellState extends State<AppShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _timeline = TimelineController(mockTimeline(), you: currentUser);
   final _profile = ProfileController();
+  late final _calls = CallController(
+    me: currentUser,
+    rings: mockRings,
+    flags: mockCallFlags,
+    onRecord: _onCallRecord,
+  );
+
+  /// Each DM has its own conversation; the spaces' channels share the one
+  /// mock timeline.
+  final _directTimelines = <String, TimelineController>{};
 
   @override
   void initState() {
     super.initState();
-    _profile.addListener(_onProfile);
+    _profile.addListener(_onChange);
+    _calls.addListener(_onChange);
   }
 
-  void _onProfile() => setState(() {});
+  void _onChange() => setState(() {});
 
   @override
   void dispose() {
     _profile
-      ..removeListener(_onProfile)
+      ..removeListener(_onChange)
+      ..dispose();
+    _calls
+      ..removeListener(_onChange)
       ..dispose();
     _timeline.dispose();
+    for (final t in _directTimelines.values) {
+      t.dispose();
+    }
     super.dispose();
   }
 
@@ -66,23 +91,48 @@ class _AppShellState extends State<AppShell> {
   var _showUpdate = true;
   final _showVerify = true;
 
-  Channel? _connected;
-  String? _connectedSpaceName;
-  bool _muted = false;
-  bool _deafened = false;
-
   /// Only consulted on wide layouts, where the member list is a column you
   /// can put away. On a phone it is a drawer and opens on demand.
   bool _showMembers = true;
+
+  /// The DM call panel fills the conversation rather than docking above it.
+  bool _dmPanelExpanded = false;
+
+  /// Desktop only: the voice call fills the window.
+  bool _fullscreen = false;
 
   // This session's changes, layered over the fixtures by Space.withSession.
   final _membership = <String, bool>{};
   final _mutedNow = <String, bool>{};
   final _read = <String>{};
+  final _missedCalls = <String, int>{};
 
-  Space get _space => mockSpaces
-      .firstWhere((s) => s.id == _spaceId)
-      .withSession(membership: _membership, muted: _mutedNow, read: _read);
+  bool get _home => _spaceId == mockHome.id;
+
+  Space get _space =>
+      (_home ? mockHome : mockSpaces.firstWhere((s) => s.id == _spaceId))
+          .withSession(
+            membership: _membership,
+            muted: _mutedNow,
+            read: _read,
+            occupants: _callOccupants,
+            unread: _missedCalls,
+          );
+
+  /// Who is in the call you are in, you included — so its channel or DM
+  /// lists you under it like everyone else.
+  Map<String, List<Member>> get _callOccupants {
+    final session = _calls.session;
+    if (session == null || !_calls.inCall) return const {};
+    if (session.phase == CallPhase.ringing) return const {};
+    return {
+      session.target.id: [
+        _profile.me,
+        for (final p in session.participants)
+          if (p.present) p.member,
+      ],
+    };
+  }
 
   Channel get _channel {
     final channels = _space.allChannels;
@@ -90,37 +140,62 @@ class _AppShellState extends State<AppShell> {
     return channels.firstWhere(
       (c) => c.id == remembered && c.joined,
       orElse: () =>
-          channels.firstWhere((c) => c.kind == ChannelKind.text && c.joined),
+          channels.firstWhere((c) => c.kind != ChannelKind.voice && c.joined),
     );
   }
 
-  void _selectSpace(String id) => setState(() => _spaceId = id);
+  TimelineController _timelineFor(Channel channel) =>
+      channel.kind != ChannelKind.direct
+      ? _timeline
+      : _directTimelines.putIfAbsent(
+          channel.id,
+          () => TimelineController(
+            mockDirectTimeline(channel.id),
+            you: currentUser,
+          ),
+        );
+
+  void _selectSpace(String id) => setState(() {
+    _spaceId = id;
+    // Home opens straight onto a DM, and seeing it is reading it.
+    if (_home) _open(id, _channel.id);
+  });
+
+  void _open(String spaceId, String channelId) {
+    _spaceId = spaceId;
+    _channelBySpace[spaceId] = channelId;
+    _fullscreen = false;
+    if (spaceId == mockHome.id) {
+      _read.add(channelId);
+      _missedCalls.remove(channelId);
+    }
+  }
 
   void _selectChannel(String id) {
     final channel = _space.allChannels.firstWhere((c) => c.id == id);
 
-    // Tapping a channel you are not in joins it. A text channel then opens,
-    // since looking is why you joined; a voice channel does not connect —
-    // membership and being in the call are separate steps.
-    if (!channel.joined) {
-      setState(() => _membership[id] = true);
-      if (channel.kind == ChannelKind.voice) return;
-    }
-
-    // Tapping a voice channel joins it rather than navigating — you stay
-    // where you were reading. That is what makes voice ambient.
-    if (channel.kind == ChannelKind.voice) {
-      setState(() {
-        final alreadyHere = _connected?.id == channel.id;
-        _connected = alreadyHere ? null : channel;
-        _connectedSpaceName = alreadyHere ? null : _space.name;
-        if (alreadyHere) _muted = false;
-      });
-      return;
-    }
-
-    setState(() => _channelBySpace[_spaceId] = id);
+    // Tapping a channel you are not in joins it and opens it. A voice
+    // channel opens to its lobby rather than connecting: membership and
+    // being in the call are separate steps.
+    final joining = !channel.joined;
+    setState(() {
+      if (joining) _membership[id] = true;
+      _open(_spaceId, id);
+      // A computer connects on click; a phone shows the lobby first, since a
+      // stray tap there should never open a live mic.
+      if (channel.kind == ChannelKind.voice && !joining && isDesktop) {
+        final here = _calls.inCall && _calls.session!.target.id == id;
+        if (!here) _joinVoice(channel);
+      }
+    });
     _scaffoldKey.currentState?.closeDrawer();
+  }
+
+  void _joinVoice(Channel channel) {
+    final space = mockSpaces.firstWhere(
+      (s) => s.allChannels.any((c) => c.id == channel.id),
+    );
+    _calls.joinVoice(channel, spaceName: space.name);
   }
 
   void _channelAction(String id, ChannelAction action) => setState(() {
@@ -136,19 +211,97 @@ class _AppShellState extends State<AppShell> {
         // first joined text channel: see _channel.
         _membership[id] = false;
         // Leaving a voice channel you are in takes you out of the call too.
-        if (_connected?.id == id) {
-          _connected = null;
-          _connectedSpaceName = null;
-          _muted = false;
-        }
+        if (_calls.session?.target.id == id) _calls.leave();
     }
   });
 
-  void _disconnect() => setState(() {
-    _connected = null;
-    _connectedSpaceName = null;
-    _muted = false;
-  });
+  /// Back to wherever the call lives: its voice channel, or its DM.
+  void _goToCall() {
+    final target = _calls.session?.target;
+    if (target == null) return;
+    setState(() {
+      if (target.kind == ChannelKind.direct) {
+        _open(mockHome.id, target.id);
+      } else {
+        final space = mockSpaces.firstWhere(
+          (s) => s.allChannels.any((c) => c.id == target.id),
+        );
+        _open(space.id, target.id);
+      }
+    });
+  }
+
+  void _onCallRecord(Channel chat, CallRecord record) {
+    _timelineFor(chat).addCall(
+      record.label,
+      record is EndedCall ? CallLine.ended : CallLine.missed,
+      from: chat.members.first,
+    );
+    final looking = _home && _channel.id == chat.id;
+    if (record is MissedCall && !looking) {
+      _missedCalls[chat.id] = (_missedCalls[chat.id] ?? 0) + 1;
+    }
+  }
+
+  // ── Incoming calls ─────────────────────────────────────────────────────
+
+  /// iOS answers through CallKit's own screen, never ours: the mock skips
+  /// straight to having answered.
+  bool get _callKit => defaultTargetPlatform == TargetPlatform.iOS;
+
+  void _ring(String chatId, String callerId) {
+    final chat = mockHome.allChannels.firstWhere((c) => c.id == chatId);
+    final caller = chat.members.firstWhere((m) => m.id == callerId);
+    _calls.receive(chat, from: caller);
+    if (_callKit) _accept();
+  }
+
+  void _accept() {
+    final ring = _calls.incoming;
+    if (ring == null) return;
+    _calls.accept();
+    setState(() {
+      _open(mockHome.id, ring.chat.id);
+      // Answering on a phone is committing to the call; a computer has room
+      // for the call and the conversation together.
+      _dmPanelExpanded = !isDesktop;
+    });
+    _scaffoldKey.currentState?.closeDrawer();
+  }
+
+  void _openIncoming() {
+    final ring = _calls.incoming;
+    if (ring == null) return;
+    setState(() => _open(mockHome.id, ring.chat.id));
+  }
+
+  Future<void> _debug(Rect anchor) async {
+    final pick = await showCallDebug(context, anchor);
+    if (pick == null) return;
+    switch (pick) {
+      case CallDebug.ringFromMika:
+        _ring('dm-mika', '@mika');
+      case CallDebug.ringFromCrew:
+        _ring('dm-crew', '@jun');
+      case CallDebug.reconnecting:
+        _calls.toggleReconnecting();
+      case CallDebug.failNext:
+        _calls.failNextConnection();
+      case CallDebug.encryption:
+        _calls.toggleEncryption();
+      case CallDebug.micBlocked:
+        _calls.toggleMicBlocked();
+      case CallDebug.cameraBlocked:
+        _calls.toggleCameraBlocked();
+      case CallDebug.remoteShare:
+        final someone = _calls.session?.participants
+            .where((p) => p.present)
+            .firstOrNull;
+        if (someone != null) _calls.toggleRemoteShare(someone.member.id);
+    }
+  }
+
+  // ── Building ───────────────────────────────────────────────────────────
 
   List<AppNotice> get _notices => [
     if (_showVerify) AppNotice.verify(onAction: () {}),
@@ -161,67 +314,164 @@ class _AppShellState extends State<AppShell> {
       ),
   ];
 
+  /// Whether the call's own page or panel is what you are looking at, in
+  /// which case the bar would only repeat it.
+  bool get _lookingAtCall =>
+      _calls.session?.target.id == _channel.id &&
+      (_home || _channel.kind == ChannelKind.voice);
+
   Widget? _buildCallBar() {
-    final connected = _connected;
-    if (connected == null) return null;
+    final session = _calls.session;
+    if (session == null || !_calls.inCall || _lookingAtCall) return null;
+    final target = session.target;
+    final present = [
+      for (final p in session.participants)
+        if (p.present) p.member,
+    ];
+    final String subtitle;
+    if (target.kind != ChannelKind.direct) {
+      subtitle = '${target.name} · ${session.spaceName ?? ''}';
+    } else if (target.members.length == 1) {
+      subtitle = 'call with ${target.members.single.name}';
+    } else {
+      final names = target.members.take(2).map((m) => m.name).join(', ');
+      final more = target.members.length - 2;
+      subtitle = more > 0 ? 'call · $names +$more' : 'call · $names';
+    }
+    final title = switch (session.phase) {
+      CallPhase.ringing => 'Ringing…',
+      CallPhase.connecting => 'Connecting…',
+      CallPhase.reconnecting => 'Reconnecting…',
+      _ => session.direct ? 'Call connected' : 'Voice connected',
+    };
     return ConnectedCallBar(
-      channel: connected,
-      spaceName: _connectedSpaceName ?? '',
-      muted: _muted,
-      onToggleMute: () => setState(() => _muted = !_muted),
-      onDisconnect: _disconnect,
-      onExpand: () {},
+      title: title,
+      subtitle: subtitle,
+      warning: session.phase == CallPhase.reconnecting,
+      occupants: present,
+      muted: _calls.muted,
+      onToggleMute: _calls.toggleMute,
+      onDisconnect: _calls.leave,
+      onExpand: _goToCall,
     );
+  }
+
+  Widget _buildMain({required bool wide}) {
+    final channel = _channel;
+    final openNavigation = wide
+        ? null
+        : () => _scaffoldKey.currentState?.openDrawer();
+
+    if (channel.kind == ChannelKind.voice) {
+      return VoiceChannelPage(
+        channel: channel,
+        calls: _calls,
+        onJoin: () => _joinVoice(channel),
+        onOpenNavigation: openNavigation,
+        fullscreen: _fullscreen,
+        onToggleFullscreen: wide
+            ? () => setState(() => _fullscreen = !_fullscreen)
+            : null,
+      );
+    }
+
+    final session = _calls.session;
+    final callHere = session != null && session.target.id == channel.id;
+    return ChannelView(
+      channel: channel,
+      timeline: _timelineFor(channel),
+      navigationAttention: _notices.any((n) => n.loud),
+      callBar: _buildCallBar(),
+      onOpenNavigation: openNavigation,
+      onToggleMembers: wide
+          ? () => setState(() => _showMembers = !_showMembers)
+          : () => _scaffoldKey.currentState?.openEndDrawer(),
+      onStartCall: callHere
+          ? null
+          : ({required video}) {
+              _dmPanelExpanded = false;
+              _calls.startDirect(channel, video: video);
+            },
+      callPanel: callHere
+          ? DmCallPanel(
+              calls: _calls,
+              expanded: _dmPanelExpanded,
+              onToggleExpanded: () =>
+                  setState(() => _dmPanelExpanded = !_dmPanelExpanded),
+            )
+          : null,
+      callPanelExpanded: _dmPanelExpanded,
+    );
+  }
+
+  /// Desktop call shortcuts, live only while you are in a call. Escape
+  /// leaves fullscreen.
+  Map<ShortcutActivator, VoidCallback> get _shortcuts {
+    if (!isDesktop) return const {};
+    final mac = defaultTargetPlatform == TargetPlatform.macOS;
+    SingleActivator combo(LogicalKeyboardKey key) =>
+        SingleActivator(key, shift: true, meta: mac, control: !mac);
+    return {
+      if (_calls.inCall) ...{
+        combo(LogicalKeyboardKey.keyM): _calls.toggleMute,
+        combo(LogicalKeyboardKey.keyD): _calls.toggleDeafen,
+        combo(LogicalKeyboardKey.keyV): _calls.toggleCamera,
+      },
+      if (_fullscreen)
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            setState(() => _fullscreen = false),
+    };
   }
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
 
-    return LayoutBuilder(
+    // Fullscreen only makes sense while there is a call on screen.
+    if (_fullscreen && !(_calls.inCall && _channel.kind == ChannelKind.voice)) {
+      _fullscreen = false;
+    }
+
+    final shell = LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= _wideBreakpoint;
 
-        final channel = ChannelView(
-          channel: _channel,
-          timeline: _timeline,
-          navigationAttention: _notices.any((n) => n.loud),
-          callBar: _buildCallBar(),
-          onOpenNavigation: wide
-              ? null
-              : () => _scaffoldKey.currentState?.openDrawer(),
-          onToggleMembers: wide
-              ? () => setState(() => _showMembers = !_showMembers)
-              : () => _scaffoldKey.currentState?.openEndDrawer(),
-        );
+        final main = _buildMain(wide: wide);
         final me = _profile.me;
+        final channel = _channel;
         final members = MemberList(
-          members: [for (final m in _space.members) m.id == me.id ? me : m],
+          members: channel.kind == ChannelKind.direct
+              ? [me, ...channel.members]
+              : [for (final m in _space.members) m.id == me.id ? me : m],
         );
 
         if (wide) {
           return Scaffold(
             key: _scaffoldKey,
             backgroundColor: tokens.page,
-            body: Row(
-              children: [
-                SizedBox(
-                  width: LoafShell.railWidth + LoafShell.sidebarWidth,
-                  child: _navigation,
-                ),
-                Expanded(child: channel),
-                if (_showMembers)
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border(left: BorderSide(color: tokens.border)),
-                    ),
-                    child: SizedBox(
-                      width: LoafShell.memberListWidth,
-                      child: members,
-                    ),
+            body: _fullscreen
+                ? main
+                : Row(
+                    children: [
+                      SizedBox(
+                        width: LoafShell.railWidth + LoafShell.sidebarWidth,
+                        child: _navigation,
+                      ),
+                      Expanded(child: main),
+                      if (_showMembers && channel.kind == ChannelKind.text)
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            border: Border(
+                              left: BorderSide(color: tokens.border),
+                            ),
+                          ),
+                          child: SizedBox(
+                            width: LoafShell.memberListWidth,
+                            child: members,
+                          ),
+                        ),
+                    ],
                   ),
-              ],
-            ),
           );
         }
 
@@ -248,9 +498,31 @@ class _AppShellState extends State<AppShell> {
             backgroundColor: tokens.sidebar,
             child: members,
           ),
-          body: channel,
+          body: main,
         );
       },
+    );
+
+    final ring = _calls.incoming;
+    return CallbackShortcuts(
+      bindings: _shortcuts,
+      child: Focus(
+        autofocus: true,
+        child: Stack(
+          children: [
+            shell,
+            if (ring != null && !_callKit)
+              _IncomingPosition(
+                child: IncomingCallCard(
+                  ring: ring,
+                  onAccept: _accept,
+                  onDecline: _calls.decline,
+                  onOpen: _openIncoming,
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -271,13 +543,21 @@ class _AppShellState extends State<AppShell> {
               selectedSpaceId: _spaceId,
               onSelect: _selectSpace,
               notices: _notices,
+              homeSelected: _home,
+              onHome: () => _selectSpace(mockHome.id),
+              homeBadge: mockHome
+                  .withSession(read: _read, unread: _missedCalls)
+                  .allChannels
+                  .fold(0, (sum, c) => sum + c.unread),
+              homeRinging: _calls.incoming != null,
             ),
             Expanded(
               child: ChannelList(
                 space: _space,
                 selectedChannelId: _channel.id,
                 onSelect: _selectChannel,
-                onAction: _channelAction,
+                onAction: _home ? null : _channelAction,
+                ringingId: _calls.incoming?.chat.id,
               ),
             ),
           ],
@@ -287,26 +567,44 @@ class _AppShellState extends State<AppShell> {
           right: UserBar.inset,
           bottom: UserBar.inset + MediaQuery.paddingOf(context).bottom,
           child: UserBar(
-            muted: _muted,
-            deafened: _deafened,
-            // Deafening implies muting. Coming back out restores you to
-            // unmuted rather than leaving you silently muted for a reason
-            // you never chose.
-            onToggleMute: () => setState(() {
-              _muted = !_muted;
-              if (!_muted) _deafened = false;
-            }),
-            onToggleDeafen: () => setState(() {
-              _deafened = !_deafened;
-              if (!_deafened) _muted = false;
-            }),
+            muted: _calls.muted,
+            deafened: _calls.deafened,
+            onToggleMute: _calls.toggleMute,
+            onToggleDeafen: _calls.toggleDeafen,
             onSettings: () => showSettings(context, profile: _profile),
             me: _profile.me,
             onAvatarTap: (anchor) =>
                 showStatusPicker(context, _profile, anchor: anchor),
+            onDebug: kDebugMode ? _debug : null,
           ),
         ),
       ],
     ),
   );
+}
+
+/// Desktop: a card in the top-right corner. Android: pinned across the top.
+class _IncomingPosition extends StatelessWidget {
+  const _IncomingPosition({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final padding = MediaQuery.paddingOf(context);
+    if (isDesktop) {
+      return Positioned(
+        top: LoafSpace.x4 + padding.top,
+        right: LoafSpace.x4,
+        width: IncomingCallCard.width,
+        child: child,
+      );
+    }
+    return Positioned(
+      top: LoafSpace.x2 + padding.top,
+      left: LoafSpace.x2,
+      right: LoafSpace.x2,
+      child: child,
+    );
+  }
 }

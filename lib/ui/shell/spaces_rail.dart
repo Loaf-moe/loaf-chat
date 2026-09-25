@@ -17,7 +17,13 @@ class SpacesRail extends StatelessWidget {
     required this.selectedSpaceId,
     required this.onSelect,
     this.notices = const [],
+    this.homeSelected = false,
+    this.onHome,
+    this.homeBadge = 0,
+    this.homeRinging = false,
   });
+
+  static const homeKey = ValueKey('home');
 
   final List<Space> spaces;
   final String selectedSpaceId;
@@ -26,6 +32,17 @@ class SpacesRail extends StatelessWidget {
   /// Pinned below the scrolling spaces, just above the account panel, so
   /// they stay put however many spaces you are in.
   final List<AppNotice> notices;
+
+  /// The loaf mark doubles as Home, where DMs live — Discord's logo does
+  /// the same.
+  final bool homeSelected;
+  final VoidCallback? onHome;
+
+  /// Unread DMs, including missed calls.
+  final int homeBadge;
+
+  /// A DM call is ringing at you.
+  final bool homeRinging;
 
   @override
   Widget build(BuildContext context) {
@@ -41,7 +58,13 @@ class SpacesRail extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 14),
           child: Column(
             children: [
-              _LoafMark(tokens: tokens),
+              _LoafMark(
+                tokens: tokens,
+                selected: homeSelected,
+                onTap: onHome,
+                badge: homeBadge,
+                ringing: homeRinging,
+              ),
               Expanded(
                 child: SingleChildScrollView(
                   child: Column(
@@ -77,16 +100,25 @@ class SpacesRail extends StatelessWidget {
 }
 
 class _LoafMark extends StatelessWidget {
-  const _LoafMark({required this.tokens});
+  const _LoafMark({
+    required this.tokens,
+    required this.selected,
+    required this.onTap,
+    required this.badge,
+    required this.ringing,
+  });
 
   final LoafTokens tokens;
+  final bool selected;
+  final VoidCallback? onTap;
+  final int badge;
+  final bool ringing;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    final mark = Container(
       width: 44,
       height: 44,
-      margin: const EdgeInsets.only(bottom: 6),
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: tokens.onRail,
@@ -107,7 +139,83 @@ class _LoafMark extends StatelessWidget {
         ),
       ),
     );
+    return Tooltip(
+      message: 'Home',
+      child: GestureDetector(
+        key: SpacesRail.homeKey,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
+              children: [
+                Positioned(
+                  left: 0,
+                  child: _SelectionPill(tokens: tokens, selected: selected),
+                ),
+                mark,
+                if (ringing)
+                  Positioned(
+                    right: LoafShell.railWidth / 2 - 30,
+                    top: -2,
+                    child: Container(
+                      key: const ValueKey('home-ringing'),
+                      width: 20,
+                      height: 20,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: tokens.online,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: tokens.rail, width: 2),
+                      ),
+                      child: const Icon(
+                        LucideIcons.phone,
+                        size: 10,
+                        color: Colors.white,
+                      ),
+                    ),
+                  )
+                else if (badge > 0)
+                  Positioned(
+                    right: LoafShell.railWidth / 2 - 30,
+                    top: -2,
+                    child: _CountBadge(
+                      count: badge,
+                      tokens: tokens,
+                      ringColor: tokens.rail,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
+}
+
+/// The accent bar at the rail's left edge that marks where you are.
+class _SelectionPill extends StatelessWidget {
+  const _SelectionPill({required this.tokens, required this.selected});
+
+  final LoafTokens tokens;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) => AnimatedContainer(
+    duration: LoafMotion.fast,
+    curve: LoafMotion.ease,
+    width: 4,
+    height: selected ? 26 : 0,
+    decoration: BoxDecoration(
+      color: tokens.accent,
+      borderRadius: BorderRadius.circular(2),
+    ),
+  );
 }
 
 class _SpaceItem extends StatelessWidget {
@@ -141,16 +249,7 @@ class _SpaceItem extends StatelessWidget {
               top: 0,
               bottom: 0,
               child: Center(
-                child: AnimatedContainer(
-                  duration: LoafMotion.fast,
-                  curve: LoafMotion.ease,
-                  width: 4,
-                  height: selected ? 26 : 0,
-                  decoration: BoxDecoration(
-                    color: tokens.accent,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
+                child: _SelectionPill(tokens: tokens, selected: selected),
               ),
             ),
             Center(

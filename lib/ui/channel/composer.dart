@@ -35,9 +35,18 @@ double _fieldPad(TextScaler scaler) {
 }
 
 class Composer extends StatefulWidget {
-  const Composer({super.key, required this.channelName, this.timeline});
+  const Composer({
+    super.key,
+    required this.channelName,
+    this.timeline,
+    this.prefix = '#',
+  });
 
   final String channelName;
+
+  /// What the placeholder puts before the name: `#` for a channel, `@` for
+  /// a person, nothing for a group DM.
+  final String prefix;
 
   /// Supplies the message being replied to or edited, if any.
   final TimelineController? timeline;
@@ -215,7 +224,7 @@ class _ComposerState extends State<Composer> {
                   isCollapsed: true,
                   border: InputBorder.none,
                   contentPadding: EdgeInsets.zero,
-                  hintText: 'Message #${widget.channelName}',
+                  hintText: 'Message ${widget.prefix}${widget.channelName}',
                   hintStyle: loafBody(
                     _textSize,
                     400,

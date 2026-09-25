@@ -42,4 +42,19 @@ void main() {
       expect(field.dy, moreOrLessEquals(plus.dy, epsilon: 0.5));
     });
   }
+
+  testWidgets('a DM\'s placeholder names the person, not a channel', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: loafDarkTheme(),
+        home: const Scaffold(
+          body: Composer(channelName: 'Mika Rye', prefix: '@'),
+        ),
+      ),
+    );
+
+    expect(find.text('Message @Mika Rye'), findsOneWidget);
+  });
 }

@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../call/call_tile.dart';
+import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
@@ -18,9 +20,13 @@ class ChannelList extends StatefulWidget {
     required this.selectedChannelId,
     required this.onSelect,
     this.onAction,
+    this.ringingId,
   });
 
   final Space space;
+
+  /// A direct chat whose call is ringing at you.
+  final String? ringingId;
   final String selectedChannelId;
   final ValueChanged<String> onSelect;
 
@@ -72,6 +78,7 @@ class _ChannelListState extends State<ChannelList> {
                       onToggle: () => _toggle(category.name),
                       onSelect: widget.onSelect,
                       onAction: widget.onAction,
+                      ringingId: widget.ringingId,
                     ),
                 ],
               ),
@@ -153,9 +160,11 @@ class _CategorySection extends StatelessWidget {
     required this.onToggle,
     required this.onSelect,
     required this.onAction,
+    this.ringingId,
   });
 
   final ChannelCategory category;
+  final String? ringingId;
   final bool collapsed;
   final String selectedChannelId;
   final LoafTokens tokens;
@@ -215,6 +224,7 @@ class _CategorySection extends StatelessWidget {
           _ChannelEntry(
             channel: channel,
             selected: channel.id == selectedChannelId,
+            ringing: channel.id == ringingId,
             tokens: tokens,
             onTap: () => onSelect(channel.id),
             onAction: onAction == null || !channel.joined
@@ -233,10 +243,12 @@ class _ChannelEntry extends StatelessWidget {
     required this.tokens,
     required this.onTap,
     required this.onAction,
+    this.ringing = false,
   });
 
   final Channel channel;
   final bool selected;
+  final bool ringing;
   final LoafTokens tokens;
   final VoidCallback onTap;
   final ValueChanged<ChannelAction>? onAction;
@@ -255,6 +267,7 @@ class _ChannelEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final joined = channel.joined;
+    final direct = channel.kind == ChannelKind.direct;
     // Muted channels keep their mentions but lose the bold "something new"
     // styling: that is the point of muting them.
     final unread = joined && !channel.muted && channel.unread > 0;
@@ -304,8 +317,11 @@ class _ChannelEntry extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Row(
                     children: [
-                      Icon(iconData, size: 16, color: fg),
-                      const SizedBox(width: 6),
+                      if (direct)
+                        _DirectAvatar(channel: channel, tokens: tokens)
+                      else
+                        Icon(iconData, size: 16, color: fg),
+                      SizedBox(width: direct ? 8 : 6),
                       Expanded(
                         child: Text(
                           channel.name,
@@ -323,9 +339,24 @@ class _ChannelEntry extends StatelessWidget {
                           color: tokens.textMuted,
                         ),
                       ],
-                      if (!joined) ...[
+                      if (ringing) ...[
+                        const SizedBox(width: 6),
+                        Pulse(
+                          key: const ValueKey('dm-ringing'),
+                          child: Icon(
+                            LucideIcons.phoneIncoming,
+                            size: 16,
+                            color: tokens.online,
+                          ),
+                        ),
+                      ] else if (!joined) ...[
                         const SizedBox(width: 6),
                         _JoinPill(tokens: tokens),
+                      ] else if (direct && channel.unread > 0) ...[
+                        // Everything in a DM is addressed to you, so its
+                        // unread count is the badge.
+                        const SizedBox(width: 6),
+                        _CountBadge(count: channel.unread, tokens: tokens),
                       ] else if (channel.mentions > 0) ...[
                         const SizedBox(width: 6),
                         _CountBadge(count: channel.mentions, tokens: tokens),
@@ -336,7 +367,7 @@ class _ChannelEntry extends StatelessWidget {
               ),
             ),
           ),
-          if (channel.kind == ChannelKind.voice && channel.occupants.isNotEmpty)
+          if (channel.kind != ChannelKind.text && channel.occupants.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(left: 30, top: 2, bottom: 4),
               child: Column(
@@ -371,6 +402,61 @@ class _ChannelEntry extends StatelessWidget {
 
 /// Marks a channel you can join with one tap. Not a separate button: the
 /// whole row joins, and this says so.
+/// A DM's face in the list: the person with their presence, or for a group,
+/// two of its people overlapping.
+class _DirectAvatar extends StatelessWidget {
+  const _DirectAvatar({required this.channel, required this.tokens});
+
+  final Channel channel;
+  final LoafTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    final members = channel.members;
+    if (members.length == 1) {
+      return SizedBox(
+        width: 22,
+        height: 22,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            _MemberAvatar(member: members.single, size: 22),
+            Positioned(
+              right: -3,
+              bottom: -3,
+              child: PresenceDot(
+                presence: members.single.presence,
+                ring: tokens.sidebar,
+                size: 10,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return SizedBox(
+      width: 22,
+      height: 22,
+      child: Stack(
+        children: [
+          _MemberAvatar(member: members[0], size: 15),
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: tokens.sidebar, width: 1.5),
+              ),
+              child: _MemberAvatar(member: members[1], size: 14),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _JoinPill extends StatelessWidget {
   const _JoinPill({required this.tokens});
 
@@ -434,7 +520,9 @@ class _MemberAvatar extends StatelessWidget {
       decoration: BoxDecoration(color: member.color, shape: BoxShape.circle),
       child: Text(
         member.initials,
-        style: loafBody(9, 600).copyWith(color: Colors.white),
+        // Scales with the circle: a group DM's overlapping pair is smaller
+        // than a voice occupant's avatar.
+        style: loafBody(size * 0.42, 600).copyWith(color: Colors.white),
       ),
     );
   }

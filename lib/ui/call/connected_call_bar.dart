@@ -1,4 +1,4 @@
-/// The persistent bar shown while you are connected to a voice channel.
+/// The persistent bar shown while you are in a call and looking elsewhere.
 ///
 /// This is what keeps voice feeling always-on rather than call-shaped: it
 /// survives navigating to other channels and other spaces, so leaving a
@@ -14,16 +14,27 @@ import '../theme/loaf_theme.dart';
 class ConnectedCallBar extends StatelessWidget {
   const ConnectedCallBar({
     super.key,
-    required this.channel,
-    required this.spaceName,
+    required this.title,
+    required this.subtitle,
+    this.occupants = const [],
+    this.warning = false,
     required this.muted,
     required this.onToggleMute,
     required this.onDisconnect,
     this.onExpand,
   });
 
-  final Channel channel;
-  final String spaceName;
+  /// The call's state: "Voice connected", "Ringing…", "Reconnecting…".
+  final String title;
+
+  /// Where the call is: "the hangout · The Starter Pack", "call with Mika".
+  final String subtitle;
+
+  final List<Member> occupants;
+
+  /// Draws [title] in amber rather than green: the call is struggling.
+  final bool warning;
+
   final bool muted;
   final VoidCallback onToggleMute;
   final VoidCallback onDisconnect;
@@ -45,7 +56,11 @@ class ConnectedCallBar extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(LucideIcons.radio, size: 18, color: tokens.online),
+              Icon(
+                LucideIcons.radio,
+                size: 18,
+                color: warning ? tokens.idle : tokens.online,
+              ),
               const SizedBox(width: LoafSpace.x3),
               Expanded(
                 child: Column(
@@ -53,11 +68,14 @@ class ConnectedCallBar extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Voice connected',
-                      style: loafBody(11, 600).copyWith(color: tokens.online),
+                      title,
+                      style: loafBody(
+                        11,
+                        600,
+                      ).copyWith(color: warning ? tokens.idle : tokens.online),
                     ),
                     Text(
-                      '${channel.name} · $spaceName',
+                      subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: loafBody(
@@ -68,8 +86,8 @@ class ConnectedCallBar extends StatelessWidget {
                   ],
                 ),
               ),
-              if (channel.occupants.isNotEmpty) ...[
-                _OccupantStack(occupants: channel.occupants),
+              if (occupants.isNotEmpty) ...[
+                _OccupantStack(occupants: occupants),
                 const SizedBox(width: LoafSpace.x2),
               ],
               _CallAction(
@@ -82,7 +100,7 @@ class ConnectedCallBar extends StatelessWidget {
               const SizedBox(width: LoafSpace.x1),
               _CallAction(
                 icon: LucideIcons.phoneOff,
-                tooltip: 'Disconnect',
+                tooltip: 'Leave call',
                 onTap: onDisconnect,
                 foreground: tokens.accent,
               ),

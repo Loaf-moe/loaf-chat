@@ -23,8 +23,13 @@ class UserBar extends StatelessWidget {
     this.onToggleDeafen,
     this.onSettings,
     this.onAvatarTap,
+    this.onDebug,
     this.me = currentUser,
   });
+
+  /// Mock builds only: opens levers for states the fake data never reaches
+  /// on its own. Receives the button's bounds, to anchor a menu.
+  final ValueChanged<Rect>? onDebug;
 
   /// You, with your current presence.
   final Member me;
@@ -104,6 +109,17 @@ class UserBar extends StatelessWidget {
             tinted: deafened,
             onTap: onToggleDeafen,
           ),
+          if (onDebug != null)
+            Builder(
+              builder: (context) => _BarAction(
+                icon: LucideIcons.bug,
+                tooltip: 'Debug',
+                onTap: () {
+                  final box = context.findRenderObject()! as RenderBox;
+                  onDebug!(box.localToGlobal(Offset.zero) & box.size);
+                },
+              ),
+            ),
           _BarAction(
             icon: LucideIcons.settings,
             tooltip: 'Settings',

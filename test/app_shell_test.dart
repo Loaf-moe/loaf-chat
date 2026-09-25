@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:loaf_native/ui/call/call_controller.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
 import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
@@ -219,19 +220,18 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('joining a voice channel does not connect you', (tester) async {
+    testWidgets('joining a voice channel opens its lobby without connecting', (
+      tester,
+    ) async {
       await _pumpShell(tester, const Size(1440, 900));
 
       await tester.tap(find.text('late night vc'));
       await tester.pumpAndSettle();
 
       expect(pills(), findsNWidgets(2));
+      // Joining the room and being in the call are separate steps.
+      expect(find.text('join voice'), findsOneWidget);
       expect(find.text('Voice connected'), findsNothing);
-
-      // Once joined, it behaves like any voice channel.
-      await tester.tap(find.text('late night vc'));
-      await tester.pumpAndSettle();
-      expect(find.text('Voice connected'), findsOneWidget);
     });
 
     testWidgets('are hidden when their category is collapsed', (tester) async {
@@ -405,12 +405,14 @@ void main() {
       (tester) async {
         await _pumpShell(tester, const Size(1440, 900));
         await tester.tap(find.text('the hangout'));
-        await tester.pumpAndSettle();
-        expect(find.text('Voice connected'), findsOneWidget);
+        await tester.pump(CallController.connectDelay);
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.byKey(const ValueKey('call-view')), findsOneWidget);
 
         await rightClick(tester, 'the hangout');
         await pick(tester, 'Leave channel');
 
+        expect(find.byKey(const ValueKey('call-view')), findsNothing);
         expect(find.text('Voice connected'), findsNothing);
       },
     );
@@ -702,30 +704,29 @@ void main() {
     });
   });
 
-  testWidgets('joining a voice channel shows the call bar and keeps you '
-      'in the channel you were reading', (tester) async {
-    await _pumpShell(tester, const Size(1440, 900));
+  testWidgets(
+    'the call bar names the channel and space, and tapping the channel '
+    'again does not hang up',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      await _pumpShell(tester, const Size(1440, 900));
 
-    expect(find.text('Voice connected'), findsNothing);
+      await tester.tap(find.text('the hangout'));
+      await tester.pump(CallController.connectDelay);
+      await tester.tap(find.text('general').first);
+      await tester.pump(const Duration(milliseconds: 300));
 
-    await tester.tap(find.text('the hangout'));
-    await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Voice connected'), findsOneWidget);
+      expect(find.text('the hangout · The Starter Pack'), findsOneWidget);
 
-    expect(tester.takeException(), isNull);
-    expect(find.text('Voice connected'), findsOneWidget);
-    expect(
-      find.text('the hangout · The Starter Pack'),
-      findsOneWidget,
-      reason: 'the bar names the channel and the space it belongs to',
-    );
-    // The point of ambient voice: reading position is untouched.
-    expect(find.text('general'), findsWidgets);
-
-    // Tapping it again leaves.
-    await tester.tap(find.text('the hangout'));
-    await tester.pumpAndSettle();
-    expect(find.text('Voice connected'), findsNothing);
-  });
+      // Disconnecting lives on the bar and the call's controls, never on
+      // the channel itself: tapping it just takes you back to the call.
+      await tester.tap(find.text('the hangout'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const ValueKey('call-view')), findsOneWidget);
+    },
+  );
 
   testWidgets('reaction pills hug their content and sit on one row', (
     tester,

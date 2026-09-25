@@ -47,9 +47,22 @@ class ChannelView extends StatelessWidget {
     this.onToggleMembers,
     this.callBar,
     this.navigationAttention = false,
+    this.onStartCall,
+    this.callPanel,
+    this.callPanelExpanded = false,
   });
 
   final Channel channel;
+
+  /// DMs only: rings everyone in the chat. Null while a call here is already
+  /// running: the panel is right there, so the header's buttons step aside.
+  final void Function({required bool video})? onStartCall;
+
+  /// A DM's call, docked above the timeline.
+  final Widget? callPanel;
+
+  /// The call fills the conversation: no timeline, no composer.
+  final bool callPanelExpanded;
   final TimelineController timeline;
 
   /// Marks the menu button when a notice that must not be missed is waiting
@@ -84,10 +97,24 @@ class ChannelView extends StatelessWidget {
               onOpenNavigation: onOpenNavigation,
               onToggleMembers: onToggleMembers,
               navigationAttention: navigationAttention,
+              onStartCall: onStartCall,
             ),
-            Expanded(child: _Timeline(controller: timeline)),
-            ?callBar,
-            Composer(channelName: channel.name, timeline: timeline),
+            if (callPanel != null && callPanelExpanded)
+              Expanded(child: callPanel!)
+            else ...[
+              ?callPanel,
+              Expanded(child: _Timeline(controller: timeline)),
+              ?callBar,
+              Composer(
+                channelName: channel.name,
+                timeline: timeline,
+                prefix: switch (channel) {
+                  Channel(kind: ChannelKind.direct, members: [_]) => '@',
+                  Channel(kind: ChannelKind.direct) => '',
+                  _ => '#',
+                },
+              ),
+            ],
           ],
         ),
       ),
@@ -101,17 +128,21 @@ class _ChannelHeader extends StatelessWidget {
     required this.onOpenNavigation,
     required this.onToggleMembers,
     required this.navigationAttention,
+    this.onStartCall,
   });
 
   final Channel channel;
   final VoidCallback? onOpenNavigation;
   final VoidCallback? onToggleMembers;
   final bool navigationAttention;
+  final void Function({required bool video})? onStartCall;
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
     final topic = channel.topic;
+    final direct = channel.kind == ChannelKind.direct;
+    final onStartCall = this.onStartCall;
     return Container(
       height: 56,
       decoration: BoxDecoration(
@@ -154,11 +185,24 @@ class _ChannelHeader extends StatelessWidget {
                 ),
                 const SizedBox(width: LoafSpace.x2),
               ],
-              Icon(LucideIcons.hash, size: 18, color: tokens.textMuted),
+              Icon(
+                direct
+                    ? (channel.members.length > 1
+                          ? LucideIcons.users
+                          : LucideIcons.atSign)
+                    : LucideIcons.hash,
+                size: 18,
+                color: tokens.textMuted,
+              ),
               const SizedBox(width: LoafSpace.x1),
-              Text(
-                channel.name,
-                style: loafBody(15, 600).copyWith(color: tokens.textStrong),
+              Flexible(
+                flex: 0,
+                child: Text(
+                  channel.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: loafBody(15, 600).copyWith(color: tokens.textStrong),
+                ),
               ),
               if (showTopic) ...[
                 Padding(
@@ -178,10 +222,22 @@ class _ChannelHeader extends StatelessWidget {
                 ),
               ] else
                 const Spacer(),
-              _HeaderIconButton(
-                icon: LucideIcons.users,
-                onTap: onToggleMembers,
-              ),
+              if (direct && onStartCall != null) ...[
+                _HeaderIconButton(
+                  icon: LucideIcons.phone,
+                  tooltip: 'Start a voice call',
+                  onTap: () => onStartCall(video: false),
+                ),
+                _HeaderIconButton(
+                  icon: LucideIcons.video,
+                  tooltip: 'Start a video call',
+                  onTap: () => onStartCall(video: true),
+                ),
+              ] else if (!direct)
+                _HeaderIconButton(
+                  icon: LucideIcons.users,
+                  onTap: onToggleMembers,
+                ),
               // No search button: message search is a v1 non-goal, and in
               // encrypted rooms it needs a client-side index (see the spec).
             ],
@@ -193,15 +249,21 @@ class _ChannelHeader extends StatelessWidget {
 }
 
 class _HeaderIconButton extends StatelessWidget {
-  const _HeaderIconButton({required this.icon, required this.onTap});
+  const _HeaderIconButton({
+    required this.icon,
+    required this.onTap,
+    this.tooltip,
+  });
 
   final IconData icon;
   final VoidCallback? onTap;
+  final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
     return IconButton(
+      tooltip: tooltip,
       onPressed: onTap,
       icon: Icon(icon, size: 20, color: tokens.textMuted),
     );
