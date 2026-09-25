@@ -109,7 +109,31 @@ the member list is a right drawer.
   quick mute, settings.
 
 **`Home` is a pseudo-space** holding DMs, favourites, and rooms belonging to no
-space. Every Matrix client needs this escape hatch.
+space. Every Matrix client needs this escape hatch. The loaf mark at the top of
+the rail opens it. Its list runs in sections, each collapsible and hidden when
+empty, and each room appears in exactly one:
+
+| Section | Matrix | Order |
+|---|---|---|
+| Invites | rooms in the `invite` state | as received |
+| Favourites | `m.favourite` room tag | yours, from the tag's `order` |
+| Direct messages | rooms listed in `m.direct` account data | most recent activity |
+| Rooms | joined rooms that are no joined space's child (computed) | alphabetical |
+| Low priority | `m.lowpriority` room tag | alphabetical, collapsed |
+
+Favourite beats low priority, and both beat DM or room. Tags are set from a
+Home row's actions (long press, right-click) and only there: a space channel
+tagged elsewhere keeps its one place, in its space. Favourites reorder by drag;
+on a phone, a long press that moves drags and one that lets go in place opens
+the actions. The server's admin room (tuwunel's `#admins`, where `!admin`
+commands go to the server bot) is an ordinary room in no space, so it lives
+under Rooms. Server notices (`m.server_notice`) would too.
+
+An invite opens a preview, never the room: name, avatar, who invited you, and
+the topic and member count when the server's preview offers them, with accept
+and decline. Accepting a DM or room opens it in its section; accepting a space
+adds it to the rail. The Home badge counts DM unreads, room mentions and
+invites.
 
 **Voice channels are identified by room type.** A room is a voice channel when
 its room type marks it as one (Element's video rooms use `m.call`, unstable

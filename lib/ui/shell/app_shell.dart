@@ -18,6 +18,8 @@ import '../call/incoming_call_card.dart';
 import '../call/voice_channel_page.dart';
 import '../channel/channel_view.dart';
 import '../channel/timeline_controller.dart';
+import '../home/home_sections.dart';
+import '../home/invite_preview.dart';
 import '../members/member_list.dart';
 import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
@@ -107,10 +109,61 @@ class _AppShellState extends State<AppShell> {
   final _read = <String>{};
   final _missedCalls = <String, int>{};
 
+  // Home's room tags, as this session has them. Favourites are a list so
+  // their order is the list's; m.favourite's `order` is its position.
+  late final _favourites = [
+    for (final room in [
+      ...mockHomeRooms,
+    ]..sort((a, b) => (a.favouriteOrder ?? 1).compareTo(b.favouriteOrder ?? 1)))
+      if (room.favourite) room.id,
+  ];
+  final _lowPriority = <String, bool>{};
+
+  /// When a DM last saw a message or a call, this session.
+  final _activity = <String, DateTime>{};
+
+  // Invites answered this session, and what accepting them brought in.
+  final _answeredInvites = <String>{};
+  final _acceptedRooms = <Channel>[];
+  final _acceptedSpaces = <Space>[];
+
+  /// The invite being previewed in place of a conversation, if any.
+  String? _previewInvite;
+
+  List<Space> get _spaces => [...mockSpaces, ..._acceptedSpaces];
+
+  List<Invite> get _invites => [
+    for (final invite in mockInvites)
+      if (!_answeredInvites.contains(invite.id)) invite,
+  ];
+
   bool get _home => _spaceId == mockHome.id;
 
+  /// Home's rooms with this session's tags and activity applied. Rooms you
+  /// have left are gone: Home has no "join" pills, only what you are in.
+  List<Channel> get _homeRooms => [
+    for (final room in [...mockHomeRooms, ..._acceptedRooms])
+      if (_membership[room.id] != false)
+        room.copyWith(
+          favourite: _favourites.contains(room.id),
+          favouriteOrder: _favourites.contains(room.id)
+              ? _favourites.indexOf(room.id) / _favourites.length
+              : null,
+          lowPriority: _lowPriority[room.id],
+          lastActivity: _activity[room.id],
+        ),
+  ];
+
   Space get _space =>
-      (_home ? mockHome : mockSpaces.firstWhere((s) => s.id == _spaceId))
+      (_home
+              ? Space(
+                  id: mockHome.id,
+                  name: mockHome.name,
+                  color: mockHome.color,
+                  members: mockHome.members,
+                  categories: homeSections(_homeRooms),
+                )
+              : _spaces.firstWhere((s) => s.id == _spaceId))
           .withSession(
             membership: _membership,
             muted: _mutedNow,
@@ -144,16 +197,26 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  TimelineController _timelineFor(Channel channel) =>
-      channel.kind != ChannelKind.direct
+  static bool _inHome(Channel c) =>
+      c.kind == ChannelKind.direct || c.kind == ChannelKind.room;
+
+  TimelineController _timelineFor(Channel channel) => !_inHome(channel)
       ? _timeline
-      : _directTimelines.putIfAbsent(
-          channel.id,
-          () => TimelineController(
-            mockDirectTimeline(channel.id),
+      : _directTimelines.putIfAbsent(channel.id, () {
+          final timeline = TimelineController(
+            mockHomeTimeline(channel.id),
             you: currentUser,
-          ),
-        );
+          );
+          var count = timeline.messages.length;
+          // A new message moves a DM up the list.
+          timeline.addListener(() {
+            if (timeline.messages.length > count) {
+              setState(() => _activity[channel.id] = DateTime.now());
+            }
+            count = timeline.messages.length;
+          });
+          return timeline;
+        });
 
   void _selectSpace(String id) => setState(() {
     _spaceId = id;
@@ -165,6 +228,7 @@ class _AppShellState extends State<AppShell> {
     _spaceId = spaceId;
     _channelBySpace[spaceId] = channelId;
     _fullscreen = false;
+    _previewInvite = null;
     if (spaceId == mockHome.id) {
       _read.add(channelId);
       _missedCalls.remove(channelId);
@@ -192,7 +256,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _joinVoice(Channel channel) {
-    final space = mockSpaces.firstWhere(
+    final space = _spaces.firstWhere(
       (s) => s.allChannels.any((c) => c.id == channel.id),
     );
     _calls.joinVoice(channel, spaceName: space.name);
@@ -202,6 +266,14 @@ class _AppShellState extends State<AppShell> {
     switch (action) {
       case ChannelAction.markRead:
         _read.add(id);
+      case ChannelAction.favourite:
+        _favourites.add(id);
+      case ChannelAction.unfavourite:
+        _favourites.remove(id);
+      case ChannelAction.lowPriority:
+        _lowPriority[id] = true;
+      case ChannelAction.notLowPriority:
+        _lowPriority[id] = false;
       case ChannelAction.mute:
         _mutedNow[id] = true;
       case ChannelAction.unmute:
@@ -223,7 +295,7 @@ class _AppShellState extends State<AppShell> {
       if (target.kind == ChannelKind.direct) {
         _open(mockHome.id, target.id);
       } else {
-        final space = mockSpaces.firstWhere(
+        final space = _spaces.firstWhere(
           (s) => s.allChannels.any((c) => c.id == target.id),
         );
         _open(space.id, target.id);
@@ -231,7 +303,36 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
+  // ── Invites ────────────────────────────────────────────────────────────
+
+  void _openInvite(String id) {
+    setState(() => _previewInvite = id);
+    _scaffoldKey.currentState?.closeDrawer();
+  }
+
+  /// A DM or room joins its section and opens; a space joins the rail and
+  /// you stay in Home, where the rest of your invites are.
+  void _acceptInvite(Invite invite) => setState(() {
+    _answeredInvites.add(invite.id);
+    _previewInvite = null;
+    final room = invite.room;
+    final space = invite.space;
+    if (room != null) {
+      _acceptedRooms.add(room);
+      _activity[room.id] = DateTime.now();
+      _open(mockHome.id, room.id);
+    } else if (space != null) {
+      _acceptedSpaces.add(space);
+    }
+  });
+
+  void _declineInvite(Invite invite) => setState(() {
+    _answeredInvites.add(invite.id);
+    _previewInvite = null;
+  });
+
   void _onCallRecord(Channel chat, CallRecord record) {
+    _activity[chat.id] = DateTime.now();
     _timelineFor(chat).addCall(
       record.label,
       record is EndedCall ? CallLine.ended : CallLine.missed,
@@ -362,6 +463,18 @@ class _AppShellState extends State<AppShell> {
         ? null
         : () => _scaffoldKey.currentState?.openDrawer();
 
+    final invite = _home
+        ? _invites.where((i) => i.id == _previewInvite).firstOrNull
+        : null;
+    if (invite != null) {
+      return InvitePreview(
+        invite: invite,
+        onAccept: () => _acceptInvite(invite),
+        onDecline: () => _declineInvite(invite),
+        onOpenNavigation: openNavigation,
+      );
+    }
+
     if (channel.kind == ChannelKind.voice) {
       return VoiceChannelPage(
         channel: channel,
@@ -442,6 +555,8 @@ class _AppShellState extends State<AppShell> {
         final members = MemberList(
           members: channel.kind == ChannelKind.direct
               ? [me, ...channel.members]
+              : channel.kind == ChannelKind.room
+              ? [for (final m in channel.members) m.id == me.id ? me : m]
               : [for (final m in _space.members) m.id == me.id ? me : m],
         );
 
@@ -458,7 +573,10 @@ class _AppShellState extends State<AppShell> {
                         child: _navigation,
                       ),
                       Expanded(child: main),
-                      if (_showMembers && channel.kind == ChannelKind.text)
+                      if (_showMembers &&
+                          _previewInvite == null &&
+                          (channel.kind == ChannelKind.text ||
+                              channel.kind == ChannelKind.room))
                         DecoratedBox(
                           decoration: BoxDecoration(
                             border: Border(
@@ -526,6 +644,23 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  /// Everything in a DM is addressed to you, so a DM's unreads count; a
+  /// room counts only its mentions, like a channel. Invites wait on you too.
+  int get _homeBadge {
+    final rooms = Space(
+      id: mockHome.id,
+      name: mockHome.name,
+      color: mockHome.color,
+      categories: [ChannelCategory('all', _homeRooms)],
+    ).withSession(read: _read, unread: _missedCalls).allChannels;
+    return rooms.fold(
+          0,
+          (sum, c) =>
+              sum + (c.kind == ChannelKind.direct ? c.unread : c.mentions),
+        ) +
+        _invites.length;
+  }
+
   /// Rail and channel list side by side, with the account panel floating
   /// over the bottom of both. Overlaid rather than stacked, so the columns
   /// still run the full height behind it and your avatar appears once.
@@ -539,16 +674,13 @@ class _AppShellState extends State<AppShell> {
         Row(
           children: [
             SpacesRail(
-              spaces: mockSpaces,
+              spaces: _spaces,
               selectedSpaceId: _spaceId,
               onSelect: _selectSpace,
               notices: _notices,
               homeSelected: _home,
               onHome: () => _selectSpace(mockHome.id),
-              homeBadge: mockHome
-                  .withSession(read: _read, unread: _missedCalls)
-                  .allChannels
-                  .fold(0, (sum, c) => sum + c.unread),
+              homeBadge: _homeBadge,
               homeRinging: _calls.incoming != null,
             ),
             Expanded(
@@ -556,8 +688,17 @@ class _AppShellState extends State<AppShell> {
                 space: _space,
                 selectedChannelId: _channel.id,
                 onSelect: _selectChannel,
-                onAction: _home ? null : _channelAction,
+                onAction: _channelAction,
                 ringingId: _calls.incoming?.chat.id,
+                home: _home,
+                invites: _home ? _invites : const [],
+                selectedInviteId: _previewInvite,
+                onOpenInvite: _openInvite,
+                onReorderFavourites: (ids) => setState(
+                  () => _favourites
+                    ..clear()
+                    ..addAll(ids),
+                ),
               ),
             ),
           ],

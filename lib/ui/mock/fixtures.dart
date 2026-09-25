@@ -12,9 +12,10 @@ import '../members/presence.dart';
 
 // ── Models ─────────────────────────────────────────────────────────────────
 
-/// A direct chat is a Matrix room flagged in `m.direct`. It lives in the
-/// Home pseudo-space rather than in any space's channel list.
-enum ChannelKind { text, voice, direct }
+/// A direct chat is a Matrix room flagged in `m.direct`; a room is one you
+/// have joined that belongs to no space you are in. Both live in the Home
+/// pseudo-space rather than in any space's channel list.
+enum ChannelKind { text, voice, direct, room }
 
 /// What a member may do in a room, bucketed from their Matrix power level.
 /// Drives name colour everywhere — see "Name colour" in the design spec.
@@ -144,6 +145,10 @@ class Channel {
     this.joined = true,
     this.muted = false,
     this.members = const [],
+    this.favourite = false,
+    this.favouriteOrder,
+    this.lowPriority = false,
+    this.lastActivity,
   });
 
   final String id;
@@ -171,9 +176,20 @@ class Channel {
   /// DM, more is a group DM.
   final List<Member> members;
 
+  /// The `m.favourite` room tag, and its `order` (0–1, lowest first).
+  final bool favourite;
+  final double? favouriteOrder;
+
+  /// The `m.lowpriority` room tag.
+  final bool lowPriority;
+
+  /// The newest event, which is what orders DMs.
+  final DateTime? lastActivity;
+
   IconData get icon => switch (kind) {
     ChannelKind.voice => LucideIcons.volume2,
     ChannelKind.direct => LucideIcons.atSign,
+    ChannelKind.room => LucideIcons.messagesSquare,
     _ when private => LucideIcons.lock,
     _ => LucideIcons.hash,
   };
@@ -184,6 +200,10 @@ class Channel {
     int? unread,
     int? mentions,
     List<Member>? occupants,
+    bool? favourite,
+    double? favouriteOrder,
+    bool? lowPriority,
+    DateTime? lastActivity,
   }) => Channel(
     id: id,
     name: name,
@@ -196,6 +216,10 @@ class Channel {
     joined: joined ?? this.joined,
     muted: muted ?? this.muted,
     members: members,
+    favourite: favourite ?? this.favourite,
+    favouriteOrder: favouriteOrder ?? this.favouriteOrder,
+    lowPriority: lowPriority ?? this.lowPriority,
+    lastActivity: lastActivity ?? this.lastActivity,
   );
 }
 
@@ -497,46 +521,176 @@ final mockSpaces = <Space>[
   ),
 ];
 
-/// Home: DMs, as far as calls need them. Favourites and rooms in no space
-/// arrive with the full Home design.
+// The server's own bot, which answers `!admin` commands in the admin room.
+const _tuwunel = Member(
+  '@tuwunel',
+  'tuwunel',
+  Color(0xFF64748B),
+  powerLevel: 100,
+);
+
+DateTime _ago({int days = 0, int hours = 0}) =>
+    DateTime.now().subtract(Duration(days: days, hours: hours));
+
+/// Everything that lives in Home: DMs, and joined rooms that belong to no
+/// space. Home's sections are worked out from these by `homeSections`.
+final mockHomeRooms = <Channel>[
+  Channel(
+    id: 'dm-mika',
+    name: 'Mika Rye',
+    kind: ChannelKind.direct,
+    members: const [_mika],
+    unread: 1,
+    favourite: true,
+    favouriteOrder: 0.5,
+    lastActivity: _ago(hours: 2),
+  ),
+  Channel(
+    id: 'dm-crew',
+    name: 'weekend crew',
+    kind: ChannelKind.direct,
+    members: const [_mika, _jun, _sam],
+    lastActivity: _ago(days: 2),
+  ),
+  Channel(
+    id: 'dm-sam',
+    name: 'Sam Poolish',
+    kind: ChannelKind.direct,
+    members: const [_sam],
+    lastActivity: _ago(days: 3),
+  ),
+  Channel(
+    id: 'dm-ada',
+    name: 'Ada Crumb',
+    kind: ChannelKind.direct,
+    members: const [_ada],
+    lastActivity: _ago(days: 5),
+  ),
+  // tuwunel's admin room: an ordinary room in no space, where commands to
+  // the server bot are sent as messages.
+  const Channel(
+    id: 'admins',
+    name: 'admins',
+    kind: ChannelKind.room,
+    topic: 'loaf.moe server admin. commands start with !admin',
+    members: [_you, _tuwunel],
+  ),
+  const Channel(
+    id: 'fermentation',
+    name: 'fermentation nerds',
+    kind: ChannelKind.room,
+    topic: 'koji, kombucha, kimchi, and whatever that jar is',
+    members: [_you, _mika, _theo, _pim],
+    unread: 3,
+  ),
+  const Channel(
+    id: 'breadtalk',
+    name: 'bread talk (public)',
+    kind: ChannelKind.room,
+    topic: 'the big public bread room on matrix.org',
+    members: [_you, _rosa, _theo, _pim, _ada],
+    unread: 12,
+    lowPriority: true,
+  ),
+];
+
+/// The Home pseudo-space itself. Its one category is unsorted: the shell
+/// regroups the rooms into sections with this session's tags applied.
 final mockHome = Space(
   id: 'home',
   name: 'Home',
   color: const Color(0xFF003049),
   members: const [_you, _mika, _sam, _ada, _jun],
-  categories: [
-    ChannelCategory('direct messages', [
-      const Channel(
-        id: 'dm-mika',
-        name: 'Mika Rye',
-        kind: ChannelKind.direct,
-        members: [_mika],
-        unread: 1,
-      ),
-      const Channel(
-        id: 'dm-crew',
-        name: 'weekend crew',
-        kind: ChannelKind.direct,
-        members: [_mika, _jun, _sam],
-      ),
-      const Channel(
-        id: 'dm-sam',
-        name: 'Sam Poolish',
-        kind: ChannelKind.direct,
-        members: [_sam],
-      ),
-      const Channel(
-        id: 'dm-ada',
-        name: 'Ada Crumb',
-        kind: ChannelKind.direct,
-        members: [_ada],
-      ),
-    ]),
-  ],
+  categories: [ChannelCategory('home', mockHomeRooms)],
 );
 
-/// A little history per DM, with a past call or two among the messages.
-List<Message> mockDirectTimeline(String id) {
+enum InviteKind { direct, room, space }
+
+/// Someone asking you in. Not a room yet: until you accept, you see only
+/// what the invite itself carries.
+class Invite {
+  const Invite({
+    required this.id,
+    required this.kind,
+    required this.name,
+    required this.inviter,
+    required this.color,
+    this.topic,
+    this.memberCount,
+    this.room,
+    this.space,
+  });
+
+  final String id;
+  final InviteKind kind;
+  final String name;
+  final Member inviter;
+
+  /// Avatar fallback, as for spaces.
+  final Color color;
+
+  /// Only when the server's room preview offers them.
+  final String? topic;
+  final int? memberCount;
+
+  /// What accepting a DM or room invite joins.
+  final Channel? room;
+
+  /// What accepting a space invite adds to the rail.
+  final Space? space;
+
+  /// The line under the invite's name. A DM invite's name already is the
+  /// person, so it says what they want rather than naming them twice.
+  String get summary => kind == InviteKind.direct
+      ? 'wants to chat'
+      : '${inviter.name} invited you';
+}
+
+final mockInvites = <Invite>[
+  Invite(
+    id: 'invite-rosa',
+    kind: InviteKind.direct,
+    name: 'Rosa Brioche',
+    inviter: _rosa,
+    color: _rosa.color,
+    room: Channel(
+      id: 'dm-rosa',
+      name: 'Rosa Brioche',
+      kind: ChannelKind.direct,
+      members: const [_rosa],
+      lastActivity: _ago(hours: 1),
+    ),
+  ),
+  const Invite(
+    id: 'invite-sourdough',
+    kind: InviteKind.space,
+    name: 'Sourdough Society',
+    inviter: _theo,
+    color: Color(0xFF65A30D),
+    topic: 'starters, schedules, and crumb shots',
+    memberCount: 128,
+    space: Space(
+      id: 'sourdough',
+      name: 'Sourdough Society',
+      color: Color(0xFF65A30D),
+      members: [_theo, _you, _pim, _rosa],
+      categories: [
+        ChannelCategory('welcome', [
+          Channel(
+            id: 'sourdough-welcome',
+            name: 'welcome',
+            topic: 'say hi, share your starter\'s name',
+          ),
+          Channel(id: 'crumb-shots', name: 'crumb-shots'),
+        ]),
+      ],
+    ),
+  ),
+];
+
+/// A little history per DM and room, with a past call or two among the
+/// messages.
+List<Message> mockHomeTimeline(String id) {
   final now = DateTime.now();
   DateTime at(int daysAgo, int hour, int minute) =>
       DateTime(now.year, now.month, now.day - daysAgo, hour, minute);
@@ -597,6 +751,64 @@ List<Message> mockDirectTimeline(String id) {
         author: _sam,
         sentAt: at(3, 14, 5),
         body: 'sorry, hands in dough. later?',
+      ),
+    ],
+    'admins' => [
+      Message(
+        id: '$id-1',
+        author: _you,
+        sentAt: at(1, 22, 10),
+        body: '!admin server uptime',
+      ),
+      Message(
+        id: '$id-2',
+        author: _tuwunel,
+        sentAt: at(1, 22, 10),
+        body: 'Server has been running for 12 days, 4 hours and 31 minutes.',
+      ),
+      Message(
+        id: '$id-3',
+        author: _you,
+        sentAt: at(0, 9, 2),
+        body: '!admin users list-users',
+      ),
+      Message(
+        id: '$id-4',
+        author: _tuwunel,
+        sentAt: at(0, 9, 2),
+        body:
+            'Found 8 local user account(s): @faore, @mika, @sam, @jun, '
+            '@ada, @rosa, @theo, @pim',
+      ),
+    ],
+    'fermentation' => [
+      Message(
+        id: '$id-1',
+        author: _theo,
+        sentAt: at(0, 7, 40),
+        body: 'the koji is fuzzy in the good way this time',
+      ),
+      Message(
+        id: '$id-2',
+        author: _pim,
+        sentAt: at(0, 8, 5),
+        body: 'pics or it is the bad fuzzy',
+      ),
+    ],
+    'breadtalk' => [
+      Message(
+        id: '$id-1',
+        author: _rosa,
+        sentAt: at(0, 6, 30),
+        body: 'hydration debate round 400: go',
+      ),
+    ],
+    'dm-rosa' => [
+      Message(
+        id: '$id-1',
+        author: _rosa,
+        sentAt: at(0, 11, 0),
+        body: 'hi! saw your crumb shot in the starter pack, had to say hello',
       ),
     ],
     _ => [

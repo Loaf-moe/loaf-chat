@@ -186,11 +186,13 @@ class _ChannelHeader extends StatelessWidget {
                 const SizedBox(width: LoafSpace.x2),
               ],
               Icon(
-                direct
-                    ? (channel.members.length > 1
-                          ? LucideIcons.users
-                          : LucideIcons.atSign)
-                    : LucideIcons.hash,
+                switch (channel.kind) {
+                  ChannelKind.direct when channel.members.length > 1 =>
+                    LucideIcons.users,
+                  ChannelKind.direct => LucideIcons.atSign,
+                  ChannelKind.room => LucideIcons.messagesSquare,
+                  _ => LucideIcons.hash,
+                },
                 size: 18,
                 color: tokens.textMuted,
               ),

@@ -1,6 +1,7 @@
 /// The middle column: a space's categories and channels, mockup only.
 library;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -21,9 +22,26 @@ class ChannelList extends StatefulWidget {
     required this.onSelect,
     this.onAction,
     this.ringingId,
+    this.home = false,
+    this.invites = const [],
+    this.selectedInviteId,
+    this.onOpenInvite,
+    this.onReorderFavourites,
   });
 
   final Space space;
+
+  /// Home rather than a space: sections instead of admin-made categories,
+  /// no space menu, and rows that can be tagged.
+  final bool home;
+
+  /// Home only: shown above everything else, since they wait on you.
+  final List<Invite> invites;
+  final String? selectedInviteId;
+  final ValueChanged<String>? onOpenInvite;
+
+  /// Home only: the favourites' ids in their new order after a drag.
+  final ValueChanged<List<String>>? onReorderFavourites;
 
   /// A direct chat whose call is ringing at you.
   final String? ringingId;
@@ -39,12 +57,17 @@ class ChannelList extends StatefulWidget {
 }
 
 class _ChannelListState extends State<ChannelList> {
-  final Set<String> _collapsed = {};
+  /// Categories you have opened or closed. Anything not in here falls back
+  /// to its default: open, except Home's low priority.
+  final Map<String, bool> _collapsed = {};
+
+  bool _isCollapsed(String category) =>
+      _collapsed[category] ?? (widget.home && category == _lowPriority);
+
+  static const _lowPriority = 'low priority';
 
   void _toggle(String category) {
-    setState(() {
-      if (!_collapsed.add(category)) _collapsed.remove(category);
-    });
+    setState(() => _collapsed[category] = !_isCollapsed(category));
   }
 
   @override
@@ -62,23 +85,45 @@ class _ChannelListState extends State<ChannelList> {
         left: false,
         child: Column(
           children: [
-            _Header(space: widget.space, tokens: tokens),
+            _Header(space: widget.space, tokens: tokens, menu: !widget.home),
             _SearchField(tokens: tokens),
             Expanded(
               child: ListView(
                 // Clears the account panel floating over the bottom.
                 padding: const EdgeInsets.only(bottom: UserBar.clearance),
                 children: [
+                  if (widget.invites.isNotEmpty) ...[
+                    _CategoryHeading(
+                      name: 'invites',
+                      collapsed: _isCollapsed('invites'),
+                      tokens: tokens,
+                      onToggle: () => _toggle('invites'),
+                    ),
+                    if (!_isCollapsed('invites'))
+                      for (final invite in widget.invites)
+                        _InviteEntry(
+                          invite: invite,
+                          selected: invite.id == widget.selectedInviteId,
+                          tokens: tokens,
+                          onTap: () => widget.onOpenInvite?.call(invite.id),
+                        ),
+                  ],
                   for (final category in widget.space.categories)
                     _CategorySection(
                       category: category,
-                      collapsed: _collapsed.contains(category.name),
-                      selectedChannelId: widget.selectedChannelId,
+                      collapsed: _isCollapsed(category.name),
+                      selectedChannelId: widget.selectedInviteId == null
+                          ? widget.selectedChannelId
+                          : null,
                       tokens: tokens,
                       onToggle: () => _toggle(category.name),
                       onSelect: widget.onSelect,
                       onAction: widget.onAction,
                       ringingId: widget.ringingId,
+                      home: widget.home,
+                      onReorder: widget.home && category.name == 'favourites'
+                          ? widget.onReorderFavourites
+                          : null,
                     ),
                 ],
               ),
@@ -91,10 +136,17 @@ class _ChannelListState extends State<ChannelList> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.space, required this.tokens});
+  const _Header({
+    required this.space,
+    required this.tokens,
+    required this.menu,
+  });
 
   final Space space;
   final LoafTokens tokens;
+
+  /// A space has a menu behind its name; Home has none to offer.
+  final bool menu;
 
   @override
   Widget build(BuildContext context) {
@@ -112,7 +164,8 @@ class _Header extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          Icon(LucideIcons.chevronDown, color: tokens.textMuted, size: 18),
+          if (menu)
+            Icon(LucideIcons.chevronDown, color: tokens.textMuted, size: 18),
         ],
       ),
     );
@@ -151,6 +204,53 @@ class _SearchField extends StatelessWidget {
   }
 }
 
+class _CategoryHeading extends StatelessWidget {
+  const _CategoryHeading({
+    required this.name,
+    required this.collapsed,
+    required this.tokens,
+    required this.onToggle,
+  });
+
+  final String name;
+  final bool collapsed;
+  final LoafTokens tokens;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onToggle,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 16, 12, 4),
+        child: Row(
+          children: [
+            AnimatedRotation(
+              duration: LoafMotion.fast,
+              curve: LoafMotion.ease,
+              turns: collapsed ? -0.25 : 0,
+              child: Icon(
+                LucideIcons.chevronDown,
+                size: 14,
+                color: tokens.textMuted,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              name.toUpperCase(),
+              style: loafBody(
+                11,
+                600,
+                height: 1.3,
+              ).copyWith(color: tokens.textMuted, letterSpacing: 0.04 * 11),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CategorySection extends StatelessWidget {
   const _CategorySection({
     required this.category,
@@ -161,16 +261,37 @@ class _CategorySection extends StatelessWidget {
     required this.onSelect,
     required this.onAction,
     this.ringingId,
+    this.home = false,
+    this.onReorder,
   });
 
   final ChannelCategory category;
   final String? ringingId;
   final bool collapsed;
-  final String selectedChannelId;
+  final String? selectedChannelId;
   final LoafTokens tokens;
   final VoidCallback onToggle;
   final ValueChanged<String> onSelect;
   final void Function(String channelId, ChannelAction action)? onAction;
+  final bool home;
+
+  /// Makes the rows draggable. Home's favourites only: everything else is
+  /// ordered by the space's admins or by Home's own rules.
+  final ValueChanged<List<String>>? onReorder;
+
+  _ChannelEntry _entry(Channel channel, {bool longPressActions = true}) =>
+      _ChannelEntry(
+        channel: channel,
+        selected: channel.id == selectedChannelId,
+        ringing: channel.id == ringingId,
+        tokens: tokens,
+        home: home,
+        longPressActions: longPressActions,
+        onTap: () => onSelect(channel.id),
+        onAction: onAction == null || !channel.joined
+            ? null
+            : (action) => onAction!(channel.id, action),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -182,58 +303,123 @@ class _CategorySection extends StatelessWidget {
     // a separate section: the category is structure the space's admins
     // built, and the channel belongs in it.
     final visibleChannels = collapsed
-        ? category.channels.where((c) => c.joined && c.mentions > 0)
+        ? category.channels.where((c) => c.joined && c.mentions > 0).toList()
         : [
             ...category.channels.where((c) => c.joined),
             ...category.channels.where((c) => !c.joined),
           ];
 
+    final onReorder = this.onReorder;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        InkWell(
-          onTap: onToggle,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 16, 12, 4),
-            child: Row(
-              children: [
-                AnimatedRotation(
-                  duration: LoafMotion.fast,
-                  curve: LoafMotion.ease,
-                  turns: collapsed ? -0.25 : 0,
-                  child: Icon(
-                    LucideIcons.chevronDown,
-                    size: 14,
-                    color: tokens.textMuted,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  category.name.toUpperCase(),
-                  style: loafBody(
-                    11,
-                    600,
-                    height: 1.3,
-                  ).copyWith(color: tokens.textMuted, letterSpacing: 0.04 * 11),
-                ),
-              ],
-            ),
-          ),
+        _CategoryHeading(
+          name: category.name,
+          collapsed: collapsed,
+          tokens: tokens,
+          onToggle: onToggle,
         ),
-        for (final channel in visibleChannels)
-          _ChannelEntry(
-            channel: channel,
-            selected: channel.id == selectedChannelId,
-            ringing: channel.id == ringingId,
-            tokens: tokens,
-            onTap: () => onSelect(channel.id),
-            onAction: onAction == null || !channel.joined
-                ? null
-                : (action) => onAction!(channel.id, action),
-          ),
+        if (onReorder != null && !collapsed)
+          _Reorderable(
+            channels: visibleChannels,
+            entry: _entry,
+            onReorder: onReorder,
+          )
+        else
+          for (final channel in visibleChannels) _entry(channel),
       ],
     );
   }
+}
+
+/// Rows you can drag into your own order. A computer drags on a plain
+/// drag. A phone drags after a long press — and since a long press is also
+/// how a phone asks for a row's actions, one that lets go without moving
+/// opens them instead, the way the iOS home screen does.
+class _Reorderable extends StatefulWidget {
+  const _Reorderable({
+    required this.channels,
+    required this.entry,
+    required this.onReorder,
+  });
+
+  final List<Channel> channels;
+  final _ChannelEntry Function(Channel, {bool longPressActions}) entry;
+  final ValueChanged<List<String>> onReorder;
+
+  @override
+  State<_Reorderable> createState() => _ReorderableState();
+}
+
+class _ReorderableState extends State<_Reorderable> {
+  int? _dragFrom;
+
+  /// The list only reports drops that move something, so a long press let
+  /// go in place is spotted here: it ends in its own gap, just before or
+  /// just after itself.
+  void _dragEnded(int gap) {
+    final from = _dragFrom;
+    _dragFrom = null;
+    if (from == null || isDesktop) return;
+    if (gap == from || gap == from + 1) {
+      HapticFeedback.mediumImpact();
+      widget.entry(widget.channels[from]).openActions(context);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    final channels = widget.channels;
+    return ReorderableListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      buildDefaultDragHandles: false,
+      itemCount: channels.length,
+      proxyDecorator: (child, index, animation) => Material(
+        color: Colors.transparent,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: tokens.card,
+            borderRadius: BorderRadius.circular(LoafRadius.md),
+            boxShadow: tokens.shadowMd,
+          ),
+          child: child,
+        ),
+      ),
+      onReorderStart: (index) => _dragFrom = index,
+      onReorderEnd: _dragEnded,
+      onReorderItem: (from, to) {
+        final ids = [for (final c in channels) c.id];
+        ids.insert(to, ids.removeAt(from));
+        widget.onReorder(ids);
+      },
+      itemBuilder: (context, index) {
+        final row = widget.entry(channels[index], longPressActions: false);
+        return isDesktop
+            ? _DragAfterSlop(
+                key: ValueKey('reorder-${channels[index].id}'),
+                index: index,
+                child: row,
+              )
+            : ReorderableDelayedDragStartListener(
+                key: ValueKey('reorder-${channels[index].id}'),
+                index: index,
+                child: row,
+              );
+      },
+    );
+  }
+}
+
+/// Starts a drag only once the pointer has moved, so a plain click on a
+/// row still opens it.
+class _DragAfterSlop extends ReorderableDragStartListener {
+  const _DragAfterSlop({super.key, required super.index, required super.child});
+
+  @override
+  MultiDragGestureRecognizer createRecognizer() =>
+      VerticalMultiDragGestureRecognizer(debugOwner: this);
 }
 
 class _ChannelEntry extends StatelessWidget {
@@ -244,22 +430,32 @@ class _ChannelEntry extends StatelessWidget {
     required this.onTap,
     required this.onAction,
     this.ringing = false,
+    this.home = false,
+    this.longPressActions = true,
   });
 
   final Channel channel;
   final bool selected;
   final bool ringing;
+
+  /// A Home row: its actions include favourite and low priority.
+  final bool home;
+
+  /// Off when a long press already means something else — dragging a
+  /// favourite, which opens the actions itself if you let go in place.
+  final bool longPressActions;
   final LoafTokens tokens;
   final VoidCallback onTap;
   final ValueChanged<ChannelAction>? onAction;
 
-  Future<void> _openActions(BuildContext context, {Offset? position}) async {
+  Future<void> openActions(BuildContext context, {Offset? position}) async {
     final onAction = this.onAction;
     if (onAction == null) return;
     final action = await showChannelActions(
       context,
       channel,
       position: position,
+      home: home,
     );
     if (action != null) onAction(action);
   }
@@ -268,6 +464,7 @@ class _ChannelEntry extends StatelessWidget {
   Widget build(BuildContext context) {
     final joined = channel.joined;
     final direct = channel.kind == ChannelKind.direct;
+    final room = channel.kind == ChannelKind.room;
     // Muted channels keep their mentions but lose the bold "something new"
     // styling: that is the point of muting them.
     final unread = joined && !channel.muted && channel.unread > 0;
@@ -299,17 +496,15 @@ class _ChannelEntry extends StatelessWidget {
                 onTap: onTap,
                 // Long press on a phone, right-click on a computer — the
                 // same split as message actions.
-                onLongPress: !isDesktop && onAction != null
+                onLongPress: !isDesktop && onAction != null && longPressActions
                     ? () {
                         HapticFeedback.mediumImpact();
-                        _openActions(context);
+                        openActions(context);
                       }
                     : null,
                 onSecondaryTapUp: isDesktop && onAction != null
-                    ? (details) => _openActions(
-                        context,
-                        position: details.globalPosition,
-                      )
+                    ? (details) =>
+                          openActions(context, position: details.globalPosition)
                     : null,
                 hoverColor: tokens.card.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(LoafRadius.md),
@@ -319,9 +514,11 @@ class _ChannelEntry extends StatelessWidget {
                     children: [
                       if (direct)
                         _DirectAvatar(channel: channel, tokens: tokens)
+                      else if (room)
+                        RoomAvatar(name: channel.name, id: channel.id, size: 22)
                       else
                         Icon(iconData, size: 16, color: fg),
-                      SizedBox(width: direct ? 8 : 6),
+                      SizedBox(width: direct || room ? 8 : 6),
                       Expanded(
                         child: Text(
                           channel.name,
@@ -402,6 +599,137 @@ class _ChannelEntry extends StatelessWidget {
 
 /// Marks a channel you can join with one tap. Not a separate button: the
 /// whole row joins, and this says so.
+/// A standalone room's face: a rounded square with its initial, since it is
+/// a room of its own rather than a channel in a space.
+class RoomAvatar extends StatelessWidget {
+  const RoomAvatar({
+    super.key,
+    required this.name,
+    required this.id,
+    this.size = 22,
+    this.color,
+  });
+
+  final String name;
+  final String id;
+  final double size;
+
+  /// Defaults to a colour picked from the room's id, as real clients do.
+  final Color? color;
+
+  static const _palette = [
+    Color(0xFF64748B),
+    Color(0xFF0891B2),
+    Color(0xFF7C3AED),
+    Color(0xFFD97B2A),
+    Color(0xFF4E9E76),
+    Color(0xFFDB2777),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final fill =
+        color ??
+        _palette[id.codeUnits.fold(0, (a, b) => a + b) % _palette.length];
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(size * 0.3),
+      ),
+      child: Text(
+        name.characters.first.toUpperCase(),
+        style: loafBody(size * 0.5, 700).copyWith(color: Colors.white),
+      ),
+    );
+  }
+}
+
+/// An invite in Home: who is asking you in, and to what. Tapping it opens
+/// a preview; nothing is joined until you accept there.
+class _InviteEntry extends StatelessWidget {
+  const _InviteEntry({
+    required this.invite,
+    required this.selected,
+    required this.tokens,
+    required this.onTap,
+  });
+
+  final Invite invite;
+  final bool selected;
+  final LoafTokens tokens;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final avatar = invite.kind == InviteKind.direct
+        ? _MemberAvatar(member: invite.inviter, size: 30)
+        : RoomAvatar(
+            name: invite.name,
+            id: invite.id,
+            size: 30,
+            color: invite.color,
+          );
+    return Padding(
+      key: ValueKey('invite-${invite.id}'),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      child: Material(
+        color: selected ? tokens.card : Colors.transparent,
+        borderRadius: BorderRadius.circular(LoafRadius.md),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(LoafRadius.md),
+          hoverColor: tokens.card.withValues(alpha: 0.5),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: Row(
+              children: [
+                avatar,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        invite.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: loafBody(
+                          15,
+                          600,
+                        ).copyWith(color: tokens.textStrong),
+                      ),
+                      Text(
+                        invite.summary,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: loafBody(
+                          12,
+                          400,
+                        ).copyWith(color: tokens.textMuted),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: tokens.accent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// A DM's face in the list: the person with their presence, or for a group,
 /// two of its people overlapping.
 class _DirectAvatar extends StatelessWidget {
@@ -519,7 +847,8 @@ class _MemberAvatar extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(color: member.color, shape: BoxShape.circle),
       child: Text(
-        member.initials,
+        // Two letters don't fit a group DM's tiny overlapping pair.
+        size < 18 ? member.initials.characters.first : member.initials,
         // Scales with the circle: a group DM's overlapping pair is smaller
         // than a voice occupant's avatar.
         style: loafBody(size * 0.42, 600).copyWith(color: Colors.white),

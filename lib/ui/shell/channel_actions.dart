@@ -10,41 +10,89 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
 
-enum ChannelAction { markRead, mute, unmute, leave }
+enum ChannelAction {
+  markRead,
+  favourite,
+  unfavourite,
+  lowPriority,
+  notLowPriority,
+  mute,
+  unmute,
+  leave,
+}
 
 /// Actions for a channel you have joined. Unjoined channels have none: their
 /// one action is joining, and a tap already does that.
-List<ChannelAction> actionsFor(Channel channel) => [
+///
+/// [home] rows can also be tagged favourite or low priority. Space channels
+/// never are from loaf: each room has one place in the UI, and a favourited
+/// space channel would need a second.
+List<ChannelAction> actionsFor(Channel channel, {bool home = false}) => [
   if (channel.unread > 0 || channel.mentions > 0) ChannelAction.markRead,
+  if (home) ...[
+    channel.favourite ? ChannelAction.unfavourite : ChannelAction.favourite,
+    channel.lowPriority
+        ? ChannelAction.notLowPriority
+        : ChannelAction.lowPriority,
+  ],
   channel.muted ? ChannelAction.unmute : ChannelAction.mute,
   ChannelAction.leave,
 ];
 
-ActionItem<ChannelAction> _item(ChannelAction action) => switch (action) {
-  ChannelAction.markRead => const ActionItem(
-    value: ChannelAction.markRead,
-    icon: LucideIcons.checkCheck,
-    label: 'Mark as read',
-  ),
-  // Muting keeps mentions: it maps to a mentions-only push rule, synced to
-  // every device, with no expiry — Matrix has none to offer.
-  ChannelAction.mute => const ActionItem(
-    value: ChannelAction.mute,
-    icon: LucideIcons.bellOff,
-    label: 'Mute channel',
-  ),
-  ChannelAction.unmute => const ActionItem(
-    value: ChannelAction.unmute,
-    icon: LucideIcons.bell,
-    label: 'Unmute channel',
-  ),
-  ChannelAction.leave => const ActionItem(
-    value: ChannelAction.leave,
-    icon: LucideIcons.logOut,
-    label: 'Leave channel',
-    destructive: true,
-  ),
+/// What the row is, in the words the actions use.
+String _noun(Channel channel) => switch (channel.kind) {
+  ChannelKind.room => 'room',
+  ChannelKind.direct => 'conversation',
+  _ => 'channel',
 };
+
+ActionItem<ChannelAction> _item(ChannelAction action, String noun) =>
+    switch (action) {
+      ChannelAction.markRead => const ActionItem(
+        value: ChannelAction.markRead,
+        icon: LucideIcons.checkCheck,
+        label: 'Mark as read',
+      ),
+      // Room tags, synced to every device and to other clients.
+      ChannelAction.favourite => const ActionItem(
+        value: ChannelAction.favourite,
+        icon: LucideIcons.star,
+        label: 'Favourite',
+      ),
+      ChannelAction.unfavourite => const ActionItem(
+        value: ChannelAction.unfavourite,
+        icon: LucideIcons.starOff,
+        label: 'Unfavourite',
+      ),
+      ChannelAction.lowPriority => const ActionItem(
+        value: ChannelAction.lowPriority,
+        icon: LucideIcons.arrowDownToLine,
+        label: 'Low priority',
+      ),
+      ChannelAction.notLowPriority => const ActionItem(
+        value: ChannelAction.notLowPriority,
+        icon: LucideIcons.arrowUpToLine,
+        label: 'Not low priority',
+      ),
+      // Muting keeps mentions: it maps to a mentions-only push rule, synced to
+      // every device, with no expiry — Matrix has none to offer.
+      ChannelAction.mute => ActionItem(
+        value: ChannelAction.mute,
+        icon: LucideIcons.bellOff,
+        label: 'Mute $noun',
+      ),
+      ChannelAction.unmute => ActionItem(
+        value: ChannelAction.unmute,
+        icon: LucideIcons.bell,
+        label: 'Unmute $noun',
+      ),
+      ChannelAction.leave => ActionItem(
+        value: ChannelAction.leave,
+        icon: LucideIcons.logOut,
+        label: 'Leave $noun',
+        destructive: true,
+      ),
+    };
 
 /// Opens the channel's actions — a sheet on mobile, a menu at [position] on
 /// desktop — and returns the one chosen. Leaving an invite-only channel is
@@ -53,8 +101,12 @@ Future<ChannelAction?> showChannelActions(
   BuildContext context,
   Channel channel, {
   Offset? position,
+  bool home = false,
 }) async {
-  final items = [for (final action in actionsFor(channel)) _item(action)];
+  final items = [
+    for (final action in actionsFor(channel, home: home))
+      _item(action, _noun(channel)),
+  ];
   final chosen = isDesktop && position != null
       ? await showActionMenu(context, position: position, items: items)
       : await showActionSheet(
