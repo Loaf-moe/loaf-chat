@@ -21,6 +21,7 @@ class LoafButton extends StatefulWidget {
     this.emphasis = LoafButtonEmphasis.filled,
     this.size = LoafButtonSize.large,
     this.icon,
+    this.leading,
   });
 
   final String label;
@@ -30,6 +31,10 @@ class LoafButton extends StatefulWidget {
   final LoafButtonEmphasis emphasis;
   final LoafButtonSize size;
   final IconData? icon;
+
+  /// Drawn where [icon] would be, for marks that are not icons (an identity
+  /// provider's initial). Takes precedence over [icon].
+  final Widget? leading;
 
   @override
   State<LoafButton> createState() => _LoafButtonState();
@@ -111,7 +116,10 @@ class _LoafButtonState extends State<LoafButton> {
               builder: (context, constraints) => Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (widget.icon != null) ...[
+                  if (widget.leading != null) ...[
+                    widget.leading!,
+                    const SizedBox(width: LoafSpace.x2),
+                  ] else if (widget.icon != null) ...[
                     Icon(widget.icon, size: 18, color: labelColor),
                     const SizedBox(width: LoafSpace.x2),
                   ],
