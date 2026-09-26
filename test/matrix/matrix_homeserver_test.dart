@@ -143,6 +143,38 @@ void main() {
       });
       expect(unnamed.providers.single.name, 'oidc');
     });
+
+    test('a malformed .well-known falls back to the name itself', () async {
+      final (hs, _) = await _make(
+        MockClient((request) async {
+          if (request.url.path == '/.well-known/matrix/client') {
+            return _ok({'m.homeserver': 'oops'});
+          }
+          if (request.url.path == '/_matrix/client/versions') {
+            return _ok({
+              'versions': ['v1.19'],
+            });
+          }
+          return _ok({'flows': 'oops'});
+        }),
+      );
+      final check = await hs.probe('odd.test');
+      expect(check, isA<ServerFound>());
+      expect((check as ServerFound).flows.sso, isFalse);
+    });
+
+    test('flowsFrom shrugs off wrong types', () {
+      expect(flowsFrom({'flows': 'oops'}).password, isFalse);
+      final odd = flowsFrom({
+        'flows': [
+          'oops',
+          {'type': 'm.login.sso', 'identity_providers': 'oops'},
+          {'type': 'm.login.password'},
+        ],
+      });
+      expect(odd.password, isTrue);
+      expect(odd.providers.single.id, '');
+    });
   });
 
   group('password', () {

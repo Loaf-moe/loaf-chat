@@ -47,7 +47,8 @@ class MatrixHomeserver implements Homeserver {
     String? delegatedTo;
     try {
       final wellKnown = await _json('$named/.well-known/matrix/client');
-      final url = (wellKnown?['m.homeserver'] as Map?)?['base_url'];
+      final homeserver = wellKnown?['m.homeserver'];
+      final url = homeserver is Map ? homeserver['base_url'] : null;
       if (url is String && Uri.tryParse(url)?.hasAuthority == true) {
         base = _trim(url);
         final host = Uri.parse(base).host;
@@ -173,12 +174,14 @@ String _trim(String url) => url.replaceFirst(RegExp(r'/+$'), '');
 ServerFlows flowsFrom(Map<String, Object?>? login) {
   var password = false;
   final providers = <IdentityProvider>[];
-  for (final flow in (login?['flows'] as List? ?? const []).whereType<Map>()) {
+  final flows = login?['flows'];
+  for (final flow in (flows is List ? flows : const []).whereType<Map>()) {
     switch (flow['type']) {
       case 'm.login.password':
         password = true;
       case 'm.login.sso':
-        final listed = (flow['identity_providers'] as List? ?? const [])
+        final idps = flow['identity_providers'];
+        final listed = (idps is List ? idps : const [])
             .whereType<Map>()
             .where((p) => p['id'] is String)
             .toList();
