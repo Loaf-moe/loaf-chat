@@ -51,15 +51,15 @@ threads are v2; each gets its own spec.
 
 | Package | Role |
 | --- | --- |
-| `matrix` ^12.0.1 | Sync, rooms, E2EE, MatrixRTC signalling |
+| `matrix` ^13.0.0 | Sync, rooms, E2EE, MatrixRTC signalling |
 | `flutter_vodozemac` | Olm/Megolm primitives (Rust, consumed prebuilt) |
 | `livekit_client` | SFU media for voice channels |
 | `flutter_callkit_incoming` | iOS CallKit and PushKit ringing (MSC4075) |
 | `go_router` | Routing, `matrix.to` deep links, desktop later |
 | `provider` | Hands out the one `Client` instance; nothing more |
 
-**Why matrix-dart-sdk and not a WebView around Element Call.** As of v12.0.1
-(2026-09-02) the SDK ships LiveKit group calls, E2EE key management, MSC4075
+**Why matrix-dart-sdk and not a WebView around Element Call.** As of v13.0.0
+(2026-09-22) the SDK ships LiveKit group calls, E2EE key management, MSC4075
 ringing, and delayed-leave heartbeats. FluffyChat 2.10 proves the stack
 interoperates with Element and Cinny. Native calls give native CallKit and
 picture-in-picture, which a WebView cannot. The existing `element-call` fork
