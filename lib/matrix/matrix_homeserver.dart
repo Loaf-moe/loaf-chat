@@ -42,6 +42,7 @@ class MatrixHomeserver implements Homeserver {
   // from nothing answering.
   @override
   Future<ServerCheck> probe(String server) async {
+    _generation++;
     final named = 'https://$server';
     var base = named;
     String? delegatedTo;
@@ -75,17 +76,25 @@ class MatrixHomeserver implements Homeserver {
     }
   }
 
+  /// Bumped whenever the question changes or the person walks away, so an
+  /// attempt can tell it is no longer the one being waited on.
+  var _generation = 0;
+
   @override
-  Future<SignInOutcome> password(String server, String user, String password) =>
-      _signIn(
-        server,
-        () => client.login(
-          LoginType.mLoginPassword,
-          identifier: AuthenticationUserIdentifier(user: user.trim()),
-          password: password,
-          initialDeviceDisplayName: deviceName,
-        ),
-      );
+  Future<SignInOutcome> password(String server, String user, String password) {
+    final attempt = ++_generation;
+    return _signIn(
+      server,
+      attempt,
+      (api) => api.login(
+        LoginType.mLoginPassword,
+        identifier: AuthenticationUserIdentifier(user: user.trim()),
+        password: password,
+        initialDeviceDisplayName: deviceName,
+        refreshToken: client.onSoftLogout != null,
+      ),
+    );
+  }
 
   @override
   Future<SignInOutcome> sso(
@@ -93,18 +102,28 @@ class MatrixHomeserver implements Homeserver {
     IdentityProvider provider, {
     required bool desktop,
   }) async {
+    final attempt = ++_generation;
     final base = _bases[server];
     if (base == null) return SignInFailed("couldn't reach $server");
-    final token = await browser.signIn(
-      (redirect) => ssoUrl(base, provider, redirect),
-    );
-    if (token == null) return const SignInCancelled();
+    final String? token;
+    try {
+      token = await browser.signIn(
+        (redirect) => ssoUrl(base, provider, redirect),
+      );
+    } on Exception {
+      return const SignInFailed("couldn't open the sign-in page");
+    }
+    if (token == null || attempt != _generation) {
+      return const SignInCancelled();
+    }
     return _signIn(
       server,
-      () => client.login(
+      attempt,
+      (api) => api.login(
         LoginType.mLoginToken,
         token: token,
         initialDeviceDisplayName: deviceName,
+        refreshToken: client.onSoftLogout != null,
       ),
       // A refused token is not a wrong password.
       refused: "${provider.name} didn't finish signing you in",
@@ -115,21 +134,58 @@ class MatrixHomeserver implements Homeserver {
   void reopenSso() => browser.reopen();
 
   @override
-  void cancelSso() => browser.cancel();
+  void cancelSso() {
+    _generation++;
+    browser.cancel();
+  }
 
   @override
-  void close() => browser.cancel();
+  void close() {
+    _generation++;
+    browser.cancel();
+  }
 
+  // The request goes through a throwaway [MatrixApi], not the shared
+  // [Client]: Client.login reads its homeserver only after /login answers,
+  // so an attempt abandoned mid-flight could store its token against
+  // whatever server a later attempt pointed the client at. The client is
+  // only touched once this attempt is known to still be the current one.
   Future<SignInOutcome> _signIn(
     String server,
-    Future<void> Function() login, {
+    int attempt,
+    Future<LoginResponse> Function(MatrixApi api) login, {
     String? refused,
   }) async {
     final base = _bases[server];
     if (base == null) return SignInFailed("couldn't reach $server");
-    client.homeserver = Uri.parse(base);
+    final homeserver = Uri.parse(base);
     try {
-      await login();
+      final response = await login(
+        MatrixApi(homeserver: homeserver, httpClient: _http),
+      );
+      if (attempt != _generation) {
+        await _spend(homeserver, response.accessToken);
+        return const SignInCancelled();
+      }
+      final expiresInMs = response.expiresInMs;
+      try {
+        await client.init(
+          newToken: response.accessToken,
+          newTokenExpiresAt: expiresInMs == null
+              ? null
+              : DateTime.now().add(Duration(milliseconds: expiresInMs)),
+          newRefreshToken: response.refreshToken,
+          newUserID: response.userId,
+          newHomeserver: homeserver,
+          newDeviceName: deviceName,
+          newDeviceID: response.deviceId,
+          waitForFirstSync: false,
+        );
+      } on Exception {
+        // Nothing kept the token, so nothing should be left signed in with it.
+        await _spend(homeserver, response.accessToken);
+        return SignInFailed("couldn't finish signing in to $server");
+      }
       return const SignedIn();
     } on MatrixException catch (e) {
       return switch (e.error) {
@@ -139,6 +195,23 @@ class MatrixHomeserver implements Homeserver {
       };
     } on Exception {
       return SignInFailed("couldn't reach $server");
+    } on TypeError {
+      // A 200 that is not a login answer.
+      return SignInFailed("couldn't reach $server");
+    }
+  }
+
+  /// Logs out a token nobody will use, so it leaves no orphan device behind.
+  /// Best effort: a server that doesn't answer keeps it.
+  Future<void> _spend(Uri homeserver, String token) async {
+    try {
+      await MatrixApi(
+        homeserver: homeserver,
+        accessToken: token,
+        httpClient: _http,
+      ).logout().timeout(timeout);
+    } on Exception {
+      // Nothing more to do.
     }
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -73,12 +74,59 @@ MockClient _server({
   return http.Response('{}', 404);
 });
 
+/// [FakeMatrixApi] answering at `a.test` and `b.test` too, with no
+/// well-known file so each name is its own base. `POST /login` on A waits
+/// for [holdA] and answers with A's own token; everything else, B's login
+/// included, is the fake's. [seen] records each request and its bearer.
+class _TwoServers extends http.BaseClient {
+  _TwoServers() {
+    fake.servers.addAll({'https://a.test', 'https://b.test'});
+  }
+
+  final fake = FakeMatrixApi();
+  final holdA = Completer<void>();
+  final seen = <String>[];
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final url = request.url;
+    seen.add(
+      '${request.method} ${url.origin}${url.path} '
+      '${request.headers['authorization'] ?? '-'}',
+    );
+    if (url.path == '/.well-known/matrix/client') {
+      return http.StreamedResponse(const Stream.empty(), 404);
+    }
+    if (url.host == 'a.test' &&
+        url.path == '/_matrix/client/v3/login' &&
+        request.method == 'POST') {
+      await holdA.future;
+      return http.StreamedResponse(
+        Stream.value(
+          utf8.encode(
+            jsonEncode({
+              'user_id': '@test:a.test',
+              'access_token': 'token-a',
+              'device_id': 'DEVICEA',
+            }),
+          ),
+        ),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    return fake.send(request);
+  }
+}
+
 Future<(MatrixHomeserver, _NoBrowser)> _make(http.Client http) async {
   final client = await openClient(
     httpClient: http,
     databasePath: inMemoryDatabasePath,
   );
-  if (http is FakeMatrixApi) FakeMatrixApi.client = client;
+  if (http is FakeMatrixApi || http is _TwoServers) {
+    FakeMatrixApi.client = client;
+  }
   await client.init(waitForFirstSync: false);
   addTearDown(client.dispose);
   final browser = _NoBrowser();
@@ -212,6 +260,60 @@ void main() {
     test('a server never probed is not signed in to', () async {
       final (hs, _) = await _make(_server());
       expect(await hs.password('loaf.test', 'chris', 'x'), isA<SignInFailed>());
+    });
+
+    test('a login answered after close signs nothing in', () async {
+      final servers = _TwoServers();
+      final (hs, _) = await _make(servers);
+      await hs.probe('a.test');
+      final pending = hs.password('a.test', 'test', 'x');
+      hs.close();
+      servers.holdA.complete();
+      expect(await pending, isNot(isA<SignedIn>()));
+      expect(hs.client.isLogged(), isFalse);
+    });
+
+    test('a login to one server never lands on another', () async {
+      final servers = _TwoServers();
+      final (a, _) = await _make(servers);
+      final b = MatrixHomeserver(
+        a.client,
+        browser: _NoBrowser(),
+        deviceName: 'loaf on test',
+      );
+      await a.probe('a.test');
+      final pendingA = a.password('a.test', 'test', 'x');
+      a.close();
+      await b.probe('b.test');
+      expect(await b.password('b.test', 'test', 'x'), isA<SignedIn>());
+      servers.holdA.complete();
+      expect(await pendingA, isNot(isA<SignedIn>()));
+      final client = a.client;
+      expect(client.homeserver, Uri.parse('https://b.test'));
+      expect(client.isLogged(), isTrue);
+      expect(client.accessToken, isNot('token-a'));
+      // A's stale token was spent on A, and never carried to B.
+      expect(
+        servers.seen,
+        contains('POST https://a.test/_matrix/client/v3/logout Bearer token-a'),
+      );
+      expect(
+        servers.seen.where(
+          (s) => s.contains('token-a') && !s.startsWith('POST https://a.test'),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a changed question makes a pending login stale', () async {
+      final servers = _TwoServers();
+      final (hs, _) = await _make(servers);
+      await hs.probe('a.test');
+      final pending = hs.password('a.test', 'test', 'x');
+      await hs.probe('b.test');
+      servers.holdA.complete();
+      expect(await pending, isA<SignInCancelled>());
+      expect(hs.client.isLogged(), isFalse);
     });
 
     test('retryIn rounds up and defaults', () {
