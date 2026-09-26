@@ -181,6 +181,10 @@ class _LoginPageState extends State<LoginPage> {
           const SizedBox(height: LoafSpace.x3),
           ErrorNote(message: failed.messageFor(s.server)),
         ],
+        if (s.failure case final failure?) ...[
+          const SizedBox(height: LoafSpace.x3),
+          ErrorNote(message: failure),
+        ],
         if (soft != null) ...[
           const SizedBox(height: LoafSpace.x5),
           LoafButton(

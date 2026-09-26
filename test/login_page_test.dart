@@ -71,6 +71,11 @@ void main() {
       server: 'odd.test',
       check: ServerFound(ServerFlows()),
     ),
+    'failed': SignInState(
+      server: 'loaf.moe',
+      check: mockServers['loaf.moe']!,
+      failure: "couldn't reach loaf.moe",
+    ),
   };
   for (final MapEntry(key: name, value: state) in faces.entries) {
     for (final size in [_phone, _mac]) {
@@ -481,6 +486,20 @@ void main() {
     expect(server.autocorrect, isFalse);
     expect(server.enableSuggestions, isFalse);
     expect(server.keyboardType, TextInputType.url);
+    c.dispose();
+  });
+
+  testWidgets('a failure is said under the controls', (tester) async {
+    final c = SignInController.at(
+      SignInState(
+        server: 'loaf.moe',
+        check: mockServers['loaf.moe']!,
+        failure: "couldn't reach loaf.moe",
+      ),
+    );
+    await _pump(tester, c);
+    expect(find.text("couldn't reach loaf.moe"), findsOneWidget);
+    expect(find.text('continue with loaf.moe'), findsOneWidget);
     c.dispose();
   });
 }
