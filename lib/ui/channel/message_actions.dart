@@ -12,6 +12,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../emoji/emoji_picker.dart';
 import '../widgets/toast.dart';
 import '../widgets/action_menu.dart';
 import 'timeline_controller.dart';
@@ -126,7 +127,7 @@ Future<void> showMessageContextMenu(
     ],
   );
   if (pick != null && context.mounted) {
-    await _perform(context, controller, message, pick);
+    await _perform(context, controller, message, pick, position: position);
   }
 }
 
@@ -136,13 +137,20 @@ Future<void> _perform(
   BuildContext context,
   TimelineController controller,
   Message message,
-  _Pick pick,
-) async {
+  _Pick pick, {
+  Offset? position,
+}) async {
   switch (pick) {
     case _React(:final emoji):
       controller.toggleReaction(message.id, emoji);
     case _OpenPicker():
-      showToast(context, 'the full emoji picker is on its way');
+      final emoji = await showEmojiPicker(
+        context,
+        anchor: position == null ? null : position & Size.zero,
+      );
+      // Picking is reacting: an emoji you already reacted with stays.
+      final mine = message.reactions.any((r) => r.emoji == emoji && r.mine);
+      if (emoji != null && !mine) controller.toggleReaction(message.id, emoji);
     case _Act(action: MessageAction.reply):
       controller.startReply(message);
     case _Act(action: MessageAction.edit):

@@ -11,6 +11,7 @@ import '../members/role_colors.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'message_actions.dart';
+import '../emoji/emoji_picker.dart';
 import 'timeline_controller.dart';
 
 /// Every control in the composer row is this tall. Equal heights are what
@@ -96,6 +97,26 @@ class _ComposerState extends State<Composer> {
 
   /// Sends, or saves an edit. An edit emptied out is a request to delete, so
   /// it asks — cancelling leaves you in the edit.
+  /// Opens the emoji picker from [button] and puts the pick where the
+  /// cursor was, replacing any selection — or at the end if the field was
+  /// never focused.
+  Future<void> _pickEmoji(BuildContext button) async {
+    final box = button.findRenderObject()! as RenderBox;
+    final emoji = await showEmojiPicker(
+      context,
+      anchor: box.localToGlobal(Offset.zero) & box.size,
+    );
+    if (emoji == null || !mounted) return;
+    final value = _controller.value;
+    final at = value.selection.isValid
+        ? value.selection
+        : TextSelection.collapsed(offset: value.text.length);
+    _controller.value = TextEditingValue(
+      text: value.text.replaceRange(at.start, at.end, emoji),
+      selection: TextSelection.collapsed(offset: at.start + emoji.length),
+    );
+  }
+
   Future<void> _submit() async {
     final timeline = widget.timeline;
     if (timeline == null) return;
@@ -234,7 +255,13 @@ class _ComposerState extends State<Composer> {
               ),
             ),
           ),
-          _IconAction(icon: LucideIcons.smile, onTap: () {}),
+          Builder(
+            builder: (button) => _IconAction(
+              icon: LucideIcons.smile,
+              tooltip: 'Emoji',
+              onTap: () => _pickEmoji(button),
+            ),
+          ),
           _IconAction(icon: LucideIcons.paperclip, onTap: () {}),
           const SizedBox(width: LoafSpace.x1),
           // Enabled for an emptied edit too: sending that is how you ask to
@@ -357,10 +384,11 @@ class _TargetChip extends StatelessWidget {
 /// An icon button that scales down slightly on press, per the design
 /// system's press motion.
 class _IconAction extends StatefulWidget {
-  const _IconAction({required this.icon, this.onTap});
+  const _IconAction({required this.icon, this.onTap, this.tooltip});
 
   final IconData icon;
   final VoidCallback? onTap;
+  final String? tooltip;
 
   @override
   State<_IconAction> createState() => _IconActionState();
@@ -376,7 +404,7 @@ class _IconActionState extends State<_IconAction> {
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
-    return GestureDetector(
+    final button = GestureDetector(
       onTapDown: (_) => _setPressed(true),
       onTapUp: (_) => _setPressed(false),
       onTapCancel: () => _setPressed(false),
@@ -392,6 +420,8 @@ class _IconActionState extends State<_IconAction> {
         ),
       ),
     );
+    final tooltip = widget.tooltip;
+    return tooltip == null ? button : Tooltip(message: tooltip, child: button);
   }
 }
 

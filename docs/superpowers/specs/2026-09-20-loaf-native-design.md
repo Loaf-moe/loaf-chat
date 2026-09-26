@@ -325,6 +325,18 @@ instead; saving an edit unchanged is not an edit. Tapping a reaction pill
 toggles your own reaction on it, and the trailing + opens the message's
 actions with the quick reactions first.
 
+**The emoji picker** holds every Unicode emoji, generated from Unicode's
+`emoji-test.txt` by `tool/gen_emoji.dart` into a checked-in table:
+fully-qualified forms only, capped at the Emoji version the platforms' fonts
+draw (17.0 for now), skin-tone variants left for a later skin tone setting.
+Search matches names, whole words first; category tabs switch the grid; a
+recents row keeps your latest picks (account data `io.element.recent_emoji`
+in the SDK phase, so they follow you across devices). A sheet on a phone —
+where the keyboard waits to be asked for — and a popover by the button on a
+computer. From the composer's 😊 a pick is inserted at the cursor; from a
+message's "more reactions" it is a reaction (`m.reaction`), never a removal.
+Custom emoji (image packs, MSC2545) are a later feature.
+
 Deleting someone else's message is moderation and stays out of v1; delete is
 offered on your own messages only, and always asks first, because a redaction
 cannot be undone.
