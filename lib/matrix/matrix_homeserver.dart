@@ -1,0 +1,214 @@
+/// The real [Homeserver]: discovery over plain HTTP, then sign-in through
+/// the app's one [Client].
+library;
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:matrix/matrix.dart';
+
+import '../ui/auth/homeserver.dart';
+import '../ui/auth/sign_in_state.dart';
+import 'sso_browser.dart';
+
+class MatrixHomeserver implements Homeserver {
+  MatrixHomeserver(
+    this.client, {
+    required this.browser,
+    required this.deviceName,
+    http.Client? httpClient,
+  }) : _http = httpClient ?? client.httpClient;
+
+  final Client client;
+  final SsoBrowser browser;
+
+  /// What other sessions and "is this you?" call this device.
+  final String deviceName;
+
+  final http.Client _http;
+
+  static const timeout = Duration(seconds: 15);
+
+  /// Each probed name's base URL. Sign-in goes to the base its own name
+  /// resolved to, whatever was probed since.
+  final _bases = <String, String>{};
+
+  // Discovery does not go through the SDK: Client.getVersions caches under
+  // one key for every server, so probing a second server would read the
+  // first one's answer, and checkHomeserver cannot tell a broken delegation
+  // from nothing answering.
+  @override
+  Future<ServerCheck> probe(String server) async {
+    final named = 'https://$server';
+    var base = named;
+    String? delegatedTo;
+    try {
+      final wellKnown = await _json('$named/.well-known/matrix/client');
+      final url = (wellKnown?['m.homeserver'] as Map?)?['base_url'];
+      if (url is String && Uri.tryParse(url)?.hasAuthority == true) {
+        base = _trim(url);
+        final host = Uri.parse(base).host;
+        if (host != Uri.parse(named).host) delegatedTo = host;
+      }
+    } on _NoAnswer {
+      // No file and nothing answering: the name itself is tried next.
+    }
+    try {
+      final versions = await _json('$base/_matrix/client/versions');
+      if (versions?['versions'] is! List) {
+        return const ServerFailed(ServerProblem.notMatrix);
+      }
+      final login = await _json('$base/_matrix/client/v3/login');
+      _bases[server] = base;
+      return ServerFound(flowsFrom(login));
+    } on _NoAnswer {
+      return delegatedTo == null
+          ? const ServerFailed(ServerProblem.unreachable)
+          : ServerFailed(
+              ServerProblem.delegationBroken,
+              delegatedTo: delegatedTo,
+            );
+    }
+  }
+
+  @override
+  Future<SignInOutcome> password(String server, String user, String password) =>
+      _signIn(
+        server,
+        () => client.login(
+          LoginType.mLoginPassword,
+          identifier: AuthenticationUserIdentifier(user: user.trim()),
+          password: password,
+          initialDeviceDisplayName: deviceName,
+        ),
+      );
+
+  @override
+  Future<SignInOutcome> sso(
+    String server,
+    IdentityProvider provider, {
+    required bool desktop,
+  }) async {
+    final base = _bases[server];
+    if (base == null) return SignInFailed("couldn't reach $server");
+    final token = await browser.signIn(
+      (redirect) => ssoUrl(base, provider, redirect),
+    );
+    if (token == null) return const SignInCancelled();
+    return _signIn(
+      server,
+      () => client.login(
+        LoginType.mLoginToken,
+        token: token,
+        initialDeviceDisplayName: deviceName,
+      ),
+      // A refused token is not a wrong password.
+      refused: "${provider.name} didn't finish signing you in",
+    );
+  }
+
+  @override
+  void reopenSso() => browser.reopen();
+
+  @override
+  void cancelSso() => browser.cancel();
+
+  @override
+  void close() => browser.cancel();
+
+  Future<SignInOutcome> _signIn(
+    String server,
+    Future<void> Function() login, {
+    String? refused,
+  }) async {
+    final base = _bases[server];
+    if (base == null) return SignInFailed("couldn't reach $server");
+    client.homeserver = Uri.parse(base);
+    try {
+      await login();
+      return const SignedIn();
+    } on MatrixException catch (e) {
+      return switch (e.error) {
+        MatrixError.M_FORBIDDEN when refused == null => const WrongPassword(),
+        MatrixError.M_LIMIT_EXCEEDED => RateLimited(retryIn(e.retryAfterMs)),
+        _ => SignInFailed(refused ?? "$server said no: ${e.errorMessage}"),
+      };
+    } on Exception {
+      return SignInFailed("couldn't reach $server");
+    }
+  }
+
+  /// A 200 with a JSON object, or null for any other answer. Throws
+  /// [_NoAnswer] when nothing answered at all.
+  Future<Map<String, Object?>?> _json(String url) async {
+    final http.Response response;
+    try {
+      response = await _http.get(Uri.parse(url)).timeout(timeout);
+    } on Exception {
+      throw const _NoAnswer();
+    }
+    if (response.statusCode != 200) return null;
+    try {
+      final body = jsonDecode(response.body);
+      return body is Map<String, Object?> ? body : null;
+    } on FormatException {
+      return null;
+    }
+  }
+}
+
+class _NoAnswer implements Exception {
+  const _NoAnswer();
+}
+
+/// A base URL with no trailing slash, so paths append cleanly even under a
+/// path prefix.
+String _trim(String url) => url.replaceFirst(RegExp(r'/+$'), '');
+
+/// What `GET /login` offers that loaf can use.
+@visibleForTesting
+ServerFlows flowsFrom(Map<String, Object?>? login) {
+  var password = false;
+  final providers = <IdentityProvider>[];
+  for (final flow in (login?['flows'] as List? ?? const []).whereType<Map>()) {
+    switch (flow['type']) {
+      case 'm.login.password':
+        password = true;
+      case 'm.login.sso':
+        final listed = (flow['identity_providers'] as List? ?? const [])
+            .whereType<Map>()
+            .where((p) => p['id'] is String)
+            .toList();
+        // SSO with no providers listed redirects without choosing one.
+        if (listed.isEmpty) {
+          providers.add(const IdentityProvider('', 'single sign-on'));
+        }
+        for (final p in listed) {
+          final name = p['name'];
+          providers.add(
+            IdentityProvider(
+              p['id'] as String,
+              name is String && name.isNotEmpty ? name : p['id'] as String,
+            ),
+          );
+        }
+    }
+  }
+  return ServerFlows(providers: providers, password: password);
+}
+
+@visibleForTesting
+Uri ssoUrl(String base, IdentityProvider provider, Uri redirect) {
+  final id = provider.id.isEmpty ? '' : '/${Uri.encodeComponent(provider.id)}';
+  return Uri.parse('$base/_matrix/client/v3/login/sso/redirect$id')
+      .replace(queryParameters: {'redirectUrl': redirect.toString()});
+}
+
+/// `retry_after_ms`, rounded up to the whole seconds the button counts in.
+/// A server that names no wait gets thirty seconds.
+@visibleForTesting
+Duration retryIn(int? ms) =>
+    Duration(seconds: max(1, ((ms ?? 30000) / 1000).ceil()));
