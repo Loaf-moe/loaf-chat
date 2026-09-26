@@ -459,4 +459,31 @@ void main() {
       }),
     );
   });
+
+  group('a server that will not say how to sign in', () {
+    test('probing it fails with noSignInInfo, and it can be retried', () async {
+      final (hs, _) = await _make(
+        MockClient((request) async {
+          if (request.url.path == '/.well-known/matrix/client') {
+            return http.Response('{}', 404);
+          }
+          if (request.url.path == '/_matrix/client/versions') {
+            return _ok({
+              'versions': ['v1.19'],
+            });
+          }
+          return http.Response('', 500);
+        }),
+      );
+      final check = await hs.probe('quiet.test');
+      expect(check, isA<ServerFailed>());
+      expect((check as ServerFailed).problem, ServerProblem.noSignInInfo);
+
+      expect(
+        await hs.password('quiet.test', 'chris', 'x'),
+        isA<SignInFailed>(),
+        reason: 'probe never recorded a base for it',
+      );
+    });
+  });
 }

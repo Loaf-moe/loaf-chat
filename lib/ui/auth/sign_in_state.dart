@@ -31,9 +31,11 @@ class ServerFlows {
   bool get sso => providers.isNotEmpty;
 }
 
-/// The ways discovery fails, told apart because the last is a self-hoster's
-/// misconfiguration and names the host to go and fix.
-enum ServerProblem { unreachable, notMatrix, delegationBroken }
+/// The ways discovery fails, told apart because [delegationBroken] is a
+/// self-hoster's misconfiguration that names the host to go and fix, and
+/// [noSignInInfo] is a server that answered `/versions` but not `/login`
+/// with anything usable.
+enum ServerProblem { unreachable, notMatrix, delegationBroken, noSignInInfo }
 
 @immutable
 sealed class ServerCheck {
@@ -63,6 +65,7 @@ class ServerFailed extends ServerCheck {
     ServerProblem.notMatrix => "$server isn't a matrix server",
     ServerProblem.delegationBroken =>
       "$server points to $delegatedTo, which didn't answer",
+    ServerProblem.noSignInInfo => "$server didn't say how to sign in",
   };
 }
 

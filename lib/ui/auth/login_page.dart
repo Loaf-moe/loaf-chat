@@ -238,6 +238,12 @@ class _LoginPageState extends State<LoginPage> {
         if (!flows.sso && !flows.password) {
           return [
             ErrorNote(message: '${s.server} offers no sign-in loaf can use'),
+            const SizedBox(height: LoafSpace.x3),
+            LoafButton(
+              label: 'try again',
+              icon: LucideIcons.refreshCw,
+              onTap: _c.retry,
+            ),
           ];
         }
         if (s.activity == SignInActivity.finishingSso) {

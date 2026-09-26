@@ -67,6 +67,7 @@ class MatrixHomeserver implements Homeserver {
         return const ServerFailed(ServerProblem.notMatrix);
       }
       final login = await _json('$base/_matrix/client/v3/login');
+      if (login == null) return const ServerFailed(ServerProblem.noSignInInfo);
       _bases[server] = base;
       return ServerFound(flowsFrom(login));
     } on _NoAnswer {

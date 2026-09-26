@@ -82,6 +82,7 @@ void main() {
       activity: SignInActivity.signedIn,
       provider: const IdentityProvider('oidc', 'Authentik'),
     ),
+    'no sign-in info': _on('quiet.test'),
   };
   for (final MapEntry(key: name, value: state) in faces.entries) {
     for (final size in [_phone, _mac]) {
@@ -521,6 +522,31 @@ void main() {
     expect(find.text('where does your account live?'), findsOneWidget);
     idle.dispose();
   });
+
+  testWidgets(
+    'a server with no usable flow and one with no sign-in info can both '
+    'be retried',
+    (tester) async {
+      for (final state in [
+        const SignInState(
+          server: 'odd.test',
+          check: ServerFound(ServerFlows()),
+        ),
+        _on('quiet.test'),
+      ]) {
+        final c = SignInController.at(state);
+        await _pump(tester, c);
+        expect(find.text('try again'), findsOneWidget, reason: '$state');
+
+        await tester.tap(find.text('try again'));
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(c.state.check, isA<ServerProbing>(), reason: '$state');
+
+        await tester.pump(SignInController.probeDelay);
+        c.dispose();
+      }
+    },
+  );
 
   testWidgets('a failure is said under the controls', (tester) async {
     final c = SignInController.at(

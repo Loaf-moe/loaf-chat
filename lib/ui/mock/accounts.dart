@@ -39,6 +39,7 @@ const mockServers = <String, ServerCheck>{
     ServerProblem.delegationBroken,
     delegatedTo: 'matrix.broken.test',
   ),
+  'quiet.test': ServerFailed(ServerProblem.noSignInInfo),
 };
 
 /// The one password the mock homeserver turns away (`M_FORBIDDEN`).
