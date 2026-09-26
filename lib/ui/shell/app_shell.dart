@@ -599,6 +599,15 @@ class _AppShellState extends State<AppShell> {
     VerifyPurpose purpose, {
     String? device,
   }) async {
+    // A real session's notices are true, but the flows behind them are still
+    // the mock's: they would show fake emoji, or a fake key to save.
+    if (_session is! MockSession) {
+      showToast(context, switch (purpose) {
+        VerifyPurpose.setUp => 'setting up recovery arrives in the next build',
+        _ => 'verifying this device arrives in the next build',
+      });
+      return;
+    }
     final kept = _verification;
     final VerificationController v;
     if (kept != null && kept.purpose == purpose) {
