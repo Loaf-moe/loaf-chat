@@ -433,6 +433,70 @@ void main() {
       expect(hs.closed, isTrue);
     });
   });
+
+  group('the point of no return', () {
+    testWidgets('after committing, cancel and connect are ignored', (
+      tester,
+    ) async {
+      final hs = _Scripted();
+      final c = SignInController.at(
+        const SignInState(server: 'one.test', check: ServerFound(_both)),
+        onSignedIn: () => signedIn++,
+        homeserver: hs,
+        desktop: true,
+      );
+      c.continueWithSso(const IdentityProvider('x', 'X'));
+      hs.ssoCommitting!();
+      expect(c.state.activity, SignInActivity.signedIn);
+
+      c.cancelSso();
+      c.connect('two.test');
+      expect(c.state.activity, SignInActivity.signedIn);
+      expect(c.state.server, 'one.test');
+      expect(hs.cancelled, isFalse);
+
+      hs.ssoAnswer!.complete(const SignedIn());
+      await tester.pump();
+      expect(signedIn, 1);
+      c.dispose();
+    });
+
+    testWidgets('a commit that fails brings the controls back', (tester) async {
+      final hs = _Scripted();
+      final c = SignInController.at(
+        const SignInState(server: 'one.test', check: ServerFound(_both)),
+        onSignedIn: () => signedIn++,
+        homeserver: hs,
+      );
+      c.signInWithPassword('chris', 'x');
+      hs.passwordCommitting!();
+      expect(c.state.activity, SignInActivity.signedIn);
+
+      hs.passwordAnswer!.complete(const SignInFailed('nope'));
+      await tester.pump();
+      expect(c.state.activity, SignInActivity.idle);
+      expect(c.state.failure, 'nope');
+
+      c.connect('two.test');
+      expect(c.state.server, 'two.test');
+      c.dispose();
+    });
+
+    testWidgets('a stale commit is ignored', (tester) async {
+      final hs = _Scripted();
+      final c = SignInController.at(
+        const SignInState(server: 'one.test', check: ServerFound(_both)),
+        onSignedIn: () => signedIn++,
+        homeserver: hs,
+      );
+      c.signInWithPassword('chris', 'x');
+      final stale = hs.passwordCommitting!;
+      c.connect('two.test');
+      stale();
+      expect(c.state.activity, isNot(SignInActivity.signedIn));
+      c.dispose();
+    });
+  });
 }
 
 const _both = ServerFlows(
@@ -445,6 +509,8 @@ class _Scripted implements Homeserver {
   final probes = <String, Completer<ServerCheck>>{};
   Completer<SignInOutcome>? passwordAnswer;
   Completer<SignInOutcome>? ssoAnswer;
+  void Function()? passwordCommitting;
+  void Function()? ssoCommitting;
   var cancelled = false;
   var closed = false;
 
@@ -453,15 +519,26 @@ class _Scripted implements Homeserver {
       (probes[server] = Completer()).future;
 
   @override
-  Future<SignInOutcome> password(String server, String user, String pw) =>
-      (passwordAnswer = Completer()).future;
+  Future<SignInOutcome> password(
+    String server,
+    String user,
+    String pw, {
+    void Function()? onCommitting,
+  }) {
+    passwordCommitting = onCommitting;
+    return (passwordAnswer = Completer()).future;
+  }
 
   @override
   Future<SignInOutcome> sso(
     String server,
     IdentityProvider provider, {
     required bool desktop,
-  }) => (ssoAnswer = Completer()).future;
+    void Function()? onCommitting,
+  }) {
+    ssoCommitting = onCommitting;
+    return (ssoAnswer = Completer()).future;
+  }
 
   @override
   void reopenSso() {}

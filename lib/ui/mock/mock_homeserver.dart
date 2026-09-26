@@ -35,6 +35,7 @@ class MockHomeserver implements Homeserver {
   Completer<SignInOutcome>? _sso;
   Timer? _ssoTimer;
   var _ssoDelay = Duration.zero;
+  void Function()? _ssoCommitting;
 
   Future<T> _later<T>(Duration delay, T Function() answer) {
     final done = Completer<T>();
@@ -58,29 +59,36 @@ class MockHomeserver implements Homeserver {
   }
 
   @override
-  Future<SignInOutcome> password(String server, String user, String password) =>
-      _later(passwordDelay, () {
-        final wrong = password == mockWrongPassword || consumeFailure();
-        if (!wrong) {
-          _wrongInARow = 0;
-          return const SignedIn();
-        }
-        if (++_wrongInARow >= triesBeforeLimit) {
-          _wrongInARow = 0;
-          return const RateLimited(rateLimit);
-        }
-        return const WrongPassword();
-      });
+  Future<SignInOutcome> password(
+    String server,
+    String user,
+    String password, {
+    void Function()? onCommitting,
+  }) => _later(passwordDelay, () {
+    final wrong = password == mockWrongPassword || consumeFailure();
+    if (!wrong) {
+      _wrongInARow = 0;
+      onCommitting?.call();
+      return const SignedIn();
+    }
+    if (++_wrongInARow >= triesBeforeLimit) {
+      _wrongInARow = 0;
+      return const RateLimited(rateLimit);
+    }
+    return const WrongPassword();
+  });
 
   @override
   Future<SignInOutcome> sso(
     String server,
     IdentityProvider provider, {
     required bool desktop,
+    void Function()? onCommitting,
   }) {
     cancelSso();
     final done = _sso = Completer<SignInOutcome>();
     _ssoDelay = desktop ? browserDelay : ssoSheetDelay;
+    _ssoCommitting = onCommitting;
     _waitForSso();
     return done.future;
   }
@@ -90,6 +98,7 @@ class MockHomeserver implements Homeserver {
     _ssoTimer = Timer(_ssoDelay, () {
       final done = _sso;
       _sso = null;
+      _ssoCommitting?.call();
       done?.complete(const SignedIn());
     });
   }

@@ -50,15 +50,29 @@ abstract interface class Homeserver {
   Future<ServerCheck> probe(String server);
 
   /// [server] has been probed and found to take passwords.
-  Future<SignInOutcome> password(String server, String user, String password);
+  ///
+  /// [onCommitting], if given, is called once, just before the attempt
+  /// passes the point where it can no longer be stopped; after it,
+  /// [cancelSso] and [close] no longer change the outcome.
+  Future<SignInOutcome> password(
+    String server,
+    String user,
+    String password, {
+    void Function()? onCommitting,
+  });
 
   /// Resolves when the provider hands back, or with [SignInCancelled] once
   /// [cancelSso] is called. [desktop] picks the real browser over the
   /// system sheet.
+  ///
+  /// [onCommitting], if given, is called once, just before the attempt
+  /// passes the point where it can no longer be stopped; after it,
+  /// [cancelSso] and [close] no longer change the outcome.
   Future<SignInOutcome> sso(
     String server,
     IdentityProvider provider, {
     required bool desktop,
+    void Function()? onCommitting,
   });
 
   /// Desktop: opens the pending SSO page in the browser again.

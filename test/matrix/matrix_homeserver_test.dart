@@ -399,4 +399,64 @@ void main() {
       );
     });
   });
+
+  group('onCommitting', () {
+    test(
+      'is called exactly once on a successful sign-in, before isLogged is true',
+      () async {
+        final (hs, _) = await _make(FakeMatrixApi());
+        await hs.probe('fakeServer.notExisting');
+        var calls = 0;
+        bool? loggedDuringCommit;
+        final outcome = await hs.password(
+          'fakeServer.notExisting',
+          'test',
+          'x',
+          onCommitting: () {
+            calls++;
+            loggedDuringCommit = hs.client.isLogged();
+          },
+        );
+        expect(outcome, isA<SignedIn>());
+        expect(calls, 1);
+        expect(loggedDuringCommit, isFalse);
+      },
+    );
+
+    test('is not called for M_FORBIDDEN', () async {
+      final (hs, _) = await _make(
+        _server(loginError: {'errcode': 'M_FORBIDDEN', 'error': 'nope'}),
+      );
+      await hs.probe('loaf.test');
+      var called = false;
+      final outcome = await hs.password(
+        'loaf.test',
+        'chris',
+        'x',
+        onCommitting: () => called = true,
+      );
+      expect(outcome, isA<WrongPassword>());
+      expect(called, isFalse);
+    });
+
+    test(
+      'is not called when the attempt is abandoned before /login answers',
+      (() async {
+        final servers = _TwoServers();
+        final (hs, _) = await _make(servers);
+        await hs.probe('a.test');
+        var called = false;
+        final pending = hs.password(
+          'a.test',
+          'test',
+          'x',
+          onCommitting: () => called = true,
+        );
+        hs.close();
+        servers.holdA.complete();
+        expect(await pending, isNot(isA<SignedIn>()));
+        expect(called, isFalse);
+      }),
+    );
+  });
 }

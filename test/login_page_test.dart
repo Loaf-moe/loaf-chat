@@ -76,6 +76,12 @@ void main() {
       check: mockServers['loaf.moe']!,
       failure: "couldn't reach loaf.moe",
     ),
+    'committing': SignInState(
+      server: 'sso-only.test',
+      check: mockServers['sso-only.test']!,
+      activity: SignInActivity.signedIn,
+      provider: const IdentityProvider('oidc', 'Authentik'),
+    ),
   };
   for (final MapEntry(key: name, value: state) in faces.entries) {
     for (final size in [_phone, _mac]) {
@@ -487,6 +493,33 @@ void main() {
     expect(server.enableSuggestions, isFalse);
     expect(server.keyboardType, TextInputType.url);
     c.dispose();
+  });
+
+  testWidgets('once signed in, there is no cancel and no continue with', (
+    tester,
+  ) async {
+    final c = SignInController.at(faces['committing']!);
+    await _pump(tester, c, size: _mac);
+    expect(find.text('signing in…'), findsOneWidget);
+    expect(find.text('cancel'), findsNothing);
+    expect(find.textContaining('continue with'), findsNothing);
+    c.dispose();
+  });
+
+  testWidgets('the server row cannot be edited once signed in', (tester) async {
+    final committing = SignInController.at(faces['committing']!);
+    await _pump(tester, committing, size: _mac);
+    await tester.tap(find.text('sso-only.test'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('where does your account live?'), findsNothing);
+    committing.dispose();
+
+    final idle = SignInController.at(_on('sso-only.test'));
+    await _pump(tester, idle, size: _mac);
+    await tester.tap(find.text('sso-only.test'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('where does your account live?'), findsOneWidget);
+    idle.dispose();
   });
 
   testWidgets('a failure is said under the controls', (tester) async {

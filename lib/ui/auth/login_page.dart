@@ -174,7 +174,7 @@ class _LoginPageState extends State<LoginPage> {
             tokens: tokens,
             server: s.repointing ?? s.server,
             looking: s.repointing != null,
-            onEdit: _editServer,
+            onEdit: s.activity == SignInActivity.signedIn ? null : _editServer,
           ),
         ],
         if (failed != null) ...[
@@ -245,6 +245,9 @@ class _LoginPageState extends State<LoginPage> {
         }
         if (flows.password && (_showingPassword || !flows.sso)) {
           return _passwordForm(s, flows);
+        }
+        if (s.activity == SignInActivity.signedIn) {
+          return [_WorkingNote(tokens: tokens, label: 'signing in…')];
         }
         return _ssoButtons(flows);
     }
@@ -488,48 +491,56 @@ class _ServerRow extends StatelessWidget {
 
   /// A full id in the username named this server and it is being checked.
   final bool looking;
-  final VoidCallback onEdit;
+
+  /// Null while nothing should come of tapping the row: it is then plain
+  /// text, with no tap handler and no click cursor.
+  final VoidCallback? onEdit;
 
   @override
-  Widget build(BuildContext context) => MouseRegion(
-    cursor: SystemMouseCursors.click,
-    child: GestureDetector(
-      onTap: onEdit,
-      behavior: HitTestBehavior.opaque,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (looking) ...[
-            SizedBox(
-              width: 11,
-              height: 11,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.5,
-                color: tokens.textMuted,
-              ),
-            ),
-            const SizedBox(width: LoafSpace.x2),
-          ],
-          Text(
-            looking ? 'looking for ' : 'on ',
-            style: loafBody(13, 400).copyWith(color: tokens.textMuted),
-          ),
-          Flexible(
-            child: Text(
-              server,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: loafBody(13, 600).copyWith(color: tokens.textBody),
+  Widget build(BuildContext context) {
+    final row = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (looking) ...[
+          SizedBox(
+            width: 11,
+            height: 11,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: tokens.textMuted,
             ),
           ),
-          if (!looking) ...[
-            const SizedBox(width: LoafSpace.x1),
-            Icon(LucideIcons.pencil, size: 13, color: tokens.textMuted),
-          ],
+          const SizedBox(width: LoafSpace.x2),
         ],
+        Text(
+          looking ? 'looking for ' : 'on ',
+          style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+        ),
+        Flexible(
+          child: Text(
+            server,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: loafBody(13, 600).copyWith(color: tokens.textBody),
+          ),
+        ),
+        if (!looking) ...[
+          const SizedBox(width: LoafSpace.x1),
+          Icon(LucideIcons.pencil, size: 13, color: tokens.textMuted),
+        ],
+      ],
+    );
+    final edit = onEdit;
+    if (edit == null) return row;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: edit,
+        behavior: HitTestBehavior.opaque,
+        child: row,
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _WorkingNote extends StatelessWidget {

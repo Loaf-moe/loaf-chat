@@ -91,15 +91,35 @@ class SignInController extends ChangeNotifier {
   }
 
   /// Asks, and hands the answer to [then] only if nothing newer has started.
-  void _ask<T>(Future<T> question, void Function(T answer) then) {
+  void _ask<T>(Future<T> question, void Function(T answer) then) =>
+      _askFor((_) => question, then);
+
+  /// Like [_ask], but [question] is built from the epoch it will be asked
+  /// under, so a callback threaded into it (an `onCommitting`) can tell
+  /// later whether it is still the one being waited on.
+  void _askFor<T>(
+    Future<T> Function(int epoch) question,
+    void Function(T answer) then,
+  ) {
     final mine = ++_epoch;
-    question.then((answer) {
+    question(mine).then((answer) {
       if (mine == _epoch) then(answer);
     });
   }
 
+  /// The server said yes and the attempt has passed the point where it can
+  /// no longer be stopped: [SignInActivity.signedIn], if [epoch] is still
+  /// current.
+  void Function() _committed(int epoch) => () {
+    if (epoch == _epoch) {
+      _set(_state.copyWith(activity: SignInActivity.signedIn));
+    }
+  };
+
   /// The server picker's connect. Input that names no server is ignored.
+  /// Once the point of no return has passed, nothing changes the outcome.
   void connect(String input) {
+    if (_state.activity == SignInActivity.signedIn) return;
     final name = serverNameFrom(input);
     if (name == null) return;
     _repoint?.cancel();
@@ -171,7 +191,15 @@ class SignInController extends ChangeNotifier {
         clearFailure: true,
       ),
     );
-    _ask(homeserver.sso(_state.server, provider, desktop: desktop), _finish);
+    _askFor(
+      (epoch) => homeserver.sso(
+        _state.server,
+        provider,
+        desktop: desktop,
+        onCommitting: _committed(epoch),
+      ),
+      _finish,
+    );
   }
 
   /// Desktop: the browser tab was closed or lost.
@@ -181,6 +209,7 @@ class SignInController extends ChangeNotifier {
   }
 
   void cancelSso() {
+    if (_state.activity == SignInActivity.signedIn) return;
     _epoch++;
     homeserver.cancelSso();
     _set(_state.copyWith(activity: SignInActivity.idle));
@@ -210,7 +239,15 @@ class SignInController extends ChangeNotifier {
         clearFailure: true,
       ),
     );
-    _ask(homeserver.password(_state.server, user, password), _finish);
+    _askFor(
+      (epoch) => homeserver.password(
+        _state.server,
+        user,
+        password,
+        onCommitting: _committed(epoch),
+      ),
+      _finish,
+    );
   }
 
   void _finish(SignInOutcome outcome) {

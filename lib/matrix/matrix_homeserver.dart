@@ -84,7 +84,12 @@ class MatrixHomeserver implements Homeserver {
   var _generation = 0;
 
   @override
-  Future<SignInOutcome> password(String server, String user, String password) {
+  Future<SignInOutcome> password(
+    String server,
+    String user,
+    String password, {
+    void Function()? onCommitting,
+  }) {
     final attempt = ++_generation;
     return _signIn(
       server,
@@ -96,6 +101,7 @@ class MatrixHomeserver implements Homeserver {
         initialDeviceDisplayName: deviceName,
         refreshToken: client.onSoftLogout != null,
       ),
+      onCommitting: onCommitting,
     );
   }
 
@@ -104,6 +110,7 @@ class MatrixHomeserver implements Homeserver {
     String server,
     IdentityProvider provider, {
     required bool desktop,
+    void Function()? onCommitting,
   }) async {
     final attempt = ++_generation;
     final base = _bases[server];
@@ -130,6 +137,7 @@ class MatrixHomeserver implements Homeserver {
       ),
       // A refused token is not a wrong password.
       refused: "${provider.name} didn't finish signing you in",
+      onCommitting: onCommitting,
     );
   }
 
@@ -158,6 +166,7 @@ class MatrixHomeserver implements Homeserver {
     int attempt,
     Future<LoginResponse> Function(MatrixApi api) login, {
     String? refused,
+    void Function()? onCommitting,
   }) async {
     final base = _bases[server];
     if (base == null) return SignInFailed("couldn't reach $server");
@@ -170,6 +179,7 @@ class MatrixHomeserver implements Homeserver {
         await _spend(homeserver, response.accessToken);
         return const SignInCancelled();
       }
+      onCommitting?.call();
       final expiresInMs = response.expiresInMs;
       try {
         await client.init(
