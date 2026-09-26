@@ -41,10 +41,19 @@ void main() {
   group('from the composer', () {
     testWidgets('a popover on a computer', variant: _desktop, (tester) async {
       await _pumpShell(tester, const Size(1440, 900));
+      final button = tester.getRect(find.byTooltip('Emoji'));
       await _openFromComposer(tester);
 
       expect(_picker(), findsOneWidget);
       expect(find.byType(BottomSheet), findsNothing);
+      final picker = tester.getRect(_picker());
+      expect(picker.width, greaterThanOrEqualTo(340), reason: 'not squeezed');
+      expect(
+        picker.bottom,
+        lessThanOrEqualTo(button.top),
+        reason: 'opens above the button, not over the composer',
+      );
+      expect(picker.right, lessThanOrEqualTo(1440));
     });
 
     testWidgets('a sheet on a phone', variant: _mobile, (tester) async {

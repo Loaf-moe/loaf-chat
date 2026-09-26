@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/anchored_popover.dart';
 import 'emoji.dart';
 import 'emoji_data.dart';
 
@@ -29,32 +30,20 @@ Future<String?> showEmojiPicker(BuildContext context, {Rect? anchor}) async {
   );
 
   if (isDesktop) {
-    final overlay =
-        Overlay.of(context).context.findRenderObject()! as RenderBox;
-    final at =
-        anchor ??
-        Rect.fromCenter(
-          center: overlay.size.center(Offset.zero),
-          width: 0,
-          height: 0,
-        );
-    await showMenu<void>(
-      context: context,
-      color: tokens.card,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(LoafRadius.lg),
-        side: BorderSide(color: tokens.border),
+    await showAnchoredPopover<void>(
+      context,
+      anchor:
+          anchor ??
+          Rect.fromCenter(
+            center: MediaQuery.sizeOf(context).center(Offset.zero),
+            width: 0,
+            height: 0,
+          ),
+      builder: (context) => SizedBox(
+        width: _pickerWidth,
+        height: _pickerHeight,
+        child: picker(context),
       ),
-      // Anchored on the button; showMenu keeps it on screen, which by the
-      // composer means rising above it.
-      position: RelativeRect.fromLTRB(
-        at.left,
-        at.top,
-        overlay.size.width - at.right,
-        overlay.size.height - at.bottom,
-      ),
-      items: [_PickerEntry(builder: picker)],
     );
   } else {
     await showModalBottomSheet<void>(
@@ -83,26 +72,8 @@ Future<String?> showEmojiPicker(BuildContext context, {Rect? anchor}) async {
   return emoji;
 }
 
-class _PickerEntry extends PopupMenuEntry<void> {
-  const _PickerEntry({required this.builder});
-
-  final WidgetBuilder builder;
-
-  @override
-  double get height => 400;
-
-  @override
-  bool represents(void value) => false;
-
-  @override
-  State<_PickerEntry> createState() => _PickerEntryState();
-}
-
-class _PickerEntryState extends State<_PickerEntry> {
-  @override
-  Widget build(BuildContext context) =>
-      SizedBox(width: 352, height: 400, child: widget.builder(context));
-}
+const _pickerWidth = 352.0;
+const _pickerHeight = 400.0;
 
 IconData _iconFor(String group) => switch (group) {
   'Smileys & Emotion' => LucideIcons.smile,

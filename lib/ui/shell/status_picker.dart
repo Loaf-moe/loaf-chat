@@ -9,6 +9,7 @@ import '../members/presence.dart';
 import '../members/presence_dot.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/anchored_popover.dart';
 import 'profile_controller.dart';
 
 /// Opens the picker from the avatar at [anchor] (global coordinates).
@@ -25,26 +26,11 @@ Future<void> showStatusPicker(
   final content = _PickerContent(profile: profile, draft: draft);
 
   if (isDesktop) {
-    final tokens = LoafTokens.of(context);
-    final overlay =
-        Overlay.of(context).context.findRenderObject()! as RenderBox;
-    await showMenu<void>(
-      context: context,
-      color: tokens.card,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(LoafRadius.lg),
-        side: BorderSide(color: tokens.border),
-      ),
-      // Anchored on the avatar; showMenu lifts it to stay on screen, which
-      // near the panel means rising above it.
-      position: RelativeRect.fromLTRB(
-        anchor.left,
-        anchor.top,
-        overlay.size.width - anchor.left,
-        overlay.size.height - anchor.top,
-      ),
-      items: [_PickerMenuEntry(child: content)],
+    // Beside the avatar, above it, never covering the panel it came from.
+    await showAnchoredPopover<void>(
+      context,
+      anchor: anchor,
+      builder: (context) => StatusPickerPopover(child: content),
     );
   } else {
     final tokens = LoafTokens.of(context);
@@ -76,25 +62,21 @@ class _Draft {
   String text;
 }
 
-class _PickerMenuEntry extends PopupMenuEntry<void> {
-  const _PickerMenuEntry({required this.child});
+/// The desktop popover's frame: a fixed width, and the menu padding the
+/// picker was designed inside.
+class StatusPickerPopover extends StatelessWidget {
+  const StatusPickerPopover({super.key, required this.child});
 
   final Widget child;
 
   @override
-  double get height => 300;
-
-  @override
-  bool represents(void value) => false;
-
-  @override
-  State<_PickerMenuEntry> createState() => _PickerMenuEntryState();
-}
-
-class _PickerMenuEntryState extends State<_PickerMenuEntry> {
-  @override
-  Widget build(BuildContext context) =>
-      SizedBox(width: 300, child: widget.child);
+  Widget build(BuildContext context) => SizedBox(
+    width: 300,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
+      child: child,
+    ),
+  );
 }
 
 class _PickerContent extends StatefulWidget {

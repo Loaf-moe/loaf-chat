@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:loaf_native/ui/emoji/emoji_picker.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
 import 'package:loaf_native/ui/members/presence_dot.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
+import 'package:loaf_native/ui/shell/status_picker.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 
 final _desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
@@ -72,6 +75,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text("this server doesn't share presence"), findsOneWidget);
+      // Short as it now is, it still opens above the avatar, not over it.
+      final avatar = tester.getRect(
+        find.byKey(const ValueKey('account-avatar')),
+      );
+      final popover = tester.getRect(find.byType(StatusPickerPopover));
+      expect(popover.bottom, lessThanOrEqualTo(avatar.top));
       expect(find.text('do not disturb'), findsNothing);
       expect(find.text("what's cooking?"), findsOneWidget);
     },
@@ -102,4 +111,32 @@ void main() {
       expect(tester.widget<Opacity>(remote).opacity, 1);
     },
   );
+
+  testWidgets('escape closes the status popover', variant: _desktop, (
+    tester,
+  ) async {
+    await _pumpShell(tester);
+    await tester.tap(find.byKey(const ValueKey('account-avatar')));
+    await tester.pumpAndSettle();
+    expect(find.byType(StatusPickerPopover), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(StatusPickerPopover), findsNothing);
+  });
+
+  testWidgets('escape closes the emoji popover', variant: _desktop, (
+    tester,
+  ) async {
+    await _pumpShell(tester);
+    await tester.tap(find.byTooltip('Emoji'));
+    await tester.pumpAndSettle();
+    expect(find.byType(EmojiPicker), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(EmojiPicker), findsNothing);
+  });
 }
