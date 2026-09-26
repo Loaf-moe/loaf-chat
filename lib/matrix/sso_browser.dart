@@ -1,0 +1,134 @@
+/// Where SSO happens, split by platform as the spec says: the system's
+/// sign-in sheet on a phone, the real browser on a computer.
+library;
+
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
+import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+abstract interface class SsoBrowser {
+  /// Opens `urlFor(redirect)` and resolves with the `loginToken` the server
+  /// sends back to [redirect], or null if the person gave up.
+  Future<String?> signIn(Uri Function(Uri redirect) urlFor);
+
+  /// Opens the pending page again, where that means anything.
+  void reopen();
+
+  /// Gives up on a pending [signIn], which resolves null.
+  void cancel();
+}
+
+/// A phone: `ASWebAuthenticationSession` on iOS, a Custom Tab on Android.
+/// The sheet is modal, so reopening means nothing and cancelling only
+/// drops whatever it later returns.
+class SheetSsoBrowser implements SsoBrowser {
+  SheetSsoBrowser({
+    Future<String> Function(String url, String scheme)? authenticate,
+  }) : _authenticate = authenticate ?? _system;
+
+  static Future<String> _system(String url, String scheme) =>
+      FlutterWebAuth2.authenticate(url: url, callbackUrlScheme: scheme);
+
+  /// The bundle id, which no other app can claim on iOS.
+  static const scheme = 'moe.loaf.native';
+
+  final Future<String> Function(String url, String scheme) _authenticate;
+  var _attempt = 0;
+
+  @override
+  Future<String?> signIn(Uri Function(Uri redirect) urlFor) async {
+    final mine = ++_attempt;
+    try {
+      final back = await _authenticate(
+        urlFor(Uri.parse('$scheme://sso')).toString(),
+        scheme,
+      );
+      if (mine != _attempt) return null;
+      return Uri.parse(back).queryParameters['loginToken'];
+    } on PlatformException {
+      // CANCELED: the sheet was closed.
+      return null;
+    }
+  }
+
+  @override
+  void reopen() {}
+
+  @override
+  void cancel() => _attempt++;
+}
+
+/// A computer: the real browser, returning to a one-shot listener on
+/// 127.0.0.1. A loopback redirect needs no URL scheme registered with the
+/// OS, which Linux has no single way to do.
+class LoopbackSsoBrowser implements SsoBrowser {
+  LoopbackSsoBrowser({Future<bool> Function(Uri url)? open})
+    : _open = open ?? _launch;
+
+  static Future<bool> _launch(Uri url) =>
+      launchUrl(url, mode: LaunchMode.externalApplication);
+
+  final Future<bool> Function(Uri url) _open;
+  HttpServer? _server;
+  Uri? _page;
+  Completer<String?>? _done;
+
+  @override
+  Future<String?> signIn(Uri Function(Uri redirect) urlFor) async {
+    cancel();
+    final done = _done = Completer<String?>();
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    // Cancelled while binding: this attempt is already over.
+    if (!identical(_done, done)) {
+      await server.close(force: true);
+      return done.future;
+    }
+    _server = server;
+    final page = _page = urlFor(
+      Uri(scheme: 'http', host: '127.0.0.1', port: server.port, path: '/sso'),
+    );
+    server.listen((request) async {
+      final token = request.uri.path == '/sso'
+          ? request.uri.queryParameters['loginToken']
+          : null;
+      request.response.statusCode = token == null
+          ? HttpStatus.notFound
+          : HttpStatus.ok;
+      if (token != null) {
+        request.response
+          ..headers.contentType = ContentType.html
+          ..write(_donePage);
+      }
+      await request.response.close();
+      if (token != null && identical(_done, done)) _finish(token);
+    });
+    if (!await _open(page) && identical(_done, done)) _finish(null);
+    return done.future;
+  }
+
+  @override
+  void reopen() {
+    final page = _page;
+    if (_done != null && page != null) _open(page);
+  }
+
+  @override
+  void cancel() => _finish(null);
+
+  void _finish(String? token) {
+    final done = _done;
+    _done = null;
+    _page = null;
+    _server?.close(force: true);
+    _server = null;
+    done?.complete(token);
+  }
+
+  static const _donePage =
+      '<!doctype html><meta charset="utf-8"><title>loaf</title>'
+      '<body style="font-family:sans-serif;padding:3em">'
+      "<p>you're signed in. you can close this tab and go back to loaf.</p>";
+}
