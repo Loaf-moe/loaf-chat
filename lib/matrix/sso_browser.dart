@@ -71,6 +71,15 @@ class LoopbackSsoBrowser implements SsoBrowser {
   static Future<bool> _launch(Uri url) =>
       launchUrl(url, mode: LaunchMode.externalApplication);
 
+  /// Whether the browser opened. A launcher that throws did not.
+  Future<bool> _tryOpen(Uri page) async {
+    try {
+      return await _open(page);
+    } on Exception {
+      return false;
+    }
+  }
+
   final Future<bool> Function(Uri url) _open;
   HttpServer? _server;
   Uri? _page;
@@ -105,14 +114,14 @@ class LoopbackSsoBrowser implements SsoBrowser {
       await request.response.close();
       if (token != null && identical(_done, done)) _finish(token);
     });
-    if (!await _open(page) && identical(_done, done)) _finish(null);
+    if (!await _tryOpen(page) && identical(_done, done)) _finish(null);
     return done.future;
   }
 
   @override
   void reopen() {
     final page = _page;
-    if (_done != null && page != null) _open(page);
+    if (_done != null && page != null) unawaited(_tryOpen(page));
   }
 
   @override

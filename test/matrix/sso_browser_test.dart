@@ -103,6 +103,21 @@ void main() {
       final browser = LoopbackSsoBrowser(open: (_) async => false);
       expect(await browser.signIn(_page), isNull);
     });
+
+    test(
+      'a launcher that throws ends the attempt and frees the port',
+      () async {
+        Uri? tried;
+        final browser = LoopbackSsoBrowser(
+          open: (url) async {
+            tried = url;
+            throw Exception('no browser');
+          },
+        );
+        expect(await browser.signIn(_page), isNull);
+        await expectLater(_comeBack(tried!), throwsA(isA<SocketException>()));
+      },
+    );
   });
 
   group('sheet', () {
