@@ -78,6 +78,36 @@ void main() {
     expect(s.account, AccountState.signedOut);
   });
 
+  test('signing in again after signing out works', () async {
+    final s = await _session();
+    await _signIn(s);
+    await _settle();
+    s.signOut();
+    await _settle();
+    expect(s.account, AccountState.signedOut);
+    await _signIn(s);
+    await _settle();
+    expect(s.account, AccountState.signedIn);
+  });
+
+  test('a second sign-out while one is in flight does nothing', () async {
+    final s = await _session();
+    await _signIn(s);
+    await _settle();
+    s.signOut();
+    s.signOut();
+    await _settle();
+    expect(s.account, AccountState.signedOut);
+    expect(FakeMatrixApi.calledEndpoints['/client/v3/logout'], hasLength(1));
+  });
+
+  test('a failed init inside sign-in is not an uncaught error', () async {
+    final s = await _session();
+    s.client.onLoginStateChanged.addError(Exception('init failed'));
+    await _settle();
+    expect(s.account, AccountState.signedOut);
+  });
+
   test('a token refresh in flight does not sign out', () async {
     final s = await _session();
     await _signIn(s);

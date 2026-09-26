@@ -24,12 +24,17 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
     this.defaultServer = 'loaf.moe',
   }) {
     _subscriptions = [
-      client.onLoginStateChanged.stream.listen((_) => _refresh()),
+      // The SDK reports a failed init as an error on this stream; the state
+      // it leaves behind is still worth reading.
+      client.onLoginStateChanged.stream.listen(
+        (_) => _refresh(),
+        onError: (Object _) => _refresh(),
+      ),
       // Device keys are updated after a sync is handled, and `finished`
       // comes after that; `onSync` fires too early to see them.
       client.onSyncStatus.stream
           .where((u) => u.status == SyncStatus.finished)
-          .listen((_) => _refresh()),
+          .listen((_) => _refresh(), onError: (Object _) => _refresh()),
     ];
     _account = _accountNow();
     _trust = _trustNow();
@@ -42,7 +47,13 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
     // very first sign-in rather than growing them later.
     await vod.init();
     final client = await openClient();
-    await client.init(waitForFirstSync: false);
+    try {
+      await client.init(waitForFirstSync: false);
+    } on Exception {
+      // A ClientInitException, which package:matrix does not export. The SDK
+      // has already cleared the stored session, so the app opens signed out
+      // rather than not at all.
+    }
     return MatrixSession(
       client,
       browser: desktop ? LoopbackSsoBrowser.new : SheetSsoBrowser.new,
@@ -91,8 +102,13 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
   @override
   void signedIn() {}
 
+  /// Set while a logout is in flight, so a second tap doesn't start another.
+  var _signingOut = false;
+
   @override
   void signOut() {
+    if (_signingOut) return;
+    _signingOut = true;
     unawaited(_signOut());
   }
 
@@ -101,6 +117,8 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
       await client.logout();
     } on Exception {
       // The server may be unreachable; logout clears this device either way.
+    } finally {
+      _signingOut = false;
     }
   }
 
