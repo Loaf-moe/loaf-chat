@@ -16,9 +16,14 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 /// A browser that is never opened: SSO has its own tests.
 class _NoBrowser implements SsoBrowser {
   String? token;
+  Exception? failure;
 
   @override
-  Future<String?> signIn(Uri Function(Uri redirect) urlFor) async => token;
+  Future<String?> signIn(Uri Function(Uri redirect) urlFor) async {
+    if (failure case final failure?) throw failure;
+    return token;
+  }
+
   @override
   void reopen() {}
   @override
@@ -378,6 +383,20 @@ void main() {
         desktop: false,
       );
       expect(outcome, isA<SignInCancelled>());
+    });
+    test('a browser that fails is a failure, not a throw', () async {
+      final (hs, browser) = await _make(FakeMatrixApi());
+      await hs.probe('fakeServer.notExisting');
+      browser.failure = const SocketException('bind failed');
+      final outcome = await hs.sso(
+        'fakeServer.notExisting',
+        const IdentityProvider('tuwunel', 'loaf.moe'),
+        desktop: true,
+      );
+      expect(
+        (outcome as SignInFailed).message,
+        "couldn't open the sign-in page",
+      );
     });
   });
 }

@@ -3,7 +3,9 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
@@ -48,9 +50,11 @@ class SheetSsoBrowser implements SsoBrowser {
       );
       if (mine != _attempt) return null;
       return Uri.parse(back).queryParameters['loginToken'];
-    } on PlatformException {
-      // CANCELED: the sheet was closed.
-      return null;
+    } on PlatformException catch (e) {
+      // Only a closed sheet is a cancel; anything else is a failure the
+      // homeserver turns into an answer.
+      if (e.code == 'CANCELED') return null;
+      rethrow;
     }
   }
 
@@ -96,11 +100,14 @@ class LoopbackSsoBrowser implements SsoBrowser {
       return done.future;
     }
     _server = server;
+    // Any local program can reach the port; only the page the server sent
+    // the browser back to knows this path, so only it can sign loaf in.
+    final path = '/sso/${_nonce()}';
     final page = _page = urlFor(
-      Uri(scheme: 'http', host: '127.0.0.1', port: server.port, path: '/sso'),
+      Uri(scheme: 'http', host: '127.0.0.1', port: server.port, path: path),
     );
     server.listen((request) async {
-      final token = request.uri.path == '/sso'
+      final token = request.uri.path == path
           ? request.uri.queryParameters['loginToken']
           : null;
       request.response.statusCode = token == null
@@ -111,7 +118,11 @@ class LoopbackSsoBrowser implements SsoBrowser {
           ..headers.contentType = ContentType.html
           ..write(_donePage);
       }
-      await request.response.close();
+      try {
+        await request.response.close();
+      } on Exception {
+        // The browser hung up first; the token it brought still counts.
+      }
       if (token != null && identical(_done, done)) _finish(token);
     });
     if (!await _tryOpen(page) && identical(_done, done)) _finish(null);
@@ -135,6 +146,13 @@ class LoopbackSsoBrowser implements SsoBrowser {
     _server = null;
     done?.complete(token);
   }
+
+  static final _random = Random.secure();
+
+  /// 128 random bits, URL-safe.
+  static String _nonce() => base64Url
+      .encode(List<int>.generate(16, (_) => _random.nextInt(256)))
+      .replaceAll('=', '');
 
   static const _donePage =
       '<!doctype html><meta charset="utf-8"><title>loaf</title>'

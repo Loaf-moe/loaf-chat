@@ -63,6 +63,29 @@ void main() {
       expect(await pending, 'tok');
     });
 
+    test('a token sent anywhere but the exact redirect is refused', () async {
+      final opened = <Uri>[];
+      final browser = LoopbackSsoBrowser(
+        open: (url) async {
+          opened.add(url);
+          return true;
+        },
+      );
+      final pending = browser.signIn(_page);
+      await _opened(opened);
+      final redirect = Uri.parse(opened.single.queryParameters['redirectUrl']!);
+      expect(redirect.path, matches(RegExp(r'^/sso/[A-Za-z0-9_-]{22,}$')));
+      // Another local program guessing the port but not the path.
+      final guessed = opened.single.replace(
+        queryParameters: {
+          'redirectUrl': redirect.replace(path: '/sso').toString(),
+        },
+      );
+      expect(await _comeBack(guessed, token: 'forged'), 404);
+      expect(await _comeBack(opened.single), 200);
+      expect(await pending, 'tok');
+    });
+
     test('reopen opens the same page; cancel resolves null', () async {
       final opened = <Uri>[];
       final browser = LoopbackSsoBrowser(
@@ -140,6 +163,16 @@ void main() {
         authenticate: (_, _) async => throw PlatformException(code: 'CANCELED'),
       );
       expect(await browser.signIn(_page), isNull);
+    });
+
+    test('any other sheet failure is not a cancel', () async {
+      final browser = SheetSsoBrowser(
+        authenticate: (_, _) async => throw PlatformException(code: 'EUNKNOWN'),
+      );
+      await expectLater(
+        browser.signIn(_page),
+        throwsA(isA<PlatformException>()),
+      );
     });
 
     test('an answer after cancel is dropped', () async {
