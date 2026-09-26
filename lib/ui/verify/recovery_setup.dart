@@ -1,0 +1,98 @@
+/// A fresh identity's recovery key: made, shown once, and kept before the
+/// flow will finish, since losing it is the one mistake nothing recovers.
+library;
+
+import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
+
+import '../theme/loaf_theme.dart';
+import '../widgets/loaf_button.dart';
+import 'recovery_key.dart';
+import 'verify_steps.dart';
+
+class SetUpIntroStep extends StatelessWidget {
+  const SetUpIntroStep({super.key, required this.onCreate});
+
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const StepIcon(LucideIcons.keyRound),
+      const SizedBox(height: LoafSpace.x3),
+      const StepLead(
+        'if you ever lose every device, your recovery key is how you get your encrypted history back.',
+      ),
+      const SizedBox(height: LoafSpace.x2),
+      const StepNote(
+        "keep it somewhere safe that isn't this device — a password manager is ideal.",
+      ),
+      const SizedBox(height: LoafSpace.x5),
+      LoafButton(label: 'create my recovery key', onTap: onCreate),
+    ],
+  );
+}
+
+class ShowKeyStep extends StatelessWidget {
+  const ShowKeyStep({
+    super.key,
+    required this.recoveryKey,
+    required this.saved,
+    required this.onCopy,
+    required this.onSave,
+    required this.onDone,
+  });
+
+  final String recoveryKey;
+
+  /// Copied or saved at least once.
+  final bool saved;
+  final VoidCallback onCopy;
+  final VoidCallback onSave;
+  final VoidCallback onDone;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const StepLead(
+        "this is your recovery key. save it now — loaf can't show it again.",
+      ),
+      const SizedBox(height: LoafSpace.x4),
+      RecoveryKeyDisplay(recoveryKey: recoveryKey),
+      const SizedBox(height: LoafSpace.x3),
+      Row(
+        children: [
+          Expanded(
+            child: LoafButton(
+              label: 'copy',
+              icon: LucideIcons.copy,
+              emphasis: LoafButtonEmphasis.outlined,
+              size: LoafButtonSize.small,
+              onTap: onCopy,
+            ),
+          ),
+          const SizedBox(width: LoafSpace.x2),
+          Expanded(
+            child: LoafButton(
+              label: 'save as file',
+              icon: LucideIcons.download,
+              emphasis: LoafButtonEmphasis.outlined,
+              size: LoafButtonSize.small,
+              onTap: onSave,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: LoafSpace.x5),
+      LoafButton(label: "i've saved it", onTap: saved ? onDone : null),
+      if (!saved) ...[
+        const SizedBox(height: LoafSpace.x2),
+        const StepNote('copy or save it first', center: true),
+      ],
+    ],
+  );
+}

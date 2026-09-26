@@ -105,4 +105,12 @@ void main() {
 
     expect(dismissed, isTrue);
   });
+
+  testWidgets('setting up recovery cannot be put off', (tester) async {
+    await _pumpRail(tester, [AppNotice.setUpRecovery(onAction: () {})]);
+    await tester.tap(find.byTooltip('set up recovery'));
+    await tester.pumpAndSettle();
+    expect(find.text('later'), findsNothing);
+    expect(find.text('set up'), findsOneWidget);
+  });
 }

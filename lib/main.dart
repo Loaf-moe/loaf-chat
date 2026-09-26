@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'ui/shell/app_shell.dart';
+import 'ui/auth/session_root.dart';
+import 'ui/mock/mock_session.dart';
 import 'ui/theme/loaf_theme.dart';
 
 /// Dark is the default. The brand defines no dark palette, but a community
 /// chat client is read in the evening, so the derived navy palette leads and
 /// cream is the alternative.
 final themeMode = ValueNotifier<ThemeMode>(ThemeMode.dark);
+
+/// The mock's one account. Lives as long as the app, like [themeMode].
+final session = MockSession();
 
 void main() => runApp(const LoafApp());
 
@@ -33,9 +37,9 @@ class LoafApp extends StatelessWidget {
                 : ThemeMode.dark;
           },
         },
-        // Opens on whichever screen is being designed. LoginPage is the
-        // other entry point; swap it in here to work on sign-in.
-        child: const Focus(autofocus: true, child: AppShell()),
+        // Sign-in or the app, as the session says. The debug menu's levers
+        // move between them.
+        child: Focus(autofocus: true, child: SessionRoot(session: session)),
       ),
     ),
   );

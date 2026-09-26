@@ -30,6 +30,12 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'channel_list.dart';
 import 'mock_debug.dart';
+import '../mock/mock_session.dart';
+import '../mock/accounts.dart';
+import '../verify/verification_controller.dart';
+import '../verify/verify_panel.dart';
+import '../verify/verify_state.dart';
+import '../widgets/toast.dart';
 import '../settings/settings_page.dart';
 import 'app_notice.dart';
 import 'channel_actions.dart';
@@ -42,7 +48,11 @@ import 'user_bar.dart';
 const _wideBreakpoint = 900.0;
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
+  const AppShell({super.key, this.session});
+
+  /// Who is signed in, and how far this device is trusted. The app passes
+  /// its one session; left out (tests, previews), the shell makes its own.
+  final MockSession? session;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -52,6 +62,7 @@ class _AppShellState extends State<AppShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _timeline = TimelineController(mockTimeline(), you: currentUser);
   final _profile = ProfileController();
+  late final MockSession _session = widget.session ?? MockSession();
   late final _calls = CallController(
     me: currentUser,
     rings: mockRings,
@@ -70,12 +81,16 @@ class _AppShellState extends State<AppShell> {
     _read.add(_channel.id);
     _profile.addListener(_onChange);
     _calls.addListener(_onChange);
+    _session.addListener(_onSessionChange);
   }
 
   void _onChange() => setState(() {});
 
   @override
   void dispose() {
+    _session.removeListener(_onSessionChange);
+    _verification?.dispose();
+    if (widget.session == null) _session.dispose();
     _profile
       ..removeListener(_onChange)
       ..dispose();
@@ -95,9 +110,8 @@ class _AppShellState extends State<AppShell> {
   /// you in the first channel again.
   final _channelBySpace = <String, String>{};
 
-  /// Mockup state: which app notices are showing.
+  /// Mockup state: whether the update notice is showing.
   var _showUpdate = true;
-  final _showVerify = true;
 
   /// Only consulted on wide layouts, where the member list is a column you
   /// can put away. On a phone it is a drawer and opens on demand.
@@ -530,7 +544,10 @@ class _AppShellState extends State<AppShell> {
       case MockDebug.reconnecting:
         _calls.toggleReconnecting();
       case MockDebug.failNext:
+        // One "make the next thing fail" lever: the next call, sign-in or
+        // verification, whichever comes first for each.
         _calls.failNextConnection();
+        _session.failNext();
       case MockDebug.encryption:
         _calls.toggleEncryption();
       case MockDebug.micBlocked:
@@ -544,13 +561,79 @@ class _AppShellState extends State<AppShell> {
             .where((p) => p.present)
             .firstOrNull;
         if (someone != null) _calls.toggleRemoteShare(someone.member.id);
+      case MockDebug.signOut:
+        _session.signOut();
+      case MockDebug.expireSession:
+        _session.expireSession();
+      case MockDebug.freshAccount:
+        _session.useFreshAccount();
+      case MockDebug.newSignIn:
+        _session.receiveRequest();
+    }
+  }
+
+  IncomingRequest? _shownRequest;
+
+  void _onSessionChange() {
+    setState(() {});
+    final request = _session.incoming;
+    if (request == null || identical(request, _shownRequest)) return;
+    _shownRequest = request;
+    // Straight away rather than as a notice: it is time-bound, and you
+    // usually asked for it on the other device seconds ago.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _openVerification(VerifyPurpose.incoming, device: request.device);
+      }
+    });
+  }
+
+  /// The verification flow in hand, kept only while it works unseen (history
+  /// restoring after the panel was put away).
+  VerificationController? _verification;
+
+  Future<void> _openVerification(
+    VerifyPurpose purpose, {
+    String? device,
+  }) async {
+    final kept = _verification;
+    final VerificationController v;
+    if (kept != null && kept.purpose == purpose) {
+      v = kept;
+    } else {
+      kept?.dispose();
+      v = VerificationController(
+        purpose: purpose,
+        otherSessions: mockOtherSessions(),
+        incomingDevice: device,
+        consumeFailure: _session.consumeFailure,
+        onTrusted: purpose == VerifyPurpose.incoming
+            ? () {}
+            : _session.markVerified,
+      );
+    }
+    _verification = v;
+    final finished = await showVerifyPanel(context, v);
+    if (purpose == VerifyPurpose.incoming) _session.clearIncoming();
+    if (!mounted) return;
+    if (finished == true) showToast(context, v.doneMessage);
+    // A flow put away mid-restore carries on; any other starts over next
+    // time, rather than resuming a stale wait.
+    if (!v.worksUnseen && identical(_verification, v)) {
+      _verification = null;
+      v.dispose();
     }
   }
 
   // ── Building ───────────────────────────────────────────────────────────
 
   List<AppNotice> get _notices => [
-    if (_showVerify) AppNotice.verify(onAction: () {}),
+    if (_session.trust == DeviceTrust.unverified)
+      AppNotice.verify(onAction: () => _openVerification(VerifyPurpose.verify)),
+    if (_session.trust == DeviceTrust.noIdentity)
+      AppNotice.setUpRecovery(
+        onAction: () => _openVerification(VerifyPurpose.setUp),
+      ),
     // Phones update through the App Store or TestFlight, never in-app.
     if (_showUpdate && isDesktop)
       AppNotice.update(

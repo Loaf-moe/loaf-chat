@@ -1,6 +1,6 @@
 /// Mock-only levers for states the fake data never reaches on its own: an
 /// incoming ring, a dropped connection, a denied permission, a server that
-/// shares no presence.
+/// shares no presence, a session signed out or expired.
 library;
 
 import 'package:flutter/material.dart';
@@ -19,6 +19,10 @@ enum MockDebug {
   cameraBlocked,
   remoteShare,
   presence,
+  signOut,
+  expireSession,
+  freshAccount,
+  newSignIn,
 }
 
 /// [presenceShared] words the presence lever for the state it would change.
@@ -48,6 +52,18 @@ Future<MockDebug?> showMockDebug(
       presenceShared
           ? 'turn presence off on this server'
           : 'turn presence back on',
+    ),
+    item(MockDebug.signOut, LucideIcons.logOut, 'sign out'),
+    item(MockDebug.expireSession, LucideIcons.timerOff, 'expire the session'),
+    item(
+      MockDebug.freshAccount,
+      LucideIcons.userPlus,
+      'become a fresh account',
+    ),
+    item(
+      MockDebug.newSignIn,
+      LucideIcons.monitorSmartphone,
+      'a new sign-in asks to verify',
     ),
   ];
   if (isDesktop) {

@@ -54,6 +54,17 @@ class AppNotice {
     onAction: onAction,
   );
 
+  /// A fresh account has no identity yet, so nothing protects its encrypted
+  /// history. No dismiss, for the same reason as [AppNotice.verify].
+  factory AppNotice.setUpRecovery({VoidCallback? onAction}) => AppNotice(
+    icon: LucideIcons.keyRound,
+    title: 'set up recovery',
+    body: 'so you never lose your encrypted messages',
+    actionLabel: 'set up',
+    tone: NoticeTone.attention,
+    onAction: onAction,
+  );
+
   final IconData icon;
   final String title;
   final String body;
