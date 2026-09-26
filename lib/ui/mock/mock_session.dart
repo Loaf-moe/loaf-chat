@@ -5,34 +5,18 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../auth/homeserver.dart';
+import '../auth/loaf_session.dart';
 import '../auth/sign_in_state.dart';
 import 'accounts.dart';
 import 'fixtures.dart';
+import 'mock_homeserver.dart';
 
-enum AccountState { signedOut, softLoggedOut, signedIn }
+// Tests and the shell name these through the mock, as they always have.
+export '../auth/loaf_session.dart'
+    show AccountState, DeviceTrust, IncomingRequest;
 
-/// How far this device is trusted, which decides the rail's encryption
-/// notice.
-enum DeviceTrust {
-  /// The account has no cross-signing identity yet: set up recovery.
-  noIdentity,
-
-  /// There is an identity and this device is not signed by it: verify.
-  unverified,
-
-  verified,
-}
-
-/// Another of your devices asking this one to vouch for it.
-@immutable
-class IncomingRequest {
-  const IncomingRequest({required this.device, required this.at});
-
-  final String device;
-  final DateTime at;
-}
-
-class MockSession extends ChangeNotifier {
+class MockSession extends ChangeNotifier implements LoafSession {
   MockSession({
     this._account = AccountState.signedIn,
     this._trust = DeviceTrust.unverified,
@@ -46,27 +30,39 @@ class MockSession extends ChangeNotifier {
   IncomingRequest? _incoming;
   var _failNext = false;
 
+  @override
   AccountState get account => _account;
+  @override
   DeviceTrust get trust => _trust;
+  @override
   IncomingRequest? get incoming => _incoming;
 
   Member get me => currentUser;
   String get userId => '${currentUser.id}:$server';
 
+  @override
   SoftLogout? get softLogout => _account == AccountState.softLoggedOut
       ? SoftLogout(member: me, userId: userId)
       : null;
+
+  @override
+  String get homeserverName => server;
+
+  @override
+  Homeserver newHomeserver() => MockHomeserver(consumeFailure: consumeFailure);
 
   /// The debug "fail the next connection" lever.
   void failNext() => _failNext = true;
 
   /// Spends the lever, if armed.
+  @override
   bool consumeFailure() {
     final fail = _failNext;
     _failNext = false;
     return fail;
   }
 
+  @override
   void signOut() {
     _account = AccountState.signedOut;
     // Signing out deletes the device, and its keys with it: the next one
@@ -86,6 +82,7 @@ class MockSession extends ChangeNotifier {
 
   /// Trust stays as it was left: unverified after a sign-out, and kept after
   /// a soft logout, whose keys never left.
+  @override
   void signedIn() {
     _account = AccountState.signedIn;
     notifyListeners();
@@ -98,6 +95,7 @@ class MockSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   void markVerified() {
     _trust = DeviceTrust.verified;
     notifyListeners();
@@ -113,6 +111,7 @@ class MockSession extends ChangeNotifier {
 
   /// Answered, refused or put away. Put away means ignored: the request
   /// times out on its own, as the protocol specifies.
+  @override
   void clearIncoming() {
     if (_incoming == null) return;
     _incoming = null;

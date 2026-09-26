@@ -30,6 +30,7 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'channel_list.dart';
 import 'mock_debug.dart';
+import '../auth/loaf_session.dart';
 import '../mock/mock_session.dart';
 import '../mock/accounts.dart';
 import '../verify/verification_controller.dart';
@@ -52,7 +53,7 @@ class AppShell extends StatefulWidget {
 
   /// Who is signed in, and how far this device is trusted. The app passes
   /// its one session; left out (tests, previews), the shell makes its own.
-  final MockSession? session;
+  final LoafSession? session;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -62,7 +63,7 @@ class _AppShellState extends State<AppShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _timeline = TimelineController(mockTimeline(), you: currentUser);
   final _profile = ProfileController();
-  late final MockSession _session = widget.session ?? MockSession();
+  late final LoafSession _session = widget.session ?? MockSession();
   late final _calls = CallController(
     me: currentUser,
     rings: mockRings,
@@ -547,7 +548,7 @@ class _AppShellState extends State<AppShell> {
         // One "make the next thing fail" lever: the next call, sign-in or
         // verification, whichever comes first for each.
         _calls.failNextConnection();
-        _session.failNext();
+        if (_session case final MockSession mock) mock.failNext();
       case MockDebug.encryption:
         _calls.toggleEncryption();
       case MockDebug.micBlocked:
@@ -563,12 +564,14 @@ class _AppShellState extends State<AppShell> {
         if (someone != null) _calls.toggleRemoteShare(someone.member.id);
       case MockDebug.signOut:
         _session.signOut();
+      // The account levers only move the mock; a real account's state
+      // comes from its server.
       case MockDebug.expireSession:
-        _session.expireSession();
+        if (_session case final MockSession mock) mock.expireSession();
       case MockDebug.freshAccount:
-        _session.useFreshAccount();
+        if (_session case final MockSession mock) mock.useFreshAccount();
       case MockDebug.newSignIn:
-        _session.receiveRequest();
+        if (_session case final MockSession mock) mock.receiveRequest();
     }
   }
 

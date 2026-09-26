@@ -1,18 +1,18 @@
-/// Sign-in or the app, whichever [MockSession] says. Owns the sign-in
+/// Sign-in or the app, whichever the [LoafSession] says. Owns the sign-in
 /// controller while sign-in is showing, so every visit starts fresh.
 library;
 
 import 'package:flutter/material.dart';
 
-import '../mock/mock_session.dart';
 import '../shell/app_shell.dart';
+import 'loaf_session.dart';
 import 'login_page.dart';
 import 'sign_in_controller.dart';
 
 class SessionRoot extends StatefulWidget {
   const SessionRoot({super.key, required this.session});
 
-  final MockSession session;
+  final LoafSession session;
 
   @override
   State<SessionRoot> createState() => _SessionRootState();
@@ -25,7 +25,7 @@ class _SessionRootState extends State<SessionRoot> {
   /// sign-in are different screens, so moving between them starts over.
   AccountState? _signInFor;
 
-  MockSession get _session => widget.session;
+  LoafSession get _session => widget.session;
 
   @override
   void initState() {
@@ -59,10 +59,10 @@ class _SessionRootState extends State<SessionRoot> {
     if (wanted && _signIn == null) {
       _signInFor = account;
       _signIn = SignInController(
-        server: MockSession.server,
+        server: _session.homeserverName,
         softLogout: _session.softLogout,
         onSignedIn: _session.signedIn,
-        consumeFailure: _session.consumeFailure,
+        homeserver: _session.newHomeserver(),
       );
     }
   }
