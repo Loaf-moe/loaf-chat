@@ -36,6 +36,19 @@ void main() {
       );
     });
 
+    test('survives a link typed a character at a time', () {
+      const link = 'https://matrix.to/#/%23pizza%3Aloaf.moe';
+      for (var i = 0; i <= link.length; i++) {
+        final partial = link.substring(0, i);
+        expect(
+          () => parseSpaceAddress(partial),
+          returnsNormally,
+          reason: partial,
+        );
+      }
+      expect(parseSpaceAddress('https://matrix.to/#/%2'), isNull);
+    });
+
     test('says nothing for text that is not an address yet', () {
       expect(parseSpaceAddress(''), isNull);
       expect(parseSpaceAddress('bakers'), isNull);

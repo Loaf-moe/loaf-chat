@@ -16,7 +16,13 @@ String? parseSpaceAddress(String input) {
   ).firstMatch(text);
   if (link != null) {
     // Links carry routing hints (?via=…) that are not part of the address.
-    text = Uri.decodeComponent(link.group(1)!.split('?').first);
+    // A link typed a character at a time passes through half an escape,
+    // such as `%2`, which is not an address yet rather than an error.
+    try {
+      text = Uri.decodeComponent(link.group(1)!.split('?').first);
+    } on ArgumentError {
+      return null;
+    }
   } else if (text.contains('/')) {
     return null;
   }
