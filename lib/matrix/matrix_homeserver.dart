@@ -56,7 +56,10 @@ class MatrixHomeserver implements Homeserver {
         if (host != Uri.parse(named).host) delegatedTo = host;
       }
     } on _NoAnswer {
-      // No file and nothing answering: the name itself is tried next.
+      // Nothing answered at the name at all, so asking it again for
+      // /versions would only double the wait. A 404 or garbled file is an
+      // answer, and falls through to the name itself.
+      return const ServerFailed(ServerProblem.unreachable);
     }
     try {
       final versions = await _json('$base/_matrix/client/versions');

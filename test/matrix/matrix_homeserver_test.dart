@@ -155,6 +155,19 @@ void main() {
       expect(check.problem, ServerProblem.unreachable);
     });
 
+    test('nothing answering at the name is asked only once', () async {
+      var requests = 0;
+      final (hs, _) = await _make(
+        MockClient((_) async {
+          requests++;
+          throw const SocketException('no route');
+        }),
+      );
+      final check = await hs.probe('nowhere.test') as ServerFailed;
+      expect(check.problem, ServerProblem.unreachable);
+      expect(requests, 1);
+    });
+
     test('a website with no matrix behind it is not matrix', () async {
       final (hs, _) = await _make(
         MockClient((_) async => http.Response('<html>', 404)),
