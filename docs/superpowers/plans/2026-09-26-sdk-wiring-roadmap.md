@@ -1,0 +1,50 @@
+# SDK Wiring Roadmap
+
+> **Status:** phase 1 has its step-level plan, `2026-09-26-real-sign-in.md`, which was rehearsed end to end. Every later phase gets its own plan when it comes up.
+
+**Goal:** Replace the mock source behind the finished UI with matrix-dart-sdk. Phases are ordered by what gets the app to "daily-drivable on loaf.moe" soonest for the least work.
+
+**Spec:** `docs/superpowers/specs/2026-09-20-loaf-native-design.md` (Stack, Layering, Process) and `2026-09-24-calls-design.md`.
+
+## Findings that shape every phase (verified 2026-09-26)
+
+- **The SDK is now `matrix` 13.0.0, not the spec's ^12.0.1.** 13.0.0 (2026-09-22) has a breaking change to `prev_content` handling. It resolves cleanly with `flutter_vodozemac` 0.8.1, `sqflite_common_ffi` 2.4.3, `flutter_web_auth_2` 5.1.0 and `url_launcher` 6.3.2 on Flutter 3.47.5, and it builds for macOS and the iOS simulator through Swift Package Manager. Phase 1 corrects the spec.
+- **The offline test harness works.** A real `Client` over `FakeMatrixApi` with an in-memory `sqflite_common_ffi` database discovers, signs in and runs a first sync of fake rooms under `flutter test`. Phase 2's room mapping can be tested against that sync.
+- **`FakeMatrixApi` accepts any password.** Error paths need `package:http/testing.dart`'s `MockClient`.
+- **Don't discover through the SDK.** `Client.getVersions` caches under one key for every server, so it answers for the wrong server. `checkHomeserver` swallows well-known failures and `assert(false)`s on version mismatches. Phase 1 discovers over plain HTTP.
+- **Device keys load after a sync is announced.** Straight after sign-in, "no master key" means "not loaded yet", not "no identity". Listen for `SyncStatus.finished`, which fires after keys update; `onSync` fires before.
+- **Soft logout in the SDK is a token refresh.** It announces `softLoggedOut`, refreshes, and either goes back to `loggedIn` or clears the session. The spec's locked "welcome back" screen needs its own design.
+- **An offline launch restores fine.** `client.init()` with a stored session returns signed in within about 10 ms with no network; sync reports an error and retries.
+- **loaf.moe (tuwunel, spec v1.19)** offers password, token and SSO with one provider `{id: tuwunel, name: loaf.moe, brand: kanidm}`. It accepts both a loopback redirect (`http://127.0.0.1:<port>/sso`) and a custom-scheme redirect (`moe.loaf.native://sso`). It also advertises MSC3861 `/auth_metadata`. Chris's account is SSO-only.
+- **The seams:** everything outside `lib/ui/mock/` reaches the mock through `MockSession`, `SignInController`'s answers, `VerificationController`, `TimelineController`, `CallController`, and the fixtures that `app_shell.dart` (986 lines) layers its session changes over.
+
+## Phases, by bang for buck
+
+| # | Phase | Why here | Size |
+|---|---|---|---|
+| 1 | **Real sign-in:** Kanidm SSO (sheet on phones, browser on computers), password, a session that survives relaunch, sign out, trust from the SDK | Unblocks everything, and an SSO-only account can't get in without SSO. **Plan: `2026-09-26-real-sign-in.md`** | M |
+| 2 | **Rooms from sync:** rail, channel lists, Home sections, unreads, members | The first moment the app shows *your* loaf.moe. Read-only, so low risk | M |
+| 3 | **Timeline:** read, send text, reply, react, edit, delete, read markers, pagination | Makes it usable for unencrypted rooms. `TimelineController`'s API already matches (`send`, `toggleReaction`, `saveEdit`, `delete`) | M |
+| 4 | **E2EE:** verify by emoji, recovery key, set up recovery, key backup restore, the incoming "is this you?" | Without it encrypted DMs are unreadable. vodozemac is already initialised by phase 1; the UI and `VerificationController` exist, so swap timers for `KeyVerification` and `Bootstrap` | M–L |
+| 5 | **Channel and space actions:** join, leave, mute (push rule), DMs without duplicates, invites, `/hierarchy` browse, create space, tags and favourites | Every flow is already designed, and each is a thin call | M |
+| 6 | **Presence and status, profile, settings** | Cheap polish | S |
+| 7 | **Voice channels** (MatrixRTC + `livekit_client`), connected-call bar, occupancy avatars | High delight, but heavy and needs a device | L |
+| 8 | **APNs push via Sygnal, DM ringing** (CallKit/PushKit, MSC4075) | Mac-only work, scheduled around Mac access | L |
+| 9 | Images and files, media viewer | Part of the v1 messaging scope, and independent of the phases above | M |
+
+Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel subagents. Phases 7 and 8 depend on 4 for call media keys. The default backend flips from `mock` to `matrix` when phase 3 lands.
+
+## Deferred from phase 1, to place later
+
+- **The soft-logout "welcome back" screen** (see the findings above). Until then an expired, unrefreshable token signs out.
+- **MSC3861 OIDC sign-in.** loaf.moe advertises it, but `m.login.sso` works today.
+- **Encrypting the sqlite database at rest** (sqlcipher, with a key in the Keychain) before anyone but Chris uses the app.
+- **Android's SSO callback activity** (best-effort platform).
+
+## Global constraints (all phases)
+
+- Only `lib/matrix/` (and `lib/main.dart`, which picks the backend) imports `package:matrix` and the native plugins. `lib/ui/` keeps rendering plain models. Mapping happens on read. There is no second stored model: the SDK is the store.
+- The mock backend stays forever, for tests, previews and the debug levers.
+- Existing tests must pass **unchanged** through each refactor. They are the safety net that proves the seam kept behaviour.
+- Split by `isDesktop`, lowercase warm copy, no hardcoded text metrics, Nushell-compatible commands, and `mise exec -- flutter analyze` / `test`.
+- Commits happen only when Chris asks. Each task ends with a checkpoint and a conventional commit message that ends with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
