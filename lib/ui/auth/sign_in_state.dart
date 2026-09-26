@@ -104,6 +104,7 @@ class SignInState {
     this.retryIn,
     this.softLogout,
     this.repointing,
+    this.failure,
   });
 
   /// As typed, never the delegated base URL.
@@ -126,6 +127,11 @@ class SignInState {
   /// while the form stays put.
   final String? repointing;
 
+  /// The last attempt went wrong in a way that is neither a wrong password
+  /// nor a rate limit — nothing answered, or SSO came back empty — worded
+  /// for the screen.
+  final String? failure;
+
   SignInState copyWith({
     SignInActivity? activity,
     IdentityProvider? provider,
@@ -133,6 +139,8 @@ class SignInState {
     Duration? retryIn,
     bool clearRetry = false,
     String? repointing,
+    String? failure,
+    bool clearFailure = false,
   }) => SignInState(
     server: server,
     check: check,
@@ -142,6 +150,7 @@ class SignInState {
     retryIn: clearRetry ? null : (retryIn ?? this.retryIn),
     softLogout: softLogout,
     repointing: repointing ?? this.repointing,
+    failure: clearFailure ? null : (failure ?? this.failure),
   );
 }
 

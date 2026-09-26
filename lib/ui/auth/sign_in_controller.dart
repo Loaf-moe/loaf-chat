@@ -1,7 +1,8 @@
-/// The sign-in screen's fake homeserver — mockup only. Plays discovery, SSO
-/// and password sign-in out on timers against [mockServers], producing the
-/// states a real client would get from `.well-known`, `/versions` and
-/// `/login`. See "Sign-in and verification" in the design spec.
+/// The sign-in screen's state machine: discovery, a full id re-pointing the
+/// server, SSO and password sign-in, and the rate-limit countdown. What the
+/// server says comes from a [Homeserver] — the mock's fixtures or the SDK —
+/// so this file never knows which. See "Sign-in and verification" in the
+/// design spec.
 library;
 
 import 'dart:async';
@@ -9,19 +10,26 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../mock/accounts.dart';
+import '../mock/mock_homeserver.dart';
 import '../platform.dart';
+import 'homeserver.dart';
 import 'sign_in_state.dart';
 
 class SignInController extends ChangeNotifier {
-  /// Starts probing [server] at once, the way the screen opens.
+  /// Starts probing [server] at once, the way the screen opens. Without a
+  /// [homeserver], answers come from a [MockHomeserver] over [servers].
   SignInController({
     String server = 'loaf.moe',
     SoftLogout? softLogout,
     required this.onSignedIn,
-    this.consumeFailure = _never,
-    this.servers = mockServers,
+    Homeserver? homeserver,
+    bool Function() consumeFailure = _never,
+    Map<String, ServerCheck> servers = mockServers,
     bool? desktop,
-  }) : desktop = desktop ?? isDesktop,
+  }) : homeserver =
+           homeserver ??
+           MockHomeserver(servers: servers, consumeFailure: consumeFailure),
+       desktop = desktop ?? isDesktop,
        _state = SignInState(
          server: server,
          check: const ServerProbing(),
@@ -35,42 +43,42 @@ class SignInController extends ChangeNotifier {
   SignInController.at(
     SignInState state, {
     VoidCallback? onSignedIn,
-    this.consumeFailure = _never,
-    this.servers = mockServers,
+    Homeserver? homeserver,
+    bool Function() consumeFailure = _never,
+    Map<String, ServerCheck> servers = mockServers,
     bool? desktop,
   }) : onSignedIn = onSignedIn ?? _nothing,
+       homeserver =
+           homeserver ??
+           MockHomeserver(servers: servers, consumeFailure: consumeFailure),
        desktop = desktop ?? isDesktop,
        _state = state;
 
   static bool _never() => false;
   static void _nothing() {}
 
-  static const probeDelay = Duration(milliseconds: 700);
-  static const repointDebounce = Duration(milliseconds: 400);
-  static const browserDelay = Duration(seconds: 3);
-  static const ssoSheetDelay = Duration(milliseconds: 900);
-  static const passwordDelay = Duration(milliseconds: 700);
-  static const rateLimit = Duration(seconds: 30);
+  // The mock's timings, kept here because the tests pace themselves by them.
+  static const probeDelay = MockHomeserver.probeDelay;
+  static const browserDelay = MockHomeserver.browserDelay;
+  static const ssoSheetDelay = MockHomeserver.ssoSheetDelay;
+  static const passwordDelay = MockHomeserver.passwordDelay;
+  static const rateLimit = MockHomeserver.rateLimit;
+  static const triesBeforeLimit = MockHomeserver.triesBeforeLimit;
 
-  /// Wrong passwords in a row before the server stops checking for a while.
-  static const triesBeforeLimit = 3;
+  static const repointDebounce = Duration(milliseconds: 400);
 
   final VoidCallback onSignedIn;
-
-  /// The debug "fail the next connection" lever, spent by the next password.
-  final bool Function() consumeFailure;
-  final Map<String, ServerCheck> servers;
+  final Homeserver homeserver;
   final bool desktop;
 
   SignInState _state;
   SignInState get state => _state;
 
-  /// The one thing in flight. Starting anything new cancels it, so a stale
-  /// timer can never sign in or jump a step.
-  Timer? _work;
+  /// Bumped whenever something new starts. An answer to an older question
+  /// is dropped, so a stale reply can never sign in or jump a step.
+  var _epoch = 0;
   Timer? _repoint;
   Timer? _countdown;
-  var _wrongInARow = 0;
 
   /// A password submitted while a full id's server is being looked up. It
   /// goes to that server once found: the id says where the account lives.
@@ -82,24 +90,23 @@ class SignInController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _after(Duration delay, VoidCallback run) {
-    _work?.cancel();
-    _work = Timer(delay, run);
+  /// Asks, and hands the answer to [then] only if nothing newer has started.
+  void _ask<T>(Future<T> question, void Function(T answer) then) {
+    final mine = ++_epoch;
+    question.then((answer) {
+      if (mine == _epoch) then(answer);
+    });
   }
-
-  ServerCheck _lookUp(String name) =>
-      servers[name] ?? const ServerFailed(ServerProblem.unreachable);
 
   /// The server picker's connect. Input that names no server is ignored.
   void connect(String input) {
     final name = serverNameFrom(input);
     if (name == null) return;
     _repoint?.cancel();
-    // A rate limit and a tally of wrong tries belong to the server that
-    // set them.
+    // A rate limit belongs to the server that set it.
     _countdown?.cancel();
-    _wrongInARow = 0;
     _queued = null;
+    homeserver.cancelSso();
     _set(
       SignInState(
         server: name,
@@ -114,12 +121,12 @@ class SignInController extends ChangeNotifier {
 
   void _probe() {
     final server = _state.server;
-    _after(
-      probeDelay,
-      () => _set(
+    _ask(
+      homeserver.probe(server),
+      (ServerCheck check) => _set(
         SignInState(
           server: server,
-          check: _lookUp(server),
+          check: check,
           softLogout: _state.softLogout,
         ),
       ),
@@ -141,17 +148,12 @@ class SignInController extends ChangeNotifier {
     // Mid-check the form is spoken for; the next keystroke tries again.
     if (_state.activity != SignInActivity.idle) return;
     _set(_state.copyWith(repointing: name));
-    _after(probeDelay, () {
+    _ask(homeserver.probe(name), (ServerCheck check) {
       _set(
-        SignInState(
-          server: name,
-          check: _lookUp(name),
-          softLogout: _state.softLogout,
-        ),
+        SignInState(server: name, check: check, softLogout: _state.softLogout),
       );
       final queued = _queued;
       _queued = null;
-      final check = _state.check;
       if (queued != null && check is ServerFound && check.flows.password) {
         signInWithPassword(queued.$1, queued.$2);
       }
@@ -166,20 +168,21 @@ class SignInController extends ChangeNotifier {
             ? SignInActivity.inBrowser
             : SignInActivity.finishingSso,
         provider: provider,
+        clearFailure: true,
       ),
     );
-    _after(desktop ? browserDelay : ssoSheetDelay, _succeed);
+    _ask(homeserver.sso(_state.server, provider, desktop: desktop), _finish);
   }
 
-  /// Desktop: the browser tab was closed or lost. Opening it again restarts
-  /// the wait rather than stacking a second one.
+  /// Desktop: the browser tab was closed or lost.
   void reopenBrowser() {
     if (_state.activity != SignInActivity.inBrowser) return;
-    _after(browserDelay, _succeed);
+    homeserver.reopenSso();
   }
 
   void cancelSso() {
-    _work?.cancel();
+    _epoch++;
+    homeserver.cancelSso();
     _set(_state.copyWith(activity: SignInActivity.idle));
   }
 
@@ -204,32 +207,32 @@ class SignInController extends ChangeNotifier {
       _state.copyWith(
         activity: SignInActivity.checkingPassword,
         wrongPassword: false,
+        clearFailure: true,
       ),
     );
-    _after(passwordDelay, () {
-      final wrong = password == mockWrongPassword || consumeFailure();
-      if (!wrong) {
-        _wrongInARow = 0;
-        _succeed();
-        return;
-      }
-      _wrongInARow++;
-      if (_wrongInARow >= triesBeforeLimit) {
-        _wrongInARow = 0;
-        _startLimit();
-        return;
-      }
-      _set(_state.copyWith(activity: SignInActivity.idle, wrongPassword: true));
-    });
+    _ask(homeserver.password(_state.server, user, password), _finish);
   }
 
-  void _succeed() {
-    _set(_state.copyWith(activity: SignInActivity.signedIn));
-    onSignedIn();
+  void _finish(SignInOutcome outcome) {
+    switch (outcome) {
+      case SignedIn():
+        _set(_state.copyWith(activity: SignInActivity.signedIn));
+        onSignedIn();
+      case WrongPassword():
+        _set(
+          _state.copyWith(activity: SignInActivity.idle, wrongPassword: true),
+        );
+      case RateLimited(:final retryIn):
+        _startLimit(retryIn);
+      case SignInCancelled():
+        _set(_state.copyWith(activity: SignInActivity.idle));
+      case SignInFailed(:final message):
+        _set(_state.copyWith(activity: SignInActivity.idle, failure: message));
+    }
   }
 
-  void _startLimit() {
-    var left = rateLimit;
+  void _startLimit(Duration wait) {
+    var left = wait;
     _set(
       _state.copyWith(
         activity: SignInActivity.idle,
@@ -251,9 +254,10 @@ class SignInController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _work?.cancel();
+    _epoch++;
     _repoint?.cancel();
     _countdown?.cancel();
+    homeserver.close();
     super.dispose();
   }
 }

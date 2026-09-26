@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:loaf_native/ui/auth/homeserver.dart';
 import 'package:loaf_native/ui/auth/sign_in_controller.dart';
 import 'package:loaf_native/ui/auth/sign_in_state.dart';
 import 'package:loaf_native/ui/mock/accounts.dart';
@@ -336,4 +339,136 @@ void main() {
       },
     );
   });
+
+  group('answers arrive when they like', () {
+    testWidgets('an answer to an old question is dropped', (tester) async {
+      final hs = _Scripted();
+      final c = SignInController(
+        server: 'one.test',
+        onSignedIn: () => signedIn++,
+        homeserver: hs,
+      );
+      c.connect('two.test');
+      hs.probes['one.test']!.complete(
+        const ServerFailed(ServerProblem.notMatrix),
+      );
+      await tester.pump();
+      expect(c.state.server, 'two.test');
+      expect(c.state.check, isA<ServerProbing>());
+
+      hs.probes['two.test']!.complete(
+        const ServerFound(ServerFlows(password: true)),
+      );
+      await tester.pump();
+      expect(c.state.check, isA<ServerFound>());
+      c.dispose();
+    });
+
+    testWidgets('sso answering after a connect elsewhere never signs in', (
+      tester,
+    ) async {
+      final hs = _Scripted();
+      final c = SignInController.at(
+        const SignInState(server: 'one.test', check: ServerFound(_both)),
+        onSignedIn: () => signedIn++,
+        homeserver: hs,
+        desktop: true,
+      );
+      c.continueWithSso(const IdentityProvider('x', 'X'));
+      c.connect('two.test');
+      hs.ssoAnswer!.complete(const SignedIn());
+      await tester.pump();
+      expect(signedIn, 0);
+      expect(hs.cancelled, isTrue);
+      c.dispose();
+    });
+
+    testWidgets('a failure is said, and cleared by the next try', (
+      tester,
+    ) async {
+      final hs = _Scripted();
+      final c = SignInController.at(
+        const SignInState(server: 'one.test', check: ServerFound(_both)),
+        onSignedIn: () => signedIn++,
+        homeserver: hs,
+      );
+      c.signInWithPassword('chris', 'x');
+      hs.passwordAnswer!.complete(
+        const SignInFailed("couldn't reach one.test"),
+      );
+      await tester.pump();
+      expect(c.state.failure, "couldn't reach one.test");
+      expect(c.state.activity, SignInActivity.idle);
+
+      c.signInWithPassword('chris', 'x');
+      expect(c.state.failure, isNull);
+      hs.passwordAnswer!.complete(const SignedIn());
+      await tester.pump();
+      expect(signedIn, 1);
+      c.dispose();
+    });
+
+    testWidgets("the server's own wait is counted down", (tester) async {
+      final hs = _Scripted();
+      final c = SignInController.at(
+        const SignInState(server: 'one.test', check: ServerFound(_both)),
+        homeserver: hs,
+      );
+      c.signInWithPassword('chris', 'x');
+      hs.passwordAnswer!.complete(const RateLimited(Duration(seconds: 3)));
+      await tester.pump();
+      expect(c.state.retryIn, const Duration(seconds: 3));
+      await tester.pump(const Duration(seconds: 3));
+      expect(c.state.retryIn, isNull);
+      c.dispose();
+    });
+
+    testWidgets('closing the screen closes the homeserver', (tester) async {
+      final hs = _Scripted();
+      SignInController(
+        server: 'one.test',
+        onSignedIn: () {},
+        homeserver: hs,
+      ).dispose();
+      expect(hs.closed, isTrue);
+    });
+  });
+}
+
+const _both = ServerFlows(
+  providers: [IdentityProvider('x', 'X')],
+  password: true,
+);
+
+/// A homeserver whose every answer the test hands over by hand.
+class _Scripted implements Homeserver {
+  final probes = <String, Completer<ServerCheck>>{};
+  Completer<SignInOutcome>? passwordAnswer;
+  Completer<SignInOutcome>? ssoAnswer;
+  var cancelled = false;
+  var closed = false;
+
+  @override
+  Future<ServerCheck> probe(String server) =>
+      (probes[server] = Completer()).future;
+
+  @override
+  Future<SignInOutcome> password(String server, String user, String pw) =>
+      (passwordAnswer = Completer()).future;
+
+  @override
+  Future<SignInOutcome> sso(
+    String server,
+    IdentityProvider provider, {
+    required bool desktop,
+  }) => (ssoAnswer = Completer()).future;
+
+  @override
+  void reopenSso() {}
+
+  @override
+  void cancelSso() => cancelled = true;
+
+  @override
+  void close() => closed = true;
 }
