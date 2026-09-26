@@ -66,6 +66,8 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
+    // The channel the app opens on is being read from the first frame.
+    _read.add(_channel.id);
     _profile.addListener(_onChange);
     _calls.addListener(_onChange);
   }
@@ -248,8 +250,8 @@ class _AppShellState extends State<AppShell> {
 
   void _selectSpace(String id) => setState(() {
     _spaceId = id;
-    // Home opens straight onto a DM, and seeing it is reading it.
-    if (_home) _open(id, _channel.id);
+    // A space opens onto a conversation, and seeing it is reading it.
+    _open(id, _channel.id);
   });
 
   void _open(String spaceId, String channelId) {
@@ -257,10 +259,9 @@ class _AppShellState extends State<AppShell> {
     _channelBySpace[spaceId] = channelId;
     _fullscreen = false;
     _previewInvite = null;
-    if (spaceId == mockHome.id) {
-      _read.add(channelId);
-      _missedCalls.remove(channelId);
-    }
+    // Seeing a conversation is reading it, in a space as much as in Home.
+    _read.add(channelId);
+    _missedCalls.remove(channelId);
   }
 
   void _selectChannel(String id) {

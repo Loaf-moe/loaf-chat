@@ -7,7 +7,6 @@ import 'package:loaf_native/ui/call/call_controller.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
 import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
-import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/shell/user_bar.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 
@@ -333,7 +332,7 @@ void main() {
     ) async {
       await _pumpShell(tester, const Size(1440, 900));
       Finder railBadge(String count) => find.descendant(
-        of: find.byType(SpacesRail),
+        of: find.byKey(const ValueKey('space-starter')),
         matching: find.text(count),
       );
       // The Starter Pack: kitchen's 3 mentions win over the unread count.
@@ -341,14 +340,15 @@ void main() {
 
       await rightClick(tester, 'kitchen');
       await pick(tester, 'Mark as read');
-      // No mentions left, so the badge counts what is unread: 4 in
-      // #general and 2 in #chess.
+      // No mentions left, so the badge counts what is unread: #chess's 2.
+      // #general's 4 are read — it is the channel on screen.
       expect(railBadge('3'), findsNothing);
-      expect(railBadge('6'), findsOneWidget);
+      expect(railBadge('2'), findsOneWidget);
 
-      await rightClick(tester, 'chess');
-      await pick(tester, 'Mark as read');
-      expect(railBadge('4'), findsOneWidget);
+      // Opening a channel reads it too.
+      await tester.tap(find.text('chess'));
+      await tester.pumpAndSettle();
+      expect(railBadge('2'), findsNothing);
     });
 
     testWidgets(

@@ -75,6 +75,7 @@ class SpacesRail extends StatelessWidget {
                     children: [
                       for (final space in spaces) ...[
                         _SpaceItem(
+                          key: ValueKey('space-${space.id}'),
                           space: space,
                           selected: space.id == selectedSpaceId,
                           tokens: tokens,
@@ -224,6 +225,7 @@ class _SelectionPill extends StatelessWidget {
 
 class _SpaceItem extends StatelessWidget {
   const _SpaceItem({
+    super.key,
     required this.space,
     required this.selected,
     required this.tokens,
