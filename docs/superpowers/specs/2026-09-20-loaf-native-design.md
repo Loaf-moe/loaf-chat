@@ -233,6 +233,108 @@ specifies the desktop form of this IA: a 76px navy-900 spaces rail, a 268px
 cream sidebar, and a module view. Mobile collapses those columns into drawers,
 so desktop is an expansion of the same structure rather than a second design.
 
+## Sign-in and verification
+
+Signing in never blocks on verification. You land in the app, and an
+unverified or identity-less session is carried by a rail notice with no
+dismiss, as ignoring it silently loses messages.
+
+### Discovery
+
+The server picker takes a name (`loaf.moe`), a URL (`https://matrix.loaf.moe`)
+or a full id (`@chris:loaf.moe`, of which only the domain is kept). Typing a
+full id into the username field re-points the server line after a short
+debounce, with its own "looking for…".
+
+| Step | Matrix |
+|---|---|
+| Find the homeserver | `GET https://<name>/.well-known/matrix/client` → `m.homeserver.base_url`; no file → try the name itself |
+| Confirm it | `GET /_matrix/client/versions` |
+| Learn the ways in | `GET /_matrix/client/v3/login` → `m.login.password`, `m.login.sso` with `identity_providers[]` |
+
+The server line always shows the name you typed, never the delegated base URL.
+Three failures are told apart, since the third is a self-hoster's
+misconfiguration: nothing answered at X; X isn't a matrix server; X points to
+Y, which didn't answer.
+
+### The sign-in screen
+
+One identity provider is "continue with <name>". Several are equal stacked
+buttons with the provider's icon (letter fallback): the server's order is not
+a preference. The password form stays behind a link, offered only where the
+server advertises `m.login.password`.
+
+**SSO** (`/login/sso/redirect/{idpId}?redirectUrl=…`, answered with a
+`loginToken` exchanged via `m.login.token`) splits by platform. On a phone it
+runs in the system's `ASWebAuthenticationSession` sheet, which the mock stands
+in for with a short "signing in…". On a computer the real browser opens and the
+screen becomes "finish in your browser", with open it again and cancel. The
+next-generation OAuth 2.0 API (MSC3861, advertised at `/auth_metadata`) looks
+the same: one "continue with" button.
+
+**Password** (`m.id.user`) shows the button busy while it works. `M_FORBIDDEN`
+is "that username and password didn't match" under the fields;
+`M_LIMIT_EXCEEDED` counts its `retry_after_ms` down on the disabled button.
+Fields carry autofill hints so the Keychain and password managers fill them;
+Enter submits on a computer.
+
+**Soft logout** (`soft_logout: true` on a rejected token) keeps the device's
+keys, so the screen is locked to that account: avatar, "welcome back", "sign in
+again as @chris:loaf.moe" with that server's controls and no server line. A
+quiet "sign out instead" confirms first, because it takes this device's keys
+with it.
+
+### Verifying a session
+
+A new session is trusted once the account's cross-signing self-signing key
+signs it. The verify notice opens a panel (sheet on a phone, dialog on a
+computer) offering, in order:
+
+| Route | Matrix |
+|---|---|
+| Another device | `m.key.verification.request` to your devices → SAS with 7 emoji → secrets arrive by `m.secret.request` |
+| Recovery key or passphrase | unlocks secret storage (SSSS), yielding the cross-signing keys and the key backup key |
+| Reset identity | new cross-signing keys, uploaded behind user-interactive auth |
+
+Another device is offered only when other sessions exist, listed by name
+beneath it. Its steps: waiting for acceptance; the 7 emoji with their names in
+a 4 + 3 grid, "they match" or "they don't match"; waiting for the other side;
+done. A mismatch or timeout says nothing was trusted and offers try again.
+
+The recovery field takes a key or a passphrase made elsewhere, hidden with a
+reveal toggle. A key that unlocks nothing says so. One that works restores
+history from key backup with a count ("restored 1,204 of 3,380 keys") that
+carries on if the panel closes.
+
+Reset explains its cost first: contacts see "identity changed", and history
+unreachable now stays unreadable. Its button spends the accent red. It then
+re-authenticates (password, or SSO through the same browser wait) and ends in
+setting up recovery, because a reset is a fresh identity.
+
+Verified, the panel closes, the notice goes and a toast confirms.
+
+**The other end.** A verified session receiving a request pops the same panel
+at once: "new sign-in: is this you?", the device's name and when it signed in.
+Yes runs the same emoji widget both ends share. "That's not me" cancels and
+suggests signing the device out in settings. Closing the panel ignores the
+request, which times out as the protocol specifies (10 minutes).
+
+**Setting up recovery.** An account with no cross-signing identity (a first
+sign-in through Kanidm) gets a "set up recovery" notice instead, also without
+dismiss. Its panel creates the identity and a recovery key, shown in monospace
+as 12 groups of four, selectable on a computer, with copy and save as file.
+"I've saved it" enables only after one of them: losing this key is the one
+mistake nothing recovers. No passphrase creation and no read-back quiz.
+
+### The mockup
+
+A `MockSession` in `lib/ui/mock/` holds the fake account (signed out, soft
+logged out, signed in) and device trust (no identity, unverified, verified),
+and plays each flow out on timers. The app shows sign-in or the shell from it.
+Debug levers: sign out, expire session, fresh account, new sign-in from another
+device; "fail the next connection" also fails the next sign-in or verification.
+Every face renders from a plain state value, so tests pin each one directly.
+
 ## Visual language
 
 The loaf.moe design system is the source of truth. Its tokens port once into a
@@ -374,6 +476,11 @@ settles.
   and MSC4515's `get_rtc_transports` widget action. The loaf.moe tuwunel
   configuration currently advertises the older `org.matrix.msc4143.rtc_foci`.
   This works today and is a known upgrade.
+- **Setting up recovery may need re-authentication.** Uploading the first
+  cross-signing keys can require user-interactive auth; MSC3967 exempts the
+  first upload, but whether tuwunel implements it is unconfirmed. If not, that
+  flow grows the same re-auth step reset has — for an SSO-only account, a
+  browser round trip.
 - **iOS builds require the Mac.** Push notifications, CallKit, and background
   modes cannot be tested on Linux at all. Schedule that work around Mac access
   rather than discovering the gap late.
