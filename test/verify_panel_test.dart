@@ -9,6 +9,7 @@ import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/verification_controller.dart';
 import 'package:loaf_native/ui/verify/verify_panel.dart';
 import 'package:loaf_native/ui/verify/verify_state.dart';
+import 'package:loaf_native/ui/verify/verify_steps.dart';
 
 const _wide = Size(1440, 900);
 const _route = Duration(milliseconds: 400);
@@ -459,6 +460,40 @@ void main() {
         await tester.pump(MockVerifier.keyCheckDelay);
         await tester.pumpAndSettle();
         expect(find.text(mockNewRecoveryKey), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a restore finishing under a request closes its own panel',
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      (tester) async {
+        final s = await _pumpShell(tester);
+        await _openVerify(tester);
+        await tester.tap(find.text('use your recovery key'));
+        await tester.pump(_route);
+        await tester.enterText(
+          find.widgetWithText(TextField, 'recovery key or passphrase'),
+          mockRecoveryKey,
+        );
+        await tester.tap(find.text('unlock'));
+        await tester.pump(MockVerifier.keyCheckDelay);
+        expect(find.text('restoring history'), findsOneWidget);
+
+        // Left on screen: the request stacks its panel on top of it.
+        s.receiveRequest();
+        await _incomingShows(tester, _route);
+        await tester.pump(MockVerifier.restoreTick * 21);
+        await tester.pump(VerificationController.doneLinger);
+        await tester.pumpAndSettle();
+
+        expect(find.text('is this you?'), findsOneWidget);
+        expect(s.incoming, isNotNull);
+        expect(
+          find.textContaining('${mockNewDevice()} is verified'),
+          findsNothing,
+        );
+        expect(find.text('restoring history'), findsNothing);
+        expect(find.byType(DoneStep), findsNothing);
       },
     );
 

@@ -63,9 +63,16 @@ class _VerifyPanelState extends State<VerifyPanel> {
   }
 
   void _onChange() {
-    if (_c.state.closing && !_popped) {
-      _popped = true;
-      Navigator.of(context).pop(true);
+    if (!_c.state.closing || _popped) return;
+    _popped = true;
+    // Closes this panel's own route, not whatever is on top: a request's
+    // panel stacked over this one must stay, or its request is dropped.
+    final route = ModalRoute.of(context);
+    final navigator = Navigator.of(context);
+    if (route == null || route.isCurrent) {
+      navigator.pop(true);
+    } else {
+      navigator.removeRoute(route, true);
     }
   }
 
