@@ -23,6 +23,10 @@ class _Api extends FakeMatrixApi {
   final redacted = <String>[];
   final markers = <Map<String, Object?>>[];
   var refuseSend = false;
+
+  /// Answers sends with a server error rather than a refusal: the SDK marks
+  /// the echo failed but, unlike a 403, does not throw.
+  var failSend = false;
   var refuseRedact = false;
   var refuseHistory = false;
   Completer<void>? holdMarkers;
@@ -41,6 +45,11 @@ class _Api extends FakeMatrixApi {
     'error': 'not allowed',
   }, 403);
 
+  static final _serverError = _json({
+    'errcode': 'M_UNKNOWN',
+    'error': 'something broke',
+  }, 500);
+
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
     final path = Uri.decodeComponent(request.url.path);
@@ -50,6 +59,7 @@ class _Api extends FakeMatrixApi {
     if (request.method == 'PUT' && path.contains('/send/')) {
       await holdSend?.future;
       if (refuseSend) return _forbidden;
+      if (failSend) return _serverError;
       final type = path.split('/send/').last.split('/').first;
       sent.add((type, jsonDecode(request.body) as Map<String, Object?>));
       return _json({'event_id': '\$sent${_ids++}'});
@@ -545,6 +555,17 @@ void main() {
       expect(h.messages.single.reactions, isEmpty);
       expect(failures, ["couldn't react"]);
     });
+
+    test('a reaction the server failed on snaps back, and says so', () async {
+      final h = await _open([_text('bread', id: r'$m1')]);
+      final failures = <String>[];
+      h.timeline.failures.listen(failures.add);
+      h.api.failSend = true;
+      h.timeline.toggleReaction(r'$m1', '🔥');
+      await _settle();
+      expect(h.messages.single.reactions, isEmpty);
+      expect(failures, ["couldn't react"]);
+    });
   });
 
   group('editing', () {
@@ -577,6 +598,18 @@ void main() {
       final failures = <String>[];
       h.timeline.failures.listen(failures.add);
       h.api.refuseSend = true;
+      h.timeline.saveEdit(r'$m1', 'hello');
+      await _settle();
+      final m = h.messages.single;
+      expect((m.body, m.edited), ('helo', false));
+      expect(failures, ["couldn't save that edit"]);
+    });
+
+    test('an edit the server failed on snaps back, and says so', () async {
+      final h = await _open([_text('helo', id: r'$m1', sender: _me)]);
+      final failures = <String>[];
+      h.timeline.failures.listen(failures.add);
+      h.api.failSend = true;
       h.timeline.saveEdit(r'$m1', 'hello');
       await _settle();
       final m = h.messages.single;

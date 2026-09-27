@@ -228,14 +228,19 @@ class MatrixTimeline extends ChangeNotifier
       event.status.isError ||
       (event.status.isSending && !_inFlight.contains(event.eventId));
 
-  /// Sends under a transaction id this session knows it has in flight.
-  Future<Object?> _send(Future<Object?> Function(String txid) send) {
+  /// Sends under a transaction id this session knows it has in flight. The
+  /// SDK throws only for a 403 or an event too large; any other failure it
+  /// gives up on marks the echo failed and answers null, so null is a
+  /// failure here too.
+  Future<String> _send(Future<String?> Function(String txid) send) {
     final txid = room.client.generateUniqueTransactionId();
     _inFlight.add(txid);
-    return send(txid).whenComplete(() {
-      _inFlight.remove(txid);
-      _changed();
-    });
+    return send(txid)
+        .then((id) => id ?? (throw StateError('not sent: $txid')))
+        .whenComplete(() {
+          _inFlight.remove(txid);
+          _changed();
+        });
   }
 
   Event? _event(String id) =>
