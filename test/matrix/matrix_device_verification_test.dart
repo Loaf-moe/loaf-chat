@@ -77,8 +77,9 @@ void main() {
     a.addListener(() => told++);
     FakeMatrixApi.calledEndpoints.clear();
     a.match();
+    // The next relay carries the mac; the phase follows the send's answer.
     await sentTo('${room}m.key.verification.mac');
-    expect(a.phase, DevicePhase.waitingForOther);
+    await _until(() => a.phase == DevicePhase.waitingForOther);
     expect(told, greaterThan(0));
 
     await relay(req1, theirs);
@@ -86,8 +87,8 @@ void main() {
     b.match();
     await sentTo('${room}m.key.verification.done');
     await relay(req2, mine, answer: 'm.key.verification.done');
-    expect(a.phase, DevicePhase.done);
-    expect(b.phase, DevicePhase.done);
+    await _until(() => a.phase == DevicePhase.done);
+    await _until(() => b.phase == DevicePhase.done);
     expect(a.emoji, isEmpty);
   });
 
@@ -100,9 +101,9 @@ void main() {
     FakeMatrixApi.calledEndpoints.clear();
     a.mismatch();
     await sentTo('${room}m.key.verification.cancel');
-    expect(a.phase, DevicePhase.cancelled);
+    await _until(() => a.phase == DevicePhase.cancelled);
     await relay(req1, theirs);
-    expect(b.phase, DevicePhase.cancelled);
+    await _until(() => b.phase == DevicePhase.cancelled);
   });
 
   test('an incoming request waits for yes', () async {
@@ -137,7 +138,7 @@ void main() {
     FakeMatrixApi.calledEndpoints.clear();
     expect(await a.unlock(fixtureRecoveryKey), UnlockResult.unlocked);
     await sentTo('${room}m.room.message');
-    expect(a.phase, DevicePhase.waiting);
+    await _until(() => a.phase == DevicePhase.waiting);
     a.cancel();
   });
 
@@ -174,4 +175,14 @@ void main() {
       expect(a.phase, DevicePhase.cancelled);
     });
   });
+}
+
+/// Waits for [done], bounded: a phase is set only once the SDK has handled
+/// its send's answer, a moment after the fake server recorded the send.
+Future<void> _until(bool Function() done) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 10));
+  while (!done()) {
+    if (DateTime.now().isAfter(deadline)) fail('it never happened');
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
 }
