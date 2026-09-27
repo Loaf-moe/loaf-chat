@@ -25,9 +25,15 @@ const quickReactions = ['👍', '❤️', '😂', '😮', '🔥', '🥖'];
 /// Actions available on [message] to [you]. Edit and delete are yours alone;
 /// removing someone else's message is moderation, which v1 defers. A
 /// message the server does not have yet can only be copied: replying,
-/// editing and deleting all point at an event it has not got.
-List<MessageAction> actionsFor(Message message, Member you) => [
-  if (message.status != MessageStatus.sent)
+/// editing and deleting all point at an event it has not got. Nor can a
+/// message in a timeline that is not [writable]: a reply or an edit would
+/// have nowhere to be written.
+List<MessageAction> actionsFor(
+  Message message,
+  Member you, {
+  bool writable = true,
+}) => [
+  if (!writable || message.status != MessageStatus.sent)
     MessageAction.copy
   else ...[
     MessageAction.reply,
@@ -39,8 +45,11 @@ List<MessageAction> actionsFor(Message message, Member you) => [
   ],
 ];
 
-/// Whether [message] can take a reaction yet: only once the server has it.
-bool canReactTo(Message message) => message.status == MessageStatus.sent;
+/// Whether [message] can take a reaction yet: only once the server has it,
+/// and only where the timeline is [writable] — a reaction is sent into the
+/// room like any message.
+bool canReactTo(Message message, {bool writable = true}) =>
+    writable && message.status == MessageStatus.sent;
 
 extension on MessageAction {
   String get label => switch (this) {
@@ -84,8 +93,12 @@ class _CopySelection extends _Pick {
   final String text;
 }
 
-List<ActionItem<_Pick>> _items(Message message, Member you) => [
-  for (final action in actionsFor(message, you))
+List<ActionItem<_Pick>> _items(Message message, Timeline controller) => [
+  for (final action in actionsFor(
+    message,
+    controller.you,
+    writable: controller.writable,
+  ))
     ActionItem(
       value: _Act(action),
       icon: action.icon,
@@ -102,13 +115,13 @@ Future<void> showMessageActionsSheet(
 ) async {
   final pick = await showActionSheet<_Pick>(
     context,
-    header: canReactTo(message)
+    header: canReactTo(message, writable: controller.writable)
         ? (context) => _ReactionRow(
             size: 44,
             onPick: (pick) => Navigator.pop(context, pick),
           )
         : null,
-    items: _items(message, controller.you),
+    items: _items(message, controller),
   );
   if (pick != null && context.mounted) {
     await _perform(context, controller, message, pick);
@@ -128,7 +141,10 @@ Future<void> showMessageContextMenu(
   final pick = await showActionMenu<_Pick>(
     context,
     position: position,
-    leading: [if (canReactTo(message)) _ReactionMenuEntry()],
+    leading: [
+      if (canReactTo(message, writable: controller.writable))
+        _ReactionMenuEntry(),
+    ],
     items: [
       if (selection.isNotEmpty)
         ActionItem(
@@ -136,7 +152,7 @@ Future<void> showMessageContextMenu(
           icon: LucideIcons.textCursorInput,
           label: 'Copy selection',
         ),
-      ..._items(message, controller.you),
+      ..._items(message, controller),
     ],
   );
   if (pick != null && context.mounted) {

@@ -123,7 +123,8 @@ class _MessageBody extends StatelessWidget {
   final ValueChanged<String>? onReact;
 
   /// The trailing + pill: opens the message's actions, reactions first.
-  /// Receives where it was tapped, for a menu to open at.
+  /// Receives where it was tapped, for a menu to open at. Null draws no +
+  /// pill, since there would be nothing behind it.
   final ValueChanged<Offset>? onAddReaction;
 
   /// When set, the text is selectable and this hears the selected text.
@@ -370,24 +371,25 @@ class _ReactionsWrap extends StatelessWidget {
               ),
             ),
           ),
-        GestureDetector(
-          onTapUp: onAdd == null ? null : (d) => onAdd!(d.globalPosition),
-          child: Container(
-            height: 26,
-            width: 26,
-            decoration: BoxDecoration(
-              color: tokens.card,
-              borderRadius: BorderRadius.circular(LoafRadius.full),
-              border: Border.all(color: tokens.border),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              LucideIcons.smilePlus,
-              size: 14,
-              color: tokens.textMuted,
+        if (onAdd case final onAdd?)
+          GestureDetector(
+            onTapUp: (d) => onAdd(d.globalPosition),
+            child: Container(
+              height: 26,
+              width: 26,
+              decoration: BoxDecoration(
+                color: tokens.card,
+                borderRadius: BorderRadius.circular(LoafRadius.full),
+                border: Border.all(color: tokens.border),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                LucideIcons.smilePlus,
+                size: 14,
+                color: tokens.textMuted,
+              ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -410,6 +412,9 @@ class _TouchMessageState extends State<_TouchMessage> {
   /// acting on.
   bool _active = false;
 
+  bool get _canReact =>
+      canReactTo(widget.message, writable: widget.controller.writable);
+
   Future<void> _openSheet() async {
     HapticFeedback.mediumImpact();
     setState(() => _active = true);
@@ -425,11 +430,11 @@ class _TouchMessageState extends State<_TouchMessage> {
       on: _active,
       child: _MessageBody(
         message: widget.message,
-        onReact: canReactTo(widget.message)
+        onReact: _canReact
             ? (emoji) =>
                   widget.controller.toggleReaction(widget.message.id, emoji)
             : null,
-        onAddReaction: canReactTo(widget.message) ? (_) => _openSheet() : null,
+        onAddReaction: _canReact ? (_) => _openSheet() : null,
         onRetry: () => widget.controller.retry(widget.message.id),
         onDiscard: () => widget.controller.discard(widget.message.id),
       ),
@@ -467,14 +472,18 @@ class _PointerMessageState extends State<_PointerMessage> {
   /// in response to the same click.
   String? _selectionAtRightClick;
 
+  bool get _canReact =>
+      canReactTo(widget.message, writable: widget.controller.writable);
+
   void _setHover({bool? message, bool? toolbar}) {
     setState(() {
       _overMessage = message ?? _overMessage;
       _overToolbar = toolbar ?? _overToolbar;
     });
     // The toolbar reacts and replies, which wait until the server has the
-    // message; right-click still copies it.
-    if ((_overMessage || _overToolbar) && canReactTo(widget.message)) {
+    // message and need a timeline that can be written to; right-click still
+    // copies it.
+    if ((_overMessage || _overToolbar) && _canReact) {
       _toolbar.show();
     } else {
       _toolbar.hide();
@@ -545,13 +554,13 @@ class _PointerMessageState extends State<_PointerMessage> {
               on: _active || _overMessage || _overToolbar,
               child: _MessageBody(
                 message: widget.message,
-                onReact: canReactTo(widget.message)
+                onReact: _canReact
                     ? (emoji) => widget.controller.toggleReaction(
                         widget.message.id,
                         emoji,
                       )
                     : null,
-                onAddReaction: canReactTo(widget.message) ? _openMenu : null,
+                onAddReaction: _canReact ? _openMenu : null,
                 onSelectionChanged: (text) => _selection = text,
                 onRetry: () => widget.controller.retry(widget.message.id),
                 onDiscard: () => widget.controller.discard(widget.message.id),

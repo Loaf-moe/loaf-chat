@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/channel/channel_view.dart';
 import 'package:loaf_native/ui/channel/composer.dart';
 import 'package:loaf_native/ui/channel/timeline.dart';
@@ -198,6 +199,55 @@ void main() {
     await _pump(tester, [_msg('1')], setUp: (t) => t.writable = false);
     expect(find.byType(Composer), findsNothing);
     expect(find.text('sending here waits for encryption'), findsOneWidget);
+  });
+
+  group('an unwritable room', () {
+    /// A message this device could read, with someone's 🔥 on it.
+    final readable = _msg(
+      '1',
+      body: 'readable',
+    ).copyWith(reactions: const [Reaction('🔥', 1)]);
+
+    testWidgets('offers only copying a message it can read', variant: _mobile, (
+      tester,
+    ) async {
+      final timeline = await _pump(tester, [
+        readable,
+      ], setUp: (t) => t.writable = false);
+      await tester.longPress(find.text('readable'));
+      await tester.pumpAndSettle();
+      expect(find.text('Copy text'), findsOneWidget);
+      expect(find.text('Reply'), findsNothing);
+      expect(find.text('👍'), findsNothing);
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      // The pill shows who reacted, but is not a way to react.
+      await tester.tap(find.text('🔥 1'));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(LucideIcons.smilePlus), findsNothing);
+      expect(timeline.calls, isEmpty);
+    });
+
+    testWidgets(
+      'shows no hover toolbar, and its menu only copies',
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester, [readable], setUp: (t) => t.writable = false);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        addTearDown(mouse.removePointer);
+        await mouse.addPointer(
+          location: tester.getCenter(find.text('readable')),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Reply'), findsNothing);
+        await tester.tap(find.text('readable'), buttons: kSecondaryButton);
+        await tester.pumpAndSettle();
+        expect(find.text('Copy text'), findsOneWidget);
+        expect(find.text('Reply'), findsNothing);
+        expect(find.byTooltip('More reactions'), findsNothing);
+      },
+    );
   });
 
   group('older messages', () {
