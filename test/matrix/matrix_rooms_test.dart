@@ -569,6 +569,31 @@ void main() {
     expect(api.answered.where((p) => p.endsWith('/join')), hasLength(2));
   });
 
+  test('an answered invite is gone before the sync that confirms it, and '
+      'answers nothing more', () async {
+    final api = _Api();
+    final client = await _client(api: api);
+    final rooms = await _rooms(client);
+    await _invited(client);
+    await _settle();
+    final invite = rooms.invites.firstWhere(
+      (i) => i.id == '!invited:example.com',
+    );
+    await rooms.accept(invite);
+    // The server said yes; the sync saying so has not arrived.
+    expect(
+      client.getRoomById('!invited:example.com')!.membership,
+      Membership.invite,
+    );
+    expect(rooms.invites.map((i) => i.id), isNot(contains(invite.id)));
+    // A stale preview's buttons: no second join, and no leave of the room
+    // just joined.
+    await rooms.accept(invite);
+    await rooms.decline(invite);
+    expect(api.answered, hasLength(1));
+    expect(api.answered.single, endsWith('/join'));
+  });
+
   test('you are you, and only answering invites is wired', () async {
     final rooms = await _rooms(await _client());
     expect(rooms.me.id, _me);

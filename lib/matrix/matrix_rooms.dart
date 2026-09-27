@@ -57,6 +57,12 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// nothing more.
   final _answering = <String, Future<void>>{};
 
+  /// Invites the server has taken an answer to, whose change of membership
+  /// has not come down a sync yet. Until it does the room still reads as an
+  /// invite; listing it would offer a second answer, and a decline then
+  /// leaves the room just joined.
+  final _answered = <String>{};
+
   /// Rooms whose member lists have been asked for. Once each: the shell
   /// asks on every build, and later changes to a loaded list arrive over
   /// sync.
@@ -149,9 +155,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
           _channel(room, home: true),
     ];
 
+    // An answer's sync has landed once the room is no longer an invite.
+    _answered.removeWhere(
+      (id) => client.getRoomById(id)?.membership != Membership.invite,
+    );
     _invites = [
       for (final room in client.rooms)
-        if (room.membership == Membership.invite) _invite(room),
+        if (room.membership == Membership.invite &&
+            !_answered.contains(room.id))
+          _invite(room),
     ];
     for (final room in client.rooms) {
       if (room.membership == Membership.invite) _loadInvite(room);
@@ -347,14 +359,21 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     if (pending != null) return pending;
     final room = client.getRoomById(invite.id);
     // Answered already, here or on another device.
-    if (room == null || room.membership != Membership.invite) {
+    if (room == null ||
+        room.membership != Membership.invite ||
+        _answered.contains(invite.id)) {
       return Future.value();
     }
-    // A block body: `remove` returns this very future, and `whenComplete`
-    // would wait on it, which never finishes.
-    final answer = call(room).whenComplete(() {
-      _answering.remove(invite.id);
-    });
+    final answer = call(room)
+        .then((_) {
+          _answered.add(invite.id);
+          if (!_disposed) _rebuild();
+        })
+        // A block body: `remove` returns this very future, and
+        // `whenComplete` would wait on it, which never finishes.
+        .whenComplete(() {
+          _answering.remove(invite.id);
+        });
     _answering[invite.id] = answer;
     return answer;
   }
