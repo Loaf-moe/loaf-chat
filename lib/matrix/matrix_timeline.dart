@@ -41,6 +41,17 @@ class MatrixTimeline extends ChangeNotifier
   List<ui.Message>? _messages;
   final _failures = StreamController<String>.broadcast();
 
+  /// Transactions this session sent and has not heard back about. The SDK
+  /// keeps an echo "sending" across a relaunch, but nothing sends it then:
+  /// a sending echo that is not one of these reads as failed, so it can be
+  /// retried or discarded rather than dimmed for ever.
+  final _inFlight = <String>{};
+
+  /// Reactions being added or taken back, by message and emoji. A second
+  /// tap while one is on its way would otherwise add it twice: its echo is
+  /// not in the timeline yet.
+  final _reacting = <(String, String)>{};
+
   Future<void> _open() async {
     _opening = true;
     _pageFailed = false;
@@ -109,11 +120,11 @@ class MatrixTimeline extends ChangeNotifier
   ui.Message? _message(Event event, Timeline timeline, {bool quoting = false}) {
     if (event.redacted) return null;
     final author = member(event.senderId);
-    final status = switch (event.status) {
-      EventStatus.sending => ui.MessageStatus.sending,
-      EventStatus.error => ui.MessageStatus.failed,
-      EventStatus.sent || EventStatus.synced => ui.MessageStatus.sent,
-    };
+    final status = _unsent(event)
+        ? ui.MessageStatus.failed
+        : event.status.isSending
+        ? ui.MessageStatus.sending
+        : ui.MessageStatus.sent;
     if (event.type == EventTypes.Encrypted) {
       return ui.Message(
         id: event.eventId,
@@ -161,7 +172,7 @@ class MatrixTimeline extends ChangeNotifier
               (e) =>
                   e.senderId == event.senderId &&
                   e.type == EventTypes.Message &&
-                  !e.status.isError,
+                  !_unsent(e),
             )
             .toList()
           ..sort((a, b) => a.originServerTs.compareTo(b.originServerTs));
@@ -182,7 +193,7 @@ class MatrixTimeline extends ChangeNotifier
       timeline,
       RelationshipTypes.reaction,
     )) {
-      if (r.status.isError) continue;
+      if (_unsent(r)) continue;
       final key = _reactionKey(r);
       if (key == null) continue;
       (byKey[key] ??= {}).add(r.senderId);
@@ -210,23 +221,141 @@ class MatrixTimeline extends ChangeNotifier
 
   static final _someone = ui.Member('', 'someone', spaceColorFor(''));
 
-  // ── Not wired yet ──────────────────────────────────────────────────────
+  // ── Writing ────────────────────────────────────────────────────────────
 
-  Never _unwired(String what) =>
-      throw UnsupportedError('$what is not wired to the SDK yet');
+  /// Failed, or left sending by an app that has since quit.
+  bool _unsent(Event event) =>
+      event.status.isError ||
+      (event.status.isSending && !_inFlight.contains(event.eventId));
+
+  /// Sends under a transaction id this session knows it has in flight.
+  Future<Object?> _send(Future<Object?> Function(String txid) send) {
+    final txid = room.client.generateUniqueTransactionId();
+    _inFlight.add(txid);
+    return send(txid).whenComplete(() {
+      _inFlight.remove(txid);
+      _changed();
+    });
+  }
+
+  Event? _event(String id) =>
+      _timeline?.events.where((e) => e.eventId == id).firstOrNull;
+
+  /// Runs [action], and on failure says [failure] as a toast.
+  void _attempt(Future<Object?> Function() action, String failure) {
+    unawaited(
+      Future.sync(action).then<void>(
+        (_) {},
+        onError: (Object _) {
+          if (!_disposed) _failures.add(failure);
+        },
+      ),
+    );
+  }
 
   @override
-  void send(String text) => _unwired('sending');
+  void send(String text) {
+    final body = text.trim();
+    if (body.isEmpty) return;
+    final target = this.target;
+    final replyTo = target?.mode == ui.ComposerMode.reply
+        ? _event(target!.message.id)
+        : null;
+    // A failure shows on the message itself, which stays to retry.
+    unawaited(
+      _send(
+        (txid) => room.sendTextEvent(
+          body,
+          txid: txid,
+          inReplyTo: replyTo,
+          parseMarkdown: false,
+          parseCommands: false,
+        ),
+      ).then<void>((_) {}, onError: (Object _) {}),
+    );
+    aim(null);
+  }
+
   @override
-  void saveEdit(String messageId, String text) => _unwired('editing');
+  void saveEdit(String messageId, String text) {
+    final body = text.trim();
+    final current = messages.where((m) => m.id == messageId).firstOrNull;
+    if (current != null && body.isNotEmpty && body != current.body) {
+      _attempt(
+        () => _send(
+          (txid) => room.sendTextEvent(
+            body,
+            txid: txid,
+            editEventId: messageId,
+            parseMarkdown: false,
+            parseCommands: false,
+          ),
+        ),
+        "couldn't save that edit",
+      );
+    }
+    aim(null);
+  }
+
   @override
-  void toggleReaction(String messageId, String emoji) => _unwired('reacting');
+  void toggleReaction(String messageId, String emoji) {
+    final event = _event(messageId);
+    final timeline = _timeline;
+    if (event == null || timeline == null) return;
+    final key = (messageId, emoji);
+    if (_reacting.contains(key)) return;
+    final mine = event
+        .aggregatedEvents(timeline, RelationshipTypes.reaction)
+        .where(
+          (r) =>
+              r.senderId == you.id && !_unsent(r) && _reactionKey(r) == emoji,
+        )
+        .firstOrNull;
+    // Still on its way, a reaction has no event id to take back yet.
+    if (mine != null && !mine.status.isSent) return;
+    _reacting.add(key);
+    _attempt(
+      () =>
+          (mine == null
+                  ? _send(
+                      (txid) => room.sendReaction(messageId, emoji, txid: txid),
+                    )
+                  : room.redactEvent(mine.eventId))
+              .whenComplete(() => _reacting.remove(key)),
+      "couldn't react",
+    );
+  }
+
   @override
-  void delete(String messageId) => _unwired('deleting');
+  void delete(String messageId) {
+    _attempt(() => room.redactEvent(messageId), "couldn't delete that");
+    if (target?.message.id == messageId) aim(null);
+  }
+
   @override
-  void retry(String messageId) => _unwired('sending');
+  void retry(String messageId) {
+    final event = _event(messageId);
+    if (event == null || !_unsent(event)) return;
+    // The SDK resends only what it has marked failed; one left sending by
+    // a quit app is failed in all but name.
+    event.status = EventStatus.error;
+    _inFlight.add(event.eventId);
+    unawaited(
+      event.sendAgain().then<void>((_) {}, onError: (Object _) {}).whenComplete(
+        () {
+          _inFlight.remove(event.eventId);
+          _changed();
+        },
+      ),
+    );
+  }
+
   @override
-  void discard(String messageId) => _unwired('sending');
+  void discard(String messageId) {
+    final event = _event(messageId);
+    if (event == null || !_unsent(event)) return;
+    unawaited(event.cancelSend());
+  }
 
   // ── History ────────────────────────────────────────────────────────────
 

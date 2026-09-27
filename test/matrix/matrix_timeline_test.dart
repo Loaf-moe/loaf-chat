@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -395,6 +396,220 @@ void main() {
     });
   });
 
+  group('sending', () {
+    test('a message shows at once as sending, then as sent', () async {
+      final h = await _open([_text('hi')]);
+      final api = h.api..holdSend = Completer<void>();
+      h.timeline.send('  fresh bread  ');
+      // The echo lands before the server has answered.
+      await _settle();
+      final echo = h.messages.last;
+      expect(echo.body, 'fresh bread');
+      expect(echo.author.id, _me);
+      expect(echo.status, MessageStatus.sending);
+      api.holdSend!.complete();
+      await _settle();
+      expect(h.messages.last.status, MessageStatus.sent);
+      expect(api.sent.single.$1, 'm.room.message');
+      expect(api.sent.single.$2['body'], 'fresh bread');
+    });
+
+    test('text is sent as written: no commands, no markdown', () async {
+      final h = await _open([_text('hi')]);
+      h.timeline.send('/leave');
+      h.timeline.send('2 * 3 * 4');
+      await _settle();
+      expect(h.api.sent.map((s) => s.$2['body']), ['/leave', '2 * 3 * 4']);
+      expect(h.api.sent.map((s) => s.$2['format']), [null, null]);
+      expect(h.client.getRoomById(_roomId)!.membership, Membership.join);
+    });
+
+    test('blank text never sends', () async {
+      final h = await _open([_text('hi')]);
+      h.timeline.send('   ');
+      await _settle();
+      expect(h.api.sent, isEmpty);
+    });
+
+    test('a reply names what it answers, and clears the aim', () async {
+      final h = await _open([_text('question', id: r'$q')]);
+      h.timeline.startReply(h.byBody('question'));
+      h.timeline.send('answer');
+      await _settle();
+      final content = h.api.sent.single.$2;
+      expect((content['m.relates_to']! as Map)['m.in_reply_to'], {
+        'event_id': r'$q',
+      });
+      expect(h.timeline.target, isNull);
+      expect(h.byBody('answer').replyTo!.id, r'$q');
+    });
+
+    test('a refused message stays, failed, until retried', () async {
+      final h = await _open([_text('hi')]);
+      h.api.refuseSend = true;
+      h.timeline.send('rejected');
+      await _settle();
+      final failed = h.byBody('rejected');
+      expect(failed.status, MessageStatus.failed);
+
+      h.api.refuseSend = false;
+      h.timeline.retry(failed.id);
+      await _settle();
+      expect(h.byBody('rejected').status, MessageStatus.sent);
+      expect(h.api.sent.map((s) => s.$2['body']), ['rejected']);
+    });
+
+    test('a refused message can be discarded', () async {
+      final h = await _open([_text('hi')]);
+      h.api.refuseSend = true;
+      h.timeline.send('rejected');
+      await _settle();
+      h.timeline.discard(h.byBody('rejected').id);
+      await _settle();
+      expect(h.messages.map((m) => m.body), ['hi']);
+    });
+
+    test('signing out with a message on its way throws nothing', () async {
+      final api = _Api()..holdSend = Completer<void>();
+      final client = await _client(api);
+      addTearDown(client.dispose);
+      await _sync(client, [_text('hi')]);
+      final rooms = MatrixRooms(client);
+      final timeline = rooms.timeline(_roomId)!;
+      await _settle();
+      timeline
+        ..send('late')
+        ..toggleReaction(timeline.messages.first.id, '🔥');
+      await _settle();
+      rooms.dispose();
+      api.holdSend!.complete();
+      await _settle();
+    });
+  });
+
+  group('reacting', () {
+    test('toggles your own reaction on and off', () async {
+      final h = await _open([_text('bread', id: r'$m1')]);
+      h.timeline.toggleReaction(r'$m1', '🔥');
+      await _settle();
+      expect(h.api.sent.single.$1, 'm.reaction');
+      final pill = h.messages.single.reactions.single;
+      expect((pill.emoji, pill.count, pill.mine), ('🔥', 1, true));
+
+      h.timeline.toggleReaction(r'$m1', '🔥');
+      await _settle();
+      expect(h.api.redacted, hasLength(1));
+      // Gone once the redaction comes back down a sync.
+      await _sync(h.client, [
+        _event('m.room.redaction', {}, sender: _me)
+          ..['redacts'] = h.api.redacted.single,
+      ]);
+      await _settle();
+      expect(h.messages.single.reactions, isEmpty);
+    });
+
+    test('joins someone else\'s pill rather than taking it', () async {
+      final h = await _open([
+        _text('bread', id: r'$m1'),
+        _reaction(r'$m1', '🔥'),
+      ]);
+      h.timeline.toggleReaction(r'$m1', '🔥');
+      await _settle();
+      expect(h.api.redacted, isEmpty);
+      final pill = h.messages.single.reactions.single;
+      expect((pill.count, pill.mine), (2, true));
+    });
+
+    test('a second tap before the first reaches the server sends '
+        'nothing more', () async {
+      final h = await _open([_text('bread', id: r'$m1')]);
+      h.api.holdSend = Completer<void>();
+      h.timeline
+        ..toggleReaction(r'$m1', '🔥')
+        ..toggleReaction(r'$m1', '🔥');
+      await _settle();
+      h.api.holdSend!.complete();
+      await _settle();
+      expect(h.api.sent, hasLength(1));
+      expect(h.api.redacted, isEmpty);
+      expect(h.messages.single.reactions.single.mine, isTrue);
+    });
+
+    test('a refused reaction snaps back, and says so', () async {
+      final h = await _open([_text('bread', id: r'$m1')]);
+      final failures = <String>[];
+      h.timeline.failures.listen(failures.add);
+      h.api.refuseSend = true;
+      h.timeline.toggleReaction(r'$m1', '🔥');
+      await _settle();
+      expect(h.messages.single.reactions, isEmpty);
+      expect(failures, ["couldn't react"]);
+    });
+  });
+
+  group('editing', () {
+    test('sends a replacement, which shows as edited', () async {
+      final h = await _open([_text('helo', id: r'$m1', sender: _me)]);
+      h.timeline.startEdit(h.byBody('helo'));
+      h.timeline.saveEdit(r'$m1', 'hello');
+      await _settle();
+      final content = h.api.sent.single.$2;
+      expect(content['m.new_content'], containsPair('body', 'hello'));
+      expect(content['m.relates_to'], {
+        'rel_type': 'm.replace',
+        'event_id': r'$m1',
+      });
+      expect(h.timeline.target, isNull);
+      final m = h.messages.single;
+      expect((m.body, m.edited), ('hello', true));
+    });
+
+    test('unchanged or blank is not an edit', () async {
+      final h = await _open([_text('same', id: r'$m1', sender: _me)]);
+      h.timeline.saveEdit(r'$m1', ' same ');
+      h.timeline.saveEdit(r'$m1', '   ');
+      await _settle();
+      expect(h.api.sent, isEmpty);
+    });
+
+    test('a refused edit snaps back, and says so', () async {
+      final h = await _open([_text('helo', id: r'$m1', sender: _me)]);
+      final failures = <String>[];
+      h.timeline.failures.listen(failures.add);
+      h.api.refuseSend = true;
+      h.timeline.saveEdit(r'$m1', 'hello');
+      await _settle();
+      final m = h.messages.single;
+      expect((m.body, m.edited), ('helo', false));
+      expect(failures, ["couldn't save that edit"]);
+    });
+  });
+
+  group('deleting', () {
+    test('redacts, and the message goes when that syncs back', () async {
+      final h = await _open([_text('oops', id: r'$m1', sender: _me)]);
+      h.timeline.delete(r'$m1');
+      await _settle();
+      expect(h.api.redacted, [r'$m1']);
+      await _sync(h.client, [
+        _event('m.room.redaction', {}, sender: _me)..['redacts'] = r'$m1',
+      ]);
+      await _settle();
+      expect(h.messages, isEmpty);
+    });
+
+    test('a refused delete leaves the message, and says so', () async {
+      final h = await _open([_text('oops', id: r'$m1', sender: _me)]);
+      final failures = <String>[];
+      h.timeline.failures.listen(failures.add);
+      h.api.refuseRedact = true;
+      h.timeline.delete(r'$m1');
+      await _settle();
+      expect(h.messages.single.body, 'oops');
+      expect(failures, ["couldn't delete that"]);
+    });
+  });
+
   group('history', () {
     /// One page from the server, newest first, reaching the room's start.
     Map<String, Object?> page() => {
@@ -463,5 +678,86 @@ void main() {
       expect(timeline.loadingOlder, isFalse);
       expect(timeline.messages.single.body, 'hi');
     });
+  });
+
+  test('after a relaunch, the conversation and a failed message come '
+      'back', () async {
+    final dir = await Directory.systemTemp.createTemp('loaf_timeline');
+    addTearDown(() => dir.delete(recursive: true));
+    final path = '${dir.path}/loaf.sqlite';
+
+    final api = _Api()..refuseSend = true;
+    final first = await _client(api, path: path);
+    await _sync(first, [_text('kept')]);
+    final firstRooms = MatrixRooms(first);
+    firstRooms.timeline(_roomId)!;
+    await _settle();
+    firstRooms.timeline(_roomId)!.send('unsent');
+    await _settle();
+    expect(
+      firstRooms.timeline(_roomId)!.messages.last.status,
+      MessageStatus.failed,
+    );
+    firstRooms.dispose();
+    await first.dispose(closeDatabase: true);
+
+    // The app opens again: everything comes back from the database.
+    final client = await openClient(httpClient: _Api(), databasePath: path);
+    FakeMatrixApi.client = client;
+    await client.init(waitForFirstSync: false);
+    addTearDown(() => client.dispose(closeDatabase: true));
+    final rooms = MatrixRooms(client);
+    addTearDown(rooms.dispose);
+    final timeline = rooms.timeline(_roomId)!;
+    await _settle();
+    expect(timeline.messages.map((m) => (m.body, m.status)), [
+      ('kept', MessageStatus.sent),
+      ('unsent', MessageStatus.failed),
+    ]);
+  });
+
+  test('a message on its way when the app quit comes back failed, and '
+      'retries', () async {
+    final dir = await Directory.systemTemp.createTemp('loaf_timeline');
+    addTearDown(() => dir.delete(recursive: true));
+    final path = '${dir.path}/loaf.sqlite';
+
+    // The server never answers before the app quits.
+    final first = await _client(
+      _Api()..holdSend = Completer<void>(),
+      path: path,
+    );
+    await _sync(first, [_text('kept')]);
+    final firstRooms = MatrixRooms(first);
+    firstRooms.timeline(_roomId)!;
+    await _settle();
+    firstRooms.timeline(_roomId)!.send('in flight');
+    await _settle();
+    expect(
+      firstRooms.timeline(_roomId)!.messages.last.status,
+      MessageStatus.sending,
+    );
+    firstRooms.dispose();
+    await first.dispose(closeDatabase: true);
+
+    final api = _Api();
+    final client = await openClient(httpClient: api, databasePath: path);
+    FakeMatrixApi.client = client;
+    await client.init(waitForFirstSync: false);
+    addTearDown(() => client.dispose(closeDatabase: true));
+    final rooms = MatrixRooms(client);
+    addTearDown(rooms.dispose);
+    final timeline = rooms.timeline(_roomId)!;
+    await _settle();
+    final stranded = timeline.messages.last;
+    expect(
+      (stranded.body, stranded.status),
+      ('in flight', MessageStatus.failed),
+    );
+
+    timeline.retry(stranded.id);
+    await _settle();
+    expect(timeline.messages.last.status, MessageStatus.sent);
+    expect(api.sent.single.$2['body'], 'in flight');
   });
 }

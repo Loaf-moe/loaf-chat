@@ -81,7 +81,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   final _timelines = <String, MatrixTimeline>{};
 
   @override
-  Set<RoomAbility> get abilities => const {RoomAbility.answerInvites};
+  Set<RoomAbility> get abilities => const {
+    RoomAbility.answerInvites,
+    RoomAbility.messages,
+  };
 
   @override
   bool get synced => _synced;
