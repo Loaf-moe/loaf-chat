@@ -192,7 +192,12 @@ class VerificationController extends ChangeNotifier {
       case DevicePhase.waiting:
         break;
       case DevicePhase.emoji:
-        _go(VerifyStep.compareEmoji);
+        // Still emoji while this end's answer is on its way: the step has
+        // already moved on, and must not bring the buttons back.
+        final answered =
+            _state.step == VerifyStep.waitingForOther ||
+            _state.step == VerifyStep.cancelled;
+        if (!answered) _go(VerifyStep.compareEmoji);
       case DevicePhase.waitingForOther:
         _go(VerifyStep.waitingForOther);
       case DevicePhase.needsKey:
@@ -211,12 +216,19 @@ class VerificationController extends ChangeNotifier {
     }
   }
 
+  /// Answers at once, rather than leaving the buttons drawn and dead while
+  /// the answer goes out. If it then fails, the device's cancel still lands
+  /// on [VerifyStep.cancelled].
   void emojiMatch() {
-    if (_state.step == VerifyStep.compareEmoji) _device?.match();
+    if (_state.step != VerifyStep.compareEmoji) return;
+    _go(VerifyStep.waitingForOther);
+    _device?.match();
   }
 
   void emojiMismatch() {
-    if (_state.step == VerifyStep.compareEmoji) _device?.mismatch();
+    if (_state.step != VerifyStep.compareEmoji) return;
+    _go(VerifyStep.cancelled);
+    _device?.mismatch();
   }
 
   void acceptIncoming() {

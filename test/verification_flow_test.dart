@@ -111,6 +111,34 @@ void main() {
       c.dispose();
     });
 
+    test('"they match" answers at once, before the device moves', () {
+      final v = _Verifier();
+      final c = over(v)..useAnotherDevice();
+      v.device.go(DevicePhase.emoji);
+      c.emojiMatch();
+      expect(v.device.matched, 1);
+      expect(c.state.step, VerifyStep.waitingForOther);
+      // The device still says emoji until its answer lands: no going back.
+      v.device.go(DevicePhase.emoji);
+      expect(c.state.step, VerifyStep.waitingForOther);
+      // And a match that then fails still ends in nothing trusted.
+      v.device.go(DevicePhase.cancelled);
+      expect(c.state.step, VerifyStep.cancelled);
+      expect(trusted, 0);
+      c.dispose();
+    });
+
+    test('"they don\'t match" ends it at once', () {
+      final v = _Verifier();
+      final c = over(v)..useAnotherDevice();
+      v.device.go(DevicePhase.emoji);
+      c.emojiMismatch();
+      expect(v.device.mismatched, 1);
+      expect(c.state.step, VerifyStep.cancelled);
+      expect(trusted, 0);
+      c.dispose();
+    });
+
     test('saying yes waits for the new device, and is said once', () {
       final device = _Device();
       final c = over(
@@ -519,6 +547,8 @@ class _Challenge implements AuthChallenge {
 class _Device extends ChangeNotifier implements DeviceVerification {
   DevicePhase _phase = DevicePhase.waiting;
   var accepted = 0;
+  var matched = 0;
+  var mismatched = 0;
   var cancelled = false;
   var disposed = false;
   var unlockAs = UnlockResult.unlocked;
@@ -536,9 +566,9 @@ class _Device extends ChangeNotifier implements DeviceVerification {
   @override
   void accept() => accepted++;
   @override
-  void match() {}
+  void match() => matched++;
   @override
-  void mismatch() {}
+  void mismatch() => mismatched++;
   @override
   Future<UnlockResult> unlock(String keyOrPassphrase) async {
     keys.add(keyOrPassphrase);
