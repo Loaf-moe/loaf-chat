@@ -219,6 +219,34 @@ void main() {
     });
 
     testWidgets(
+      'the toolbar sits on the message, not off the edge of the window',
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester, _them);
+
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        addTearDown(mouse.removePointer);
+        await mouse.addPointer(location: Offset.zero);
+        await mouse.moveTo(tester.getCenter(_body));
+        await tester.pumpAndSettle();
+
+        final window = Offset.zero & const Size(800, 900);
+        final message = tester.getRect(_body);
+        final row = tester.getRect(find.byType(MessageGroupTile));
+        final more = tester.getRect(find.byTooltip('More'));
+        expect(window.contains(more.topLeft), isTrue);
+        expect(window.contains(more.bottomRight), isTrue);
+        // Straddles the message's top edge, at the row's right end, clear of
+        // a short message's text.
+        expect(more.top, lessThan(message.top));
+        expect(more.bottom, greaterThan(message.top));
+        expect(more.right, greaterThan(row.right - LoafSpace.x6));
+        expect(more.right, lessThanOrEqualTo(row.right));
+        expect(more.left, greaterThan(message.right));
+      },
+    );
+
+    testWidgets(
       'right-click opens the same actions as a menu',
       variant: _desktop,
       (tester) async {

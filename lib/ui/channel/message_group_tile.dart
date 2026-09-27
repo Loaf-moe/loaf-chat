@@ -523,13 +523,16 @@ class _PointerMessageState extends State<_PointerMessage> {
   Widget build(BuildContext context) {
     return OverlayPortal(
       controller: _toolbar,
-      overlayChildBuilder: (context) => CompositedTransformFollower(
-        link: _link,
-        targetAnchor: Alignment.topRight,
-        followerAnchor: Alignment.centerRight,
-        offset: const Offset(-LoafSpace.x2, 0),
-        child: Align(
-          alignment: Alignment.topLeft,
+      // The Align only loosens the overlay's constraints so the follower
+      // shrinks to the toolbar; inside the follower it would fill the window,
+      // and `followerAnchor` would place the window's edge, not the toolbar's.
+      overlayChildBuilder: (context) => Align(
+        alignment: Alignment.topLeft,
+        child: CompositedTransformFollower(
+          link: _link,
+          targetAnchor: Alignment.topRight,
+          followerAnchor: Alignment.centerRight,
+          offset: const Offset(-LoafSpace.x2, 0),
           child: MouseRegion(
             onEnter: (_) => _setHover(toolbar: true),
             onExit: (_) => _setHover(toolbar: false),
@@ -542,28 +545,34 @@ class _PointerMessageState extends State<_PointerMessage> {
           ),
         ),
       ),
+      // The full row, not just the text: the toolbar sits at the row's right
+      // end, where it never covers a short message, and the wash and hover
+      // span the row like the rest of the app's list rows.
       child: CompositedTransformTarget(
         link: _link,
-        child: MouseRegion(
-          onEnter: (_) => _setHover(message: true),
-          onExit: (_) => _setHover(message: false),
-          child: Listener(
-            onPointerDown: _onPointerDown,
-            onPointerUp: _onPointerUp,
-            child: _Highlight(
-              on: _active || _overMessage || _overToolbar,
-              child: _MessageBody(
-                message: widget.message,
-                onReact: _canReact
-                    ? (emoji) => widget.controller.toggleReaction(
-                        widget.message.id,
-                        emoji,
-                      )
-                    : null,
-                onAddReaction: _canReact ? _openMenu : null,
-                onSelectionChanged: (text) => _selection = text,
-                onRetry: () => widget.controller.retry(widget.message.id),
-                onDiscard: () => widget.controller.discard(widget.message.id),
+        child: SizedBox(
+          width: double.infinity,
+          child: MouseRegion(
+            onEnter: (_) => _setHover(message: true),
+            onExit: (_) => _setHover(message: false),
+            child: Listener(
+              onPointerDown: _onPointerDown,
+              onPointerUp: _onPointerUp,
+              child: _Highlight(
+                on: _active || _overMessage || _overToolbar,
+                child: _MessageBody(
+                  message: widget.message,
+                  onReact: _canReact
+                      ? (emoji) => widget.controller.toggleReaction(
+                          widget.message.id,
+                          emoji,
+                        )
+                      : null,
+                  onAddReaction: _canReact ? _openMenu : null,
+                  onSelectionChanged: (text) => _selection = text,
+                  onRetry: () => widget.controller.retry(widget.message.id),
+                  onDiscard: () => widget.controller.discard(widget.message.id),
+                ),
               ),
             ),
           ),
