@@ -86,6 +86,7 @@ class _VerifyPanelState extends State<VerifyPanel> {
 
   String _title(VerifyStep step) {
     final incoming = _c.purpose == VerifyPurpose.incoming;
+    final settingUp = _c.purpose == VerifyPurpose.setUp;
     return switch (step) {
       VerifyStep.choose => 'verify this session',
       VerifyStep.incomingPrompt || VerifyStep.notMe => 'new sign-in',
@@ -93,15 +94,26 @@ class _VerifyPanelState extends State<VerifyPanel> {
       VerifyStep.compareEmoji ||
       VerifyStep.waitingForOther ||
       VerifyStep.cancelled => incoming ? 'new sign-in' : 'use another device',
-      VerifyStep.recoveryKey || VerifyStep.restoring => 'use your recovery key',
-      VerifyStep.resetConfirm || VerifyStep.resetAuth => 'reset your identity',
+      VerifyStep.recoveryKey || VerifyStep.restoring =>
+        incoming ? 'new sign-in' : 'use your recovery key',
+      VerifyStep.resetConfirm => 'reset your identity',
+      VerifyStep.resetAuth =>
+        settingUp ? 'set up recovery' : 'reset your identity',
       VerifyStep.setUpIntro || VerifyStep.showKey =>
-        _c.purpose == VerifyPurpose.setUp
-            ? 'set up recovery'
-            : 'save your new recovery key',
+        settingUp ? 'set up recovery' : 'save your new recovery key',
       VerifyStep.done => '',
     };
   }
+
+  /// Nothing reached the server, so nothing changed.
+  String? get _unreachable =>
+      _c.state.failed ? "couldn't reach ${_c.server} · try again" : null;
+
+  String? get _cutShort => _c.state.failed
+      ? 'restored ${thousands(_c.state.restored)} of '
+            '${thousands(_c.state.totalKeys)} · the rest arrive as you open '
+            'rooms'
+      : null;
 
   Widget _body(VerifyState s) => switch (s.step) {
     VerifyStep.choose => ChooseStep(
@@ -141,6 +153,10 @@ class _VerifyPanelState extends State<VerifyPanel> {
       controller: _key,
       checking: s.checking,
       rejected: s.rejected,
+      failure: _unreachable,
+      lead: _c.purpose == VerifyPurpose.incoming
+          ? 'to vouch for it, this device needs your recovery key or passphrase.'
+          : 'enter your recovery key, or the passphrase that protects it.',
       onSubmit: () => _c.submitKey(_key.text),
     ),
     VerifyStep.restoring => RestoringStep(
@@ -150,6 +166,8 @@ class _VerifyPanelState extends State<VerifyPanel> {
     VerifyStep.resetConfirm => ResetConfirmStep(
       onReset: _c.confirmReset,
       onCancel: _c.back,
+      busy: s.checking,
+      failure: _unreachable,
     ),
     VerifyStep.resetAuth => ResetAuthStep(
       byPassword: _c.reauthByPassword,
@@ -163,8 +181,15 @@ class _VerifyPanelState extends State<VerifyPanel> {
       onReopen: _c.reopenBrowser,
       onFinished: _c.browserFinished,
       onCancelBrowser: _c.cancelBrowser,
+      lead: _c.purpose == VerifyPurpose.setUp
+          ? "confirm it's you before your new identity goes up."
+          : "confirm it's you before the old identity goes.",
     ),
-    VerifyStep.setUpIntro => SetUpIntroStep(onCreate: _c.createKey),
+    VerifyStep.setUpIntro => SetUpIntroStep(
+      onCreate: _c.createKey,
+      busy: s.checking,
+      failure: _unreachable,
+    ),
     VerifyStep.showKey => ShowKeyStep(
       recoveryKey: _c.newRecoveryKey,
       saved: s.keySaved,
@@ -172,7 +197,7 @@ class _VerifyPanelState extends State<VerifyPanel> {
       onSave: _save,
       onDone: _c.finishSetUp,
     ),
-    VerifyStep.done => DoneStep(message: _c.doneMessage),
+    VerifyStep.done => DoneStep(message: _c.doneMessage, note: _cutShort),
   };
 
   @override

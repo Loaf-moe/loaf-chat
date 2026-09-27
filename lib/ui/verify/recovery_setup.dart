@@ -6,14 +6,24 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
+import '../widgets/error_note.dart';
 import '../widgets/loaf_button.dart';
 import 'recovery_key.dart';
 import 'verify_steps.dart';
 
 class SetUpIntroStep extends StatelessWidget {
-  const SetUpIntroStep({super.key, required this.onCreate});
+  const SetUpIntroStep({
+    super.key,
+    required this.onCreate,
+    this.busy = false,
+    this.failure,
+  });
 
   final VoidCallback onCreate;
+
+  /// The identity is being made; it can't be stopped part way.
+  final bool busy;
+  final String? failure;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -29,8 +39,15 @@ class SetUpIntroStep extends StatelessWidget {
       const StepNote(
         "keep it somewhere safe that isn't this device — a password manager is ideal.",
       ),
+      if (failure case final failure?) ...[
+        const SizedBox(height: LoafSpace.x3),
+        ErrorNote(message: failure),
+      ],
       const SizedBox(height: LoafSpace.x5),
-      LoafButton(label: 'create my recovery key', onTap: onCreate),
+      LoafButton(
+        label: busy ? 'creating…' : 'create my recovery key',
+        onTap: busy ? null : onCreate,
+      ),
     ],
   );
 }

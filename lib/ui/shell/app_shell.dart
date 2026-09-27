@@ -580,6 +580,7 @@ class _AppShellState extends State<AppShell> {
         verifier: session.verifier,
         incoming: request?.verification,
         incomingDevice: request?.device,
+        server: session.homeserverName,
         onTrusted: purpose == VerifyPurpose.incoming
             ? () {}
             : _session.markVerified,

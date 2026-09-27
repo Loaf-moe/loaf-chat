@@ -18,6 +18,7 @@ class VerificationController extends ChangeNotifier {
     required this.onTrusted,
     this.incoming,
     this.incomingDevice,
+    this.server = 'your server',
   }) : _state = VerifyState(
          step: switch (purpose) {
            VerifyPurpose.verify => VerifyStep.choose,
@@ -37,6 +38,7 @@ class VerificationController extends ChangeNotifier {
     VoidCallback? onTrusted,
     this.incoming,
     this.incomingDevice,
+    this.server = 'your server',
   }) : onTrusted = onTrusted ?? _nothing,
        _state = state {
     _follow(incoming);
@@ -57,6 +59,9 @@ class VerificationController extends ChangeNotifier {
   /// Incoming only: the request, and the device asking to be verified.
   final DeviceVerification? incoming;
   final String? incomingDevice;
+
+  /// The homeserver's name, for saying it did not answer.
+  final String server;
 
   List<String> get otherSessions => verifier.otherSessions;
 

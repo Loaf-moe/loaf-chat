@@ -333,6 +333,8 @@ class RecoveryStep extends StatelessWidget {
     required this.checking,
     required this.rejected,
     required this.onSubmit,
+    this.failure,
+    this.lead = 'enter your recovery key, or the passphrase that protects it.',
   });
 
   final TextEditingController controller;
@@ -340,19 +342,25 @@ class RecoveryStep extends StatelessWidget {
   final bool rejected;
   final VoidCallback onSubmit;
 
+  /// Why nothing is known about the key yet: the server did not answer.
+  final String? failure;
+  final String lead;
+
   @override
   Widget build(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const StepLead(
-        'enter your recovery key, or the passphrase that protects it.',
-      ),
+      StepLead(lead),
       const SizedBox(height: LoafSpace.x4),
       RecoveryKeyField(controller: controller, onSubmit: onSubmit),
       if (rejected) ...[
         const SizedBox(height: LoafSpace.x3),
         const ErrorNote(message: "that didn't unlock anything"),
+      ],
+      if (failure case final failure?) ...[
+        const SizedBox(height: LoafSpace.x3),
+        ErrorNote(message: failure),
       ],
       const SizedBox(height: LoafSpace.x4),
       LoafButton(
@@ -397,9 +405,12 @@ class RestoringStep extends StatelessWidget {
 }
 
 class DoneStep extends StatelessWidget {
-  const DoneStep({super.key, required this.message});
+  const DoneStep({super.key, required this.message, this.note});
 
   final String message;
+
+  /// What else is true: history that stopped restoring part way.
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
@@ -415,6 +426,10 @@ class DoneStep extends StatelessWidget {
           textAlign: TextAlign.center,
           style: loafBody(17, 600).copyWith(color: tokens.textStrong),
         ),
+        if (note case final note?) ...[
+          const SizedBox(height: LoafSpace.x2),
+          StepNote(note, center: true),
+        ],
         const SizedBox(height: LoafSpace.x4),
       ],
     );

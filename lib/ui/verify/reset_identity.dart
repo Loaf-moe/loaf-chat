@@ -17,10 +17,16 @@ class ResetConfirmStep extends StatelessWidget {
     super.key,
     required this.onReset,
     required this.onCancel,
+    this.busy = false,
+    this.failure,
   });
 
   final VoidCallback onReset;
   final VoidCallback onCancel;
+
+  /// Waiting for the server to ask who you are.
+  final bool busy;
+  final String? failure;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -34,13 +40,20 @@ class ResetConfirmStep extends StatelessWidget {
       const _Cost('people you talk to will see that your identity changed'),
       const SizedBox(height: LoafSpace.x2),
       const _Cost("encrypted history you can't reach now stays unreadable"),
+      if (failure case final failure?) ...[
+        const SizedBox(height: LoafSpace.x3),
+        ErrorNote(message: failure),
+      ],
       const SizedBox(height: LoafSpace.x5),
       // The filled button is the accent: this is its honest use.
-      LoafButton(label: 'reset my identity', onTap: onReset),
+      LoafButton(
+        label: busy ? 'starting…' : 'reset my identity',
+        onTap: busy ? null : onReset,
+      ),
       const SizedBox(height: LoafSpace.x2),
       LoafButton(
         label: 'cancel',
-        onTap: onCancel,
+        onTap: busy ? null : onCancel,
         emphasis: LoafButtonEmphasis.quiet,
         size: LoafButtonSize.small,
       ),
@@ -93,6 +106,7 @@ class ResetAuthStep extends StatelessWidget {
     required this.onReopen,
     this.onFinished,
     required this.onCancelBrowser,
+    this.lead = "confirm it's you before the old identity goes.",
   });
 
   final bool byPassword;
@@ -108,6 +122,7 @@ class ResetAuthStep extends StatelessWidget {
   /// The browser page is done with, where it cannot hand back itself.
   final VoidCallback? onFinished;
   final VoidCallback onCancelBrowser;
+  final String lead;
 
   @override
   Widget build(BuildContext context) {
@@ -124,7 +139,7 @@ class ResetAuthStep extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const StepLead("confirm it's you before the old identity goes."),
+        StepLead(lead),
         const SizedBox(height: LoafSpace.x4),
         if (byPassword) ...[
           LoafField(
@@ -146,14 +161,17 @@ class ResetAuthStep extends StatelessWidget {
             label: checking ? 'checking…' : 'continue',
             onTap: checking ? null : onPassword,
           ),
-        ] else if (checking)
-          const WorkingLine('signing in…')
-        else
+        ] else ...[
+          if (rejected) ...[
+            const ErrorNote(message: "that didn't finish · try again"),
+            const SizedBox(height: LoafSpace.x3),
+          ],
           LoafButton(
             label: 'continue with $providerName',
             icon: LucideIcons.logIn,
             onTap: onSso,
           ),
+        ],
       ],
     );
   }
