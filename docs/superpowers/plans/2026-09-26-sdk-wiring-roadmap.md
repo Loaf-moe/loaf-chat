@@ -66,6 +66,13 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **The composer's + and paperclip buttons** do nothing on either backend. They belong to media (phase 9); until then they are controls with nothing behind them.
 - **A toast for a refused reaction, edit or delete only shows while its room is on screen.** The screen still snaps back to what the server has.
 - **Voice channels read "messages aren't wired up yet"**, which an existing test pins, until calls land in phase 7.
+- **"didn't send" takes minutes to appear offline** (found by hand, 2026-09-27). Two SDK defaults stack: `Client.sendTimelineEventTimeout` is 1 minute of retrying once a second, and the plain `http.Client` from `openClient` has no per-request timeout, so one attempt on a dead network hangs until the OS drops the TCP connection; the SDK checks its deadline only after an attempt fails. Candidate fix: a shorter window and a timeout on send requests only (sync long-polls for 30s by design). Chris's call: leave it until phase 9, since a send timeout would also bound image uploads.
+- **Edit is offered on file and emote rows**; saving turns a file into a text message. It should be text and notice rows only.
+- **`MatrixRooms.markRead` can target the SDK's `refreshingLastEvent` placeholder or a discarded echo.** It fails silently and heals itself.
+- **A room that fails to open reads "couldn't load older messages · try again" over an empty room.** It works, but the copy misleads.
+- **The failed line's retry and discard, and the older row's "try again", are small tap targets on a phone.**
+- **Two app instances on one store fight over its lock** (`database is locked` from `BEGIN IMMEDIATE`, seen when a stale `flutter run` was still up). A second launch could detect a store in use and say so.
+- **`test/matrix/` tests flake under load**: `matrix_session_test` and several `matrix_timeline_test` cases fail intermittently, on `main` too, with `database_closed` and timing asserts. A separate session is on it.
 
 ## Global constraints (all phases)
 
