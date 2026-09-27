@@ -15,6 +15,7 @@ import '../ui/members/presence.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
+import 'matrix_timeline.dart';
 
 /// `m.room.create` types that make a room a voice channel: Element's video
 /// rooms, stable and unstable.
@@ -74,6 +75,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// database. Once each: after a relaunch only a room list's state is in
   /// memory, and an invite's `is_direct` and sender live in that event.
   final _invitesLoaded = <String>{};
+
+  /// Each room's conversation, once opened. They stay open until the rooms
+  /// are disposed: fine at loaf.moe's size.
+  final _timelines = <String, MatrixTimeline>{};
 
   @override
   Set<RoomAbility> get abilities => const {RoomAbility.answerInvites};
@@ -383,6 +388,21 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     return answer;
   }
 
+  // ── Conversations ──────────────────────────────────────────────────────
+
+  @override
+  Timeline? timeline(String roomId) {
+    final open = _timelines[roomId];
+    if (open != null) return open;
+    final room = client.getRoomById(roomId);
+    if (room == null || room.membership != Membership.join) return null;
+    return _timelines[roomId] = MatrixTimeline(
+      room,
+      you: me,
+      member: (userId) => _member(room, userId),
+    );
+  }
+
   // ── Not wired yet ──────────────────────────────────────────────────────
 
   @override
@@ -403,9 +423,6 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
           }),
     );
   }
-
-  @override
-  Timeline? timeline(String roomId) => null;
 
   Never _unwired(String what) =>
       throw UnsupportedError('$what is not wired to the SDK yet');
@@ -435,6 +452,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _disposed = true;
     for (final s in _subscriptions) {
       unawaited(s.cancel());
+    }
+    for (final t in _timelines.values) {
+      t.dispose();
     }
     super.dispose();
   }
