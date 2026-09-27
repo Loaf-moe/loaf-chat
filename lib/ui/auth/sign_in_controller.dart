@@ -11,7 +11,7 @@ import 'package:flutter/foundation.dart';
 
 import '../mock/accounts.dart';
 import '../mock/mock_homeserver.dart';
-import '../platform.dart';
+import '../platform.dart' as platform;
 import 'homeserver.dart';
 import 'sign_in_state.dart';
 
@@ -25,11 +25,11 @@ class SignInController extends ChangeNotifier {
     Homeserver? homeserver,
     bool Function() consumeFailure = _never,
     Map<String, ServerCheck> servers = mockServers,
-    bool? desktop,
+    bool? ssoInBrowser,
   }) : homeserver =
            homeserver ??
            MockHomeserver(servers: servers, consumeFailure: consumeFailure),
-       desktop = desktop ?? isDesktop,
+       ssoInBrowser = ssoInBrowser ?? platform.ssoInBrowser,
        _state = SignInState(
          server: server,
          check: const ServerProbing(),
@@ -46,12 +46,12 @@ class SignInController extends ChangeNotifier {
     Homeserver? homeserver,
     bool Function() consumeFailure = _never,
     Map<String, ServerCheck> servers = mockServers,
-    bool? desktop,
+    bool? ssoInBrowser,
   }) : onSignedIn = onSignedIn ?? _nothing,
        homeserver =
            homeserver ??
            MockHomeserver(servers: servers, consumeFailure: consumeFailure),
-       desktop = desktop ?? isDesktop,
+       ssoInBrowser = ssoInBrowser ?? platform.ssoInBrowser,
        _state = state;
 
   static bool _never() => false;
@@ -69,7 +69,10 @@ class SignInController extends ChangeNotifier {
 
   final VoidCallback onSignedIn;
   final Homeserver homeserver;
-  final bool desktop;
+
+  /// Whether SSO goes to the real browser rather than the system sign-in
+  /// window: true on Linux and Windows, false everywhere else.
+  final bool ssoInBrowser;
 
   SignInState _state;
   SignInState get state => _state;
@@ -184,7 +187,7 @@ class SignInController extends ChangeNotifier {
     if (_state.activity != SignInActivity.idle) return;
     _set(
       _state.copyWith(
-        activity: desktop
+        activity: ssoInBrowser
             ? SignInActivity.inBrowser
             : SignInActivity.finishingSso,
         provider: provider,
@@ -195,7 +198,7 @@ class SignInController extends ChangeNotifier {
       (epoch) => homeserver.sso(
         _state.server,
         provider,
-        desktop: desktop,
+        inBrowser: ssoInBrowser,
         onCommitting: _committed(epoch),
       ),
       _finish,

@@ -14,24 +14,24 @@ void main() {
 
   SignInController make({
     String server = 'loaf.moe',
-    bool desktop = false,
+    bool ssoInBrowser = false,
     bool Function()? fail,
   }) => SignInController(
     server: server,
     onSignedIn: () => signedIn++,
     consumeFailure: fail ?? () => false,
-    desktop: desktop,
+    ssoInBrowser: ssoInBrowser,
   );
 
   SignInController at(
     String server, {
-    bool desktop = false,
+    bool ssoInBrowser = false,
     bool Function()? fail,
   }) => SignInController.at(
     SignInState(server: server, check: mockServers[server]!),
     onSignedIn: () => signedIn++,
     consumeFailure: fail ?? () => false,
-    desktop: desktop,
+    ssoInBrowser: ssoInBrowser,
   );
 
   group('discovery', () {
@@ -121,7 +121,7 @@ void main() {
 
   group('sso', () {
     testWidgets('a computer waits on the browser', (tester) async {
-      final c = at('loaf.moe', desktop: true);
+      final c = at('loaf.moe', ssoInBrowser: true);
       c.continueWithSso(loafMoeProvider);
       expect(c.state.activity, SignInActivity.inBrowser);
       expect(c.state.provider, loafMoeProvider);
@@ -140,7 +140,7 @@ void main() {
     });
 
     testWidgets('opening the browser again restarts the wait', (tester) async {
-      final c = at('loaf.moe', desktop: true);
+      final c = at('loaf.moe', ssoInBrowser: true);
       c.continueWithSso(loafMoeProvider);
       await tester.pump(const Duration(seconds: 2));
       c.reopenBrowser();
@@ -152,7 +152,7 @@ void main() {
     });
 
     testWidgets('cancel stops the pending sign-in', (tester) async {
-      final c = at('loaf.moe', desktop: true);
+      final c = at('loaf.moe', ssoInBrowser: true);
       c.continueWithSso(loafMoeProvider);
       c.cancelSso();
       expect(c.state.activity, SignInActivity.idle);
@@ -164,7 +164,7 @@ void main() {
     testWidgets('connecting elsewhere mid-wait drops the old sign-in', (
       tester,
     ) async {
-      final c = at('loaf.moe', desktop: true);
+      final c = at('loaf.moe', ssoInBrowser: true);
       c.continueWithSso(loafMoeProvider);
       c.connect('passwords.test');
       await tester.pump(SignInController.browserDelay);
@@ -372,7 +372,7 @@ void main() {
         const SignInState(server: 'one.test', check: ServerFound(_both)),
         onSignedIn: () => signedIn++,
         homeserver: hs,
-        desktop: true,
+        ssoInBrowser: true,
       );
       c.continueWithSso(const IdentityProvider('x', 'X'));
       c.connect('two.test');
@@ -443,7 +443,7 @@ void main() {
         const SignInState(server: 'one.test', check: ServerFound(_both)),
         onSignedIn: () => signedIn++,
         homeserver: hs,
-        desktop: true,
+        ssoInBrowser: true,
       );
       c.continueWithSso(const IdentityProvider('x', 'X'));
       hs.ssoCommitting!();
@@ -533,7 +533,7 @@ class _Scripted implements Homeserver {
   Future<SignInOutcome> sso(
     String server,
     IdentityProvider provider, {
-    required bool desktop,
+    required bool inBrowser,
     void Function()? onCommitting,
   }) {
     ssoCommitting = onCommitting;

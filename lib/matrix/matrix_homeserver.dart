@@ -110,7 +110,7 @@ class MatrixHomeserver implements Homeserver {
   Future<SignInOutcome> sso(
     String server,
     IdentityProvider provider, {
-    required bool desktop,
+    required bool inBrowser,
     void Function()? onCommitting,
   }) async {
     final attempt = ++_generation;

@@ -42,6 +42,7 @@ dependencies:
   http: ^1.6.0
   flutter_web_auth_2: ^5.1.0
   url_launcher: ^6.3.2
+  window_to_front: ^0.0.4
 
 dev_dependencies:
   flutter_test:

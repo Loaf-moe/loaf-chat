@@ -1,5 +1,6 @@
 /// Where SSO happens, split by platform as the spec says: the system's
-/// sign-in sheet on a phone, the real browser on a computer.
+/// sign-in window where one exists (iOS, macOS), the real browser only
+/// where none does (Linux, Windows).
 library;
 
 import 'dart:async';
@@ -10,6 +11,7 @@ import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:window_to_front/window_to_front.dart';
 
 abstract interface class SsoBrowser {
   /// Opens `urlFor(redirect)` and resolves with the `loginToken` the server
@@ -23,7 +25,7 @@ abstract interface class SsoBrowser {
   void cancel();
 }
 
-/// A phone: `ASWebAuthenticationSession` on iOS, a Custom Tab on Android.
+/// iOS and macOS use `ASWebAuthenticationSession`; Android a Custom Tab.
 /// The sheet is modal, so reopening means nothing and cancelling only
 /// drops whatever it later returns.
 class SheetSsoBrowser implements SsoBrowser {
@@ -65,15 +67,31 @@ class SheetSsoBrowser implements SsoBrowser {
   void cancel() => _attempt++;
 }
 
-/// A computer: the real browser, returning to a one-shot listener on
-/// 127.0.0.1. A loopback redirect needs no URL scheme registered with the
-/// OS, which Linux has no single way to do.
+/// Linux and Windows, which have no system sign-in window: the real
+/// browser, returning to a one-shot listener on 127.0.0.1. A loopback
+/// redirect needs no URL scheme registered with the OS, which Linux has no
+/// single way to do.
 class LoopbackSsoBrowser implements SsoBrowser {
-  LoopbackSsoBrowser({Future<bool> Function(Uri url)? open})
-    : _open = open ?? _launch;
+  LoopbackSsoBrowser({
+    Future<bool> Function(Uri url)? open,
+    Future<void> Function()? onReturned,
+  }) : _open = open ?? _launch,
+       _onReturned = onReturned ?? _bringToFront;
 
   static Future<bool> _launch(Uri url) =>
       launchUrl(url, mode: LaunchMode.externalApplication);
+
+  /// Brings the app back to the front once the browser hands a valid token
+  /// back. A platform with no `window_to_front` implementation, or one
+  /// that otherwise fails, just leaves the browser in front.
+  static Future<void> _bringToFront() async {
+    try {
+      await WindowToFront.activate();
+    } on Exception {
+      // MissingPluginException implements Exception, so it is caught here
+      // too: nothing registers the plugin on a platform that never asks.
+    }
+  }
 
   /// Whether the browser opened. A launcher that throws did not.
   Future<bool> _tryOpen(Uri page) async {
@@ -85,6 +103,7 @@ class LoopbackSsoBrowser implements SsoBrowser {
   }
 
   final Future<bool> Function(Uri url) _open;
+  final Future<void> Function() _onReturned;
   HttpServer? _server;
   Uri? _page;
   Completer<String?>? _done;
@@ -123,7 +142,10 @@ class LoopbackSsoBrowser implements SsoBrowser {
       } on Exception {
         // The browser hung up first; the token it brought still counts.
       }
-      if (token != null && identical(_done, done)) _finish(token);
+      if (token != null && identical(_done, done)) {
+        unawaited(_onReturned());
+        _finish(token);
+      }
     });
     if (!await _tryOpen(page) && identical(_done, done)) _finish(null);
     return done.future;

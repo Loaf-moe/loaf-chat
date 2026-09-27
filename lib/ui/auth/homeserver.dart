@@ -62,8 +62,8 @@ abstract interface class Homeserver {
   });
 
   /// Resolves when the provider hands back, or with [SignInCancelled] once
-  /// [cancelSso] is called. [desktop] picks the real browser over the
-  /// system sheet.
+  /// [cancelSso] is called. [inBrowser] picks the real browser, where the
+  /// platform has no system sign-in window, over the system sheet.
   ///
   /// [onCommitting], if given, is called once, just before the attempt
   /// passes the point where it can no longer be stopped; after it,
@@ -71,7 +71,7 @@ abstract interface class Homeserver {
   Future<SignInOutcome> sso(
     String server,
     IdentityProvider provider, {
-    required bool desktop,
+    required bool inBrowser,
     void Function()? onCommitting,
   });
 

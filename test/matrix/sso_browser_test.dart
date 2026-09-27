@@ -34,11 +34,13 @@ void main() {
   group('loopback', () {
     test('the token the browser brings back resolves the sign-in', () async {
       final opened = <Uri>[];
+      var returned = 0;
       final browser = LoopbackSsoBrowser(
         open: (url) async {
           opened.add(url);
           return true;
         },
+        onReturned: () async => returned++,
       );
       final pending = browser.signIn(_page);
       await _opened(opened);
@@ -46,30 +48,37 @@ void main() {
       expect(redirect.host, '127.0.0.1');
       expect(await _comeBack(opened.single), 200);
       expect(await pending, 'tok');
+      expect(returned, 1);
     });
 
     test('a visit with no token is turned away and keeps waiting', () async {
       final opened = <Uri>[];
+      var returned = 0;
       final browser = LoopbackSsoBrowser(
         open: (url) async {
           opened.add(url);
           return true;
         },
+        onReturned: () async => returned++,
       );
       final pending = browser.signIn(_page);
       await _opened(opened);
       expect(await _comeBack(opened.single, token: null), 404);
+      expect(returned, 0);
       expect(await _comeBack(opened.single), 200);
       expect(await pending, 'tok');
+      expect(returned, 1);
     });
 
     test('a token sent anywhere but the exact redirect is refused', () async {
       final opened = <Uri>[];
+      var returned = 0;
       final browser = LoopbackSsoBrowser(
         open: (url) async {
           opened.add(url);
           return true;
         },
+        onReturned: () async => returned++,
       );
       final pending = browser.signIn(_page);
       await _opened(opened);
@@ -82,17 +91,21 @@ void main() {
         },
       );
       expect(await _comeBack(guessed, token: 'forged'), 404);
+      expect(returned, 0);
       expect(await _comeBack(opened.single), 200);
       expect(await pending, 'tok');
+      expect(returned, 1);
     });
 
     test('reopen opens the same page; cancel resolves null', () async {
       final opened = <Uri>[];
+      var returned = 0;
       final browser = LoopbackSsoBrowser(
         open: (url) async {
           opened.add(url);
           return true;
         },
+        onReturned: () async => returned++,
       );
       final pending = browser.signIn(_page);
       await _opened(opened);
@@ -101,6 +114,7 @@ void main() {
       expect(opened.last, opened.first);
       browser.cancel();
       expect(await pending, isNull);
+      expect(returned, 0);
       // The listener is gone with it.
       await expectLater(
         _comeBack(opened.first),
@@ -115,6 +129,7 @@ void main() {
           opened.add(url);
           return true;
         },
+        onReturned: () async {},
       );
       final pending = browser.signIn(_page);
       browser.cancel();
@@ -123,7 +138,10 @@ void main() {
     });
 
     test('a browser that will not open ends the attempt', () async {
-      final browser = LoopbackSsoBrowser(open: (_) async => false);
+      final browser = LoopbackSsoBrowser(
+        open: (_) async => false,
+        onReturned: () async {},
+      );
       expect(await browser.signIn(_page), isNull);
     });
 
@@ -136,6 +154,7 @@ void main() {
             tried = url;
             throw Exception('no browser');
           },
+          onReturned: () async {},
         );
         expect(await browser.signIn(_page), isNull);
         await expectLater(_comeBack(tried!), throwsA(isA<SocketException>()));

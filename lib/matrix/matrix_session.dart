@@ -12,6 +12,7 @@ import 'package:matrix/matrix.dart';
 import '../ui/auth/homeserver.dart';
 import '../ui/auth/loaf_session.dart';
 import '../ui/auth/sign_in_state.dart';
+import '../ui/platform.dart';
 import 'client_factory.dart';
 import 'matrix_homeserver.dart';
 import 'sso_browser.dart';
@@ -56,7 +57,7 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
     }
     return MatrixSession(
       client,
-      browser: desktop ? LoopbackSsoBrowser.new : SheetSsoBrowser.new,
+      browser: ssoInBrowser ? LoopbackSsoBrowser.new : SheetSsoBrowser.new,
       deviceName: deviceNameFor(desktop: desktop),
     );
   }

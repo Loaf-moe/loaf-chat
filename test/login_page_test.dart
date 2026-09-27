@@ -288,8 +288,9 @@ void main() {
   });
 
   testWidgets(
-    'a computer waits on the browser, and can open it again',
-    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    'a computer without a sign-in window waits on the browser, and can '
+    'open it again',
+    variant: TargetPlatformVariant.only(TargetPlatform.linux),
     (tester) async {
       var signedIn = false;
       final c = SignInController.at(
@@ -308,6 +309,27 @@ void main() {
 
       await tester.tap(find.text('continue with loaf.moe'));
       await tester.pump(SignInController.browserDelay);
+      expect(signedIn, isTrue);
+      c.dispose();
+    },
+  );
+
+  testWidgets(
+    'a mac signs in through the system window',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      var signedIn = false;
+      final c = SignInController.at(
+        _on('loaf.moe'),
+        onSignedIn: () => signedIn = true,
+      );
+      await _pump(tester, c, size: _mac);
+      await tester.tap(find.text('continue with loaf.moe'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('signing in…'), findsOneWidget);
+      expect(find.text('finish in your browser'), findsNothing);
+
+      await tester.pump(SignInController.ssoSheetDelay);
       expect(signedIn, isTrue);
       c.dispose();
     },
@@ -703,7 +725,7 @@ class _Scripted implements Homeserver {
   Future<SignInOutcome> sso(
     String server,
     IdentityProvider provider, {
-    required bool desktop,
+    required bool inBrowser,
     void Function()? onCommitting,
   }) => Completer<SignInOutcome>().future;
 

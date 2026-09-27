@@ -82,12 +82,12 @@ class MockHomeserver implements Homeserver {
   Future<SignInOutcome> sso(
     String server,
     IdentityProvider provider, {
-    required bool desktop,
+    required bool inBrowser,
     void Function()? onCommitting,
   }) {
     cancelSso();
     final done = _sso = Completer<SignInOutcome>();
-    _ssoDelay = desktop ? browserDelay : ssoSheetDelay;
+    _ssoDelay = inBrowser ? browserDelay : ssoSheetDelay;
     _ssoCommitting = onCommitting;
     _waitForSso();
     return done.future;

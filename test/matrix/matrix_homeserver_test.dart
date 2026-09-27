@@ -369,7 +369,7 @@ void main() {
       final outcome = await hs.sso(
         'fakeServer.notExisting',
         const IdentityProvider('tuwunel', 'loaf.moe'),
-        desktop: true,
+        inBrowser: true,
       );
       expect(outcome, isA<SignedIn>());
     });
@@ -380,7 +380,7 @@ void main() {
       final outcome = await hs.sso(
         'fakeServer.notExisting',
         const IdentityProvider('tuwunel', 'loaf.moe'),
-        desktop: false,
+        inBrowser: false,
       );
       expect(outcome, isA<SignInCancelled>());
     });
@@ -391,7 +391,7 @@ void main() {
       final outcome = await hs.sso(
         'fakeServer.notExisting',
         const IdentityProvider('tuwunel', 'loaf.moe'),
-        desktop: true,
+        inBrowser: true,
       );
       expect(
         (outcome as SignInFailed).message,
