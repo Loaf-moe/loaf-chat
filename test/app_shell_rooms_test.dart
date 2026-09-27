@@ -276,6 +276,13 @@ void main() {
       expect(session.signedOut, 1);
     });
 
+    testWidgets('no mic or deafen: there are no calls to mute', (tester) async {
+      await _pump(tester, _FakeRooms(spaces: [_bakery()]));
+      expect(find.byTooltip('Mute'), findsNothing);
+      expect(find.byTooltip('Deafen'), findsNothing);
+      expect(find.byTooltip('Settings'), findsOneWidget);
+    });
+
     testWidgets('your avatar opens no status picker', variant: _desktop, (
       tester,
     ) async {

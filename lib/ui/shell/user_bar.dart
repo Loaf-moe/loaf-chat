@@ -25,7 +25,12 @@ class UserBar extends StatelessWidget {
     this.onAvatarTap,
     this.onDebug,
     this.me = currentUser,
+    this.callControls = true,
   });
+
+  /// Whether mute and deafen are drawn: false on a backend with no calls,
+  /// where they would only flip state nothing reads.
+  final bool callControls;
 
   /// Mock builds only: opens levers for states the fake data never reaches
   /// on its own. Receives the button's bounds, to anchor a menu.
@@ -97,18 +102,22 @@ class UserBar extends StatelessWidget {
               ],
             ),
           ),
-          _BarAction(
-            icon: muted || deafened ? LucideIcons.micOff : LucideIcons.mic,
-            tooltip: muted ? 'Unmute' : 'Mute',
-            tinted: muted || deafened,
-            onTap: onToggleMute,
-          ),
-          _BarAction(
-            icon: deafened ? LucideIcons.headphoneOff : LucideIcons.headphones,
-            tooltip: deafened ? 'Undeafen' : 'Deafen',
-            tinted: deafened,
-            onTap: onToggleDeafen,
-          ),
+          if (callControls) ...[
+            _BarAction(
+              icon: muted || deafened ? LucideIcons.micOff : LucideIcons.mic,
+              tooltip: muted ? 'Unmute' : 'Mute',
+              tinted: muted || deafened,
+              onTap: onToggleMute,
+            ),
+            _BarAction(
+              icon: deafened
+                  ? LucideIcons.headphoneOff
+                  : LucideIcons.headphones,
+              tooltip: deafened ? 'Undeafen' : 'Deafen',
+              tinted: deafened,
+              onTap: onToggleDeafen,
+            ),
+          ],
           if (onDebug != null)
             Builder(
               builder: (context) => _BarAction(

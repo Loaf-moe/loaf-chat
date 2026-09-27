@@ -999,6 +999,7 @@ class _AppShellState extends State<AppShell> {
             deafened: _calls.deafened,
             onToggleMute: _calls.toggleMute,
             onToggleDeafen: _calls.toggleDeafen,
+            callControls: _can(RoomAbility.calls),
             onSettings: () => showSettings(
               context,
               profile: _profile,
