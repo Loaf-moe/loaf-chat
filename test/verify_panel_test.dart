@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/mock/accounts.dart';
+import 'package:loaf_native/ui/mock/mock_verifier.dart';
 import 'package:loaf_native/ui/mock/mock_session.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -59,12 +60,12 @@ void main() {
         mockRecoveryKey,
       );
       await tester.tap(find.text('unlock'));
-      await tester.pump(VerificationController.keyCheckDelay);
+      await tester.pump(MockVerifier.keyCheckDelay);
       expect(s.trust, DeviceTrust.verified);
       expect(find.byTooltip('verify this session'), findsNothing);
       expect(find.text('restoring history'), findsOneWidget);
 
-      await tester.pump(VerificationController.restoreTick * 21);
+      await tester.pump(MockVerifier.restoreTick * 21);
       expect(find.text('this session is verified'), findsWidgets);
       await tester.pump(VerificationController.doneLinger);
       await tester.pumpAndSettle();
@@ -76,10 +77,10 @@ void main() {
     final s = await _pumpShell(tester);
     await _openVerify(tester);
     await tester.tap(find.text('use another device'));
-    await tester.pump(VerificationController.acceptDelay);
+    await tester.pump(MockVerifier.acceptDelay);
     expect(find.text('dog'), findsOneWidget);
     await tester.tap(find.text('they match'));
-    await tester.pump(VerificationController.confirmDelay);
+    await tester.pump(MockVerifier.confirmDelay);
     expect(s.trust, DeviceTrust.verified);
     await tester.pump(VerificationController.doneLinger);
     await tester.pumpAndSettle();
@@ -108,7 +109,7 @@ void main() {
       await tester.pump(_route);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump(_route);
-      await tester.pump(VerificationController.acceptDelay);
+      await tester.pump(MockVerifier.acceptDelay);
       expect(tester.takeException(), isNull);
       expect(s.trust, DeviceTrust.unverified);
       expect(find.byTooltip('verify this session'), findsOneWidget);
@@ -132,6 +133,7 @@ void main() {
       await tester.tap(find.text('set up'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('create my recovery key'));
+      await tester.pump(MockVerifier.keyCheckDelay);
       await tester.pumpAndSettle();
       expect(find.text(mockNewRecoveryKey), findsOneWidget);
 
@@ -154,6 +156,31 @@ void main() {
     },
   );
 
+  testWidgets('a second sign-in asking while one is open waits its turn', (
+    tester,
+  ) async {
+    final s = await _pumpShell(tester);
+    s.receiveRequest();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(_route);
+    final first = s.incoming;
+    s.receiveRequest();
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(_route);
+    expect(s.incoming, same(first));
+    expect(find.text('is this you?'), findsOneWidget);
+    await tester.tap(find.text('yes, verify it'));
+    await tester.pump(_route);
+    expect(tester.takeException(), isNull);
+    expect(find.text('dog'), findsOneWidget);
+    await tester.tap(find.text('they match'));
+    await tester.pump(MockVerifier.confirmDelay);
+    await tester.pump(VerificationController.doneLinger);
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('a new sign-in pops up at once and uses the same emoji', (
     tester,
   ) async {
@@ -170,7 +197,7 @@ void main() {
     await tester.pump(_route);
     expect(find.text('dog'), findsOneWidget);
     await tester.tap(find.text('they match'));
-    await tester.pump(VerificationController.confirmDelay);
+    await tester.pump(MockVerifier.confirmDelay);
     await tester.pump(VerificationController.doneLinger);
     await tester.pumpAndSettle();
     expect(s.incoming, isNull);

@@ -1,6 +1,6 @@
 /// Desktop SSO: the real browser has the conversation, and this only waits
-/// for it to hand back. The verify panel's reset reuses it for
-/// re-authentication.
+/// for it to hand back. The verify panel reuses it for re-authentication,
+/// whose page hands nothing back, so there the person says when it is done.
 library;
 
 import 'package:flutter/material.dart';
@@ -15,12 +15,20 @@ class BrowserWait extends StatelessWidget {
     required this.name,
     required this.onReopen,
     required this.onCancel,
+    this.onFinished,
+    this.finishing = false,
   });
 
   /// Who the browser is signing in with: the identity provider's name.
   final String name;
   final VoidCallback onReopen;
   final VoidCallback onCancel;
+
+  /// Offered where the browser cannot hand back on its own.
+  final VoidCallback? onFinished;
+
+  /// [onFinished] was pressed and the server is being asked.
+  final bool finishing;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +51,13 @@ class BrowserWait extends StatelessWidget {
           style: loafBody(15, 400).copyWith(color: tokens.textMuted),
         ),
         const SizedBox(height: LoafSpace.x6),
+        if (onFinished case final finished?) ...[
+          LoafButton(
+            label: finishing ? 'checking…' : "i've finished",
+            onTap: finishing ? null : finished,
+          ),
+          const SizedBox(height: LoafSpace.x3),
+        ],
         LoafButton(
           label: 'open it again',
           icon: LucideIcons.externalLink,

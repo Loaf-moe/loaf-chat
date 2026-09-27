@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/auth/sign_in_controller.dart';
 import 'package:loaf_native/ui/mock/accounts.dart';
+import 'package:loaf_native/ui/mock/mock_verifier.dart';
 import 'package:loaf_native/ui/verify/verification_controller.dart';
 import 'package:loaf_native/ui/verify/verify_state.dart';
 
@@ -13,15 +13,19 @@ void main() {
     VerifyPurpose purpose, {
     bool Function()? fail,
     bool byPassword = false,
-    bool desktop = false,
   }) => VerificationController(
     purpose: purpose,
+    verifier: MockVerifier(
+      otherSessions: const ["faore's MacBook"],
+      identityExists: () => purpose != VerifyPurpose.setUp,
+      reauthByPassword: byPassword,
+      consumeFailure: fail ?? () => false,
+    ),
     onTrusted: () => trusted++,
-    otherSessions: const ["faore's MacBook"],
+    incoming: purpose == VerifyPurpose.incoming
+        ? MockDeviceVerification()
+        : null,
     incomingDevice: 'loaf on iPhone',
-    reauthByPassword: byPassword,
-    consumeFailure: fail ?? () => false,
-    desktop: desktop,
   );
 
   test('each purpose starts where it should', () {
@@ -37,21 +41,24 @@ void main() {
   });
 
   group('another device', () {
-    testWidgets('waits, compares, confirms, then closes itself', (
+    testWidgets('waits, compares, confirms, restores, then closes itself', (
       tester,
     ) async {
       final c = make(VerifyPurpose.verify);
       c.useAnotherDevice();
       expect(c.state.step, VerifyStep.waitingForDevice);
-      await tester.pump(VerificationController.acceptDelay);
+      await tester.pump(MockVerifier.acceptDelay);
       expect(c.state.step, VerifyStep.compareEmoji);
       expect(c.emoji, hasLength(7));
 
       c.emojiMatch();
       expect(c.state.step, VerifyStep.waitingForOther);
       expect(trusted, 0);
-      await tester.pump(VerificationController.confirmDelay);
+      await tester.pump(MockVerifier.confirmDelay);
       expect(trusted, 1);
+      // The other device sends the secrets, the backup key among them.
+      expect(c.state.step, VerifyStep.restoring);
+      await tester.pump(MockVerifier.restoreTick * 20);
       expect(c.state.step, VerifyStep.done);
       expect(c.state.closing, isFalse);
       await tester.pump(VerificationController.doneLinger);
@@ -62,10 +69,10 @@ void main() {
     testWidgets('a mismatch trusts nothing', (tester) async {
       final c = make(VerifyPurpose.verify);
       c.useAnotherDevice();
-      await tester.pump(VerificationController.acceptDelay);
+      await tester.pump(MockVerifier.acceptDelay);
       c.emojiMismatch();
       expect(c.state.step, VerifyStep.cancelled);
-      await tester.pump(VerificationController.confirmDelay);
+      await tester.pump(MockVerifier.confirmDelay);
       expect(trusted, 0);
       c.dispose();
     });
@@ -83,10 +90,10 @@ void main() {
         },
       );
       c.useAnotherDevice();
-      await tester.pump(VerificationController.acceptDelay);
+      await tester.pump(MockVerifier.acceptDelay);
       expect(c.state.step, VerifyStep.cancelled);
       c.tryAgain();
-      await tester.pump(VerificationController.acceptDelay);
+      await tester.pump(MockVerifier.acceptDelay);
       expect(c.state.step, VerifyStep.compareEmoji);
       c.dispose();
     });
@@ -98,7 +105,7 @@ void main() {
       c.useAnotherDevice();
       expect(c.canGoBack, isTrue);
       c.back();
-      await tester.pump(VerificationController.acceptDelay);
+      await tester.pump(MockVerifier.acceptDelay);
       expect(c.state.step, VerifyStep.choose);
       c.dispose();
     });
@@ -106,6 +113,7 @@ void main() {
     test('there is no going back mid-comparison', () {
       final c = VerificationController.at(
         const VerifyState(step: VerifyStep.compareEmoji),
+        verifier: MockVerifier(),
       );
       expect(c.canGoBack, isFalse);
       c.dispose();
@@ -117,7 +125,7 @@ void main() {
       final c = make(VerifyPurpose.verify)..useRecoveryKey();
       c.submitKey('EsTc nope');
       expect(c.state.checking, isTrue);
-      await tester.pump(VerificationController.keyCheckDelay);
+      await tester.pump(MockVerifier.keyCheckDelay);
       expect(c.state.rejected, isTrue);
       expect(trusted, 0);
       c.dispose();
@@ -129,17 +137,17 @@ void main() {
         final c = make(VerifyPurpose.verify)..useRecoveryKey();
         final messy = '  ${mockRecoveryKey.replaceAll(' ', '\n')}  \n';
         c.submitKey(messy);
-        await tester.pump(VerificationController.keyCheckDelay);
+        await tester.pump(MockVerifier.keyCheckDelay);
         // Trusted as soon as the key opens secret storage; history follows.
         expect(trusted, 1);
         expect(c.state.step, VerifyStep.restoring);
         expect(c.worksUnseen, isTrue);
 
-        await tester.pump(VerificationController.restoreTick * 3);
+        await tester.pump(MockVerifier.restoreTick * 3);
         expect(c.state.restored, greaterThan(0));
         expect(c.state.totalKeys, mockBackupKeys);
 
-        await tester.pump(VerificationController.restoreTick * 20);
+        await tester.pump(MockVerifier.restoreTick * 20);
         expect(c.state.step, VerifyStep.done);
         await tester.pump(VerificationController.doneLinger);
         c.dispose();
@@ -149,7 +157,7 @@ void main() {
     testWidgets('the passphrase unlocks too', (tester) async {
       final c = make(VerifyPurpose.verify)..useRecoveryKey();
       c.submitKey(mockRecoveryPassphrase);
-      await tester.pump(VerificationController.keyCheckDelay);
+      await tester.pump(MockVerifier.keyCheckDelay);
       expect(c.state.step, VerifyStep.restoring);
       c.dispose();
     });
@@ -176,11 +184,11 @@ void main() {
       c.confirmReset();
 
       c.reauthWithPassword(mockWrongPassword);
-      await tester.pump(VerificationController.keyCheckDelay);
+      await tester.pump(MockVerifier.keyCheckDelay);
       expect(c.state.rejected, isTrue);
 
       c.reauthWithPassword('hunter2');
-      await tester.pump(VerificationController.keyCheckDelay);
+      await tester.pump(MockVerifier.keyCheckDelay);
       expect(c.state.step, VerifyStep.showKey);
 
       c.finishSetUp();
@@ -197,10 +205,8 @@ void main() {
       c.dispose();
     });
 
-    testWidgets('an sso account goes through the browser on a computer', (
-      tester,
-    ) async {
-      final c = make(VerifyPurpose.verify, desktop: true)
+    testWidgets('an sso account goes through the browser', (tester) async {
+      final c = make(VerifyPurpose.verify)
         ..cantDoEither()
         ..confirmReset();
       c.reauthWithSso();
@@ -208,7 +214,10 @@ void main() {
       c.cancelBrowser();
       expect(c.state.inBrowser, isFalse);
       c.reauthWithSso();
-      await tester.pump(SignInController.browserDelay);
+      // The server's page hands nothing back: the person says when.
+      c.browserFinished();
+      expect(c.state.checking, isTrue);
+      await tester.pump(MockVerifier.keyCheckDelay);
       expect(c.state.step, VerifyStep.showKey);
       c.dispose();
     });
@@ -216,6 +225,8 @@ void main() {
 
   testWidgets('setting up: create, keep, finish', (tester) async {
     final c = make(VerifyPurpose.setUp)..createKey();
+    expect(c.state.checking, isTrue);
+    await tester.pump(MockVerifier.keyCheckDelay);
     expect(c.state.step, VerifyStep.showKey);
     expect(c.newRecoveryKey, mockNewRecoveryKey);
     c.keyKept();
@@ -234,7 +245,7 @@ void main() {
       final c = make(VerifyPurpose.incoming)..acceptIncoming();
       expect(c.state.step, VerifyStep.compareEmoji);
       c.emojiMatch();
-      await tester.pump(VerificationController.confirmDelay);
+      await tester.pump(MockVerifier.confirmDelay);
       expect(c.state.step, VerifyStep.done);
       expect(trusted, 0);
       expect(c.doneMessage, 'loaf on iPhone is verified');
@@ -253,7 +264,7 @@ void main() {
   testWidgets('disposing mid-restore leaves no timer behind', (tester) async {
     final c = make(VerifyPurpose.verify)..useRecoveryKey();
     c.submitKey(mockRecoveryKey);
-    await tester.pump(VerificationController.keyCheckDelay);
+    await tester.pump(MockVerifier.keyCheckDelay);
     c.dispose();
   });
 }

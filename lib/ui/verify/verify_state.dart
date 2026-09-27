@@ -60,6 +60,7 @@ class VerifyState {
     required this.step,
     this.checking = false,
     this.rejected = false,
+    this.failed = false,
     this.restored = 0,
     this.totalKeys = 0,
     this.keySaved = false,
@@ -75,6 +76,10 @@ class VerifyState {
   /// The last key or password was wrong.
   final bool rejected;
 
+  /// The server could not be reached, or turned the work down: nothing was
+  /// changed. At [VerifyStep.done], history stopped restoring part way.
+  final bool failed;
+
   /// Key backup progress, while [step] is restoring.
   final int restored;
   final int totalKeys;
@@ -82,7 +87,7 @@ class VerifyState {
   /// The new recovery key was copied or saved at least once.
   final bool keySaved;
 
-  /// Reset's SSO re-auth is in the real browser (desktop).
+  /// Re-authentication's SSO page is open in the real browser.
   final bool inBrowser;
 
   /// Done has lingered long enough to be read; the panel should go.

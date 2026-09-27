@@ -111,8 +111,10 @@ class _VerifyPanelState extends State<VerifyPanel> {
       onNeither: _c.cantDoEither,
     ),
     VerifyStep.waitingForDevice => WaitingStep(
-      label: "accept the request on another device where you're signed in",
-      onCancel: _c.back,
+      label: _c.purpose == VerifyPurpose.incoming
+          ? 'waiting for the new sign-in to start'
+          : "accept the request on another device where you're signed in",
+      onCancel: _c.canGoBack ? _c.back : null,
     ),
     VerifyStep.incomingPrompt => IncomingPromptStep(
       device: _c.incomingDevice ?? 'a device',
@@ -159,6 +161,7 @@ class _VerifyPanelState extends State<VerifyPanel> {
       onPassword: () => _c.reauthWithPassword(_password.text),
       onSso: _c.reauthWithSso,
       onReopen: _c.reopenBrowser,
+      onFinished: _c.browserFinished,
       onCancelBrowser: _c.cancelBrowser,
     ),
     VerifyStep.setUpIntro => SetUpIntroStep(onCreate: _c.createKey),

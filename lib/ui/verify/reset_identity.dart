@@ -91,6 +91,7 @@ class ResetAuthStep extends StatelessWidget {
     required this.onPassword,
     required this.onSso,
     required this.onReopen,
+    this.onFinished,
     required this.onCancelBrowser,
   });
 
@@ -103,6 +104,9 @@ class ResetAuthStep extends StatelessWidget {
   final VoidCallback onPassword;
   final VoidCallback onSso;
   final VoidCallback onReopen;
+
+  /// The browser page is done with, where it cannot hand back itself.
+  final VoidCallback? onFinished;
   final VoidCallback onCancelBrowser;
 
   @override
@@ -111,6 +115,8 @@ class ResetAuthStep extends StatelessWidget {
       return BrowserWait(
         name: providerName,
         onReopen: onReopen,
+        onFinished: onFinished,
+        finishing: checking,
         onCancel: onCancelBrowser,
       );
     }

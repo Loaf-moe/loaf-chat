@@ -5,6 +5,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../verify/verifier.dart';
 import 'homeserver.dart';
 import 'sign_in_state.dart';
 
@@ -25,10 +26,17 @@ enum DeviceTrust {
 /// Another of your devices asking this one to vouch for it.
 @immutable
 class IncomingRequest {
-  const IncomingRequest({required this.device, required this.at});
+  const IncomingRequest({
+    required this.device,
+    required this.at,
+    required this.verification,
+  });
 
   final String device;
   final DateTime at;
+
+  /// The request itself, which the panel answers.
+  final DeviceVerification verification;
 }
 
 abstract interface class LoafSession implements Listenable {

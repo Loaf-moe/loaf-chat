@@ -33,7 +33,6 @@ import 'channel_list.dart';
 import 'mock_debug.dart';
 import '../auth/loaf_session.dart';
 import '../mock/mock_session.dart';
-import '../mock/accounts.dart';
 import '../verify/verification_controller.dart';
 import '../verify/verify_panel.dart';
 import '../verify/verify_state.dart';
@@ -547,7 +546,7 @@ class _AppShellState extends State<AppShell> {
     // usually asked for it on the other device seconds ago.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        _openVerification(VerifyPurpose.incoming, device: request.device);
+        _openVerification(VerifyPurpose.incoming, request: request);
       }
     });
   }
@@ -558,11 +557,12 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _openVerification(
     VerifyPurpose purpose, {
-    String? device,
+    IncomingRequest? request,
   }) async {
     // A real session's notices are true, but the flows behind them are still
     // the mock's: they would show fake emoji, or a fake key to save.
-    if (_session is! MockSession) {
+    final session = _session;
+    if (session is! MockSession) {
       showToast(context, switch (purpose) {
         VerifyPurpose.setUp => 'setting up recovery arrives in the next build',
         _ => 'verifying this device arrives in the next build',
@@ -577,9 +577,9 @@ class _AppShellState extends State<AppShell> {
       kept?.dispose();
       v = VerificationController(
         purpose: purpose,
-        otherSessions: mockOtherSessions(),
-        incomingDevice: device,
-        consumeFailure: _session.consumeFailure,
+        verifier: session.verifier,
+        incoming: request?.verification,
+        incomingDevice: request?.device,
         onTrusted: purpose == VerifyPurpose.incoming
             ? () {}
             : _session.markVerified,

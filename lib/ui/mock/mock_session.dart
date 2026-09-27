@@ -8,9 +8,11 @@ import 'package:flutter/foundation.dart';
 import '../auth/homeserver.dart';
 import '../auth/loaf_session.dart';
 import '../auth/sign_in_state.dart';
+import '../verify/verifier.dart';
 import 'accounts.dart';
 import 'fixtures.dart';
 import 'mock_homeserver.dart';
+import 'mock_verifier.dart';
 
 // Tests and the shell name these through the mock, as they always have.
 export '../auth/loaf_session.dart'
@@ -50,6 +52,13 @@ class MockSession extends ChangeNotifier implements LoafSession {
 
   @override
   Homeserver newHomeserver() => MockHomeserver(consumeFailure: consumeFailure);
+
+  /// What the verify panels run on.
+  late final Verifier verifier = MockVerifier(
+    otherSessions: mockOtherSessions(),
+    identityExists: () => _trust != DeviceTrust.noIdentity,
+    consumeFailure: consumeFailure,
+  );
 
   /// The debug "fail the next connection" lever.
   void failNext() => _failNext = true;
@@ -102,10 +111,19 @@ class MockSession extends ChangeNotifier implements LoafSession {
   }
 
   /// Another of your devices asks this one to vouch for it. Only a verified
-  /// device is asked, so this one becomes one.
+  /// device is asked, so this one becomes one. One asked while another is
+  /// being answered waits its turn, timing out if it has to.
   void receiveRequest() {
     _trust = DeviceTrust.verified;
-    _incoming = IncomingRequest(device: mockNewDevice(), at: DateTime.now());
+    if (_incoming != null) {
+      notifyListeners();
+      return;
+    }
+    _incoming = IncomingRequest(
+      device: mockNewDevice(),
+      at: DateTime.now(),
+      verification: MockDeviceVerification(),
+    );
     notifyListeners();
   }
 
@@ -113,7 +131,9 @@ class MockSession extends ChangeNotifier implements LoafSession {
   /// times out on its own, as the protocol specifies.
   @override
   void clearIncoming() {
-    if (_incoming == null) return;
+    final incoming = _incoming;
+    if (incoming == null) return;
+    incoming.verification.dispose();
     _incoming = null;
     notifyListeners();
   }

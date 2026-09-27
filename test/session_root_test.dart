@@ -4,8 +4,8 @@ import 'package:loaf_native/ui/auth/session_root.dart';
 import 'package:loaf_native/ui/auth/sign_in_controller.dart';
 import 'package:loaf_native/ui/mock/mock_session.dart';
 import 'package:loaf_native/ui/mock/accounts.dart';
+import 'package:loaf_native/ui/mock/mock_verifier.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
-import 'package:loaf_native/ui/verify/verification_controller.dart';
 
 const _wide = Size(1440, 900);
 
@@ -105,7 +105,7 @@ void main() {
       mockRecoveryKey,
     );
     await tester.tap(find.text('unlock'));
-    await tester.pump(VerificationController.keyCheckDelay);
+    await tester.pump(MockVerifier.keyCheckDelay);
 
     s.signOut();
     await tester.pump();
