@@ -319,6 +319,12 @@ class _TimelineState extends State<_Timeline> {
   String? _lastId;
   late final StreamSubscription<String> _failures;
 
+  /// Someone else's message arrived while you were not looking. macOS
+  /// reports a window without focus as inactive, so this is common: it is
+  /// read when you come back instead.
+  bool _unreadWhileAway = false;
+  late final AppLifecycleListener _lifecycle;
+
   @override
   void initState() {
     super.initState();
@@ -328,11 +334,13 @@ class _TimelineState extends State<_Timeline> {
     _failures = widget.controller.failures.listen((text) {
       if (mounted) showToast(context, text);
     });
+    _lifecycle = AppLifecycleListener(onResume: _onResume);
     _checkFilled();
   }
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     widget.controller.removeListener(_onMessages);
     unawaited(_failures.cancel());
     _scroll.dispose();
@@ -341,8 +349,8 @@ class _TimelineState extends State<_Timeline> {
 
   /// A new newest message: yours brings you back down to it, even if you
   /// had scrolled up to reread something; someone else's does not yank you
-  /// around, but is read if you are looking. Older messages paging in
-  /// above change neither.
+  /// around, but is read if you are looking, or once you are back. Older
+  /// messages paging in above change neither.
   void _onMessages() {
     final last = widget.controller.messages.lastOrNull;
     final arrived = last != null && last.id != _lastId;
@@ -360,7 +368,15 @@ class _TimelineState extends State<_Timeline> {
       }
     } else if (_looking) {
       widget.onRead?.call();
+    } else {
+      _unreadWhileAway = true;
     }
+  }
+
+  void _onResume() {
+    if (!_unreadWhileAway) return;
+    _unreadWhileAway = false;
+    widget.onRead?.call();
   }
 
   /// In front and focused. A window behind another, or an app in the

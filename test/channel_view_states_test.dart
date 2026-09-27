@@ -335,6 +335,38 @@ void main() {
       await tester.pump();
       expect(read, 0);
     });
+
+    testWidgets('what arrived while away is read on coming back', (
+      tester,
+    ) async {
+      var read = 0;
+      final timeline = await _pump(tester, [_msg('1')], onRead: () => read++);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      timeline
+        ..messages = [...timeline.messages, _msg('2', minute: 1)]
+        ..update();
+      await tester.pump();
+      expect(read, 0);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(read, 1);
+      // Once is enough: the next return has nothing new to read.
+      tester.binding
+        ..handleAppLifecycleStateChanged(AppLifecycleState.inactive)
+        ..handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(read, 1);
+    });
+
+    testWidgets('coming back with nothing new reads nothing', (tester) async {
+      var read = 0;
+      await _pump(tester, [_msg('1')], onRead: () => read++);
+      tester.binding
+        ..handleAppLifecycleStateChanged(AppLifecycleState.inactive)
+        ..handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(read, 0);
+    });
   });
 
   testWidgets('switching rooms listens to the new room', (tester) async {
