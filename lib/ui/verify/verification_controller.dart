@@ -114,9 +114,13 @@ class VerificationController extends ChangeNotifier {
   };
 
   /// Whether closing the panel should leave this running: history keeps
-  /// restoring with nobody watching, and a new key waits to be saved.
+  /// restoring with nobody watching, a new key waits to be saved, or
+  /// [mustStay] — so the shell never disposes a flow that is making a key,
+  /// however its panel came to close.
   bool get worksUnseen =>
-      _state.step == VerifyStep.restoring || _state.step == VerifyStep.showKey;
+      _state.step == VerifyStep.restoring ||
+      _state.step == VerifyStep.showKey ||
+      mustStay;
 
   /// Whether the panel must not be put away: a new identity is being made,
   /// or its key is on screen unsaved. On a real server, trust flips to

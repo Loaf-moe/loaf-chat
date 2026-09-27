@@ -247,6 +247,43 @@ void main() {
       },
     );
 
+    test('setting up also refuses a key backup the server holds, even with '
+        'no secret storage or cross-signing locally', () async {
+      // Blanks every secret this device would otherwise see, the same
+      // way the "cross-signing without key backup" tests do — but the
+      // fake server still answers the backup version it was given at
+      // setup, as a real server would keep serving one Chris made
+      // elsewhere.
+      for (final type in [
+        EventTypes.MegolmBackup,
+        EventTypes.CrossSigningSelfSigning,
+        EventTypes.CrossSigningUserSigning,
+        EventTypes.CrossSigningMasterKey,
+        EventTypes.SecretStorageDefaultKey,
+      ]) {
+        await client.setAccountData(me, type, {});
+      }
+      final state = await client.getCryptoIdentityState();
+      expect(state.keyBackupEnabled, isFalse);
+      expect(state.crossSigningEnabled, isFalse);
+      expect(client.encryption!.ssss.defaultKeyId, isNull);
+
+      FakeMatrixApi.calledEndpoints.clear();
+      final asked = <AuthChallenge>[];
+      await expectLater(
+        verifier.createIdentity(wipe: false, onAuth: asked.add),
+        throwsA(isA<RecoveryExists>()),
+      );
+      expect(asked, isEmpty);
+      expect(
+        FakeMatrixApi.calledEndpoints['/client/v3/room_keys/version']
+                ?.whereType<String>() ??
+            const [],
+        isEmpty,
+        reason: 'nothing POSTed a new backup',
+      );
+    });
+
     test('asks for the password, again when it is wrong', () async {
       api.asks = AuthenticationTypes.password;
       final asked = <AuthChallenge>[];

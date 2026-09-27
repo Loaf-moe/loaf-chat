@@ -350,6 +350,16 @@ void main() {
       c3.dispose();
     });
 
+    test('worksUnseen too, so the shell never disposes it', () {
+      final v = _Verifier();
+      final c = over(v)..cantDoEither();
+      c.confirmReset();
+      expect(c.state.step, VerifyStep.resetConfirm);
+      expect(c.state.checking, isTrue);
+      expect(c.worksUnseen, isTrue);
+      c.dispose();
+    });
+
     test('while the new key is on screen unsaved', () {
       final c = VerificationController.at(
         const VerifyState(step: VerifyStep.showKey),

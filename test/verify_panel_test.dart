@@ -268,6 +268,56 @@ void main() {
     },
   );
 
+  testWidgets(
+    'a phone cannot swipe or tap away a key being made',
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    (tester) async {
+      final c = VerificationController.at(
+        const VerifyState(step: VerifyStep.showKey),
+        purpose: VerifyPurpose.setUp,
+        verifier: MockVerifier(),
+      );
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showVerifyPanel(context, c),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text('copy'), findsOneWidget);
+
+      // Dragging the sheet down hard would normally close it.
+      await tester.fling(find.text('copy'), const Offset(0, 400), 1000);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('copy'),
+        findsOneWidget,
+        reason: 'the sheet cannot be dragged away while the key is unsaved',
+      );
+
+      // Tapping the barrier, above the sheet.
+      await tester.tapAt(const Offset(200, 10));
+      await tester.pumpAndSettle();
+      expect(find.text('copy'), findsOneWidget);
+
+      await tester.tap(find.text('copy'));
+      await tester.pump();
+
+      await tester.tapAt(const Offset(200, 10));
+      await tester.pumpAndSettle();
+      expect(find.text('copy'), findsNothing);
+    },
+  );
+
   testWidgets('the panel title lines up with what it heads', (tester) async {
     await _pumpShell(tester);
     await _openVerify(tester);

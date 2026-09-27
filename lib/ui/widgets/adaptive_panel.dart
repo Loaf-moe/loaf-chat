@@ -14,6 +14,12 @@ Future<T?> showAdaptivePanel<T>(
   required Widget child,
   double maxWidth = 440,
   double maxHeight = 580,
+  // The bottom sheet's drag-to-close calls `Navigator.pop` directly
+  // (Flutter's `BottomSheet.onClosing`), bypassing a `PopScope` the child
+  // puts up to keep the panel open. A caller whose content has steps that
+  // must not be put away (an in-flight identity, an unsaved key) turns
+  // this off so only its own `PopScope` decides.
+  bool enableDrag = true,
 }) {
   final tokens = LoafTokens.of(context);
   // Routes sit above the shell, so carry its presence setting across the
@@ -41,7 +47,8 @@ Future<T?> showAdaptivePanel<T>(
   return showModalBottomSheet<T>(
     context: context,
     backgroundColor: tokens.card,
-    showDragHandle: true,
+    showDragHandle: enableDrag,
+    enableDrag: enableDrag,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(

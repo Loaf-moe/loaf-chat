@@ -161,6 +161,15 @@ class MatrixVerifier implements Verifier {
           client.encryption!.ssss.defaultKeyId != null) {
         throw RecoveryExists();
       }
+      // Secret storage and cross-signing may be untouched, but the server
+      // can still hold a key backup from before: setting up must not
+      // orphan it either.
+      try {
+        await client.encryption!.keyManager.getRoomKeysBackupInfo(false);
+        throw RecoveryExists();
+      } on MatrixException catch (e) {
+        if (e.error != MatrixError.M_NOT_FOUND) rethrow;
+      }
     }
     var cancelled = false;
     var asked = 0;
