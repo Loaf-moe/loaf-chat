@@ -12,6 +12,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../model/models.dart';
+
 import '../shell/profile_controller.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
@@ -37,22 +39,42 @@ enum SettingsSection {
 const _twoPaneFrom = 900.0;
 
 /// Opens settings over the current screen. [profile] is shared with the
-/// account panel's status picker, so both edit the same presence.
-Future<void> showSettings(BuildContext context, {ProfileController? profile}) =>
-    showDialog<void>(
-      context: context,
-      barrierColor: const Color(0x99000016),
-      builder: (_) => SettingsModal(profile: profile),
-    );
+/// account panel's status picker, so both edit the same presence. [me] is
+/// who the account section shows, and [editable] whether it offers to
+/// change anything; [onSignOut] is what the sign-out button does.
+Future<void> showSettings(
+  BuildContext context, {
+  ProfileController? profile,
+  Member? me,
+  bool editable = true,
+  VoidCallback? onSignOut,
+}) => showDialog<void>(
+  context: context,
+  barrierColor: const Color(0x99000016),
+  builder: (_) => SettingsModal(
+    profile: profile,
+    me: me,
+    editable: editable,
+    onSignOut: onSignOut,
+  ),
+);
 
 class SettingsModal extends StatefulWidget {
   const SettingsModal({
     super.key,
     this.initial = SettingsSection.account,
     this.profile,
+    this.me,
+    this.editable = true,
+    this.onSignOut,
   });
 
   final ProfileController? profile;
+
+  /// Left null (in isolation, as in tests), the mock's account.
+  final Member? me;
+  final bool editable;
+  final VoidCallback? onSignOut;
 
   /// Settings opens on the account, which carries the profile — the thing
   /// people actually come here to change.
@@ -126,21 +148,31 @@ class _SettingsModalState extends State<SettingsModal> {
         child: _Nav(
           selected: _section,
           onSelect: (s) => setState(() => _section = s),
+          onSignOut: widget.onSignOut,
         ),
       ),
-      Expanded(
-        child: _Detail(section: _section, profile: widget.profile),
-      ),
+      Expanded(child: _detail(_section)),
     ],
   );
 
   Widget _onePane() {
     final pushed = _pushed;
     if (pushed == null) {
-      return _Nav(selected: null, onSelect: (s) => setState(() => _pushed = s));
+      return _Nav(
+        selected: null,
+        onSelect: (s) => setState(() => _pushed = s),
+        onSignOut: widget.onSignOut,
+      );
     }
-    return _Detail(section: pushed, profile: widget.profile);
+    return _detail(pushed);
   }
+
+  Widget _detail(SettingsSection section) => _Detail(
+    section: section,
+    profile: widget.profile,
+    me: widget.me,
+    editable: widget.editable,
+  );
 }
 
 /// The card's header. Same height, same type, same close button in every
@@ -197,7 +229,9 @@ class _CardHeader extends StatelessWidget {
 }
 
 class _Nav extends StatelessWidget {
-  const _Nav({required this.selected, required this.onSelect});
+  const _Nav({required this.selected, required this.onSelect, this.onSignOut});
+
+  final VoidCallback? onSignOut;
 
   /// Null on the narrow layout, where nothing is selected in place.
   final SettingsSection? selected;
@@ -231,7 +265,7 @@ class _Nav extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
-          _SignOut(tokens: tokens),
+          _SignOut(tokens: tokens, onTap: onSignOut),
         ],
       ),
     );
@@ -293,9 +327,10 @@ class _NavItem extends StatelessWidget {
 }
 
 class _SignOut extends StatelessWidget {
-  const _SignOut({required this.tokens});
+  const _SignOut({required this.tokens, this.onTap});
 
   final LoafTokens tokens;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -307,24 +342,31 @@ class _SignOut extends StatelessWidget {
         icon: LucideIcons.logOut,
         emphasis: LoafButtonEmphasis.quiet,
         size: LoafButtonSize.small,
-        onTap: () {},
+        onTap: onTap ?? () {},
       ),
     ),
   );
 }
 
 class _Detail extends StatelessWidget {
-  const _Detail({required this.section, required this.profile});
+  const _Detail({
+    required this.section,
+    required this.profile,
+    required this.me,
+    required this.editable,
+  });
 
   final SettingsSection section;
   final ProfileController? profile;
+  final Member? me;
+  final bool editable;
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
 
     if (section == SettingsSection.account) {
-      return AccountSection(profile: profile);
+      return AccountSection(profile: profile, me: me, editable: editable);
     }
 
     // Honest placeholder: the IA is decided, these screens are not designed.

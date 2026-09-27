@@ -63,7 +63,10 @@ class ChannelView extends StatelessWidget {
 
   /// The call fills the conversation: no timeline, no composer.
   final bool callPanelExpanded;
-  final TimelineController timeline;
+
+  /// Null while the backend cannot read messages yet: the conversation
+  /// says so, and offers no composer to write into nowhere.
+  final TimelineController? timeline;
 
   /// Marks the menu button when a notice that must not be missed is waiting
   /// in the rail. Only matters on a phone, where the rail hides in the drawer.
@@ -99,17 +102,19 @@ class ChannelView extends StatelessWidget {
               navigationAttention: navigationAttention,
               onStartCall: onStartCall,
             ),
-            if (callPanel != null && callPanelExpanded)
+            if (timeline == null)
+              const Expanded(child: _Unwired())
+            else if (callPanel != null && callPanelExpanded)
               Expanded(child: callPanel!)
             else ...[
               ?callPanel,
-              Expanded(child: _Timeline(controller: timeline)),
+              Expanded(child: _Timeline(controller: timeline!)),
               if (channel.waitingFor.isNotEmpty)
                 _WaitingLine(people: channel.waitingFor),
               ?callBar,
               Composer(
                 channelName: channel.name,
-                timeline: timeline,
+                timeline: timeline!,
                 prefix: switch (channel) {
                   Channel(kind: ChannelKind.direct, members: [_]) => '@',
                   Channel(kind: ChannelKind.direct) => '',
@@ -445,6 +450,33 @@ class _WaitingLine extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Where the timeline goes, before this backend can read one.
+class _Unwired extends StatelessWidget {
+  const _Unwired();
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(LoafSpace.x6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(LucideIcons.messagesSquare, size: 28, color: tokens.textMuted),
+            const SizedBox(height: LoafSpace.x3),
+            Text(
+              "messages aren't wired up yet",
+              textAlign: TextAlign.center,
+              style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+            ),
+          ],
+        ),
       ),
     );
   }

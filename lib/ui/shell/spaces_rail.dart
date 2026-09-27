@@ -22,10 +22,15 @@ class SpacesRail extends StatelessWidget {
     this.homeBadge = 0,
     this.homeRinging = false,
     this.onAddSpace,
+    this.addSpace = true,
   });
 
   /// The dashed "+": join, explore or create a space.
   final VoidCallback? onAddSpace;
+
+  /// Whether to draw the add-space button at all: false while the backend
+  /// cannot add a space yet.
+  final bool addSpace;
 
   static const homeKey = ValueKey('home');
 
@@ -83,7 +88,8 @@ class SpacesRail extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                       ],
-                      _AddSpaceButton(tokens: tokens, onTap: onAddSpace),
+                      if (addSpace)
+                        _AddSpaceButton(tokens: tokens, onTap: onAddSpace),
                       const SizedBox(height: LoafSpace.x2),
                     ],
                   ),

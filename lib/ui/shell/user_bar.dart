@@ -89,7 +89,7 @@ class UserBar extends StatelessWidget {
                   style: loafBody(13, 600).copyWith(color: tokens.textStrong),
                 ),
                 Text(
-                  currentUser.id,
+                  me.id,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: loafBody(11, 400).copyWith(color: tokens.textMuted),

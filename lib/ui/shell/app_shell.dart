@@ -87,7 +87,7 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     // The channel the app opens on is being read from the first frame.
     // Before listening: nothing is built yet to hear it.
-    _rooms.markRead(_channel.id);
+    if (_can(RoomAbility.markRead)) _rooms.markRead(_channel.id);
     _rooms.addListener(_onChange);
     _profile.addListener(_onChange);
     _calls.addListener(_onChange);
@@ -151,6 +151,27 @@ class _AppShellState extends State<AppShell> {
 
   bool get _home => _spaceId == mockHome.id;
 
+  bool _can(RoomAbility ability) => _rooms.abilities.contains(ability);
+
+  /// The row actions the rooms can carry out. Older conversations is only
+  /// a way to reach a room, so it is always there.
+  Set<ChannelAction> get _allowedActions => {
+    if (_can(RoomAbility.markRead)) ChannelAction.markRead,
+    if (_can(RoomAbility.tag)) ...[
+      ChannelAction.favourite,
+      ChannelAction.unfavourite,
+      ChannelAction.lowPriority,
+      ChannelAction.notLowPriority,
+    ],
+    ChannelAction.olderConversations,
+    if (_can(RoomAbility.mute)) ...[ChannelAction.mute, ChannelAction.unmute],
+    if (_can(RoomAbility.leave)) ChannelAction.leave,
+  };
+
+  /// You as others see you: with your presence and status where the
+  /// backend can set them, and as the rooms know you where it cannot.
+  Member get _me => _can(RoomAbility.editProfile) ? _profile.me : _rooms.me;
+
   /// Home's rooms with the calls' and timelines' changes layered on.
   List<Channel> get _homeRooms => [
     for (final room in _rooms.homeRooms)
@@ -185,7 +206,7 @@ class _AppShellState extends State<AppShell> {
     if (session.phase == CallPhase.ringing) return const {};
     return {
       session.target.id: [
-        _profile.me,
+        _me,
         for (final p in session.participants)
           if (p.present) p.member,
       ],
@@ -245,7 +266,7 @@ class _AppShellState extends State<AppShell> {
     _fullscreen = false;
     _previewInvite = null;
     // Seeing a conversation is reading it, in a space as much as in Home.
-    _rooms.markRead(channelId);
+    if (_can(RoomAbility.markRead)) _rooms.markRead(channelId);
     _missedCalls.remove(channelId);
   }
 
@@ -261,7 +282,10 @@ class _AppShellState extends State<AppShell> {
       _open(_spaceId, id);
       // A computer connects on click; a phone shows the lobby first, since a
       // stray tap there should never open a live mic.
-      if (channel.kind == ChannelKind.voice && !joining && isDesktop) {
+      if (channel.kind == ChannelKind.voice &&
+          !joining &&
+          isDesktop &&
+          _can(RoomAbility.calls)) {
         final here = _calls.inCall && _calls.session!.target.id == id;
         if (!here) _joinVoice(channel);
       }
@@ -346,7 +370,7 @@ class _AppShellState extends State<AppShell> {
           _rooms.joinSpace(space);
           _spaceId = space.id;
         case CreateSpace(:final name):
-          final id = _rooms.createSpace(name, me: _profile.me);
+          final id = _rooms.createSpace(name, me: _me);
           _open(id, '$id-general');
       }
       _fullscreen = false;
@@ -357,7 +381,7 @@ class _AppShellState extends State<AppShell> {
   // ── New messages ───────────────────────────────────────────────────
 
   Future<void> _newMessage() async {
-    final me = _profile.me;
+    final me = _me;
     final people = <String, Member>{
       for (final space in _spaces)
         for (final m in space.members)
@@ -572,8 +596,9 @@ class _AppShellState extends State<AppShell> {
       AppNotice.setUpRecovery(
         onAction: () => _openVerification(VerifyPurpose.setUp),
       ),
-    // Phones update through the App Store or TestFlight, never in-app.
-    if (_showUpdate && isDesktop)
+    // Phones update through the App Store or TestFlight, never in-app. The
+    // mock's notice only: there is no updater behind it yet.
+    if (_showUpdate && isDesktop && _session is MockSession)
       AppNotice.update(
         version: '0.3.0',
         onAction: () {},
@@ -641,6 +666,21 @@ class _AppShellState extends State<AppShell> {
       );
     }
 
+    // Before the backend can read messages, every room is its header and a
+    // line saying so — a voice channel too, since joining a call is a
+    // conversation's next step.
+    if (!_can(RoomAbility.messages)) {
+      return ChannelView(
+        channel: channel,
+        timeline: null,
+        navigationAttention: _notices.any((n) => n.loud),
+        onOpenNavigation: openNavigation,
+        onToggleMembers: wide
+            ? () => setState(() => _showMembers = !_showMembers)
+            : () => _scaffoldKey.currentState?.openEndDrawer(),
+      );
+    }
+
     if (channel.kind == ChannelKind.voice) {
       return VoiceChannelPage(
         channel: channel,
@@ -665,7 +705,7 @@ class _AppShellState extends State<AppShell> {
       onToggleMembers: wide
           ? () => setState(() => _showMembers = !_showMembers)
           : () => _scaffoldKey.currentState?.openEndDrawer(),
-      onStartCall: callHere
+      onStartCall: callHere || !_can(RoomAbility.calls)
           ? null
           : ({required video}) {
               _dmPanelExpanded = false;
@@ -716,7 +756,7 @@ class _AppShellState extends State<AppShell> {
         final wide = constraints.maxWidth >= _wideBreakpoint;
 
         final main = _buildMain(wide: wide);
-        final me = _profile.me;
+        final me = _me;
         final channel = _channel;
         final members = MemberList(
           members: channel.kind == ChannelKind.direct
@@ -846,6 +886,7 @@ class _AppShellState extends State<AppShell> {
               homeBadge: _homeBadge,
               homeRinging: _calls.incoming != null,
               onAddSpace: _addSpace,
+              addSpace: _can(RoomAbility.addSpace),
             ),
             Expanded(
               child: ChannelList(
@@ -853,13 +894,18 @@ class _AppShellState extends State<AppShell> {
                 selectedChannelId: _channel.id,
                 onSelect: _selectChannel,
                 onAction: _channelAction,
+                allowedActions: _allowedActions,
                 ringingId: _calls.incoming?.chat.id,
                 home: _home,
                 invites: _home ? _invites : const [],
                 selectedInviteId: _previewInvite,
                 onOpenInvite: _openInvite,
-                onNewMessage: _newMessage,
-                onReorderFavourites: _rooms.reorderFavourites,
+                onNewMessage: _can(RoomAbility.startDirect)
+                    ? _newMessage
+                    : null,
+                onReorderFavourites: _can(RoomAbility.tag)
+                    ? _rooms.reorderFavourites
+                    : null,
               ),
             ),
           ],
@@ -873,10 +919,18 @@ class _AppShellState extends State<AppShell> {
             deafened: _calls.deafened,
             onToggleMute: _calls.toggleMute,
             onToggleDeafen: _calls.toggleDeafen,
-            onSettings: () => showSettings(context, profile: _profile),
-            me: _profile.me,
-            onAvatarTap: (anchor) =>
-                showStatusPicker(context, _profile, anchor: anchor),
+            onSettings: () => showSettings(
+              context,
+              profile: _profile,
+              me: _me,
+              editable: _can(RoomAbility.editProfile),
+              onSignOut: _session.signOut,
+            ),
+            me: _me,
+            onAvatarTap: _can(RoomAbility.editProfile)
+                ? (anchor) =>
+                      showStatusPicker(context, _profile, anchor: anchor)
+                : null,
             onDebug: kDebugMode ? _debug : null,
           ),
         ),

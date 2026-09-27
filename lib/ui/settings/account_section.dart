@@ -7,6 +7,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../members/presence.dart';
@@ -17,18 +18,35 @@ import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
 
 class AccountSection extends StatefulWidget {
-  const AccountSection({super.key, this.profile});
+  const AccountSection({
+    super.key,
+    this.profile,
+    this.me,
+    this.editable = true,
+  });
 
   /// Shared with the account panel's picker. Left null (in isolation, as in
   /// tests), the section keeps a profile of its own.
   final ProfileController? profile;
+
+  /// Who is signed in. Left null, the mock's account.
+  final Member? me;
+
+  /// False while the backend cannot change a profile yet: everything reads
+  /// as fact, with nothing to edit or save.
+  final bool editable;
 
   @override
   State<AccountSection> createState() => _AccountSectionState();
 }
 
 class _AccountSectionState extends State<AccountSection> {
-  final _name = TextEditingController(text: currentUser.name);
+  Member get _me => widget.me ?? currentUser;
+
+  /// The mock's ids are bare localparts; a real one is whole already.
+  String get _matrixId => _me.id.contains(':') ? _me.id : '${_me.id}:loaf.moe';
+
+  late final _name = TextEditingController(text: _me.name);
   late final _ownProfile = widget.profile == null ? ProfileController() : null;
   ProfileController get _profile => widget.profile ?? _ownProfile!;
   late final _status = TextEditingController(text: _profile.status);
@@ -66,56 +84,61 @@ class _AccountSectionState extends State<AccountSection> {
               // No page title: the nav says which section this is, and on a
               // phone so does the card header.
               _FieldLabel(tokens: tokens, label: 'avatar'),
-              _AvatarRow(tokens: tokens),
+              _AvatarRow(tokens: tokens, me: _me, editable: widget.editable),
               const SizedBox(height: LoafSpace.x6),
 
               _FieldLabel(tokens: tokens, label: 'display name'),
-              _TextRow(tokens: tokens, controller: _name),
+              if (widget.editable)
+                _TextRow(tokens: tokens, controller: _name)
+              else
+                _ReadOnlyRow(tokens: tokens, value: _me.name, mono: false),
               const SizedBox(height: LoafSpace.x5),
 
               _FieldLabel(tokens: tokens, label: 'matrix id'),
-              _ReadOnlyRow(tokens: tokens, value: '${currentUser.id}:loaf.moe'),
-              const SizedBox(height: LoafSpace.x5),
+              _ReadOnlyRow(tokens: tokens, value: _matrixId),
+              if (widget.editable) ...[
+                const SizedBox(height: LoafSpace.x5),
 
-              _FieldLabel(tokens: tokens, label: 'presence'),
-              // Applies at once, like the picker: presence is a switch, not
-              // a form field.
-              _PresenceChips(
-                value: _profile.choice,
-                onChanged: _profile.choose,
-              ),
-              const SizedBox(height: LoafSpace.x5),
-
-              _FieldLabel(tokens: tokens, label: 'status'),
-              _TextRow(
-                tokens: tokens,
-                controller: _status,
-                hint: 'what are you up to?',
-              ),
-              const SizedBox(height: LoafSpace.x6),
-
-              // Left-aligned with the form rather than stretched: the fields
-              // are the subject here, not the button.
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    LoafButton(
-                      label: 'save changes',
-                      size: LoafButtonSize.small,
-                      onTap: () => _profile.setStatus(_status.text),
-                    ),
-                    const SizedBox(width: LoafSpace.x2),
-                    LoafButton(
-                      label: 'discard',
-                      emphasis: LoafButtonEmphasis.quiet,
-                      size: LoafButtonSize.small,
-                      onTap: () => _status.text = _profile.status,
-                    ),
-                  ],
+                _FieldLabel(tokens: tokens, label: 'presence'),
+                // Applies at once, like the picker: presence is a switch, not
+                // a form field.
+                _PresenceChips(
+                  value: _profile.choice,
+                  onChanged: _profile.choose,
                 ),
-              ),
+                const SizedBox(height: LoafSpace.x5),
+
+                _FieldLabel(tokens: tokens, label: 'status'),
+                _TextRow(
+                  tokens: tokens,
+                  controller: _status,
+                  hint: 'what are you up to?',
+                ),
+                const SizedBox(height: LoafSpace.x6),
+
+                // Left-aligned with the form rather than stretched: the fields
+                // are the subject here, not the button.
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      LoafButton(
+                        label: 'save changes',
+                        size: LoafButtonSize.small,
+                        onTap: () => _profile.setStatus(_status.text),
+                      ),
+                      const SizedBox(width: LoafSpace.x2),
+                      LoafButton(
+                        label: 'discard',
+                        emphasis: LoafButtonEmphasis.quiet,
+                        size: LoafButtonSize.small,
+                        onTap: () => _status.text = _profile.status,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -125,9 +148,17 @@ class _AccountSectionState extends State<AccountSection> {
 }
 
 class _AvatarRow extends StatelessWidget {
-  const _AvatarRow({required this.tokens});
+  const _AvatarRow({
+    required this.tokens,
+    required this.me,
+    required this.editable,
+  });
 
   final LoafTokens tokens;
+  final Member me;
+
+  /// Offers a new picture: the camera badge and its hint.
+  final bool editable;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -140,34 +171,35 @@ class _AvatarRow extends StatelessWidget {
           children: [
             Container(
               decoration: BoxDecoration(
-                color: currentUser.color,
+                color: me.color,
                 shape: BoxShape.circle,
               ),
               alignment: Alignment.center,
               child: Text(
-                currentUser.initials,
+                me.initials,
                 style: loafBody(30, 600).copyWith(color: Colors.white),
               ),
             ),
-            Positioned(
-              right: -2,
-              bottom: -2,
-              child: Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: tokens.card,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: tokens.border),
-                  boxShadow: tokens.shadowSm,
-                ),
-                child: Icon(
-                  LucideIcons.camera,
-                  size: 15,
-                  color: tokens.textBody,
+            if (editable)
+              Positioned(
+                right: -2,
+                bottom: -2,
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: tokens.card,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: tokens.border),
+                    boxShadow: tokens.shadowSm,
+                  ),
+                  child: Icon(
+                    LucideIcons.camera,
+                    size: 15,
+                    color: tokens.textBody,
+                  ),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -177,14 +209,16 @@ class _AvatarRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              currentUser.name,
+              me.name,
               style: loafDisplay(20, 600).copyWith(color: tokens.textStrong),
             ),
-            const SizedBox(height: 2),
-            Text(
-              'png or jpg, at least 256px',
-              style: loafBody(11, 400).copyWith(color: tokens.textMuted),
-            ),
+            if (editable) ...[
+              const SizedBox(height: 2),
+              Text(
+                'png or jpg, at least 256px',
+                style: loafBody(11, 400).copyWith(color: tokens.textMuted),
+              ),
+            ],
           ],
         ),
       ),
@@ -252,10 +286,17 @@ class _TextRow extends StatelessWidget {
 /// Your Matrix ID is not editable — it is who you are, not what you are
 /// called — so it reads as a fact you can copy rather than a field.
 class _ReadOnlyRow extends StatelessWidget {
-  const _ReadOnlyRow({required this.tokens, required this.value});
+  const _ReadOnlyRow({
+    required this.tokens,
+    required this.value,
+    this.mono = true,
+  });
 
   final LoafTokens tokens;
   final String value;
+
+  /// Ids are set in mono; names are not.
+  final bool mono;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -273,11 +314,13 @@ class _ReadOnlyRow extends StatelessWidget {
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: loafMono(13).copyWith(color: tokens.textBody),
+            style: (mono ? loafMono(13) : loafBody(15, 400)).copyWith(
+              color: tokens.textBody,
+            ),
           ),
         ),
         IconButton(
-          onPressed: () {},
+          onPressed: () => Clipboard.setData(ClipboardData(text: value)),
           iconSize: 16,
           color: tokens.textMuted,
           tooltip: 'Copy',

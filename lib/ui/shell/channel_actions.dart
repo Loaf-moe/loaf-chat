@@ -29,17 +29,27 @@ enum ChannelAction {
 /// [home] rows can also be tagged favourite or low priority. Space channels
 /// never are from loaf: each room has one place in the UI, and a favourited
 /// space channel would need a second.
-List<ChannelAction> actionsFor(Channel channel, {bool home = false}) => [
-  if (channel.unread > 0 || channel.mentions > 0) ChannelAction.markRead,
-  if (home) ...[
-    channel.favourite ? ChannelAction.unfavourite : ChannelAction.favourite,
-    channel.lowPriority
-        ? ChannelAction.notLowPriority
-        : ChannelAction.lowPriority,
-    if (channel.earlier.isNotEmpty) ChannelAction.olderConversations,
-  ],
-  channel.muted ? ChannelAction.unmute : ChannelAction.mute,
-  ChannelAction.leave,
+///
+/// Only actions in [allowed] are offered, when it is given: the backend may
+/// not do them all yet, and one that only pretends would lie.
+List<ChannelAction> actionsFor(
+  Channel channel, {
+  bool home = false,
+  Set<ChannelAction>? allowed,
+}) => [
+  for (final action in [
+    if (channel.unread > 0 || channel.mentions > 0) ChannelAction.markRead,
+    if (home) ...[
+      channel.favourite ? ChannelAction.unfavourite : ChannelAction.favourite,
+      channel.lowPriority
+          ? ChannelAction.notLowPriority
+          : ChannelAction.lowPriority,
+      if (channel.earlier.isNotEmpty) ChannelAction.olderConversations,
+    ],
+    channel.muted ? ChannelAction.unmute : ChannelAction.mute,
+    ChannelAction.leave,
+  ])
+    if (allowed == null || allowed.contains(action)) action,
 ];
 
 /// What the row is, in the words the actions use.
@@ -110,9 +120,10 @@ Future<ChannelAction?> showChannelActions(
   Channel channel, {
   Offset? position,
   bool home = false,
+  Set<ChannelAction>? allowed,
 }) async {
   final items = [
-    for (final action in actionsFor(channel, home: home))
+    for (final action in actionsFor(channel, home: home, allowed: allowed))
       _item(action, _noun(channel)),
   ];
   final chosen = isDesktop && position != null

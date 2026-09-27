@@ -28,6 +28,7 @@ class ChannelList extends StatefulWidget {
     this.onOpenInvite,
     this.onReorderFavourites,
     this.onNewMessage,
+    this.allowedActions,
   });
 
   final Space space;
@@ -55,6 +56,10 @@ class ChannelList extends StatefulWidget {
   /// Receives what was picked from a channel's actions (long press on a
   /// phone, right-click on a computer). Left null, channels have no menu.
   final void Function(String channelId, ChannelAction action)? onAction;
+
+  /// The row actions the backend can do yet; null for all of them. A row
+  /// left with none opens no menu.
+  final Set<ChannelAction>? allowedActions;
 
   @override
   State<ChannelList> createState() => _ChannelListState();
@@ -123,6 +128,7 @@ class _ChannelListState extends State<ChannelList> {
                       onToggle: () => _toggle(category.name),
                       onSelect: widget.onSelect,
                       onAction: widget.onAction,
+                      allowedActions: widget.allowedActions,
                       ringingId: widget.ringingId,
                       home: widget.home,
                       onReorder: widget.home && category.name == 'favourites'
@@ -289,6 +295,7 @@ class _CategorySection extends StatelessWidget {
     required this.onToggle,
     required this.onSelect,
     required this.onAction,
+    this.allowedActions,
     this.ringingId,
     this.home = false,
     this.onReorder,
@@ -296,6 +303,7 @@ class _CategorySection extends StatelessWidget {
   });
 
   final ChannelCategory category;
+  final Set<ChannelAction>? allowedActions;
 
   /// Home's direct messages only: starts a new one.
   final VoidCallback? onAdd;
@@ -324,7 +332,11 @@ class _CategorySection extends StatelessWidget {
         home: home,
         longPressActions: longPressActions,
         onTap: () => onSelect(channel.id),
-        onAction: onAction == null || !channel.joined
+        allowedActions: allowedActions,
+        onAction:
+            onAction == null ||
+                !channel.joined ||
+                actionsFor(channel, home: home, allowed: allowedActions).isEmpty
             ? null
             : (action) => onAction!(channel.id, action),
       );
@@ -468,12 +480,14 @@ class _ChannelEntry extends StatelessWidget {
     required this.tokens,
     required this.onTap,
     required this.onAction,
+    this.allowedActions,
     this.ringing = false,
     this.home = false,
     this.longPressActions = true,
   });
 
   final Channel channel;
+  final Set<ChannelAction>? allowedActions;
   final bool selected;
   final bool ringing;
 
@@ -495,6 +509,7 @@ class _ChannelEntry extends StatelessWidget {
       channel,
       position: position,
       home: home,
+      allowed: allowedActions,
     );
     if (action != null) onAction(action);
   }
