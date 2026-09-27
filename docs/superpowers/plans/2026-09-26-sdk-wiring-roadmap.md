@@ -42,6 +42,7 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **Android's SSO callback activity** (best-effort platform).
 - **A widget-level test of `SessionRoot` over `MatrixSession`** (sign-in flips to the shell, and the post-frame dispose closes the homeserver). It needs a fake-backed session inside the widget tester's fake clock.
 - **Pressing Enter in the password field during the point of no return** reaches the submit handler, which is a no-op there. The fields could be read-only while signing in, to be fully honest.
+- **Reset identity's re-sign-in** (`lib/ui/verify/verification_controller.dart`) still picks browser vs. system window by `isDesktop`. When phase 4 wires it to real SSO, it must use `ssoInBrowser`, so a Mac uses the system window there too.
 - **Small tidy-ups:** `sso()` and `_signIn()` both look up `_bases`; `openClient` calls `sqfliteFfiInit()` on every call; the failure note and the server-check note on the sign-in screen are two identical blocks; `MatrixSession.open()` itself has no test.
 
 ## Global constraints (all phases)
