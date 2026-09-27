@@ -717,6 +717,12 @@ class _AppShellState extends State<AppShell> {
       onRead: _can(RoomAbility.markRead)
           ? () => _rooms.markRead(channel.id)
           : null,
+      trust: _session.trust,
+      onVerify: () => _openVerification(
+        _session.trust == DeviceTrust.noIdentity
+            ? VerifyPurpose.setUp
+            : VerifyPurpose.verify,
+      ),
       navigationAttention: _notices.any((n) => n.loud),
       callBar: _buildCallBar(),
       onOpenNavigation: openNavigation,

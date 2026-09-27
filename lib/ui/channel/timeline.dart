@@ -26,7 +26,8 @@ abstract interface class Timeline implements Listenable {
   List<Message> get messages;
 
   /// False where this device cannot write yet: an encrypted room, before
-  /// encryption is wired. The composer is replaced by a line saying so.
+  /// this device is verified. The composer is replaced by a line saying so,
+  /// and a locked message is one whose key has yet to come.
   bool get writable;
 
   /// Whether there is history further back to ask for.

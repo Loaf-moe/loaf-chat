@@ -6,8 +6,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../auth/loaf_session.dart' show DeviceTrust;
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_button.dart';
 import '../widgets/toast.dart';
 import 'composer.dart';
 import 'message_group_tile.dart';
@@ -54,6 +56,8 @@ class ChannelView extends StatelessWidget {
     this.callPanel,
     this.callPanelExpanded = false,
     this.onRead,
+    this.trust = DeviceTrust.verified,
+    this.onVerify,
   });
 
   final Channel channel;
@@ -75,6 +79,11 @@ class ChannelView extends StatelessWidget {
   /// Null while the backend cannot read messages yet: the conversation
   /// says so, and offers no composer to write into nowhere.
   final Timeline? timeline;
+
+  /// This device's trust, which a room that can't be written in yet waits
+  /// on; [onVerify] opens the panel that changes it.
+  final DeviceTrust trust;
+  final VoidCallback? onVerify;
 
   /// Marks the menu button when a notice that must not be missed is waiting
   /// in the rail. Only matters on a phone, where the rail hides in the drawer.
@@ -128,21 +137,27 @@ class ChannelView extends StatelessWidget {
               if (channel.waitingFor.isNotEmpty)
                 _WaitingLine(people: channel.waitingFor),
               ?callBar,
-              if (timeline!.writable)
-                Composer(
-                  // Keyed like the list: a reply card or a draft belongs to
-                  // the room it was started in, and must not send in the next.
-                  key: ObjectKey(timeline),
-                  channelName: channel.name,
-                  timeline: timeline!,
-                  prefix: switch (channel) {
-                    Channel(kind: ChannelKind.direct, members: [_]) => '@',
-                    Channel(kind: ChannelKind.direct) => '',
-                    _ => '#',
-                  },
-                )
-              else
-                const _EncryptedNote(),
+              // Heard live: a room becomes writable the moment this device
+              // is verified, with the conversation open.
+              ListenableBuilder(
+                listenable: timeline!,
+                builder: (context, _) => timeline!.writable
+                    ? Composer(
+                        // Keyed like the list: a reply card or a draft
+                        // belongs to the room it was started in, and must
+                        // not send in the next.
+                        key: ObjectKey(timeline),
+                        channelName: channel.name,
+                        timeline: timeline!,
+                        prefix: switch (channel) {
+                          Channel(kind: ChannelKind.direct, members: [_]) =>
+                            '@',
+                          Channel(kind: ChannelKind.direct) => '',
+                          _ => '#',
+                        },
+                      )
+                    : _EncryptedNote(trust: trust, onVerify: onVerify),
+              ),
             ],
           ],
         ),
@@ -612,14 +627,24 @@ class _Unwired extends StatelessWidget {
   }
 }
 
-/// In place of the composer in an encrypted room, until this device can
-/// encrypt: nothing is sent there unencrypted.
+/// In place of the composer in an encrypted room, until this device is
+/// verified: nothing is sent there unencrypted, and the way forward is one
+/// tap away.
 class _EncryptedNote extends StatelessWidget {
-  const _EncryptedNote();
+  const _EncryptedNote({required this.trust, this.onVerify});
+
+  final DeviceTrust trust;
+  final VoidCallback? onVerify;
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
+    final (line, action) = switch (trust) {
+      DeviceTrust.noIdentity => ('set up recovery to send here', 'set up'),
+      DeviceTrust.unverified => ('verify this device to send here', 'verify'),
+      DeviceTrust.verified => ('sending here waits for encryption', null),
+    };
+    final onVerify = this.onVerify;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         LoafSpace.x4,
@@ -633,10 +658,17 @@ class _EncryptedNote extends StatelessWidget {
           const SizedBox(width: LoafSpace.x2),
           Expanded(
             child: Text(
-              'sending here waits for encryption',
+              line,
               style: loafBody(13, 400).copyWith(color: tokens.textMuted),
             ),
           ),
+          if (action != null && onVerify != null)
+            LoafButton(
+              label: action,
+              onTap: onVerify,
+              emphasis: LoafButtonEmphasis.outlined,
+              size: LoafButtonSize.small,
+            ),
         ],
       ),
     );

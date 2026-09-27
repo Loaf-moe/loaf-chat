@@ -16,6 +16,7 @@ import '../ui/auth/sign_in_state.dart';
 import '../ui/platform.dart';
 import '../ui/verify/verifier.dart';
 import 'client_factory.dart';
+import 'device_trust.dart';
 import 'matrix_device_verification.dart';
 import 'matrix_homeserver.dart';
 import 'matrix_verifier.dart';
@@ -43,7 +44,7 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
       client.onKeyVerificationRequest.stream.listen(_onRequest),
     ];
     _account = _accountNow();
-    _trust = _trustNow();
+    _trust = trustOf(client);
   }
 
   /// Opens the stored session, if any. Offline is fine: a stored session
@@ -132,9 +133,10 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
     }
   }
 
-  /// Trust is read from device keys, so there is nothing to record.
+  /// Trust is read from device keys, never recorded: this reads them again,
+  /// rather than waiting for the next sync to.
   @override
-  void markVerified() {}
+  void markVerified() => _refresh();
 
   @override
   void clearIncoming() {
@@ -172,21 +174,9 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
     LoginState.loggedOut || null => AccountState.signedOut,
   };
 
-  DeviceTrust _trustNow() {
-    final userId = client.userID;
-    final keys = userId == null ? null : client.userDeviceKeys[userId];
-    // Until this account's keys are known, never claim it has no identity:
-    // that notice offers to make one, and would reset a real one.
-    if (keys == null || keys.outdated) return DeviceTrust.unverified;
-    if (keys.masterKey == null) return DeviceTrust.noIdentity;
-    return client.isUnknownSession
-        ? DeviceTrust.unverified
-        : DeviceTrust.verified;
-  }
-
   void _refresh() {
     final account = _accountNow();
-    final trust = _trustNow();
+    final trust = trustOf(client);
     if (account == _account && trust == _trust) return;
     _account = account;
     _trust = trust;

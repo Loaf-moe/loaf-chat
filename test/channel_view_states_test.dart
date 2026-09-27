@@ -169,7 +169,9 @@ void main() {
     'a locked message says why, and offers nothing',
     variant: _mobile,
     (tester) async {
-      await _pump(tester, [_msg('1', locked: true, body: '')]);
+      await _pump(tester, [
+        _msg('1', locked: true, body: ''),
+      ], setUp: (t) => t.writable = false);
       expect(
         find.text('encrypted · readable once this device is verified'),
         findsOneWidget,

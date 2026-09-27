@@ -46,12 +46,17 @@ const _otherAccount =
 
 /// A signed-in client with encryption on, over [api] (a fresh fake server
 /// when null). [asOther] signs in as @othertest instead of @test. Sync stops
-/// after the first, so tests hand it what they want it to see.
-Future<Client> cryptoClient({FakeMatrixApi? api, bool asOther = false}) async {
+/// after the first, so tests hand it what they want it to see. [path] keeps
+/// its store in a file, for [relaunch].
+Future<Client> cryptoClient({
+  FakeMatrixApi? api,
+  bool asOther = false,
+  String path = inMemoryDatabasePath,
+}) async {
   await loadVodozemac();
   final client = await openClient(
     httpClient: api ?? FakeMatrixApi(),
-    databasePath: inMemoryDatabasePath,
+    databasePath: path,
   );
   FakeMatrixApi.client = client;
   await client.checkHomeserver(
@@ -67,6 +72,20 @@ Future<Client> cryptoClient({FakeMatrixApi? api, bool asOther = false}) async {
     newOlmAccount: asOther ? _otherAccount : _myAccount,
   );
   await client.abortSync();
+  addTearDown(() => client.dispose(closeDatabase: true));
+  return client;
+}
+
+/// The app quitting and opening again on the store at [path]: the session
+/// and its keys come back from it alone.
+Future<Client> relaunch(Client quitting, String path) async {
+  await quitting.dispose(closeDatabase: true);
+  final client = await openClient(
+    httpClient: FakeMatrixApi(),
+    databasePath: path,
+  );
+  FakeMatrixApi.client = client;
+  await client.init(waitForFirstSync: false);
   addTearDown(() => client.dispose(closeDatabase: true));
   return client;
 }

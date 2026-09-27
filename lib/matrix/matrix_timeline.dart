@@ -9,9 +9,11 @@ import 'package:flutter/foundation.dart';
 // The SDK's own Timeline is the one wrapped here; the UI's is `ui.Timeline`.
 import 'package:matrix/matrix.dart';
 
+import '../ui/auth/loaf_session.dart' show DeviceTrust;
 import '../ui/channel/timeline.dart' as ui;
 import '../ui/model/models.dart' as ui;
 import '../ui/spaces/add_space.dart' show spaceColorFor;
+import 'device_trust.dart';
 
 /// How many events one page of history asks for.
 const historyPage = 50;
@@ -92,8 +94,12 @@ class MatrixTimeline extends ChangeNotifier
     ];
   }
 
+  /// Read live: the shell rebuilds the conversation when trust changes, so
+  /// the composer appears the moment this device is verified. Until then,
+  /// other devices share no keys with it, and nothing sent could be read.
   @override
-  bool get writable => !room.encrypted;
+  bool get writable =>
+      !room.encrypted || trustOf(room.client) == DeviceTrust.verified;
 
   @override
   bool get canLoadOlder => _timeline?.canRequestHistory ?? false;

@@ -76,7 +76,11 @@ class MessageGroupTile extends StatelessWidget {
     final controller = this.controller;
     // A locked message has nothing in it to copy, reply to or react to.
     if (controller == null || message.locked) {
-      return _MessageBody(message: message);
+      // Where this device can write, it is verified: the key never came.
+      return _MessageBody(
+        message: message,
+        keyNeverCame: controller?.writable ?? false,
+      );
     }
     return isDesktop
         ? _PointerMessage(message: message, controller: controller)
@@ -110,9 +114,13 @@ class _MessageBody extends StatelessWidget {
     this.onAddReaction,
     this.onRetry,
     this.onDiscard,
+    this.keyNeverCame = false,
   });
 
   final Message message;
+
+  /// Locked on a verified device: no key for it reached this one.
+  final bool keyNeverCame;
 
   /// A failed message's two ways forward: send it again, or give up on it.
   final VoidCallback? onRetry;
@@ -136,7 +144,9 @@ class _MessageBody extends StatelessWidget {
     final tokens = LoafTokens.of(context);
     if (message.locked) {
       return Text(
-        'encrypted · readable once this device is verified',
+        keyNeverCame
+            ? 'encrypted · the key for this never reached this device'
+            : 'encrypted · readable once this device is verified',
         style: loafBody(
           15,
           400,
