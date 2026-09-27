@@ -17,6 +17,7 @@ import '../widgets/toast.dart';
 import 'incoming_verification.dart';
 import 'recovery_setup.dart';
 import 'reset_identity.dart';
+import 'save_key.dart';
 import 'verification_controller.dart';
 import 'verify_state.dart';
 import 'verify_steps.dart';
@@ -32,9 +33,14 @@ Future<bool?> showVerifyPanel(
 );
 
 class VerifyPanel extends StatefulWidget {
-  const VerifyPanel({super.key, required this.controller});
+  const VerifyPanel({
+    super.key,
+    required this.controller,
+    this.saveKey = saveRecoveryKey,
+  });
 
   final VerificationController controller;
+  final KeySaver saveKey;
 
   @override
   State<VerifyPanel> createState() => _VerifyPanelState();
@@ -78,8 +84,19 @@ class _VerifyPanelState extends State<VerifyPanel> {
     _c.keyKept();
   }
 
-  void _save() {
-    // Mockup: a save dialog on a computer, the share sheet on a phone.
+  Future<void> _save() async {
+    final box = context.findRenderObject() as RenderBox?;
+    final origin = box == null
+        ? null
+        : box.localToGlobal(Offset.zero) & box.size;
+    bool kept;
+    try {
+      kept = await widget.saveKey(_c.newRecoveryKey, origin: origin);
+    } on Exception {
+      if (mounted) showToast(context, "couldn't save it · copy it instead");
+      return;
+    }
+    if (!kept || !mounted) return;
     showToast(context, isDesktop ? 'saved' : 'shared');
     _c.keyKept();
   }
@@ -194,7 +211,7 @@ class _VerifyPanelState extends State<VerifyPanel> {
       recoveryKey: _c.newRecoveryKey,
       saved: s.keySaved,
       onCopy: _copy,
-      onSave: _save,
+      onSave: () => unawaited(_save()),
       onDone: _c.finishSetUp,
     ),
     VerifyStep.done => DoneStep(message: _c.doneMessage, note: _cutShort),
