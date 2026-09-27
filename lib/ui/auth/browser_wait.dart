@@ -27,7 +27,8 @@ class BrowserWait extends StatelessWidget {
   /// Offered where the browser cannot hand back on its own.
   final VoidCallback? onFinished;
 
-  /// [onFinished] was pressed and the server is being asked.
+  /// [onFinished] was pressed and the server is being asked: neither
+  /// reopening nor cancelling does anything now, so neither is drawn.
   final bool finishing;
 
   @override
@@ -58,19 +59,23 @@ class BrowserWait extends StatelessWidget {
           ),
           const SizedBox(height: LoafSpace.x3),
         ],
-        LoafButton(
-          label: 'open it again',
-          icon: LucideIcons.externalLink,
-          emphasis: LoafButtonEmphasis.outlined,
-          onTap: onReopen,
-        ),
-        const SizedBox(height: LoafSpace.x3),
-        LoafButton(
-          label: 'cancel',
-          onTap: onCancel,
-          emphasis: LoafButtonEmphasis.quiet,
-          size: LoafButtonSize.small,
-        ),
+        // Once the server is being asked, the browser has nothing left to
+        // do and the answer can't be called back: only the wait is drawn.
+        if (!finishing) ...[
+          LoafButton(
+            label: 'open it again',
+            icon: LucideIcons.externalLink,
+            emphasis: LoafButtonEmphasis.outlined,
+            onTap: onReopen,
+          ),
+          const SizedBox(height: LoafSpace.x3),
+          LoafButton(
+            label: 'cancel',
+            onTap: onCancel,
+            emphasis: LoafButtonEmphasis.quiet,
+            size: LoafButtonSize.small,
+          ),
+        ],
       ],
     );
   }

@@ -211,8 +211,11 @@ void main() {
         ..confirmReset();
       c.reauthWithSso();
       expect(c.state.inBrowser, isTrue);
+      // Cancelling gives the check up, back where the reset started.
       c.cancelBrowser();
       expect(c.state.inBrowser, isFalse);
+      expect(c.state.step, VerifyStep.resetConfirm);
+      c.confirmReset();
       c.reauthWithSso();
       // The server's page hands nothing back: the person says when.
       c.browserFinished();

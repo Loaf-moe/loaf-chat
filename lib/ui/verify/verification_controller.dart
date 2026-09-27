@@ -139,19 +139,25 @@ class VerificationController extends ChangeNotifier {
     _turn++;
     switch (_state.step) {
       case VerifyStep.resetAuth:
-        _challenge?.cancel();
-        _challenge = null;
-        _go(
-          purpose == VerifyPurpose.setUp
-              ? VerifyStep.setUpIntro
-              : VerifyStep.resetConfirm,
-        );
+        _abandonCheck();
       case VerifyStep.waitingForDevice:
         _dropDevice(cancel: true);
         _go(VerifyStep.choose);
       default:
         _go(VerifyStep.choose);
     }
+  }
+
+  /// Gives up the server's check before anything went up, and returns to
+  /// where it started.
+  void _abandonCheck() {
+    _challenge?.cancel();
+    _challenge = null;
+    _go(
+      purpose == VerifyPurpose.setUp
+          ? VerifyStep.setUpIntro
+          : VerifyStep.resetConfirm,
+    );
   }
 
   // ── Another device ─────────────────────────────────────────────────────
@@ -381,9 +387,12 @@ class VerificationController extends ChangeNotifier {
     _challenge?.browserFinished();
   }
 
+  /// Cancel means cancel: as the back arrow does, the check is given up,
+  /// not left pending behind the auth step.
   void cancelBrowser() {
     if (!_state.inBrowser || _state.checking) return;
-    _go(VerifyStep.resetAuth);
+    _turn++;
+    _abandonCheck();
   }
 
   /// The key was copied or saved.

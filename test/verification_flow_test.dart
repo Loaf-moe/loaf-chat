@@ -331,6 +331,32 @@ void main() {
       c.dispose();
     });
 
+    test('cancelling the browser wait cancels the challenge and goes back '
+        'to where the check started', () {
+      for (final (purpose, start) in [
+        (VerifyPurpose.verify, VerifyStep.resetConfirm),
+        (VerifyPurpose.setUp, VerifyStep.setUpIntro),
+      ]) {
+        final v = _Verifier();
+        final c = over(v, purpose: purpose);
+        if (purpose == VerifyPurpose.setUp) {
+          c.createKey();
+        } else {
+          c
+            ..cantDoEither()
+            ..confirmReset();
+        }
+        v.ask(AuthKind.sso, retry: false);
+        c.reauthWithSso();
+        expect(c.state.inBrowser, isTrue);
+        c.cancelBrowser();
+        expect(v.challenge.cancelled, isTrue, reason: '$purpose');
+        expect(c.state.step, start, reason: '$purpose');
+        expect(c.state.inBrowser, isFalse);
+        c.dispose();
+      }
+    });
+
     test('going back from the auth step cancels the challenge', () {
       final v = _Verifier();
       final c = over(v)..cantDoEither();

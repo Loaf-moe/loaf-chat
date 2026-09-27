@@ -125,6 +125,22 @@ void main() {
     expect(find.text('continue with loaf.moe'), findsOneWidget);
   });
 
+  testWidgets('the browser wait, once finished, offers only the wait', (
+    tester,
+  ) async {
+    await _show(
+      tester,
+      const VerifyState(
+        step: VerifyStep.resetAuth,
+        inBrowser: true,
+        checking: true,
+      ),
+    );
+    expect(_button(tester, 'checking…').onTap, isNull);
+    expect(find.text('open it again'), findsNothing);
+    expect(find.text('cancel'), findsNothing);
+  });
+
   testWidgets('setting up asks who you are in its own words', (tester) async {
     await _show(
       tester,
