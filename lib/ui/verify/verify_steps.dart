@@ -386,7 +386,13 @@ class RestoringStep extends StatelessWidget {
       children: [
         const StepLead('restoring history'),
         const SizedBox(height: LoafSpace.x2),
-        StepNote('restored ${thousands(restored)} of ${thousands(total)} keys'),
+        // Nothing counted yet: the backup key is still arriving, or the
+        // backup is still being fetched.
+        StepNote(
+          total == 0
+              ? "getting your history's keys…"
+              : 'restored ${thousands(restored)} of ${thousands(total)} keys',
+        ),
         const SizedBox(height: LoafSpace.x3),
         ClipRRect(
           borderRadius: BorderRadius.circular(LoafRadius.full),

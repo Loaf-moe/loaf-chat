@@ -165,6 +165,18 @@ void main() {
     expect(find.byTooltip('back'), findsNothing);
   });
 
+  testWidgets('restoring before the backup is counted says no "0 of 0"', (
+    tester,
+  ) async {
+    await _show(tester, const VerifyState(step: VerifyStep.restoring));
+    expect(find.text("getting your history's keys…"), findsOneWidget);
+    expect(find.textContaining('0 of 0'), findsNothing);
+    final bar = tester.widget<LinearProgressIndicator>(
+      find.byType(LinearProgressIndicator),
+    );
+    expect(bar.value, isNull, reason: 'indeterminate');
+  });
+
   testWidgets('history cut short says the rest are on their way', (
     tester,
   ) async {
