@@ -412,6 +412,28 @@ void main() {
     });
   });
 
+  testWidgets('an unjoined row on a backend that cannot join opens nothing', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      _FakeRooms(
+        spaces: [
+          _bakery(
+            channels: const [
+              Channel(id: '!general', name: 'general'),
+              Channel(id: '!attic', name: 'attic', joined: false),
+            ],
+          ),
+        ],
+      ),
+    );
+    await tester.tap(_inList('attic'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('attic'), findsOneWidget);
+  });
+
   group('the member list', () {
     testWidgets('you keep your power level in it', (tester) async {
       const admin = Member(

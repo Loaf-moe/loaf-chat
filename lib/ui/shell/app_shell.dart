@@ -295,6 +295,8 @@ class _AppShellState extends State<AppShell> {
     // channel opens to its lobby rather than connecting: membership and
     // being in the call are separate steps.
     final joining = !channel.joined;
+    // A backend that cannot join has nothing to open here.
+    if (joining && !_can(RoomAbility.join)) return;
     setState(() {
       if (joining) _rooms.setJoined(id, true);
       _open(_spaceId, id);
