@@ -38,6 +38,22 @@ class _Api extends FakeMatrixApi {
   /// after its cross-signing keys went up.
   var failNewBackup = false;
 
+  /// 502s `PUT .../account_data/m.secret_storage.default_key`, which a new
+  /// identity sets right after its cross-signing keys went up.
+  var failDefaultKey = false;
+
+  /// Behaves as a real server does with `/keys/device_signing/upload`:
+  /// publishes the new keys through `/keys/query` only. The fake server
+  /// otherwise writes them straight into the client's own copy, which a
+  /// real client sees only after a later sync.
+  var publishOnQuery = false;
+
+  /// With [publishOnQuery]: goes quiet once an upload has landed.
+  var downAfterUpload = false;
+
+  /// The master key the last upload published, under [publishOnQuery].
+  Object? uploadedMaster;
+
   static http.Response _json(Object body, [int status = 200]) =>
       http.Response(jsonEncode(body), status);
 
@@ -51,6 +67,13 @@ class _Api extends FakeMatrixApi {
     if (failNewBackup &&
         request.method == 'POST' &&
         request.url.path.endsWith('/room_keys/version')) {
+      return _json({'errcode': 'M_UNKNOWN', 'error': 'down'}, 502);
+    }
+    if (failDefaultKey &&
+        request.method == 'PUT' &&
+        request.url.path.endsWith(
+          '/account_data/${EventTypes.SecretStorageDefaultKey}',
+        )) {
       return _json({'errcode': 'M_UNKNOWN', 'error': 'down'}, 502);
     }
     if (noBackupOnServer &&
@@ -86,7 +109,20 @@ class _Api extends FakeMatrixApi {
         holding = false;
       }
     }
-    return await super.mockIntercept(request);
+    if (publishOnQuery &&
+        request.url.path.endsWith('/keys/device_signing/upload')) {
+      uploadedMaster = (jsonDecode(request.body) as Map)['master_key'];
+      if (downAfterUpload) down = true;
+      return _json(<String, Object?>{});
+    }
+    final response = await super.mockIntercept(request);
+    final master = uploadedMaster;
+    if (master != null && request.url.path.endsWith('/keys/query')) {
+      final body = jsonDecode(response.body) as Map<String, Object?>;
+      (body['master_keys']! as Map<String, Object?>)[me] = master;
+      return _json(body, response.statusCode);
+    }
+    return response;
   }
 }
 
@@ -442,6 +478,35 @@ void main() {
         throwsA(isA<IdentityIncomplete>()),
       );
       expect(client.userDeviceKeys[me]!.masterKey!.ed25519Key, isNot(master));
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('a failure right after the upload, before any sync, is still '
+        'incomplete', () async {
+      api
+        ..publishOnQuery = true
+        ..failDefaultKey = true;
+      final master = client.userDeviceKeys[me]!.masterKey!.ed25519Key;
+      await expectLater(
+        verifier.createIdentity(wipe: true, onAuth: (_) {}),
+        throwsA(isA<IdentityIncomplete>()),
+      );
+      expect(api.uploadedMaster, isNotNull);
+      // This device's own copy hasn't caught up: only the server knows.
+      expect(client.userDeviceKeys[me]!.masterKey!.ed25519Key, master);
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('an upload that passed the check, then a server gone quiet, is '
+        'still incomplete', () async {
+      api
+        ..asks = AuthenticationTypes.password
+        ..publishOnQuery = true
+        ..downAfterUpload = true;
+      final asked = <AuthChallenge>[];
+      final made = verifier.createIdentity(wipe: true, onAuth: asked.add);
+      await _until(() => asked.isNotEmpty);
+      asked.single.password('right');
+      await expectLater(made, throwsA(isA<IdentityIncomplete>()));
+      expect(api.uploadedMaster, isNotNull);
     }, timeout: const Timeout(Duration(minutes: 2)));
 
     test('a failure before the upload is the plain error', () async {

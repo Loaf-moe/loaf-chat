@@ -160,7 +160,9 @@ class MatrixVerifier implements Verifier {
     }
     var cancelled = false;
     var asked = 0;
+    UiaRequest<Object?>? upload;
     final asking = client.onUiaRequest.stream.listen((uia) {
+      upload = uia;
       if (uia.state != UiaRequestState.waitForUser) return;
       final kind = uia.nextStages.contains(AuthenticationTypes.password)
           ? AuthKind.password
@@ -190,13 +192,32 @@ class MatrixVerifier implements Verifier {
       return await client.initCryptoIdentity();
     } on Object catch (e, s) {
       if (cancelled) return null;
-      if (_publishedMasterKey != masterBefore) {
+      if (await _wentUp(upload, masterBefore)) {
         Logs().e('[loaf] the new identity went up but did not finish', e, s);
         throw IdentityIncomplete();
       }
       rethrow;
     } finally {
       await asking.cancel();
+    }
+  }
+
+  /// Whether new cross-signing keys reached the server before a failure.
+  /// This device's own copy of its keys only catches up on a later sync, so
+  /// a failure between the upload and that sync can't be read from it.
+  Future<bool> _wentUp(UiaRequest<Object?>? asked, String? masterBefore) async {
+    // An upload that asked who you are says itself whether it landed.
+    if (asked?.state == UiaRequestState.done) return true;
+    if (_publishedMasterKey != masterBefore) return true;
+    // One that never asked never showed itself: ask the server what it
+    // publishes now.
+    try {
+      final keys = await client.queryKeys({client.userID!: []});
+      final now = keys.masterKeys?[client.userID]?.publicKey;
+      return now != null && now != masterBefore;
+    } on Object catch (e, s) {
+      Logs().w("[loaf] couldn't re-read this account's keys", e, s);
+      return false;
     }
   }
 }
