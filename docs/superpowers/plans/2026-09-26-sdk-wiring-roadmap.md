@@ -40,9 +40,8 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **MSC3861 OIDC sign-in.** loaf.moe advertises it, but `m.login.sso` works today.
 - **Encrypting the sqlite database at rest** (sqlcipher, with a key in the Keychain) before anyone but Chris uses the app.
 - **Android's SSO callback activity** (best-effort platform).
-- **A cancel that lands while `client.init` runs** (after `/login` answered, during the device-keys upload) cannot stop that sign-in. No token crosses servers. Follow-up: after `init`, if `MatrixHomeserver`'s generation moved, `client.logout()` and answer `SignInCancelled`.
 - **A widget-level test of `SessionRoot` over `MatrixSession`** (sign-in flips to the shell, and the post-frame dispose closes the homeserver). It needs a fake-backed session inside the widget tester's fake clock.
-- **A `/login` that errors after a good `/versions`** reads as "offers no sign-in loaf can use" rather than as a retriable failure.
+- **Pressing Enter in the password field during the point of no return** reaches the submit handler, which is a no-op there. The fields could be read-only while signing in, to be fully honest.
 - **Small tidy-ups:** `sso()` and `_signIn()` both look up `_bases`; `openClient` calls `sqfliteFfiInit()` on every call; the failure note and the server-check note on the sign-in screen are two identical blocks; `MatrixSession.open()` itself has no test.
 
 ## Global constraints (all phases)
