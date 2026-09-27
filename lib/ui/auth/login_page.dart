@@ -120,7 +120,15 @@ class _LoginPageState extends State<LoginPage> {
                 listenable: _c,
                 builder: (context, _) {
                   _formShown = false;
-                  final faces = _faces(tokens, _c.state);
+                  final state = _c.state;
+                  // The point of no return: the picker offers a "connect"
+                  // nothing would act on, and popping it up again on a
+                  // commit that then fails would be worse than not asking.
+                  if (state.activity == SignInActivity.signedIn &&
+                      _editingServer) {
+                    _editingServer = false;
+                  }
+                  final faces = _faces(tokens, state);
                   _forgetAbandonedForm();
                   // Around the whole screen, not the form: it outlives the form,
                   // so only the screen going (signed in) commits a save.
@@ -185,7 +193,7 @@ class _LoginPageState extends State<LoginPage> {
           const SizedBox(height: LoafSpace.x3),
           ErrorNote(message: failure),
         ],
-        if (soft != null) ...[
+        if (soft != null && s.activity != SignInActivity.signedIn) ...[
           const SizedBox(height: LoafSpace.x5),
           LoafButton(
             label: 'sign out instead',
@@ -323,7 +331,7 @@ class _LoginPageState extends State<LoginPage> {
             label: flows.providers.length == 1
                 ? 'back to ${flows.providers.single.name}'
                 : 'back to other ways in',
-            onTap: () => setState(() => _showingPassword = false),
+            onTap: busy ? null : () => setState(() => _showingPassword = false),
             emphasis: LoafButtonEmphasis.quiet,
             size: LoafButtonSize.small,
           ),

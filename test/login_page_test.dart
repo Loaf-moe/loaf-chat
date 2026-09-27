@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:loaf_native/ui/auth/homeserver.dart';
 import 'package:loaf_native/ui/auth/login_page.dart';
 import 'package:loaf_native/ui/auth/sign_in_controller.dart';
 import 'package:loaf_native/ui/auth/sign_in_state.dart';
@@ -561,4 +564,155 @@ void main() {
     expect(find.text('continue with loaf.moe'), findsOneWidget);
     c.dispose();
   });
+
+  group('nothing answers during the point of no return', () {
+    testWidgets(
+      'the picker closes once the commit passes, and does not pop back up',
+      (tester) async {
+        final hs = _Scripted();
+        final c = SignInController.at(
+          const SignInState(
+            server: 'passwords.test',
+            check: ServerFound(ServerFlows(password: true)),
+          ),
+          homeserver: hs,
+        );
+        await _pump(tester, c);
+        await tester.enterText(
+          find.widgetWithText(TextField, 'username'),
+          'chris',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextField, 'password'),
+          'hunter2',
+        );
+        await tester.tap(find.text('sign in'));
+        await tester.pump(const Duration(milliseconds: 50));
+
+        // Opened before the server answered: the row is still tappable at
+        // this point (checkingPassword, not yet signedIn).
+        await tester.tap(find.text('passwords.test'));
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(find.text('connect'), findsOneWidget);
+        expect(find.text('signing in…'), findsNothing);
+
+        hs.passwordCommitting!();
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(find.text('connect'), findsNothing);
+        expect(find.text('signing in…'), findsOneWidget);
+
+        // A commit that then fails must not pop the picker back up.
+        hs.passwordAnswer!.complete(const SignInFailed('nope'));
+        await tester.pump();
+        expect(find.text('connect'), findsNothing);
+        c.dispose();
+      },
+    );
+
+    testWidgets('sign out instead hides once the commit passes', (
+      tester,
+    ) async {
+      final hs = _Scripted();
+      final c = SignInController.at(
+        SignInState(
+          server: 'passwords.test',
+          check: mockServers['passwords.test']!,
+          softLogout: const SoftLogout(
+            member: currentUser,
+            userId: '@faore:passwords.test',
+          ),
+        ),
+        homeserver: hs,
+      );
+      await _pump(tester, c);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'password'),
+        'hunter2',
+      );
+      await tester.tap(find.text('sign in'));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('sign out instead'), findsOneWidget);
+
+      hs.passwordCommitting!();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('sign out instead'), findsNothing);
+      c.dispose();
+    });
+
+    testWidgets('back to … is disabled once the commit passes', (tester) async {
+      final hs = _Scripted();
+      final c = SignInController.at(
+        const SignInState(
+          server: 'loaf.moe',
+          check: ServerFound(
+            ServerFlows(
+              providers: [IdentityProvider('x', 'X')],
+              password: true,
+            ),
+          ),
+        ),
+        homeserver: hs,
+      );
+      await _pump(tester, c);
+      await tester.tap(find.text('use a username and password'));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.enterText(
+        find.widgetWithText(TextField, 'username'),
+        'chris',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'password'),
+        'hunter2',
+      );
+      await tester.tap(find.text('sign in'));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      hs.passwordCommitting!();
+      await tester.pump(const Duration(milliseconds: 100));
+      final button = tester.widget<LoafButton>(
+        find.widgetWithText(LoafButton, 'back to X'),
+      );
+      expect(button.onTap, isNull);
+      c.dispose();
+    });
+  });
+}
+
+/// A homeserver whose password answer the test hands over by hand, so a
+/// test can fire the stored `onCommitting` from before the answer arrives
+/// — the gap the pinned `signedIn` faces above cannot reach.
+class _Scripted implements Homeserver {
+  Completer<SignInOutcome>? passwordAnswer;
+  void Function()? passwordCommitting;
+
+  @override
+  Future<ServerCheck> probe(String server) => Completer<ServerCheck>().future;
+
+  @override
+  Future<SignInOutcome> password(
+    String server,
+    String user,
+    String pw, {
+    void Function()? onCommitting,
+  }) {
+    passwordCommitting = onCommitting;
+    return (passwordAnswer = Completer()).future;
+  }
+
+  @override
+  Future<SignInOutcome> sso(
+    String server,
+    IdentityProvider provider, {
+    required bool desktop,
+    void Function()? onCommitting,
+  }) => Completer<SignInOutcome>().future;
+
+  @override
+  void reopenSso() {}
+
+  @override
+  void cancelSso() {}
+
+  @override
+  void close() {}
 }
