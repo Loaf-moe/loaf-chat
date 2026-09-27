@@ -15,9 +15,9 @@ import 'ui/theme/loaf_theme.dart';
 /// cream is the alternative.
 final themeMode = ValueNotifier<ThemeMode>(ThemeMode.dark);
 
-/// `--dart-define=LOAF_BACKEND=matrix` talks to a real homeserver; anything
-/// else plays the mock, which stays the default until the rooms are real.
-const backend = String.fromEnvironment('LOAF_BACKEND', defaultValue: 'mock');
+/// The app talks to a real homeserver; `--dart-define=LOAF_BACKEND=mock`
+/// plays the mock instead, for previews and the debug levers.
+const backend = String.fromEnvironment('LOAF_BACKEND', defaultValue: 'matrix');
 
 /// The app's one account. Lives as long as the app, like [themeMode].
 late final LoafSession session;
@@ -30,12 +30,12 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // The stored session restores from disk before the first frame, so a
   // signed-in app never flashes the sign-in screen.
-  if (backend == 'matrix') {
+  if (backend == 'mock') {
+    session = MockSession();
+  } else {
     final matrix = await MatrixSession.open(desktop: isDesktop);
     session = matrix;
     newRooms = () => MatrixRooms(matrix.client);
-  } else {
-    session = MockSession();
   }
   runApp(const LoafApp());
 }

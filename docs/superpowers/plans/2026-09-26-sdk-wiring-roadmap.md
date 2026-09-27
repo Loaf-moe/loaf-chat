@@ -1,6 +1,6 @@
 # SDK Wiring Roadmap
 
-> **Status:** phase 1 has its step-level plan, `2026-09-26-real-sign-in.md`, which was rehearsed end to end. Every later phase gets its own plan when it comes up.
+> **Status:** phases 1–3 have landed, each from its own rehearsed plan (`2026-09-26-real-sign-in.md`, `2026-09-26-rooms-from-sync.md`, `2026-09-27-timeline.md`). The app now talks to a real homeserver by default. Every later phase gets its own plan when it comes up.
 
 **Goal:** Replace the mock source behind the finished UI with matrix-dart-sdk. Phases are ordered by what gets the app to "daily-drivable on loaf.moe" soonest for the least work.
 
@@ -24,7 +24,7 @@
 |---|---|---|---|
 | 1 | **Real sign-in:** Kanidm SSO (sheet on phones, browser on computers), password, a session that survives relaunch, sign out, trust from the SDK | Unblocks everything, and an SSO-only account can't get in without SSO. **Plan: `2026-09-26-real-sign-in.md`** | M |
 | 2 | **Rooms from sync:** rail, channel lists, Home sections, unreads, members | The first moment the app shows *your* loaf.moe. Read-only, so low risk **Plan: `2026-09-26-rooms-from-sync.md`** | M |
-| 3 | **Timeline:** read, send text, reply, react, edit, delete, read markers, pagination | Makes it usable for unencrypted rooms. `TimelineController`'s API already matches (`send`, `toggleReaction`, `saveEdit`, `delete`) | M |
+| 3 | **Timeline:** read, send text, reply, react, edit, delete, read markers, pagination | Makes it usable for unencrypted rooms. `TimelineController`'s API already matches (`send`, `toggleReaction`, `saveEdit`, `delete`) **Plan: `2026-09-27-timeline.md`** | M |
 | 4 | **E2EE:** verify by emoji, recovery key, set up recovery, key backup restore, the incoming "is this you?" | Without it encrypted DMs are unreadable. vodozemac is already initialised by phase 1; the UI and `VerificationController` exist, so swap timers for `KeyVerification` and `Bootstrap` | M–L |
 | 5 | **Channel and space actions:** join, leave, mute (push rule), DMs without duplicates, invites, `/hierarchy` browse, create space, tags and favourites | Every flow is already designed, and each is a thin call | M |
 | 6 | **Presence and status, profile, settings** | Cheap polish | S |
@@ -32,7 +32,7 @@
 | 8 | **APNs push via Sygnal, DM ringing** (CallKit/PushKit, MSC4075) | Mac-only work, scheduled around Mac access | L |
 | 9 | Images and files, media viewer | Part of the v1 messaging scope, and independent of the phases above | M |
 
-Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel subagents. Phases 7 and 8 depend on 4 for call media keys. The default backend flips from `mock` to `matrix` when phase 3 lands.
+Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel subagents. Phases 7 and 8 depend on 4 for call media keys. The default backend flipped from `mock` to `matrix` when phase 3 landed; `--dart-define=LOAF_BACKEND=mock` plays the mock.
 
 ## Deferred from phase 1, to place later
 
@@ -55,6 +55,17 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **Rail order** is alphabetical. Element orders spaces by the `org.matrix.msc3230.space_order` account data; adopt it if it matters.
 - **Member lists of very large rooms** load whole into memory when shown (`requestParticipants` with `cache: true`). Fine for loaf.moe; page them if a 10k-member room appears.
 - **The debug menu's call levers** still ring mock DMs on the real backend (debug builds only).
+
+## Deferred from phase 3, to place later
+
+- **Typing indicators, read receipts under messages, the unread divider and a jump-to-newest pill.** Each is new UI the spec does not draw yet.
+- **State events as timeline lines** (joins, leaves, renames, topics). They are skipped until then.
+- **Rich formatting, both ways.** Messages display as plain text, and send as plain text with no markdown, so what you see is what went out.
+- **Fetching a reply's target that is not loaded.** The quote is a stub ("a message further up") until then.
+- **Evicting cached timelines.** Every room opened stays open until sign-out; fine at loaf.moe's size, like large member lists.
+- **The composer's + and paperclip buttons** do nothing on either backend. They belong to media (phase 9); until then they are controls with nothing behind them.
+- **A toast for a refused reaction, edit or delete only shows while its room is on screen.** The screen still snaps back to what the server has.
+- **Voice channels read "messages aren't wired up yet"**, which an existing test pins, until calls land in phase 7.
 
 ## Global constraints (all phases)
 

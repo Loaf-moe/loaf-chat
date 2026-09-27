@@ -204,3 +204,36 @@ the flip.
   relaunch; unreads clear on opening; an encrypted room shows locked rows
   and the composer note; losing the network mid-send gives "didn't send",
   retry and discard.
+
+## Found while rehearsing
+
+The plan (`2026-09-27-timeline.md`) was rehearsed against this spec. These
+points were settled there:
+
+- **Two existing tests change, and only mechanically.** The shell test's
+  `_FakeRooms` gains `timeline()` returning null, since it implements
+  `Rooms`. `matrix_rooms_test`'s abilities assertion grows with each
+  ability turned on. It is the one assertion whose meaning is the change.
+- **Text is sent exactly as written.** The SDK's `sendTextEvent` runs slash
+  commands by default, so typing `/leave` or `/ban` would do it with no
+  confirmation. It also turns markdown into HTML by default. Both are off,
+  so what you see is what went out.
+- **The receipt is public on purpose.** The SDK also sends a private
+  receipt alongside it.
+- **Failed edits snap back.** The SDK's `getDisplayEvent` does not skip an
+  edit that failed to send, so `MatrixTimeline` picks the display event
+  itself (the newest non-failed edit by the author).
+- **The channel view's list is keyed by its timeline.** Before this it kept
+  listening to the room it first showed. With the mock that was invisible;
+  a real room's new messages would not have redrawn after switching.
+- **A message on its way when the app quit comes back failed.** The SDK
+  restores its echo as "sending" but never sends it again, which would
+  leave it dimmed for ever with no way forward. `MatrixTimeline` knows
+  which transactions it has in flight; any other sending echo reads as
+  failed, with retry and discard.
+- **A second tap on a reaction before the first reaches the server does
+  nothing.** Without that, the reaction was sent twice: its echo is not in
+  the timeline yet when the second tap looks for it.
+- **A voice channel still shows the unwired line on a backend with messages
+  but no calls.** Otherwise it would offer to join through the mock call
+  controller.
