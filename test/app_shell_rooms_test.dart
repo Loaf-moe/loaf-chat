@@ -12,6 +12,7 @@ import 'package:loaf_native/ui/channel/timeline.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
 import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/mock/mock_homeserver.dart';
+import 'package:loaf_native/ui/mock/mock_verifier.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
 import 'package:loaf_native/ui/settings/settings_page.dart';
@@ -19,6 +20,7 @@ import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/ui/verify/verifier.dart';
 
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
 final _desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
@@ -141,6 +143,8 @@ class _Session extends ChangeNotifier implements LoafSession {
   SoftLogout? get softLogout => null;
   @override
   IncomingRequest? get incoming => null;
+  @override
+  Verifier get verifier => MockVerifier();
   @override
   String get homeserverName => 'loaf.test';
   @override

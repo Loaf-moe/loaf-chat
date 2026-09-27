@@ -53,7 +53,7 @@ class MockSession extends ChangeNotifier implements LoafSession {
   @override
   Homeserver newHomeserver() => MockHomeserver(consumeFailure: consumeFailure);
 
-  /// What the verify panels run on.
+  @override
   late final Verifier verifier = MockVerifier(
     otherSessions: mockOtherSessions(),
     identityExists: () => _trust != DeviceTrust.noIdentity,

@@ -14,9 +14,11 @@ import '../ui/auth/homeserver.dart';
 import '../ui/auth/loaf_session.dart';
 import '../ui/auth/sign_in_state.dart';
 import '../ui/platform.dart';
+import '../ui/verify/verifier.dart';
 import 'client_factory.dart';
 import 'matrix_device_verification.dart';
 import 'matrix_homeserver.dart';
+import 'matrix_verifier.dart';
 import 'sso_browser.dart';
 
 class MatrixSession extends ChangeNotifier implements LoafSession {
@@ -95,6 +97,9 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
 
   @override
   IncomingRequest? get incoming => _incoming;
+
+  @override
+  late final Verifier verifier = MatrixVerifier(client);
 
   @override
   String get homeserverName => defaultServer;

@@ -4,16 +4,21 @@ import 'package:loaf_native/ui/auth/homeserver.dart';
 import 'package:loaf_native/ui/auth/loaf_session.dart';
 import 'package:loaf_native/ui/auth/sign_in_state.dart';
 import 'package:loaf_native/ui/mock/mock_homeserver.dart';
+import 'package:loaf_native/ui/mock/mock_verifier.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/ui/verify/verifier.dart';
 
 /// A session that is not a MockSession, the way MatrixSession is not: its
-/// notices are true, but the flows behind them are not built yet.
+/// panels run on whatever [verifier] it hands out, and its trust changes
+/// only when it says so.
 class _RealSession extends ChangeNotifier implements LoafSession {
-  _RealSession(this.trust);
+  _RealSession(this.trust, this.verifier);
 
   @override
   final DeviceTrust trust;
+  @override
+  final Verifier verifier;
 
   @override
   AccountState get account => AccountState.signedIn;
@@ -62,33 +67,49 @@ Future<void> _act(WidgetTester tester, String tile, String action) async {
 }
 
 void main() {
-  testWidgets('verifying a real session is not the mock flow', (tester) async {
-    final session = _RealSession(DeviceTrust.unverified);
+  testWidgets('verifying a real session opens its own panel', (tester) async {
+    final session = _RealSession(DeviceTrust.unverified, MockVerifier());
     addTearDown(session.dispose);
     await _pumpShell(tester, session);
     await _act(tester, 'verify this session', 'verify');
-    expect(
-      find.text('verifying this device arrives in the next build'),
-      findsOneWidget,
-    );
+    expect(find.text('use your recovery key'), findsOneWidget);
+    // No other device of yours to ask: the route isn't offered.
     expect(find.text('use another device'), findsNothing);
-    expect(find.text('use your recovery key'), findsNothing);
-    // The notice is true, so it stays.
-    expect(find.byTooltip('verify this session'), findsOneWidget);
   });
 
-  testWidgets('setting up recovery on a real session is not the mock flow', (
+  testWidgets('a real session unlocked is trusted by its own word', (
     tester,
   ) async {
-    final session = _RealSession(DeviceTrust.noIdentity);
+    final session = _RealSession(
+      DeviceTrust.unverified,
+      MockVerifier(otherSessions: const ['Element on Mac']),
+    );
+    addTearDown(session.dispose);
+    await _pumpShell(tester, session);
+    await _act(tester, 'verify this session', 'verify');
+    expect(find.text('Element on Mac'), findsOneWidget);
+    await tester.tap(find.text('use your recovery key'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.enterText(
+      find.widgetWithText(TextField, 'recovery key or passphrase'),
+      'bread before breakfast',
+    );
+    await tester.tap(find.text('unlock'));
+    await tester.pump(MockVerifier.keyCheckDelay);
+    expect(find.text('restoring history'), findsOneWidget);
+    // Its trust is read from the SDK, so the notice waits for it.
+    expect(find.byTooltip('verify this session'), findsOneWidget);
+    await tester.pump(MockVerifier.restoreTick * 20);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('setting up recovery on a real session opens its own panel', (
+    tester,
+  ) async {
+    final session = _RealSession(DeviceTrust.noIdentity, MockVerifier());
     addTearDown(session.dispose);
     await _pumpShell(tester, session);
     await _act(tester, 'set up recovery', 'set up');
-    expect(
-      find.text('setting up recovery arrives in the next build'),
-      findsOneWidget,
-    );
-    expect(find.textContaining('recovery key'), findsNothing);
-    expect(find.byTooltip('set up recovery'), findsOneWidget);
+    expect(find.text('create my recovery key'), findsOneWidget);
   });
 }

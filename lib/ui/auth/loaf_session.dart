@@ -45,6 +45,9 @@ abstract interface class LoafSession implements Listenable {
   SoftLogout? get softLogout;
   IncomingRequest? get incoming;
 
+  /// What the verify panels run on.
+  Verifier get verifier;
+
   /// The server the sign-in screen opens on.
   String get homeserverName;
 
