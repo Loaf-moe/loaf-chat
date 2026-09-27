@@ -909,17 +909,22 @@ class _AppShellState extends State<AppShell> {
   /// members, or a space channel's space. Asks the rooms for the whole
   /// list, where they only have some of it; they say when it arrives.
   MemberList _members(Channel channel, Member me) {
+    // Your own row shows your presence and status, which only a backend
+    // that edits your profile has; elsewhere the room's row, with your real
+    // power level, is the better one.
+    Member you(Member m) =>
+        m.id == me.id && _can(RoomAbility.editProfile) ? me : m;
     final List<Member> members;
     switch (channel.kind) {
       case ChannelKind.direct:
         members = [me, ...channel.members];
       case ChannelKind.room:
         _rooms.loadMembers(channel.id);
-        members = [for (final m in channel.members) m.id == me.id ? me : m];
+        members = [for (final m in channel.members) you(m)];
       case ChannelKind.text || ChannelKind.voice:
         final space = _space;
         _rooms.loadMembers(space.id);
-        members = [for (final m in space.members) m.id == me.id ? me : m];
+        members = [for (final m in space.members) you(m)];
     }
     return MemberList(members: members);
   }

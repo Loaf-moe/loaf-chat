@@ -34,11 +34,11 @@ const _mod = Member(
   powerLevel: 50,
 );
 
-Space _bakery({List<Channel>? channels}) => Space(
+Space _bakery({List<Channel>? channels, List<Member>? members}) => Space(
   id: '!bakery',
   name: 'Bakery',
   color: const Color(0xFFD97B2A),
-  members: const [_me, _mod],
+  members: members ?? const [_me, _mod],
   categories: [
     ChannelCategory(
       '',
@@ -362,6 +362,28 @@ void main() {
       await _pump(tester, rooms);
       expect(rooms.membersAsked, contains('!bakery'));
       expect(find.text('Moddy'), findsOneWidget);
+    });
+  });
+
+  group('the member list', () {
+    testWidgets('you keep your power level in it', (tester) async {
+      const admin = Member(
+        '@chris:loaf.test',
+        'Chris',
+        Color(0xFF3B82F6),
+        presence: Presence.unknown,
+        powerLevel: 100,
+      );
+      await _pump(
+        tester,
+        _FakeRooms(
+          spaces: [
+            _bakery(members: const [admin, _mod]),
+          ],
+        ),
+      );
+      expect(find.text('ADMINS — 1'), findsOneWidget);
+      expect(find.text('MEMBERS — 1'), findsOneWidget);
     });
   });
 
