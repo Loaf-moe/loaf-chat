@@ -11,6 +11,7 @@ import 'package:matrix/matrix.dart';
 
 import '../ui/verify/verifier.dart';
 import '../ui/verify/verify_state.dart';
+import 'unlock_failure.dart';
 
 class MatrixDeviceVerification extends ChangeNotifier
     implements DeviceVerification {
@@ -132,11 +133,8 @@ class MatrixDeviceVerification extends ChangeNotifier
     try {
       await v.openSSSS(keyOrPassphrase: keyOrPassphrase);
       return UnlockResult.unlocked;
-    } on InvalidPassphraseException {
-      return UnlockResult.wrongKey;
     } on Object catch (e, s) {
-      Logs().w('[loaf] unlocking to vouch failed', e, s);
-      return UnlockResult.unreachable;
+      return unlockFailure(e, s);
     }
   }
 

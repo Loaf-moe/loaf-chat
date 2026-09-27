@@ -4,15 +4,14 @@
 library;
 
 import 'dart:async';
-import 'dart:io';
 
-import 'package:http/http.dart' as http;
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../ui/verify/verifier.dart';
 import 'matrix_device_verification.dart';
+import 'unlock_failure.dart';
 
 class MatrixVerifier implements Verifier {
   MatrixVerifier(
@@ -92,28 +91,8 @@ class MatrixVerifier implements Verifier {
         return UnlockResult.wrongKey;
       }
       return UnlockResult.unlocked;
-    } on InvalidPassphraseException {
-      return UnlockResult.wrongKey;
-    } on FormatException {
-      return UnlockResult.wrongKey;
-    } on BootstrapBadStateException catch (e, s) {
-      Logs().w('[loaf] this account has no usable secret storage', e, s);
-      return UnlockResult.wrongKey;
-    } on IOException catch (e, s) {
-      Logs().w('[loaf] reaching the server failed', e, s);
-      return UnlockResult.unreachable;
-    } on http.ClientException catch (e, s) {
-      Logs().w('[loaf] reaching the server failed', e, s);
-      return UnlockResult.unreachable;
-    } on TimeoutException catch (e, s) {
-      Logs().w('[loaf] reaching the server failed', e, s);
-      return UnlockResult.unreachable;
-    } on MatrixException catch (e, s) {
-      Logs().w('[loaf] reaching the server failed', e, s);
-      return UnlockResult.unreachable;
     } on Object catch (e, s) {
-      Logs().w('[loaf] unlocking secret storage failed', e, s);
-      return UnlockResult.wrongKey;
+      return unlockFailure(e, s);
     }
   }
 

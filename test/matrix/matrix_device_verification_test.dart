@@ -162,6 +162,34 @@ void main() {
     a.cancel();
   });
 
+  test('vouching with a mistyped key is a wrong key, not an unreachable '
+      'server', () async {
+    // As in the test above: a verified identity whose secrets aren't here.
+    mine.userDeviceKeys[me]!.masterKey!.setDirectVerified(true);
+    await mine.encryption!.ssss.clearCache();
+    // A key with no passphrase to fall back on, so a key that isn't base58
+    // fails as a key rather than as a passphrase.
+    final keyType = EventTypes.secretStorageKey(
+      mine.encryption!.ssss.defaultKeyId!,
+    );
+    mine.accountData[keyType] = BasicEvent(
+      type: keyType,
+      content: {...mine.accountData[keyType]!.content}..remove('passphrase'),
+    );
+    final req = await mine.userDeviceKeys[other]!.startVerification(
+      newDirectChatEnableEncryption: false,
+    );
+    final a = MatrixDeviceVerification(req);
+    addTearDown(a.dispose);
+    expect(a.phase, DevicePhase.needsKey);
+    // Its length and `Es` start kept; one character not base58 at all.
+    final mistyped = fixtureRecoveryKey.split('');
+    mistyped[mistyped.indexWhere((c) => c != ' ', 2)] = '0';
+    expect(await a.unlock(mistyped.join()), UnlockResult.wrongKey);
+    expect(a.phase, DevicePhase.needsKey);
+    a.cancel();
+  });
+
   group('asking your other devices', () {
     test('goes out to every device, and waits', () async {
       FakeMatrixApi.calledEndpoints.clear();
