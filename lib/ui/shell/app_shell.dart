@@ -26,7 +26,9 @@ import '../members/member_list.dart';
 import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
+import '../mock/mock_rooms.dart';
 import '../platform.dart';
+import '../rooms/rooms.dart';
 import '../theme/loaf_theme.dart';
 import 'channel_list.dart';
 import 'mock_debug.dart';
@@ -49,11 +51,15 @@ import 'user_bar.dart';
 const _wideBreakpoint = 900.0;
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, this.session});
+  const AppShell({super.key, this.session, this.rooms});
 
   /// Who is signed in, and how far this device is trusted. The app passes
   /// its one session; left out (tests, previews), the shell makes its own.
   final LoafSession? session;
+
+  /// Makes the account's rooms, once, when the shell opens; the shell
+  /// disposes them when it closes. Left out, the rooms are the mock's.
+  final Rooms Function()? rooms;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -64,6 +70,7 @@ class _AppShellState extends State<AppShell> {
   final _timeline = TimelineController(mockTimeline(), you: currentUser);
   final _profile = ProfileController();
   late final LoafSession _session = widget.session ?? MockSession();
+  late final Rooms _rooms = widget.rooms?.call() ?? MockRooms();
   late final _calls = CallController(
     me: currentUser,
     rings: mockRings,
@@ -79,7 +86,9 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     // The channel the app opens on is being read from the first frame.
-    _read.add(_channel.id);
+    // Before listening: nothing is built yet to hear it.
+    _rooms.markRead(_channel.id);
+    _rooms.addListener(_onChange);
     _profile.addListener(_onChange);
     _calls.addListener(_onChange);
     _session.addListener(_onSessionChange);
@@ -90,6 +99,9 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     _session.removeListener(_onSessionChange);
+    _rooms
+      ..removeListener(_onChange)
+      ..dispose();
     _verification?.dispose();
     if (widget.session == null) _session.dispose();
     _profile
@@ -105,7 +117,7 @@ class _AppShellState extends State<AppShell> {
     super.dispose();
   }
 
-  String _spaceId = mockSpaces.first.id;
+  late String _spaceId = _rooms.spaces.firstOrNull?.id ?? mockHome.id;
 
   /// Where you were in each space. Switching away and back should not dump
   /// you in the first channel again.
@@ -124,87 +136,45 @@ class _AppShellState extends State<AppShell> {
   /// Desktop only: the voice call fills the window.
   bool _fullscreen = false;
 
-  // This session's changes, layered over the fixtures by Space.withSession.
-  final _membership = <String, bool>{};
-  final _mutedNow = <String, bool>{};
-  final _read = <String>{};
+  // What the call and timeline mocks add over the rooms: missed calls
+  // count as unread, and a DM that saw a message or a call moves up. They
+  // go when those mocks do.
   final _missedCalls = <String, int>{};
-
-  // Home's room tags, as this session has them. Favourites are a list so
-  // their order is the list's; m.favourite's `order` is its position.
-  late final _favourites = [
-    for (final room in [
-      ...mockHomeRooms,
-    ]..sort((a, b) => (a.favouriteOrder ?? 1).compareTo(b.favouriteOrder ?? 1)))
-      if (room.favourite) room.id,
-  ];
-  final _lowPriority = <String, bool>{};
-
-  /// When a DM last saw a message or a call, this session.
   final _activity = <String, DateTime>{};
-
-  // Invites answered this session, and what accepting them brought in.
-  final _answeredInvites = <String>{};
-  final _acceptedRooms = <Channel>[];
-  final _acceptedSpaces = <Space>[];
 
   /// The invite being previewed in place of a conversation, if any.
   String? _previewInvite;
 
-  List<Space> get _spaces => [...mockSpaces, ..._acceptedSpaces];
+  List<Space> get _spaces => _rooms.spaces;
 
-  List<Invite> get _invites => [
-    for (final invite in mockInvites)
-      if (!_answeredInvites.contains(invite.id)) invite,
-  ];
+  List<Invite> get _invites => _rooms.invites;
 
   bool get _home => _spaceId == mockHome.id;
 
-  /// Home's rooms with this session's tags and activity applied. Rooms you
-  /// have left are gone: Home has no "join" pills, only what you are in.
+  /// Home's rooms with the calls' and timelines' changes layered on.
   List<Channel> get _homeRooms => [
-    for (final room in [...mockHomeRooms, ..._acceptedRooms])
-      if (_membership[room.id] != false)
-        room.copyWith(
-          favourite: _favourites.contains(room.id),
-          favouriteOrder: _favourites.contains(room.id)
-              ? _favourites.indexOf(room.id) / _favourites.length
-              : null,
-          lowPriority: _lowPriority[room.id],
-          lastActivity: _activity[room.id],
-          // Read state is applied per room here, before duplicates fold
-          // together, so an older room's unreads still count on the row.
-          unread:
-              (_read.contains(room.id) ? 0 : room.unread) +
-              (_missedCalls[room.id] ?? 0),
-          mentions: _read.contains(room.id) ? 0 : room.mentions,
-        ),
+    for (final room in _rooms.homeRooms)
+      room.copyWith(
+        lastActivity: _activity[room.id],
+        // Per room, before duplicates fold together, so an older room's
+        // missed calls still count on the row.
+        unread: room.unread + (_missedCalls[room.id] ?? 0),
+      ),
   ];
 
   Space get _space {
     if (!_home) {
       return _spaces
           .firstWhere((s) => s.id == _spaceId)
-          .withSession(
-            membership: _membership,
-            muted: _mutedNow,
-            read: _read,
-            occupants: _callOccupants,
-            unread: _missedCalls,
-          );
+          .withSession(occupants: _callOccupants, unread: _missedCalls);
     }
-    // Home's rooms already carry their read state; see _homeRooms.
     return Space(
       id: mockHome.id,
       name: mockHome.name,
       color: mockHome.color,
       members: mockHome.members,
       categories: homeSections(collapseDuplicates(_homeRooms)),
-    ).withSession(
-      membership: _membership,
-      muted: _mutedNow,
-      occupants: _callOccupants,
-    );
+    ).withSession(occupants: _callOccupants);
   }
 
   /// Who is in the call you are in, you included — so its channel or DM
@@ -275,7 +245,7 @@ class _AppShellState extends State<AppShell> {
     _fullscreen = false;
     _previewInvite = null;
     // Seeing a conversation is reading it, in a space as much as in Home.
-    _read.add(channelId);
+    _rooms.markRead(channelId);
     _missedCalls.remove(channelId);
   }
 
@@ -287,7 +257,7 @@ class _AppShellState extends State<AppShell> {
     // being in the call are separate steps.
     final joining = !channel.joined;
     setState(() {
-      if (joining) _membership[id] = true;
+      if (joining) _rooms.setJoined(id, true);
       _open(_spaceId, id);
       // A computer connects on click; a phone shows the lobby first, since a
       // stray tap there should never open a live mic.
@@ -320,25 +290,25 @@ class _AppShellState extends State<AppShell> {
   void _applyChannelAction(String id, ChannelAction action) {
     switch (action) {
       case ChannelAction.markRead:
-        _read.add(id);
+        _rooms.markRead(id);
       case ChannelAction.favourite:
-        _favourites.add(id);
+        _rooms.setFavourite(id, true);
       case ChannelAction.unfavourite:
-        _favourites.remove(id);
+        _rooms.setFavourite(id, false);
       case ChannelAction.lowPriority:
-        _lowPriority[id] = true;
+        _rooms.setLowPriority(id, true);
       case ChannelAction.notLowPriority:
-        _lowPriority[id] = false;
+        _rooms.setLowPriority(id, false);
       case ChannelAction.olderConversations:
         break; // Handled before any state changes: it asks first.
       case ChannelAction.mute:
-        _mutedNow[id] = true;
+        _rooms.setMuted(id, true);
       case ChannelAction.unmute:
-        _mutedNow[id] = false;
+        _rooms.setMuted(id, false);
       case ChannelAction.leave:
         // Leaving the channel you are reading falls through to the space's
         // first joined text channel: see _channel.
-        _membership[id] = false;
+        _rooms.setJoined(id, false);
         // Leaving a voice channel you are in takes you out of the call too.
         if (_calls.session?.target.id == id) _calls.leave();
     }
@@ -362,8 +332,6 @@ class _AppShellState extends State<AppShell> {
 
   // ── Adding spaces ──────────────────────────────────────────────────
 
-  var _made = 0;
-
   Future<void> _addSpace() async {
     final result = await showAddSpace(
       context,
@@ -375,34 +343,10 @@ class _AppShellState extends State<AppShell> {
         case OpenSpace(:final id):
           _spaceId = id;
         case JoinSpace(:final space):
-          _acceptedSpaces.add(space);
-          // Joining a space you were invited to answers the invite.
-          for (final invite in mockInvites) {
-            if (invite.space?.id == space.id) _answeredInvites.add(invite.id);
-          }
+          _rooms.joinSpace(space);
           _spaceId = space.id;
         case CreateSpace(:final name):
-          // The mock's space creation: the space room, then #general and a
-          // voice channel as its children, both restricted to its members.
-          final id = 'made-${_made++}';
-          _acceptedSpaces.add(
-            Space(
-              id: id,
-              name: name,
-              color: spaceColorFor(name),
-              members: [_profile.me],
-              categories: [
-                ChannelCategory('', [
-                  Channel(id: '$id-general', name: 'general'),
-                  Channel(
-                    id: '$id-hangout',
-                    name: 'hangout',
-                    kind: ChannelKind.voice,
-                  ),
-                ]),
-              ],
-            ),
-          );
+          final id = _rooms.createSpace(name, me: _profile.me);
           _open(id, '$id-general');
       }
       _fullscreen = false;
@@ -411,8 +355,6 @@ class _AppShellState extends State<AppShell> {
   }
 
   // ── New messages ───────────────────────────────────────────────────
-
-  var _started = 0;
 
   Future<void> _newMessage() async {
     final me = _profile.me;
@@ -438,20 +380,7 @@ class _AppShellState extends State<AppShell> {
         case OpenExisting(:final room):
           _open(mockHome.id, room.id);
         case CreateDirect(:final members):
-          // The mock's createRoom: is_direct, trusted_private_chat, the
-          // people invited, and the room added to m.direct.
-          final room = Channel(
-            id: 'dm-new-${_started++}',
-            name: members.length == 1
-                ? members.single.name
-                : members.map((m) => m.name.split(' ').first).join(', '),
-            kind: ChannelKind.direct,
-            members: members,
-            waitingFor: members,
-          );
-          _acceptedRooms.add(room);
-          _activity[room.id] = DateTime.now();
-          _open(mockHome.id, room.id);
+          _open(mockHome.id, _rooms.createDirect(members).id);
       }
     });
     _scaffoldKey.currentState?.closeDrawer();
@@ -466,24 +395,21 @@ class _AppShellState extends State<AppShell> {
 
   /// A DM or room joins its section and opens; a space joins the rail and
   /// you stay in Home, where the rest of your invites are.
-  void _acceptInvite(Invite invite) => setState(() {
-    _answeredInvites.add(invite.id);
-    _previewInvite = null;
-    final room = invite.room;
-    final space = invite.space;
-    if (room != null) {
-      _acceptedRooms.add(room);
-      _activity[room.id] = DateTime.now();
-      _open(mockHome.id, room.id);
-    } else if (space != null) {
-      _acceptedSpaces.add(space);
-    }
-  });
+  Future<void> _acceptInvite(Invite invite) async {
+    await _rooms.accept(invite);
+    if (!mounted) return;
+    setState(() {
+      _previewInvite = null;
+      final room = invite.room;
+      if (room != null) _open(mockHome.id, room.id);
+    });
+  }
 
-  void _declineInvite(Invite invite) => setState(() {
-    _answeredInvites.add(invite.id);
-    _previewInvite = null;
-  });
+  Future<void> _declineInvite(Invite invite) async {
+    await _rooms.decline(invite);
+    if (!mounted) return;
+    setState(() => _previewInvite = null);
+  }
 
   void _onCallRecord(Channel chat, CallRecord record) {
     _activity[chat.id] = DateTime.now();
@@ -911,15 +837,7 @@ class _AppShellState extends State<AppShell> {
         Row(
           children: [
             SpacesRail(
-              // With this session's reading applied, so badges recount.
-              spaces: [
-                for (final space in _spaces)
-                  space.withSession(
-                    membership: _membership,
-                    muted: _mutedNow,
-                    read: _read,
-                  ),
-              ],
+              spaces: _spaces,
               selectedSpaceId: _spaceId,
               onSelect: _selectSpace,
               notices: _notices,
@@ -941,11 +859,7 @@ class _AppShellState extends State<AppShell> {
                 selectedInviteId: _previewInvite,
                 onOpenInvite: _openInvite,
                 onNewMessage: _newMessage,
-                onReorderFavourites: (ids) => setState(
-                  () => _favourites
-                    ..clear()
-                    ..addAll(ids),
-                ),
+                onReorderFavourites: _rooms.reorderFavourites,
               ),
             ),
           ],
