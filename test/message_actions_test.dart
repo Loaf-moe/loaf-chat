@@ -219,6 +219,43 @@ void main() {
     });
 
     testWidgets(
+      'after reacting from the toolbar\'s menu, leaving the message hides it',
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester, _them);
+
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        addTearDown(mouse.removePointer);
+        await mouse.addPointer(location: Offset.zero);
+        await mouse.moveTo(tester.getCenter(_body));
+        await tester.pumpAndSettle();
+        // One mouse throughout, clicking where it points, as in the app.
+        Future<void> click(Finder target) async {
+          await mouse.moveTo(tester.getCenter(target));
+          await tester.pump();
+          await mouse.down(tester.getCenter(target));
+          await mouse.up();
+          await tester.pumpAndSettle();
+        }
+
+        await click(find.byTooltip('More'));
+        await click(find.byTooltip('More reactions'));
+        await click(find.byTooltip('grinning face'));
+        expect(find.text('😀 1'), findsOneWidget);
+
+        await mouse.moveTo(const Offset(790, 890));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Reply'), findsNothing);
+        // And hovering it again shows one toolbar, not a stale one as well.
+        await mouse.moveTo(tester.getCenter(_body));
+        await tester.pumpAndSettle();
+        await mouse.moveTo(const Offset(790, 890));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Reply'), findsNothing);
+      },
+    );
+
+    testWidgets(
       'the toolbar sits on the message, not off the edge of the window',
       variant: _desktop,
       (tester) async {

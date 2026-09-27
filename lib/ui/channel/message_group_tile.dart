@@ -491,7 +491,12 @@ class _PointerMessageState extends State<_PointerMessage> {
   }
 
   Future<void> _openMenu(Offset globalPosition, {String selection = ''}) async {
-    setState(() => _active = true);
+    // Hiding the toolbar unmounts its MouseRegion, which never reports the
+    // pointer leaving; forget it here or the toolbar and wash stay stuck on.
+    setState(() {
+      _active = true;
+      _overToolbar = false;
+    });
     _toolbar.hide();
     await showMessageContextMenu(
       context,
