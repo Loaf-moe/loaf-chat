@@ -13,11 +13,14 @@ import 'package:loaf_native/ui/verify/verify_state.dart';
 const _wide = Size(1440, 900);
 const _route = Duration(milliseconds: 400);
 
-Future<MockSession> _pumpShell(WidgetTester tester) async {
+Future<MockSession> _pumpShell(
+  WidgetTester tester, [
+  MockSession? session,
+]) async {
   tester.view.physicalSize = _wide;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
-  final s = MockSession();
+  final s = session ?? MockSession();
   await tester.pumpWidget(
     MaterialApp(
       theme: loafLightTheme(),
@@ -38,6 +41,32 @@ Future<void> _openVerify(WidgetTester tester) async {
   // The panel is pushed once the notice has closed, a frame later.
   await tester.pump();
   await tester.pump(_route);
+}
+
+/// A session whose trust the SDK hasn't re-read yet: the notice stays, so a
+/// flow put away can be opened again. [receiveRequest] can't flip it either.
+class _TrustLagsSession extends MockSession {
+  @override
+  DeviceTrust get trust => DeviceTrust.unverified;
+}
+
+/// Waits out the frame that notices [MockSession.receiveRequest] and the one
+/// that pushes its panel.
+Future<void> _incomingShows(WidgetTester tester, Duration settle) async {
+  await tester.pump();
+  await tester.pump();
+  await tester.pump(settle);
+  expect(find.text('is this you?'), findsOneWidget);
+}
+
+/// Up to the set-up panel's create button, on a fresh account.
+Future<void> _toSetUp(WidgetTester tester, MockSession s) async {
+  s.useFreshAccount();
+  await tester.pumpAndSettle();
+  await tester.tap(find.byTooltip('set up recovery'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('set up'));
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -324,5 +353,110 @@ void main() {
     final title = tester.getRect(find.text('verify this session').last);
     final lead = tester.getRect(find.textContaining("prove it's you"));
     expect(title.left, lead.left);
+  });
+
+  group('an incoming request never touches the open flow', () {
+    testWidgets('a new key shown unsaved is still there to save after', (
+      tester,
+    ) async {
+      final s = await _pumpShell(tester);
+      await _toSetUp(tester, s);
+      await tester.tap(find.text('create my recovery key'));
+      await tester.pump(MockVerifier.keyCheckDelay);
+      await tester.pumpAndSettle();
+      expect(find.text(mockNewRecoveryKey), findsOneWidget);
+
+      s.receiveRequest();
+      await _incomingShows(tester, _route);
+      await tester.tap(find.text("that's not me"));
+      await tester.pump(_route);
+      await tester.tap(find.text('close'));
+      await tester.pumpAndSettle();
+      expect(find.text('is this you?'), findsNothing);
+
+      expect(find.text(mockNewRecoveryKey), findsOneWidget);
+      await tester.tap(find.text('copy'));
+      await tester.pump();
+      await tester.tap(find.text("i've saved it"));
+      await tester.pump();
+      await tester.pump(VerificationController.doneLinger);
+      await tester.pumpAndSettle();
+      expect(find.text(mockNewRecoveryKey), findsNothing);
+      expect(find.text('recovery is set up'), findsOneWidget);
+    });
+
+    testWidgets(
+      'a key being made still shows once the request is put away',
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      (tester) async {
+        final s = await _pumpShell(tester);
+        await _toSetUp(tester, s);
+        await tester.tap(find.text('create my recovery key'));
+        await tester.pump();
+        expect(find.text('creating…'), findsOneWidget);
+
+        // Well inside the key check, so the key is still being made.
+        const step = Duration(milliseconds: 100);
+        s.receiveRequest();
+        await _incomingShows(tester, step);
+        // Put away by tapping outside it.
+        await tester.tapAt(const Offset(10, 10));
+        await tester.pump();
+        await tester.pump(step * 2);
+        await tester.pump();
+        expect(find.text('is this you?'), findsNothing);
+        expect(find.text('creating…'), findsOneWidget);
+
+        await tester.pump(MockVerifier.keyCheckDelay);
+        await tester.pumpAndSettle();
+        expect(find.text(mockNewRecoveryKey), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'history restoring unseen carries on through a request',
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      (tester) async {
+        final s = await _pumpShell(tester, _TrustLagsSession());
+        await _openVerify(tester);
+        await tester.tap(find.text('use your recovery key'));
+        await tester.pump(_route);
+        await tester.enterText(
+          find.widgetWithText(TextField, 'recovery key or passphrase'),
+          mockRecoveryKey,
+        );
+        await tester.tap(find.text('unlock'));
+        await tester.pump(MockVerifier.keyCheckDelay);
+        expect(find.text('restoring history'), findsOneWidget);
+        await tester.tapAt(const Offset(10, 10));
+        await tester.pump();
+        await tester.pump(_route);
+        await tester.pump();
+        expect(find.text('restoring history'), findsNothing);
+
+        s.receiveRequest();
+        await _incomingShows(tester, _route);
+        await tester.tap(find.text("that's not me"));
+        await tester.pump(_route);
+        await tester.tap(find.text('close'));
+        await tester.pump();
+        await tester.pump(_route);
+        await tester.pump();
+        expect(find.text('is this you?'), findsNothing);
+
+        await _openVerify(tester);
+        final restoring = find.text('restoring history').evaluate().isNotEmpty;
+        final done = find
+            .text('this session is verified')
+            .evaluate()
+            .isNotEmpty;
+        expect(restoring || done, isTrue, reason: 'not started over');
+        expect(find.text('use your recovery key'), findsNothing);
+
+        await tester.pump(MockVerifier.restoreTick * 21);
+        await tester.pump(VerificationController.doneLinger);
+        await tester.pumpAndSettle();
+      },
+    );
   });
 }

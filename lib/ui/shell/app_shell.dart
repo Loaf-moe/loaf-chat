@@ -100,6 +100,8 @@ class _AppShellState extends State<AppShell> {
       ..removeListener(_onChange)
       ..dispose();
     _verification?.dispose();
+    _incomingFlow?.dispose();
+    _incomingFlow = null;
     if (widget.session == null) _session.dispose();
     _profile
       ..removeListener(_onChange)
@@ -551,35 +553,41 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
-  /// The verification flow in hand, kept only while it works unseen (history
-  /// restoring after the panel was put away).
+  /// The verification flow in hand, kept only while it works unseen
+  /// (history restoring after the panel was put away, a new key being made
+  /// or waiting to be saved). Never an incoming request's.
   VerificationController? _verification;
+
+  /// The incoming request's flow, while its panel is up. Its own slot: a
+  /// request can arrive over any open flow, and must never end that one —
+  /// a key being made or shown unsaved would be lost with it.
+  VerificationController? _incomingFlow;
 
   Future<void> _openVerification(
     VerifyPurpose purpose, {
     IncomingRequest? request,
   }) async {
-    final session = _session;
+    if (purpose == VerifyPurpose.incoming) {
+      if (request != null) await _answerIncoming(request);
+      return;
+    }
     final kept = _verification;
     final VerificationController v;
-    if (kept != null && kept.purpose == purpose) {
+    // A flow that works unseen is reopened whatever was asked for: ending
+    // it could drop a key being made, or stop history mid-restore.
+    if (kept != null && (kept.purpose == purpose || kept.worksUnseen)) {
       v = kept;
     } else {
       kept?.dispose();
       v = VerificationController(
         purpose: purpose,
-        verifier: session.verifier,
-        incoming: request?.verification,
-        incomingDevice: request?.device,
-        server: session.homeserverName,
-        onTrusted: purpose == VerifyPurpose.incoming
-            ? () {}
-            : _session.markVerified,
+        verifier: _session.verifier,
+        server: _session.homeserverName,
+        onTrusted: _session.markVerified,
       );
     }
     _verification = v;
     final finished = await showVerifyPanel(context, v);
-    if (purpose == VerifyPurpose.incoming) _session.clearIncoming();
     if (!mounted) return;
     if (finished == true) showToast(context, v.doneMessage);
     // A flow put away mid-restore carries on; any other starts over next
@@ -588,6 +596,27 @@ class _AppShellState extends State<AppShell> {
       _verification = null;
       v.dispose();
     }
+  }
+
+  /// Made fresh for each request and ended with its panel.
+  Future<void> _answerIncoming(IncomingRequest request) async {
+    final v = VerificationController(
+      purpose: VerifyPurpose.incoming,
+      verifier: _session.verifier,
+      incoming: request.verification,
+      incomingDevice: request.device,
+      server: _session.homeserverName,
+      onTrusted: () {},
+    );
+    _incomingFlow = v;
+    final finished = await showVerifyPanel(context, v);
+    // Already ended if the shell went while the panel was up.
+    if (identical(_incomingFlow, v)) {
+      _incomingFlow = null;
+      v.dispose();
+    }
+    _session.clearIncoming();
+    if (mounted && finished == true) showToast(context, v.doneMessage);
   }
 
   // ── Building ───────────────────────────────────────────────────────────
