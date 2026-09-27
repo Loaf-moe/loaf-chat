@@ -244,6 +244,39 @@ void main() {
     expect(bakery.categories.first.channels.first.kind, ChannelKind.text);
   });
 
+  test(
+    'a room listed twice in one category\'s tree appears there once',
+    () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _sync(client, {
+        'join': {
+          '!mill:example.com': _room(
+            'Mill',
+            type: 'm.space',
+            extra: [_child('!grain:example.com')],
+          ),
+          '!grain:example.com': _room(
+            'grain',
+            type: 'm.space',
+            extra: [_child('!flour:example.com'), _child('!rye:example.com')],
+          ),
+          '!rye:example.com': _room(
+            'rye',
+            type: 'm.space',
+            extra: [_child('!flour:example.com')],
+          ),
+          '!flour:example.com': _room('flour'),
+        },
+      });
+      await _settle();
+      final mill = rooms.spaces.single;
+      expect(mill.categories.single.channels.map((c) => c.id), [
+        '!flour:example.com',
+      ]);
+    },
+  );
+
   test('a channel carries its counts, topic and lock', () async {
     final client = await _client();
     final rooms = await _rooms(client);

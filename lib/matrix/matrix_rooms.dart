@@ -216,7 +216,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   /// A category's rooms: its joined non-space children, then those of any
   /// subspaces under it, flattened in. [seen] stops a space that lists an
-  /// ancestor from looping.
+  /// ancestor from looping, and a room listed under two of the category's
+  /// subspaces from appearing in it twice.
   Iterable<Room> _descendants(
     Room space,
     Map<String, Room> joined,
@@ -228,7 +229,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       if (room == null) continue;
       if (room.isSpace) {
         yield* _descendants(room, joined, seen);
-      } else {
+      } else if (seen.add(room.id)) {
         yield room;
       }
     }
