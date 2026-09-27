@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
 import 'ui/auth/loaf_session.dart';
 import 'ui/auth/session_root.dart';
 import 'ui/mock/mock_session.dart';
 import 'ui/platform.dart';
+import 'ui/rooms/rooms.dart';
 import 'ui/theme/loaf_theme.dart';
 
 /// Dark is the default. The brand defines no dark palette, but a community
@@ -20,13 +22,21 @@ const backend = String.fromEnvironment('LOAF_BACKEND', defaultValue: 'mock');
 /// The app's one account. Lives as long as the app, like [themeMode].
 late final LoafSession session;
 
+/// Makes the account's rooms each time the app opens onto them; null plays
+/// the mock's.
+Rooms Function()? newRooms;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // The stored session restores from disk before the first frame, so a
   // signed-in app never flashes the sign-in screen.
-  session = backend == 'matrix'
-      ? await MatrixSession.open(desktop: isDesktop)
-      : MockSession();
+  if (backend == 'matrix') {
+    final matrix = await MatrixSession.open(desktop: isDesktop);
+    session = matrix;
+    newRooms = () => MatrixRooms(matrix.client);
+  } else {
+    session = MockSession();
+  }
   runApp(const LoafApp());
 }
 
@@ -54,7 +64,10 @@ class LoafApp extends StatelessWidget {
         },
         // Sign-in or the app, as the session says. The debug menu's levers
         // move between them.
-        child: Focus(autofocus: true, child: SessionRoot(session: session)),
+        child: Focus(
+          autofocus: true,
+          child: SessionRoot(session: session, rooms: newRooms),
+        ),
       ),
     ),
   );

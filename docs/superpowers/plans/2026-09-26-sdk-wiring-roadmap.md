@@ -23,7 +23,7 @@
 | # | Phase | Why here | Size |
 |---|---|---|---|
 | 1 | **Real sign-in:** Kanidm SSO (sheet on phones, browser on computers), password, a session that survives relaunch, sign out, trust from the SDK | Unblocks everything, and an SSO-only account can't get in without SSO. **Plan: `2026-09-26-real-sign-in.md`** | M |
-| 2 | **Rooms from sync:** rail, channel lists, Home sections, unreads, members | The first moment the app shows *your* loaf.moe. Read-only, so low risk | M |
+| 2 | **Rooms from sync:** rail, channel lists, Home sections, unreads, members | The first moment the app shows *your* loaf.moe. Read-only, so low risk **Plan: `2026-09-26-rooms-from-sync.md`** | M |
 | 3 | **Timeline:** read, send text, reply, react, edit, delete, read markers, pagination | Makes it usable for unencrypted rooms. `TimelineController`'s API already matches (`send`, `toggleReaction`, `saveEdit`, `delete`) | M |
 | 4 | **E2EE:** verify by emoji, recovery key, set up recovery, key backup restore, the incoming "is this you?" | Without it encrypted DMs are unreadable. vodozemac is already initialised by phase 1; the UI and `VerificationController` exist, so swap timers for `KeyVerification` and `Bootstrap` | M–L |
 | 5 | **Channel and space actions:** join, leave, mute (push rule), DMs without duplicates, invites, `/hierarchy` browse, create space, tags and favourites | Every flow is already designed, and each is a thin call | M |
@@ -44,6 +44,17 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **Pressing Enter in the password field during the point of no return** reaches the submit handler, which is a no-op there. The fields could be read-only while signing in, to be fully honest.
 - **Reset identity's re-sign-in** (`lib/ui/verify/verification_controller.dart`) still picks browser vs. system window by `isDesktop`. When phase 4 wires it to real SSO, it must use `ssoInBrowser`, so a Mac uses the system window there too.
 - **Small tidy-ups:** `sso()` and `_signIn()` both look up `_bases`; `openClient` calls `sqfliteFfiInit()` on every call; the failure note and the server-check note on the sign-in screen are two identical blocks; `MatrixSession.open()` itself has no test.
+
+## Deferred from phase 2, to place later
+
+- **Unjoined channels from `/hierarchy`**, and joining a space's category subspaces and suggested channels (phase 5, with joining).
+- **Voice occupancy avatars** need a `VoIP` instance to read MatrixRTC memberships (phase 7).
+- **Avatar images** (`mxc` thumbnails) for spaces, rooms and people (phase 6 or 9). Initials on a colour until then.
+- **Presence of others** is `Presence.unknown` until phase 6.
+- **Marking read on opening** waits for read markers (phase 3); until then a real room's unread count stays after reading it elsewhere only until the next sync.
+- **Rail order** is alphabetical. Element orders spaces by the `org.matrix.msc3230.space_order` account data; adopt it if it matters.
+- **Member lists of very large rooms** load whole into memory when shown (`requestParticipants` with `cache: true`). Fine for loaf.moe; page them if a 10k-member room appears.
+- **The debug menu's call levers** still ring mock DMs on the real backend (debug builds only).
 
 ## Global constraints (all phases)
 
