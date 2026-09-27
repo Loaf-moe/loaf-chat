@@ -99,7 +99,8 @@ class MatrixVerifier implements Verifier {
   @override
   Stream<RestoreProgress> restoreHistory() async* {
     final keyManager = client.encryption?.keyManager;
-    if (keyManager == null) return;
+    // An account that keeps no key backup has no key on its way to wait for.
+    if (keyManager == null || !keyManager.enabled) return;
     final deadline = DateTime.now().add(backupKeyWait);
     while (!await keyManager.isCached()) {
       if (DateTime.now().isAfter(deadline)) return;

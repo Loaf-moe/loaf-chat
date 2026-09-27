@@ -221,6 +221,18 @@ void main() {
       expect(await verifier.restoreHistory().toList(), isEmpty);
     });
 
+    test('an account with no key backup at all ends at once', () async {
+      await client.setAccountData(me, EventTypes.MegolmBackup, {});
+      expect(client.encryption!.keyManager.enabled, isFalse);
+      final patient = MatrixVerifier(
+        client,
+        backupKeyWait: const Duration(seconds: 5),
+      );
+      final clock = Stopwatch()..start();
+      expect(await patient.restoreHistory().toList(), isEmpty);
+      expect(clock.elapsed, lessThan(const Duration(seconds: 1)));
+    });
+
     test('waits for the backup key to arrive', () async {
       final slow = MatrixVerifier(
         client,
