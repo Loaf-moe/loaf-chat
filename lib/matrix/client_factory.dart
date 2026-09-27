@@ -30,5 +30,17 @@ Future<Client> openClient({
     ),
     sqfliteFactory: databaseFactoryFfi,
   );
-  return Client('loaf', database: database, httpClient: httpClient);
+  return Client(
+    'loaf',
+    database: database,
+    httpClient: httpClient,
+    // The SDK keeps only a room list's state in memory for rooms not open.
+    // These are what the channel list and member list read on top of that:
+    // a channel's topic and lock, and who is an admin or moderator.
+    importantStateEvents: {
+      EventTypes.RoomTopic,
+      EventTypes.RoomJoinRules,
+      EventTypes.RoomPowerLevels,
+    },
+  );
 }
