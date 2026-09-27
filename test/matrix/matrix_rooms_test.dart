@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -443,6 +444,50 @@ void main() {
     );
     expect(invite.kind, InviteKind.direct);
     expect(invite.room!.kind, ChannelKind.direct);
+  });
+
+  test('after a relaunch, an invite still knows who sent it and that it is '
+      'a DM', () async {
+    final dir = await Directory.systemTemp.createTemp('loaf_relaunch');
+    addTearDown(() => dir.delete(recursive: true));
+    final path = '${dir.path}/loaf.sqlite';
+
+    final first = await openClient(
+      httpClient: FakeMatrixApi(),
+      databasePath: path,
+    );
+    FakeMatrixApi.client = first;
+    await first.init(
+      newToken: 'abcd',
+      newHomeserver: Uri.parse('https://fakeServer.notExisting'),
+      newUserID: _me,
+      newDeviceID: 'GHTYAJCE',
+      newDeviceName: 'loaf on test',
+    );
+    await _invited(first, direct: true);
+    await first.dispose(closeDatabase: true);
+
+    // The app opens again: everything comes back from the database.
+    final client = await openClient(
+      httpClient: FakeMatrixApi(),
+      databasePath: path,
+    );
+    FakeMatrixApi.client = client;
+    await client.init(waitForFirstSync: false);
+    addTearDown(() => client.dispose(closeDatabase: true));
+    final rooms = await _rooms(client);
+
+    final invite = rooms.invites.firstWhere(
+      (i) => i.id == '!invited:example.com',
+    );
+    expect(invite.kind, InviteKind.direct);
+    expect(invite.inviter.id, '@al:x.y');
+    expect(invite.inviter.name, 'Al');
+    // So accepting files it under m.direct.
+    expect(
+      client.getRoomById('!invited:example.com')!.directChatMatrixID,
+      '@al:x.y',
+    );
   });
 
   test('before the first sync: waiting, then progress, then synced', () async {

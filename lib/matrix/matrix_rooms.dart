@@ -62,6 +62,11 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// sync.
   final _membersAsked = <String>{};
 
+  /// Invites whose own membership event and inviter have been asked of the
+  /// database. Once each: after a relaunch only a room list's state is in
+  /// memory, and an invite's `is_direct` and sender live in that event.
+  final _invitesLoaded = <String>{};
+
   @override
   Set<RoomAbility> get abilities => const {RoomAbility.answerInvites};
 
@@ -148,7 +153,26 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       for (final room in client.rooms)
         if (room.membership == Membership.invite) _invite(room),
     ];
+    for (final room in client.rooms) {
+      if (room.membership == Membership.invite) _loadInvite(room);
+    }
     _notify();
+  }
+
+  /// Brings back an invite's own membership event and its inviter, which a
+  /// relaunch leaves on disk: without them a DM invite reads as a room, the
+  /// inviter as nobody, and accepting skips `m.direct`. The SDK's own
+  /// `loadHeroUsers` does exactly this for invites, from the database first.
+  void _loadInvite(Room room) {
+    if (!_invitesLoaded.add(room.id)) return;
+    unawaited(
+      room
+          .loadHeroUsers()
+          .then<void>((_) {}, onError: (Object _) {})
+          .whenComplete(() {
+            if (!_disposed) _rebuild();
+          }),
+    );
   }
 
   Space _space(Room space, Map<String, Room> joined) {
