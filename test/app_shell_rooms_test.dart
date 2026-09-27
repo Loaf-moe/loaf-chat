@@ -13,6 +13,7 @@ import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/mock/mock_homeserver.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
+import 'package:loaf_native/ui/settings/settings_page.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
@@ -259,6 +260,19 @@ void main() {
       expect(find.byType(TextField), findsNothing);
       await tester.tap(find.text('sign out'));
       await tester.pump();
+      expect(session.signedOut, 1);
+    });
+
+    testWidgets('signing out from settings closes settings first', (
+      tester,
+    ) async {
+      final session = await _pump(tester, _FakeRooms(spaces: [_bakery()]));
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('sign out'));
+      await tester.pumpAndSettle();
+      // The sign-in screen replaces the shell, not the card over it.
+      expect(find.byType(SettingsModal), findsNothing);
       expect(session.signedOut, 1);
     });
 

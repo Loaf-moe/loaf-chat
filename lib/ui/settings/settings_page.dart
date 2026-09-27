@@ -148,7 +148,7 @@ class _SettingsModalState extends State<SettingsModal> {
         child: _Nav(
           selected: _section,
           onSelect: (s) => setState(() => _section = s),
-          onSignOut: widget.onSignOut,
+          onSignOut: _signOut,
         ),
       ),
       Expanded(child: _detail(_section)),
@@ -161,10 +161,22 @@ class _SettingsModalState extends State<SettingsModal> {
       return _Nav(
         selected: null,
         onSelect: (s) => setState(() => _pushed = s),
-        onSignOut: widget.onSignOut,
+        onSignOut: _signOut,
       );
     }
     return _detail(pushed);
+  }
+
+  /// Closes the card, then signs out. Signing out swaps the shell for the
+  /// sign-in screen underneath, and a card left open would sit over it
+  /// showing the account just signed out of.
+  VoidCallback? get _signOut {
+    final signOut = widget.onSignOut;
+    if (signOut == null) return null;
+    return () {
+      Navigator.of(context).pop();
+      signOut();
+    };
   }
 
   Widget _detail(SettingsSection section) => _Detail(
