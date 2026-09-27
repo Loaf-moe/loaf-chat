@@ -283,6 +283,31 @@ void main() {
       expect(find.byTooltip('Settings'), findsOneWidget);
     });
 
+    Future<Iterable<String?>> selectable(WidgetTester tester) async {
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      return tester
+          .widgetList<SelectableText>(find.byType(SelectableText))
+          .map((t) => t.data);
+    }
+
+    testWidgets(
+      'on a computer your matrix id can be selected',
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester, _FakeRooms(spaces: [_bakery()]));
+        expect(await selectable(tester), contains('@chris:loaf.test'));
+      },
+    );
+
+    testWidgets('on a phone your matrix id is plain text', variant: _mobile, (
+      tester,
+    ) async {
+      await _pump(tester, _FakeRooms(spaces: [_bakery()]));
+      expect(await selectable(tester), isNot(contains('@chris:loaf.test')));
+      expect(find.text('@chris:loaf.test'), findsWidgets);
+    });
+
     testWidgets('your avatar opens no status picker', variant: _desktop, (
       tester,
     ) async {

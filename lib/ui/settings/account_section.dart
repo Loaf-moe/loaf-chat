@@ -13,6 +13,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../members/presence.dart';
 import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
+import '../platform.dart';
 import '../shell/profile_controller.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
@@ -95,7 +96,12 @@ class _AccountSectionState extends State<AccountSection> {
               const SizedBox(height: LoafSpace.x5),
 
               _FieldLabel(tokens: tokens, label: 'matrix id'),
-              _ReadOnlyRow(tokens: tokens, value: _matrixId),
+              // A computer keeps text selection; an id is what gets copied.
+              _ReadOnlyRow(
+                tokens: tokens,
+                value: _matrixId,
+                selectable: isDesktop,
+              ),
               if (widget.editable) ...[
                 const SizedBox(height: LoafSpace.x5),
 
@@ -290,13 +296,26 @@ class _ReadOnlyRow extends StatelessWidget {
     required this.tokens,
     required this.value,
     this.mono = true,
+    this.selectable = false,
   });
 
   final LoafTokens tokens;
   final String value;
 
+  /// Drawn as selectable text, the desktop idiom.
+  final bool selectable;
+
   /// Ids are set in mono; names are not.
   final bool mono;
+
+  TextStyle get _style => (mono ? loafMono(13) : loafBody(15, 400)).copyWith(
+    color: tokens.textBody,
+  );
+
+  Widget _plain() =>
+      Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: _style);
+
+  Widget _selectable() => SelectableText(value, maxLines: 1, style: _style);
 
   @override
   Widget build(BuildContext context) => Container(
@@ -309,16 +328,7 @@ class _ReadOnlyRow extends StatelessWidget {
     ),
     child: Row(
       children: [
-        Expanded(
-          child: Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: (mono ? loafMono(13) : loafBody(15, 400)).copyWith(
-              color: tokens.textBody,
-            ),
-          ),
-        ),
+        Expanded(child: selectable ? _selectable() : _plain()),
         IconButton(
           onPressed: () => Clipboard.setData(ClipboardData(text: value)),
           iconSize: 16,
