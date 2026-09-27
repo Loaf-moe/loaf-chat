@@ -115,7 +115,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   Future<void> _loadMe() async {
     try {
       final profile = await client.fetchOwnProfile();
-      _myName = profile.displayName;
+      // A blank name is no name: the localpart reads better than nothing.
+      final name = profile.displayName?.trim();
+      _myName = name == null || name.isEmpty ? null : profile.displayName;
       _notify();
     } on Object {
       // Offline, or no profile: the localpart stands in.

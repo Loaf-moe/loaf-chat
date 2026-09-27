@@ -55,8 +55,10 @@ class Member {
     _ => Role.member,
   };
 
+  /// '?' for a name with nothing in it, which a server will happily send.
   String get initials {
-    final parts = name.trim().split(RegExp(r'\s+'));
+    final parts = _words(name);
+    if (parts.isEmpty) return '?';
     if (parts.length == 1) return parts.first.characters.first.toUpperCase();
     return (parts.first.characters.first + parts.last.characters.first)
         .toUpperCase();
@@ -267,13 +269,12 @@ class Space {
       .where((c) => c.joined && !c.muted)
       .fold(0, (sum, c) => sum + c.unread);
 
-  String get initials => name
-      .trim()
-      .split(RegExp(r'\s+'))
-      .take(2)
-      .map((w) => w.characters.first)
-      .join()
-      .toUpperCase();
+  /// '?' for a name with nothing in it, which a server will happily send.
+  String get initials {
+    final parts = _words(name);
+    if (parts.isEmpty) return '?';
+    return parts.take(2).map((w) => w.characters.first).join().toUpperCase();
+  }
 
   Iterable<Channel> get allChannels => categories.expand((c) => c.channels);
 
@@ -458,3 +459,9 @@ class SpacePreview {
 
   String get server => alias.split(':').last;
 }
+
+/// A name's words, none of them empty.
+List<String> _words(String name) => [
+  for (final word in name.trim().split(RegExp(r'\s+')))
+    if (word.isNotEmpty) word,
+];

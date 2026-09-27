@@ -23,9 +23,17 @@ class _Api extends FakeMatrixApi {
   Completer<void>? hold;
   var refuse = false;
 
+  /// When set, the display name every profile answers with.
+  String? profileName;
+
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
     final path = request.url.path;
+    if (profileName != null &&
+        request.method == 'GET' &&
+        path.contains('/profile/')) {
+      return http.Response(jsonEncode({'displayname': profileName}), 200);
+    }
     if (request.method == 'POST' &&
         (path.endsWith('/join') || path.endsWith('/leave'))) {
       answered.add(path);
@@ -625,6 +633,11 @@ void main() {
     await rooms.decline(invite);
     expect(api.answered, hasLength(1));
     expect(api.answered.single, endsWith('/join'));
+  });
+
+  test('a blank display name is no name: the localpart stands in', () async {
+    final rooms = await _rooms(await _client(api: _Api()..profileName = '  '));
+    expect(rooms.me.name, 'test');
   });
 
   test('you are you, and only answering invites is wired', () async {
