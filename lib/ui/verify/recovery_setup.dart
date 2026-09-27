@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/error_note.dart';
 import '../widgets/loaf_button.dart';
@@ -116,9 +117,11 @@ class ShowKeyStep extends StatelessWidget {
           ),
           const SizedBox(width: LoafSpace.x2),
           Expanded(
+            // What it does where it runs: a save panel on a computer, the
+            // share sheet on a phone.
             child: LoafButton(
-              label: 'save as file',
-              icon: LucideIcons.download,
+              label: isDesktop ? 'save as file' : 'share',
+              icon: isDesktop ? LucideIcons.download : LucideIcons.share,
               emphasis: LoafButtonEmphasis.outlined,
               size: LoafButtonSize.small,
               onTap: onSave,

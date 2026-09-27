@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/mock/accounts.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/incoming_verification.dart';
@@ -168,6 +169,32 @@ void main() {
       isNotNull,
     );
   });
+
+  testWidgets(
+    'on a phone the key is shared, not saved as a file',
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    (tester) async {
+      await _pump(tester, steps['show key']!);
+      expect(find.text('save as file'), findsNothing);
+      final share = tester.widget<LoafButton>(
+        find.widgetWithText(LoafButton, 'share'),
+      );
+      expect(share.icon, LucideIcons.share);
+    },
+  );
+
+  testWidgets(
+    'on a computer the key is saved as a file',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      await _pump(tester, steps['show key']!);
+      expect(find.text('share'), findsNothing);
+      final save = tester.widget<LoafButton>(
+        find.widgetWithText(LoafButton, 'save as file'),
+      );
+      expect(save.icon, LucideIcons.download);
+    },
+  );
 
   testWidgets('restoring counts with thousands separators', (tester) async {
     await _pump(tester, steps['restoring']!);
