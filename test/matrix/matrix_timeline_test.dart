@@ -680,6 +680,79 @@ void main() {
     });
   });
 
+  group('marking read', () {
+    test(
+      'sets the fully-read marker and receipt on the newest event',
+      () async {
+        final h = await _open([_text('one'), _text('two', id: r'$last')]);
+        h.rooms.markRead(_roomId);
+        await _settle();
+        final marker = h.api.markers.single;
+        expect(marker['m.fully_read'], r'$last');
+        // Public: the person you are talking to sees you have read it.
+        expect(marker['m.read'], r'$last');
+      },
+    );
+
+    test('a burst sends one receipt at a time, ending on the newest', () async {
+      final h = await _open([_text('one', id: r'$1')]);
+      h.api.holdMarkers = Completer<void>();
+      h.rooms.markRead(_roomId);
+      await _settle();
+      await _sync(h.client, [_text('two', id: r'$2')]);
+      h.rooms
+        ..markRead(_roomId)
+        ..markRead(_roomId);
+      await _settle();
+      expect(h.api.markers, hasLength(1));
+      h.api.holdMarkers!.complete();
+      await _settle();
+      expect(h.api.markers.map((m) => m['m.fully_read']), [r'$1', r'$2']);
+    });
+
+    test('a room already read sends nothing', () async {
+      final api = _Api();
+      final client = await _client(api);
+      addTearDown(client.dispose);
+      await _sync(client, [_text('one', id: r'$1')]);
+      await client.handleSync(
+        SyncUpdate.fromJson({
+          'next_batch': 'b${_n++}',
+          'rooms': {
+            'join': {
+              _roomId: {
+                'account_data': {
+                  'events': [
+                    {
+                      'type': 'm.fully_read',
+                      'content': {'event_id': r'$1'},
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+      );
+      final rooms = MatrixRooms(client);
+      addTearDown(rooms.dispose);
+      rooms.markRead(_roomId);
+      await _settle();
+      expect(api.markers, isEmpty);
+    });
+
+    test('your own message on its way is not marked', () async {
+      final h = await _open([_text('one', id: r'$1')]);
+      h.api.holdSend = Completer<void>();
+      h.timeline.send('mine');
+      await _settle();
+      h.rooms.markRead(_roomId);
+      await _settle();
+      expect(h.api.markers, isEmpty);
+      h.api.holdSend!.complete();
+    });
+  });
+
   test('after a relaunch, the conversation and a failed message come '
       'back', () async {
     final dir = await Directory.systemTemp.createTemp('loaf_timeline');

@@ -640,11 +640,19 @@ void main() {
     expect(rooms.me.name, 'test');
   });
 
-  test('you are you, and only invites and messages are wired', () async {
+  test('you are you, and only invites, messages and reading are '
+      'wired', () async {
     final rooms = await _rooms(await _client());
     expect(rooms.me.id, _me);
     expect(rooms.me.name, isNotEmpty);
-    expect(rooms.abilities, {RoomAbility.answerInvites, RoomAbility.messages});
-    expect(() => rooms.markRead('!calls:example.com'), throwsUnsupportedError);
+    expect(rooms.abilities, {
+      RoomAbility.answerInvites,
+      RoomAbility.messages,
+      RoomAbility.markRead,
+    });
+    expect(
+      () => rooms.setMuted('!calls:example.com', true),
+      throwsUnsupportedError,
+    );
   });
 }

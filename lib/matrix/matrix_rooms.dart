@@ -80,10 +80,16 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// are disposed: fine at loaf.moe's size.
   final _timelines = <String, MatrixTimeline>{};
 
+  /// Rooms whose read marker is on its way, and those that saw more since
+  /// it left: one receipt at a time per room, however fast messages come.
+  final _reading = <String>{};
+  final _readAgain = <String>{};
+
   @override
   Set<RoomAbility> get abilities => const {
     RoomAbility.answerInvites,
     RoomAbility.messages,
+    RoomAbility.markRead,
   };
 
   @override
@@ -406,6 +412,32 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     );
   }
 
+  /// Moves the fully-read marker and your public receipt to the newest
+  /// event the server has. Nothing is zeroed here: the counts drop when
+  /// the receipt comes back down a sync. A failed receipt changes nothing,
+  /// and the next opening tries again.
+  @override
+  void markRead(String roomId) {
+    final room = client.getRoomById(roomId);
+    final last = room?.lastEvent;
+    // Your own message still on its way has no event id to mark.
+    if (room == null || last == null || !last.status.isSent) return;
+    if (room.notificationCount == 0 && room.fullyRead == last.eventId) return;
+    if (!_reading.add(roomId)) {
+      _readAgain.add(roomId);
+      return;
+    }
+    unawaited(
+      room
+          .setReadMarker(last.eventId, mRead: last.eventId, public: true)
+          .then<void>((_) {}, onError: (Object _) {})
+          .whenComplete(() {
+            _reading.remove(roomId);
+            if (_readAgain.remove(roomId) && !_disposed) markRead(roomId);
+          }),
+    );
+  }
+
   // ── Not wired yet ──────────────────────────────────────────────────────
 
   @override
@@ -430,8 +462,6 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   Never _unwired(String what) =>
       throw UnsupportedError('$what is not wired to the SDK yet');
 
-  @override
-  void markRead(String roomId) => _unwired('marking read');
   @override
   void setMuted(String roomId, bool muted) => _unwired('muting');
   @override
