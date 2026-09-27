@@ -130,6 +130,9 @@ class ChannelView extends StatelessWidget {
               ?callBar,
               if (timeline!.writable)
                 Composer(
+                  // Keyed like the list: a reply card or a draft belongs to
+                  // the room it was started in, and must not send in the next.
+                  key: ObjectKey(timeline),
                   channelName: channel.name,
                   timeline: timeline!,
                   prefix: switch (channel) {

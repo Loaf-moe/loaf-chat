@@ -357,4 +357,52 @@ void main() {
     await tester.pump();
     expect(find.text('arrived'), findsOneWidget);
   });
+
+  testWidgets('a reply and a draft stay in the room they were started in', (
+    tester,
+  ) async {
+    final first = await _pump(tester, [_msg('1', body: 'first room')]);
+    first.startReply(first.messages.single);
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'half a thought');
+    expect(find.byKey(const ValueKey('composer-target')), findsOneWidget);
+
+    Future<void> show(Timeline timeline) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: ChannelView(channel: _channel, timeline: timeline),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    final second = _FakeTimeline([_msg('a', body: 'second room')]);
+    addTearDown(second.dispose);
+    await show(second);
+    expect(find.byKey(const ValueKey('composer-target')), findsNothing);
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      '',
+    );
+
+    // Back in the first room, the reply it is still aimed at shows again:
+    // sending there would still answer it.
+    await show(first);
+    expect(find.byKey(const ValueKey('composer-target')), findsOneWidget);
+
+    // An edit comes back with the message's text to work on.
+    final mine = _msg('2', author: _you, body: 'my words');
+    first
+      ..messages = [...first.messages, mine]
+      ..startEdit(mine);
+    await show(second);
+    await show(first);
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      'my words',
+    );
+  });
 }

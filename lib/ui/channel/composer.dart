@@ -65,6 +65,13 @@ class _ComposerState extends State<Composer> {
   @override
   void initState() {
     super.initState();
+    // Coming back to a room still aimed at a reply or an edit: show it, since
+    // that is what sending here would do.
+    _target = widget.timeline?.target;
+    if (_target case ComposerTarget(mode: ComposerMode.edit, :final message)) {
+      _controller.text = message.body;
+      _hasText = message.body.trim().isNotEmpty;
+    }
     _controller.addListener(() {
       final hasText = _controller.text.trim().isNotEmpty;
       if (hasText != _hasText) setState(() => _hasText = hasText);
