@@ -5,6 +5,7 @@ library;
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -42,5 +43,8 @@ Future<Client> openClient({
       EventTypes.RoomJoinRules,
       EventTypes.RoomPowerLevels,
     },
+    // The 7 emoji only: the spec draws no QR, and a client that names no
+    // method can take part in no verification at all.
+    verificationMethods: {KeyVerificationMethod.emoji},
   );
 }

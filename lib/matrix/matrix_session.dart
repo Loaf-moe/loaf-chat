@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_vodozemac/flutter_vodozemac.dart' as vod;
+import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 
 import '../ui/auth/homeserver.dart';
@@ -14,6 +15,7 @@ import '../ui/auth/loaf_session.dart';
 import '../ui/auth/sign_in_state.dart';
 import '../ui/platform.dart';
 import 'client_factory.dart';
+import 'matrix_device_verification.dart';
 import 'matrix_homeserver.dart';
 import 'sso_browser.dart';
 
@@ -36,6 +38,7 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
       client.onSyncStatus.stream
           .where((u) => u.status == SyncStatus.finished)
           .listen((_) => _refresh(), onError: (Object _) => _refresh()),
+      client.onKeyVerificationRequest.stream.listen(_onRequest),
     ];
     _account = _accountNow();
     _trust = _trustNow();
@@ -88,9 +91,10 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
   @override
   SoftLogout? get softLogout => null;
 
-  /// Verification requests are phase 4.
+  IncomingRequest? _incoming;
+
   @override
-  IncomingRequest? get incoming => null;
+  IncomingRequest? get incoming => _incoming;
 
   @override
   String get homeserverName => defaultServer;
@@ -128,7 +132,29 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
   void markVerified() {}
 
   @override
-  void clearIncoming() {}
+  void clearIncoming() {
+    final incoming = _incoming;
+    if (incoming == null) return;
+    incoming.verification.dispose();
+    _incoming = null;
+    notifyListeners();
+  }
+
+  /// Another of your devices asks this one to verify it. Other people's
+  /// requests have no panel yet, so they are left to time out, as is one
+  /// that arrives while another is being answered: its panel is open.
+  void _onRequest(KeyVerification request) {
+    if (request.userId != client.userID || _incoming != null) return;
+    final device = request.deviceId == null
+        ? null
+        : client.userDeviceKeys[client.userID]?.deviceKeys[request.deviceId];
+    _incoming = IncomingRequest(
+      device: device?.deviceDisplayName ?? request.deviceId ?? 'a new sign-in',
+      at: DateTime.now(),
+      verification: MatrixDeviceVerification(request),
+    );
+    notifyListeners();
+  }
 
   @override
   bool consumeFailure() => false;
