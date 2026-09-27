@@ -61,19 +61,15 @@ class SetUpIntroStep extends StatelessWidget {
         ErrorNote(message: failure),
       ],
       const SizedBox(height: LoafSpace.x5),
-      LoafButton(
-        label: busy ? 'creating…' : 'create my recovery key',
-        onTap: busy ? null : onCreate,
-      ),
-      if (rejected && onReset != null) ...[
-        const SizedBox(height: LoafSpace.x2),
+      // Refused, creating would only be refused again: reset is the one
+      // way forward, so it takes the filled button.
+      if (!rejected)
         LoafButton(
-          label: 'reset',
-          onTap: onReset,
-          emphasis: LoafButtonEmphasis.quiet,
-          size: LoafButtonSize.small,
-        ),
-      ],
+          label: busy ? 'creating…' : 'create my recovery key',
+          onTap: busy ? null : onCreate,
+        )
+      else if (onReset case final reset?)
+        LoafButton(label: 'reset', onTap: reset),
     ],
   );
 }

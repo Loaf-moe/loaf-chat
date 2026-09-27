@@ -87,6 +87,19 @@ void main() {
     },
   );
 
+  testWidgets('a refused set up offers only the way that works', (
+    tester,
+  ) async {
+    await _show(
+      tester,
+      const VerifyState(step: VerifyStep.setUpIntro, rejected: true),
+      purpose: VerifyPurpose.setUp,
+    );
+    // Creating would only be refused again.
+    expect(find.text('create my recovery key'), findsNothing);
+    expect(_button(tester, 'reset').emphasis, LoafButtonEmphasis.filled);
+  });
+
   testWidgets('a reset waiting for the server offers no cancel', (
     tester,
   ) async {
