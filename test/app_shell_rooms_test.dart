@@ -58,6 +58,15 @@ const _dm = Channel(
   members: [_mod],
 );
 
+final _invite = Invite(
+  id: '!proofing',
+  kind: InviteKind.room,
+  name: 'Proofing',
+  inviter: _mod,
+  color: const Color(0xFF4E9E76),
+  room: const Channel(id: '!proofing', name: 'Proofing'),
+);
+
 /// Rooms as a real backend has them in phase 2: plain models, and only
 /// invites can be answered.
 class _FakeRooms extends ChangeNotifier implements Rooms {
@@ -270,5 +279,128 @@ void main() {
         expect(find.textContaining('0.3.0'), findsNothing);
       },
     );
+  });
+
+  group('faces and fallbacks', () {
+    testWidgets('the first sync spins, then fills a bar', (tester) async {
+      final rooms = (_FakeRooms()..synced = false);
+      await _pump(tester, rooms, settle: false);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      rooms
+        ..syncProgress = 0.4
+        ..update();
+      await tester.pump();
+      final bar = tester.widget<LinearProgressIndicator>(
+        find.byType(LinearProgressIndicator),
+      );
+      expect(bar.value, 0.4);
+      rooms
+        ..synced = true
+        ..syncProgress = null
+        ..spaces = [_bakery()]
+        ..update();
+      await tester.pumpAndSettle();
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      // The app opened on Home; the space arrives on the rail.
+      expect(find.byKey(const ValueKey('space-!bakery')), findsOneWidget);
+    });
+
+    testWidgets(
+      'on a phone the first sync still has a way to the drawer',
+      variant: _mobile,
+      (tester) async {
+        await _pump(
+          tester,
+          (_FakeRooms()..synced = false),
+          size: const Size(390, 844),
+          settle: false,
+        );
+        expect(find.byTooltip('Channels'), findsOneWidget);
+      },
+    );
+
+    testWidgets('an account in no rooms says so', (tester) async {
+      await _pump(tester, _FakeRooms());
+      expect(find.text('nothing here yet'), findsOneWidget);
+    });
+
+    testWidgets('a room that vanishes falls back to the next', (tester) async {
+      final rooms = _FakeRooms(spaces: [_bakery()]);
+      await _pump(tester, rooms);
+      expect(find.text('general'), findsWidgets);
+      rooms
+        ..spaces = [
+          _bakery(
+            channels: const [
+              Channel(id: '!crumb', name: 'crumb'),
+              Channel(id: '!oven', name: 'oven', kind: ChannelKind.voice),
+            ],
+          ),
+        ]
+        ..update();
+      await tester.pumpAndSettle();
+      expect(find.text('general'), findsNothing);
+      expect(find.text('crumb'), findsWidgets);
+    });
+
+    testWidgets('a space that vanishes falls back to Home', (tester) async {
+      final rooms = _FakeRooms(spaces: [_bakery()], homeRooms: [_dm]);
+      await _pump(tester, rooms);
+      rooms
+        ..spaces = []
+        ..update();
+      await tester.pumpAndSettle();
+      expect(_inList('Moddy'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a space channel asks for the space\'s whole member list', (
+      tester,
+    ) async {
+      final rooms = _FakeRooms(spaces: [_bakery()]);
+      await _pump(tester, rooms);
+      expect(rooms.membersAsked, contains('!bakery'));
+      expect(find.text('Moddy'), findsOneWidget);
+    });
+  });
+
+  group('answering an invite', () {
+    Future<_FakeRooms> openInvite(WidgetTester tester) async {
+      final rooms = _FakeRooms(homeRooms: [_dm])
+        ..invites = [_invite]
+        ..answer = Completer();
+      await _pump(tester, rooms);
+      await tester.tap(_inList('Proofing'));
+      await tester.pumpAndSettle();
+      return rooms;
+    }
+
+    testWidgets('while an answer is on its way, neither button answers', (
+      tester,
+    ) async {
+      final rooms = await openInvite(tester);
+      await tester.tap(find.text('accept'));
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      await tester.tap(find.text('decline'));
+      await tester.pump();
+      rooms.answer!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('accept'), findsNothing);
+    });
+
+    testWidgets('a refused answer says so, and the buttons come back', (
+      tester,
+    ) async {
+      final rooms = await openInvite(tester);
+      await tester.tap(find.text('accept'));
+      await tester.pump();
+      rooms.answer!.completeError(Exception('403'));
+      await tester.pumpAndSettle();
+      expect(find.text("couldn't join. try again?"), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('accept'), findsOneWidget);
+    });
   });
 }

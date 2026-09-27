@@ -13,18 +13,27 @@ import '../shell/channel_list.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
 
+/// An answer on its way to the server.
+enum Answering { accepting, declining }
+
 class InvitePreview extends StatelessWidget {
   const InvitePreview({
     super.key,
     required this.invite,
     required this.onAccept,
     required this.onDecline,
+    this.answering,
     this.onOpenNavigation,
   });
 
   final Invite invite;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
+
+  /// Set while an answer is on its way. Neither button answers then — the
+  /// server may already have it, so there is nothing to take back — and
+  /// the one pressed spins.
+  final Answering? answering;
 
   /// The phone layout's way back to the list.
   final VoidCallback? onOpenNavigation;
@@ -126,14 +135,20 @@ class InvitePreview extends StatelessWidget {
                               child: LoafButton(
                                 label: 'decline',
                                 emphasis: LoafButtonEmphasis.outlined,
-                                onTap: onDecline,
+                                leading: answering == Answering.declining
+                                    ? const _Spinner()
+                                    : null,
+                                onTap: answering == null ? onDecline : null,
                               ),
                             ),
                             const SizedBox(width: LoafSpace.x3),
                             Expanded(
                               child: LoafButton(
                                 label: 'accept',
-                                onTap: onAccept,
+                                leading: answering == Answering.accepting
+                                    ? const _Spinner()
+                                    : null,
+                                onTap: answering == null ? onAccept : null,
                               ),
                             ),
                           ],
@@ -174,5 +189,17 @@ class _PersonAvatar extends StatelessWidget {
       member.initials,
       style: loafBody(26, 600).copyWith(color: Colors.white),
     ),
+  );
+}
+
+/// Sized to sit where a button's icon goes.
+class _Spinner extends StatelessWidget {
+  const _Spinner();
+
+  @override
+  Widget build(BuildContext context) => const SizedBox(
+    width: 15,
+    height: 15,
+    child: CircularProgressIndicator.adaptive(strokeWidth: 2),
   );
 }

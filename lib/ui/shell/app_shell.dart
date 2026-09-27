@@ -43,6 +43,7 @@ import '../settings/settings_page.dart';
 import 'app_notice.dart';
 import 'channel_actions.dart';
 import 'profile_controller.dart';
+import 'shell_faces.dart';
 import 'status_picker.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
@@ -87,7 +88,10 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     // The channel the app opens on is being read from the first frame.
     // Before listening: nothing is built yet to hear it.
-    if (_can(RoomAbility.markRead)) _rooms.markRead(_channel.id);
+    final opening = _channel;
+    if (opening != null && _can(RoomAbility.markRead)) {
+      _rooms.markRead(opening.id);
+    }
     _rooms.addListener(_onChange);
     _profile.addListener(_onChange);
     _calls.addListener(_onChange);
@@ -145,11 +149,21 @@ class _AppShellState extends State<AppShell> {
   /// The invite being previewed in place of a conversation, if any.
   String? _previewInvite;
 
+  /// The invite whose answer is on its way to the server, and which.
+  (String, Answering)? _answering;
+
   List<Space> get _spaces => _rooms.spaces;
 
   List<Invite> get _invites => _rooms.invites;
 
-  bool get _home => _spaceId == mockHome.id;
+  /// Where you are: the space you chose, or Home once it has gone — left
+  /// from another client, say.
+  String get _placeId =>
+      _spaceId != mockHome.id && _spaces.any((s) => s.id == _spaceId)
+      ? _spaceId
+      : mockHome.id;
+
+  bool get _home => _placeId == mockHome.id;
 
   bool _can(RoomAbility ability) => _rooms.abilities.contains(ability);
 
@@ -186,7 +200,7 @@ class _AppShellState extends State<AppShell> {
   Space get _space {
     if (!_home) {
       return _spaces
-          .firstWhere((s) => s.id == _spaceId)
+          .firstWhere((s) => s.id == _placeId)
           .withSession(occupants: _callOccupants, unread: _missedCalls);
     }
     return Space(
@@ -213,16 +227,18 @@ class _AppShellState extends State<AppShell> {
     };
   }
 
-  Channel get _channel {
+  /// The conversation you are reading: the one you last opened here while
+  /// it is still here, else the first you can read. Null when there is none
+  /// — the first sync is still coming, or the account is in no rooms.
+  Channel? get _channel {
     final rows = _space.allChannels;
     // An older duplicate DM is not a row of its own, but can be open.
     final channels = [...rows, for (final row in rows) ...row.earlier];
-    final remembered = _channelBySpace[_spaceId];
-    return channels.firstWhere(
-      (c) => c.id == remembered && c.joined,
-      orElse: () =>
-          channels.firstWhere((c) => c.kind != ChannelKind.voice && c.joined),
-    );
+    final remembered = _channelBySpace[_placeId];
+    return channels.where((c) => c.id == remembered && c.joined).firstOrNull ??
+        channels
+            .where((c) => c.kind != ChannelKind.voice && c.joined)
+            .firstOrNull;
   }
 
   static bool _inHome(Channel c) =>
@@ -257,14 +273,16 @@ class _AppShellState extends State<AppShell> {
   void _selectSpace(String id) => setState(() {
     _spaceId = id;
     // A space opens onto a conversation, and seeing it is reading it.
-    _open(id, _channel.id);
+    _open(id, _channel?.id);
   });
 
-  void _open(String spaceId, String channelId) {
+  /// Goes to [spaceId], and opens [channelId] there if there is one.
+  void _open(String spaceId, String? channelId) {
     _spaceId = spaceId;
-    _channelBySpace[spaceId] = channelId;
     _fullscreen = false;
     _previewInvite = null;
+    if (channelId == null) return;
+    _channelBySpace[spaceId] = channelId;
     // Seeing a conversation is reading it, in a space as much as in Home.
     if (_can(RoomAbility.markRead)) _rooms.markRead(channelId);
     _missedCalls.remove(channelId);
@@ -418,10 +436,11 @@ class _AppShellState extends State<AppShell> {
   }
 
   /// A DM or room joins its section and opens; a space joins the rail and
-  /// you stay in Home, where the rest of your invites are.
+  /// you stay in Home, where the rest of your invites are. A room the
+  /// server has let you into but not yet synced opens once it arrives:
+  /// until then the list's first room holds its place.
   Future<void> _acceptInvite(Invite invite) async {
-    await _rooms.accept(invite);
-    if (!mounted) return;
+    if (!await _answer(invite, Answering.accepting)) return;
     setState(() {
       _previewInvite = null;
       final room = invite.room;
@@ -430,9 +449,33 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _declineInvite(Invite invite) async {
-    await _rooms.decline(invite);
-    if (!mounted) return;
+    if (!await _answer(invite, Answering.declining)) return;
     setState(() => _previewInvite = null);
+  }
+
+  /// Sends the answer, spinning its button meanwhile. False when it failed,
+  /// which leaves the preview up with its buttons to try again, or when the
+  /// shell has gone.
+  Future<bool> _answer(Invite invite, Answering answering) async {
+    setState(() => _answering = (invite.id, answering));
+    try {
+      await (answering == Answering.accepting
+          ? _rooms.accept(invite)
+          : _rooms.decline(invite));
+      return mounted;
+    } on Object {
+      if (mounted) {
+        showToast(
+          context,
+          answering == Answering.accepting
+              ? "couldn't join. try again?"
+              : "couldn't decline. try again?",
+        );
+      }
+      return false;
+    } finally {
+      if (mounted) setState(() => _answering = null);
+    }
   }
 
   void _onCallRecord(Channel chat, CallRecord record) {
@@ -442,7 +485,7 @@ class _AppShellState extends State<AppShell> {
       record is EndedCall ? CallLine.ended : CallLine.missed,
       from: chat.members.first,
     );
-    final looking = _home && _channel.id == chat.id;
+    final looking = _home && _channel?.id == chat.id;
     if (record is MissedCall && !looking) {
       _missedCalls[chat.id] = (_missedCalls[chat.id] ?? 0) + 1;
     }
@@ -609,8 +652,8 @@ class _AppShellState extends State<AppShell> {
   /// Whether the call's own page or panel is what you are looking at, in
   /// which case the bar would only repeat it.
   bool get _lookingAtCall =>
-      _calls.session?.target.id == _channel.id &&
-      (_home || _channel.kind == ChannelKind.voice);
+      _calls.session?.target.id == _channel?.id &&
+      (_home || _channel?.kind == ChannelKind.voice);
 
   Widget? _buildCallBar() {
     final session = _calls.session;
@@ -658,12 +701,23 @@ class _AppShellState extends State<AppShell> {
         ? _invites.where((i) => i.id == _previewInvite).firstOrNull
         : null;
     if (invite != null) {
+      final (answeringId, answering) = _answering ?? ('', null);
       return InvitePreview(
         invite: invite,
         onAccept: () => _acceptInvite(invite),
         onDecline: () => _declineInvite(invite),
+        answering: answeringId == invite.id ? answering : null,
         onOpenNavigation: openNavigation,
       );
+    }
+
+    if (channel == null) {
+      return _rooms.synced
+          ? NothingHereFace(onOpenNavigation: openNavigation)
+          : SyncingFace(
+              progress: _rooms.syncProgress,
+              onOpenNavigation: openNavigation,
+            );
     }
 
     // Before the backend can read messages, every room is its header and a
@@ -747,7 +801,8 @@ class _AppShellState extends State<AppShell> {
     final tokens = LoafTokens.of(context);
 
     // Fullscreen only makes sense while there is a call on screen.
-    if (_fullscreen && !(_calls.inCall && _channel.kind == ChannelKind.voice)) {
+    if (_fullscreen &&
+        !(_calls.inCall && _channel?.kind == ChannelKind.voice)) {
       _fullscreen = false;
     }
 
@@ -758,13 +813,7 @@ class _AppShellState extends State<AppShell> {
         final main = _buildMain(wide: wide);
         final me = _me;
         final channel = _channel;
-        final members = MemberList(
-          members: channel.kind == ChannelKind.direct
-              ? [me, ...channel.members]
-              : channel.kind == ChannelKind.room
-              ? [for (final m in channel.members) m.id == me.id ? me : m]
-              : [for (final m in _space.members) m.id == me.id ? me : m],
-        );
+        final members = channel == null ? null : _members(channel, me);
 
         if (wide) {
           return Scaffold(
@@ -779,9 +828,10 @@ class _AppShellState extends State<AppShell> {
                         child: _navigation,
                       ),
                       Expanded(child: main),
-                      if (_showMembers &&
+                      if (members != null &&
+                          _showMembers &&
                           _previewInvite == null &&
-                          (channel.kind == ChannelKind.text ||
+                          (channel!.kind == ChannelKind.text ||
                               channel.kind == ChannelKind.room))
                         DecoratedBox(
                           decoration: BoxDecoration(
@@ -816,12 +866,14 @@ class _AppShellState extends State<AppShell> {
           ),
           // The mirror of the navigation drawer: same width rules, same
           // edge-to-edge surface.
-          endDrawer: Drawer(
-            width: drawerWidth.clamp(0.0, LoafShell.memberListWidth + 40),
-            shape: const RoundedRectangleBorder(),
-            backgroundColor: tokens.sidebar,
-            child: members,
-          ),
+          endDrawer: members == null
+              ? null
+              : Drawer(
+                  width: drawerWidth.clamp(0.0, LoafShell.memberListWidth + 40),
+                  shape: const RoundedRectangleBorder(),
+                  backgroundColor: tokens.sidebar,
+                  child: members,
+                ),
           body: main,
         );
       },
@@ -853,6 +905,25 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  /// Who is in [channel]: a DM's people and you, a Home room's own
+  /// members, or a space channel's space. Asks the rooms for the whole
+  /// list, where they only have some of it; they say when it arrives.
+  MemberList _members(Channel channel, Member me) {
+    final List<Member> members;
+    switch (channel.kind) {
+      case ChannelKind.direct:
+        members = [me, ...channel.members];
+      case ChannelKind.room:
+        _rooms.loadMembers(channel.id);
+        members = [for (final m in channel.members) m.id == me.id ? me : m];
+      case ChannelKind.text || ChannelKind.voice:
+        final space = _space;
+        _rooms.loadMembers(space.id);
+        members = [for (final m in space.members) m.id == me.id ? me : m];
+    }
+    return MemberList(members: members);
+  }
+
   /// Everything in a DM is addressed to you, so a DM's unreads count; a
   /// room counts only its mentions, like a channel. Invites wait on you too.
   int get _homeBadge {
@@ -878,7 +949,7 @@ class _AppShellState extends State<AppShell> {
           children: [
             SpacesRail(
               spaces: _spaces,
-              selectedSpaceId: _spaceId,
+              selectedSpaceId: _placeId,
               onSelect: _selectSpace,
               notices: _notices,
               homeSelected: _home,
@@ -891,7 +962,7 @@ class _AppShellState extends State<AppShell> {
             Expanded(
               child: ChannelList(
                 space: _space,
-                selectedChannelId: _channel.id,
+                selectedChannelId: _channel?.id ?? '',
                 onSelect: _selectChannel,
                 onAction: _channelAction,
                 allowedActions: _allowedActions,
