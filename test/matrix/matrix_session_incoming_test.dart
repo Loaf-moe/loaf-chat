@@ -59,7 +59,7 @@ void main() {
     expect(told, 1);
   });
 
-  test('a second request while one is being answered waits its turn', () async {
+  test('a second request while one is being answered is dropped', () async {
     await arrive(requestFrom(me, 'OTHERDEVICE'));
     final first = session.incoming;
     await arrive(requestFrom(me, 'NEWDEVICE'));

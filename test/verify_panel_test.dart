@@ -188,7 +188,7 @@ void main() {
     },
   );
 
-  testWidgets('a second sign-in asking while one is open waits its turn', (
+  testWidgets('a second sign-in asking while one is open is dropped', (
     tester,
   ) async {
     final s = await _pumpShell(tester);
