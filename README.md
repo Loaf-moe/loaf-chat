@@ -2,6 +2,12 @@
 
 A Matrix client for loaf.moe, shaped like a place you hang out.
 
+## Running the tests
+
+Build the macOS app once with `mise exec -- flutter build macos --debug`,
+then run `mise exec -- flutter test`. Encryption tests load vodozemac's
+native library from that build, and fail saying so without it.
+
 ## Getting Started
 
 This project is a starting point for a Flutter application.

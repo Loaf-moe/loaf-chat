@@ -1,6 +1,6 @@
 # SDK Wiring Roadmap
 
-> **Status:** phases 1–3 have landed, each from its own rehearsed plan (`2026-09-26-real-sign-in.md`, `2026-09-26-rooms-from-sync.md`, `2026-09-27-timeline.md`). The app now talks to a real homeserver by default. Every later phase gets its own plan when it comes up.
+> **Status:** phases 1–4 have landed, each from its own rehearsed plan (`2026-09-26-real-sign-in.md`, `2026-09-26-rooms-from-sync.md`, `2026-09-27-timeline.md`, `2026-09-27-e2ee.md`). The app now talks to a real homeserver by default. Every later phase gets its own plan when it comes up.
 
 **Goal:** Replace the mock source behind the finished UI with matrix-dart-sdk. Phases are ordered by what gets the app to "daily-drivable on loaf.moe" soonest for the least work.
 
@@ -25,7 +25,7 @@
 | 1 | **Real sign-in:** Kanidm SSO (sheet on phones, browser on computers), password, a session that survives relaunch, sign out, trust from the SDK | Unblocks everything, and an SSO-only account can't get in without SSO. **Plan: `2026-09-26-real-sign-in.md`** | M |
 | 2 | **Rooms from sync:** rail, channel lists, Home sections, unreads, members | The first moment the app shows *your* loaf.moe. Read-only, so low risk **Plan: `2026-09-26-rooms-from-sync.md`** | M |
 | 3 | **Timeline:** read, send text, reply, react, edit, delete, read markers, pagination | Makes it usable for unencrypted rooms. `TimelineController`'s API already matches (`send`, `toggleReaction`, `saveEdit`, `delete`) **Plan: `2026-09-27-timeline.md`** | M |
-| 4 | **E2EE:** verify by emoji, recovery key, set up recovery, key backup restore, the incoming "is this you?" | Without it encrypted DMs are unreadable. vodozemac is already initialised by phase 1; the UI and `VerificationController` exist, so swap timers for `KeyVerification` and `Bootstrap` | M–L |
+| 4 | **E2EE:** verify by emoji, recovery key, set up recovery, key backup restore, the incoming "is this you?" | Without it encrypted DMs are unreadable. vodozemac is already initialised by phase 1; the UI and `VerificationController` exist, so swap timers for `KeyVerification` and `Bootstrap` **Plan: `2026-09-27-e2ee.md`** | M–L |
 | 5 | **Channel and space actions:** join, leave, mute (push rule), DMs without duplicates, invites, `/hierarchy` browse, create space, tags and favourites | Every flow is already designed, and each is a thin call | M |
 | 6 | **Presence and status, profile, settings** | Cheap polish | S |
 | 7 | **Voice channels** (MatrixRTC + `livekit_client`), connected-call bar, occupancy avatars | High delight, but heavy and needs a device | L |
@@ -42,7 +42,7 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **Android's SSO callback activity** (best-effort platform).
 - **A widget-level test of `SessionRoot` over `MatrixSession`** (sign-in flips to the shell, and the post-frame dispose closes the homeserver). It needs a fake-backed session inside the widget tester's fake clock.
 - **Pressing Enter in the password field during the point of no return** reaches the submit handler, which is a no-op there. The fields could be read-only while signing in, to be fully honest.
-- **Reset identity's re-sign-in** (`lib/ui/verify/verification_controller.dart`) still picks browser vs. system window by `isDesktop`. When phase 4 wires it to real SSO, it must use `ssoInBrowser`, so a Mac uses the system window there too.
+- ~~**Reset identity's re-sign-in** must use `ssoInBrowser`.~~ Superseded by phase 4: re-authentication's SSO is the server's fallback page, which hands nothing back, so it opens in the real browser on every platform with an "i've finished" step.
 - **Small tidy-ups:** `sso()` and `_signIn()` both look up `_bases`; `openClient` calls `sqfliteFfiInit()` on every call; the failure note and the server-check note on the sign-in screen are two identical blocks; `MatrixSession.open()` itself has no test.
 
 ## Deferred from phase 2, to place later
@@ -73,6 +73,16 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **The failed line's retry and discard, and the older row's "try again", are small tap targets on a phone.**
 - **Two app instances on one store fight over its lock** (`database is locked` from `BEGIN IMMEDIATE`, seen when a stale `flutter run` was still up). A second launch could detect a store in use and say so.
 - **`test/matrix/` tests flake under load**: `matrix_session_test` and several `matrix_timeline_test` cases fail intermittently, on `main` too, with `database_closed` and timing asserts. A separate session is on it.
+
+## Deferred from phase 4, to place later
+
+- **QR verification,** and **verifying other people.** Another person's request is left to time out: there is no panel for it.
+- **An account whose secret storage holds no cross-signing keys** hears that its key "unlocks nothing", which is true but not the whole story. It needs another device, or a reset.
+- **Reset's SSO re-authentication is tested offline only.** The live run used a password account.
+- **Encryption tests need the macOS build first** (`flutter build macos --debug`); a fresh clone fails them with that instruction. A test-only build of vodozemac would lift it.
+- **A restore does not resume after a quit.** Rooms fetch missing keys from backup as they open, so nothing is lost, only the count.
+- **Key backup without cross-signing is not healed by the key.** Such an account is offered setting up, which refuses and offers reset, since healing needs a re-auth inside unlocking.
+- **Minor leftovers from the task reviews:** the restore count counts keys attempted, not stored; making an identity takes every re-auth request on the client, not only its own; a re-auth "retry" also shows after a passed stage of a multi-stage flow; "they match" can be tapped twice while its answer is sending; the panel's composer choice listens to the timeline, but a trust flip really arrives through the shell's rebuild on the session changing.
 
 ## Global constraints (all phases)
 
