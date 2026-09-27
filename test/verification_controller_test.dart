@@ -226,6 +226,24 @@ void main() {
     });
   });
 
+  testWidgets('verifying through a reset says there is a new identity', (
+    tester,
+  ) async {
+    final c = make(VerifyPurpose.verify, byPassword: true)
+      ..cantDoEither()
+      ..confirmReset();
+    expect(c.doneMessage, 'this session is verified');
+    c.reauthWithPassword('hunter2');
+    await tester.pump(MockVerifier.keyCheckDelay);
+    c
+      ..keyKept()
+      ..finishSetUp();
+    expect(c.state.step, VerifyStep.done);
+    expect(c.doneMessage, 'you have a new identity');
+    await tester.pump(VerificationController.doneLinger);
+    c.dispose();
+  });
+
   testWidgets('setting up: create, keep, finish', (tester) async {
     final c = make(VerifyPurpose.setUp)..createKey();
     expect(c.state.checking, isTrue);

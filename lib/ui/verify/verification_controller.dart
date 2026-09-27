@@ -77,7 +77,10 @@ class VerificationController extends ChangeNotifier {
   bool get reauthByPassword => _challenge?.kind == AuthKind.password;
 
   String get doneMessage => switch (purpose) {
-    VerifyPurpose.verify => 'this session is verified',
+    // Verifying only makes a key through a reset, which is not the session
+    // verified by the old identity: say what happened.
+    VerifyPurpose.verify =>
+      _newKey != null ? 'you have a new identity' : 'this session is verified',
     VerifyPurpose.setUp => 'recovery is set up',
     VerifyPurpose.incoming => '${incomingDevice ?? 'that device'} is verified',
   };
