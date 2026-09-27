@@ -85,6 +85,7 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **Minor leftovers from the task reviews:** the restore count counts keys attempted, not stored; making an identity takes every re-auth request on the client, not only its own; a re-auth "retry" also shows after a passed stage of a multi-stage flow; the panel's composer choice listens to the timeline, but a trust flip really arrives through the shell's rebuild on the session changing.
 - **A server that refuses a re-auth stage reads "couldn't reach".** A set-up or reset the server turned down (not a wrong password) says it couldn't reach the server, which is not the whole story.
 - **No test signs out during a restore, and `Verifier` has no `dispose`.** A restore running unseen when the session ends is left to the SDK's own teardown.
+- **A device list in settings, where a sign-in can be signed out.** "that's not me" says to sign the device out from another app, since settings can't yet; point it there once it can.
 - **A backup-only account hears "that didn't unlock anything".** Key backup without cross-signing isn't healed by the key (above), and the key panel's answer doesn't say why.
 
 ## Global constraints (all phases)

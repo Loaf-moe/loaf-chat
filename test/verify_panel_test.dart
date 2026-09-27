@@ -239,7 +239,7 @@ void main() {
     );
   });
 
-  testWidgets("that's not me cancels and points at settings", (tester) async {
+  testWidgets("that's not me cancels and says what to do", (tester) async {
     final s = await _pumpShell(tester);
     s.receiveRequest();
     // Pushed after the frame that noticed the request.
@@ -249,7 +249,7 @@ void main() {
     await tester.tap(find.text("that's not me"));
     await tester.pump(_route);
     expect(
-      find.textContaining('sign that device out in settings'),
+      find.textContaining('sign that device out from another app'),
       findsOneWidget,
     );
     await tester.tap(find.text('close'));

@@ -190,6 +190,23 @@ void main() {
     expect(bar.value, isNull, reason: 'indeterminate');
   });
 
+  testWidgets("that's not me points only at what exists", (tester) async {
+    await _show(
+      tester,
+      const VerifyState(step: VerifyStep.notMe),
+      purpose: VerifyPurpose.incoming,
+    );
+    expect(
+      find.text(
+        'someone may be signed in as you. change your password, and sign '
+        'that device out from another app.',
+      ),
+      findsOneWidget,
+    );
+    // Settings has no device sign-out yet.
+    expect(find.textContaining('in settings'), findsNothing);
+  });
+
   testWidgets('history cut short says the rest are on their way', (
     tester,
   ) async {

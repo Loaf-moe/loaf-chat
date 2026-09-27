@@ -61,8 +61,10 @@ class NotMeStep extends StatelessWidget {
         center: true,
       ),
       const SizedBox(height: LoafSpace.x2),
+      // Settings can't sign a device out yet, so it isn't pointed at.
       const StepNote(
-        'someone may have your password. sign that device out in settings.',
+        'someone may be signed in as you. change your password, and sign '
+        'that device out from another app.',
         center: true,
       ),
       const SizedBox(height: LoafSpace.x5),
