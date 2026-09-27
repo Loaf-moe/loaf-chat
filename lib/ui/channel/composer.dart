@@ -12,7 +12,7 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'message_actions.dart';
 import '../emoji/emoji_picker.dart';
-import 'timeline_controller.dart';
+import 'timeline.dart';
 
 /// Every control in the composer row is this tall. Equal heights are what
 /// make `CrossAxisAlignment.end` also read as vertically centred.
@@ -50,7 +50,7 @@ class Composer extends StatefulWidget {
   final String prefix;
 
   /// Supplies the message being replied to or edited, if any.
-  final TimelineController? timeline;
+  final Timeline? timeline;
 
   @override
   State<Composer> createState() => _ComposerState();

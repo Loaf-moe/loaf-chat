@@ -5,6 +5,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../channel/timeline.dart';
 import '../model/models.dart';
 
 /// What a backend can do to your rooms yet. The shell draws no control for
@@ -62,6 +63,11 @@ abstract interface class Rooms implements Listenable {
   /// Asks for a room's full member list, where the backend loaded only
   /// some of it. Listeners hear when it arrives.
   void loadMembers(String roomId);
+
+  /// A room's conversation, or null where this backend has no
+  /// [RoomAbility.messages]. The same one comes back each time; the rooms
+  /// dispose of it when they are disposed.
+  Timeline? timeline(String roomId);
 
   void markRead(String roomId);
   void setMuted(String roomId, bool muted);

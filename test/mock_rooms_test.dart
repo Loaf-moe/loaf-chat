@@ -103,4 +103,44 @@ void main() {
     final dm = rooms.createDirect([ada]);
     expect(_home(rooms, dm.id).waitingFor, [ada]);
   });
+
+  group('timelines', () {
+    test('the original spaces\' channels share one conversation', () {
+      final channels = mockSpaces.first.allChannels
+          .where((c) => c.kind == ChannelKind.text)
+          .toList();
+      expect(
+        rooms.timeline(channels[0].id),
+        same(rooms.timeline(channels[1].id)),
+      );
+    });
+
+    test('a Home room has its own, the same one each time', () {
+      final dm = rooms.timeline('dm-mika');
+      expect(dm, same(rooms.timeline('dm-mika')));
+      expect(dm, isNot(same(rooms.timeline('dm-sam'))));
+      expect(
+        dm.messages.map((m) => m.id),
+        mockHomeTimeline('dm-mika').map((m) => m.id),
+      );
+    });
+
+    test('a message moves its DM up the list', () {
+      expect(_home(rooms, 'dm-sam').lastActivity, isNot(isNull));
+      final before = _home(rooms, 'dm-sam').lastActivity!;
+      rooms.timeline('dm-sam').send('hello');
+      expect(_home(rooms, 'dm-sam').lastActivity!.isAfter(before), isTrue);
+      expect(heard, greaterThan(0));
+    });
+
+    test('never sends, fails or pages', () {
+      final t = rooms.timeline('dm-mika');
+      expect(t.writable, isTrue);
+      expect(t.canLoadOlder, isFalse);
+      expect(t.loadingOlder, isFalse);
+      expect(t.loadOlderFailed, isFalse);
+      t.send('hi');
+      expect(t.messages.last.status, MessageStatus.sent);
+    });
+  });
 }

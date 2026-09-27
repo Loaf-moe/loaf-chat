@@ -6,9 +6,11 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-// The SDK has a Presence of its own; loaf's is the one the UI draws.
-import 'package:matrix/matrix.dart' hide Presence;
+// The SDK has a Presence and a Timeline of its own; loaf's are the ones the
+// UI draws.
+import 'package:matrix/matrix.dart' hide Presence, Timeline;
 
+import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
@@ -401,6 +403,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
           }),
     );
   }
+
+  @override
+  Timeline? timeline(String roomId) => null;
 
   Never _unwired(String what) =>
       throw UnsupportedError('$what is not wired to the SDK yet');

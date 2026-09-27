@@ -16,7 +16,6 @@ import '../call/dm_call_panel.dart';
 import '../call/incoming_call_card.dart';
 import '../call/voice_channel_page.dart';
 import '../channel/channel_view.dart';
-import '../channel/timeline_controller.dart';
 import '../home/direct_messages.dart';
 import '../home/home_sections.dart';
 import '../home/new_message_picker.dart';
@@ -68,7 +67,6 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-  final _timeline = TimelineController(mockTimeline(), you: currentUser);
   final _profile = ProfileController();
   late final LoafSession _session = widget.session ?? MockSession();
   late final Rooms _rooms = widget.rooms?.call() ?? MockRooms();
@@ -78,10 +76,6 @@ class _AppShellState extends State<AppShell> {
     flags: mockCallFlags,
     onRecord: _onCallRecord,
   );
-
-  /// Conversations of their own: Home's rooms, and channels in spaces
-  /// joined or made this session. See _timelineFor.
-  final _directTimelines = <String, TimelineController>{};
 
   @override
   void initState() {
@@ -114,10 +108,6 @@ class _AppShellState extends State<AppShell> {
     _calls
       ..removeListener(_onChange)
       ..dispose();
-    _timeline.dispose();
-    for (final t in _directTimelines.values) {
-      t.dispose();
-    }
     super.dispose();
   }
 
@@ -240,35 +230,6 @@ class _AppShellState extends State<AppShell> {
             .where((c) => c.kind != ChannelKind.voice && c.joined)
             .firstOrNull;
   }
-
-  static bool _inHome(Channel c) =>
-      c.kind == ChannelKind.direct || c.kind == ChannelKind.room;
-
-  /// The original spaces' channels share one mock conversation. Anything
-  /// joined or made this session, and every Home room, has its own.
-  static bool _sharesMockTimeline(Channel c) =>
-      mockSpaces.any((s) => s.allChannels.any((x) => x.id == c.id));
-
-  TimelineController _timelineFor(Channel channel) =>
-      _sharesMockTimeline(channel)
-      ? _timeline
-      : _directTimelines.putIfAbsent(channel.id, () {
-          final timeline = TimelineController(
-            _inHome(channel)
-                ? mockHomeTimeline(channel.id)
-                : mockSpaceTimeline(channel.id),
-            you: currentUser,
-          );
-          var count = timeline.messages.length;
-          // A new message moves a DM up the list.
-          timeline.addListener(() {
-            if (timeline.messages.length > count) {
-              setState(() => _activity[channel.id] = DateTime.now());
-            }
-            count = timeline.messages.length;
-          });
-          return timeline;
-        });
 
   void _selectSpace(String id) => setState(() {
     _spaceId = id;
@@ -482,11 +443,16 @@ class _AppShellState extends State<AppShell> {
 
   void _onCallRecord(Channel chat, CallRecord record) {
     _activity[chat.id] = DateTime.now();
-    _timelineFor(chat).addCall(
-      record.label,
-      record is EndedCall ? CallLine.ended : CallLine.missed,
-      from: chat.members.first,
-    );
+    // Calls are the mock's alone, and so are the lines they leave.
+    final rooms = _rooms;
+    if (rooms is! MockRooms) return;
+    rooms
+        .timeline(chat.id)
+        .addCall(
+          record.label,
+          record is EndedCall ? CallLine.ended : CallLine.missed,
+          from: chat.members.first,
+        );
     final looking = _home && _channel?.id == chat.id;
     if (record is MissedCall && !looking) {
       _missedCalls[chat.id] = (_missedCalls[chat.id] ?? 0) + 1;
@@ -754,7 +720,7 @@ class _AppShellState extends State<AppShell> {
     final callHere = session != null && session.target.id == channel.id;
     return ChannelView(
       channel: channel,
-      timeline: _timelineFor(channel),
+      timeline: _rooms.timeline(channel.id),
       navigationAttention: _notices.any((n) => n.loud),
       callBar: _buildCallBar(),
       onOpenNavigation: openNavigation,

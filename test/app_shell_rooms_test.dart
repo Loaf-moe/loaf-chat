@@ -8,6 +8,7 @@ import 'package:loaf_native/ui/auth/homeserver.dart';
 import 'package:loaf_native/ui/auth/loaf_session.dart';
 import 'package:loaf_native/ui/auth/sign_in_state.dart';
 import 'package:loaf_native/ui/channel/composer.dart';
+import 'package:loaf_native/ui/channel/timeline.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
 import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/mock/mock_homeserver.dart';
@@ -98,6 +99,9 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
 
   @override
   void loadMembers(String roomId) => membersAsked.add(roomId);
+
+  @override
+  Timeline? timeline(String roomId) => null;
 
   @override
   Future<void> accept(Invite invite) => answer!.future;

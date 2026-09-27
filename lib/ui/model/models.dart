@@ -88,6 +88,10 @@ class Reaction {
 /// The two looks a call's system line takes in a DM timeline.
 enum CallLine { ended, missed }
 
+/// Where a message you wrote is on its way to the server. Everyone else's
+/// messages, and yours once the server has them, are [sent].
+enum MessageStatus { sent, sending, failed }
+
 class Message {
   const Message({
     required this.id,
@@ -99,7 +103,24 @@ class Message {
     this.replyTo,
     this.imageAspect,
     this.callLine,
+    this.status = MessageStatus.sent,
+    this.locked = false,
+    this.stub = false,
   });
+
+  /// A reply's quote of a message that is not loaded, or no longer there:
+  /// who wrote it, where that is known, and nothing of what it said.
+  Message.stub({required this.id, required this.author})
+    : sentAt = DateTime.utc(1970),
+      body = '',
+      reactions = const [],
+      edited = false,
+      replyTo = null,
+      imageAspect = null,
+      callLine = null,
+      status = MessageStatus.sent,
+      locked = false,
+      stub = true;
 
   final String id;
   final Member author;
@@ -119,6 +140,14 @@ class Message {
   /// anyone said; [body] is then its label, such as "call · 12m".
   final CallLine? callLine;
 
+  final MessageStatus status;
+
+  /// Encrypted, and this device cannot read it yet. [body] is empty.
+  final bool locked;
+
+  /// See [Message.stub].
+  final bool stub;
+
   Message copyWith({List<Reaction>? reactions, String? body, bool? edited}) =>
       Message(
         id: id,
@@ -130,6 +159,9 @@ class Message {
         replyTo: replyTo,
         imageAspect: imageAspect,
         callLine: callLine,
+        status: status,
+        locked: locked,
+        stub: stub,
       );
 }
 

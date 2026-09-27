@@ -8,7 +8,7 @@ import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import 'composer.dart';
 import 'message_group_tile.dart';
-import 'timeline_controller.dart';
+import 'timeline.dart';
 
 const _narrowTopicWidth = 480.0;
 
@@ -66,7 +66,7 @@ class ChannelView extends StatelessWidget {
 
   /// Null while the backend cannot read messages yet: the conversation
   /// says so, and offers no composer to write into nowhere.
-  final TimelineController? timeline;
+  final Timeline? timeline;
 
   /// Marks the menu button when a notice that must not be missed is waiting
   /// in the rail. Only matters on a phone, where the rail hides in the drawer.
@@ -282,7 +282,7 @@ class _HeaderIconButton extends StatelessWidget {
 class _Timeline extends StatefulWidget {
   const _Timeline({required this.controller});
 
-  final TimelineController controller;
+  final Timeline controller;
 
   @override
   State<_Timeline> createState() => _TimelineState();

@@ -6,6 +6,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../channel/timeline_controller.dart';
 import '../rooms/rooms.dart';
 import '../spaces/add_space.dart' show spaceColorFor;
 import 'fixtures.dart';
@@ -33,6 +34,11 @@ class MockRooms extends ChangeNotifier implements Rooms {
   final _answeredInvites = <String>{};
   final _acceptedRooms = <Channel>[];
   final _acceptedSpaces = <Space>[];
+
+  /// The original spaces' channels share one conversation; every other
+  /// room, Home's and anything joined or made this session, has its own.
+  late final _shared = TimelineController(mockTimeline(), you: currentUser);
+  final _timelines = <String, TimelineController>{};
 
   var _made = 0;
   var _started = 0;
@@ -206,5 +212,40 @@ class MockRooms extends ChangeNotifier implements Rooms {
       _activity[room.id] = DateTime.now();
     });
     return room;
+  }
+
+  @override
+  TimelineController timeline(String roomId) {
+    if (mockSpaces.any((s) => s.allChannels.any((c) => c.id == roomId))) {
+      return _shared;
+    }
+    return _timelines.putIfAbsent(roomId, () {
+      final home = [
+        ...mockHomeRooms,
+        ..._acceptedRooms,
+      ].any((c) => c.id == roomId);
+      final timeline = TimelineController(
+        home ? mockHomeTimeline(roomId) : mockSpaceTimeline(roomId),
+        you: currentUser,
+      );
+      var count = timeline.messages.length;
+      // A new message moves a DM up the list.
+      timeline.addListener(() {
+        if (timeline.messages.length > count) {
+          _change(() => _activity[roomId] = DateTime.now());
+        }
+        count = timeline.messages.length;
+      });
+      return timeline;
+    });
+  }
+
+  @override
+  void dispose() {
+    _shared.dispose();
+    for (final t in _timelines.values) {
+      t.dispose();
+    }
+    super.dispose();
   }
 }

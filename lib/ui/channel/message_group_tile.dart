@@ -12,7 +12,7 @@ import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'message_actions.dart';
-import 'timeline_controller.dart';
+import 'timeline.dart';
 
 String _formatTime(DateTime time) {
   String two(int n) => n.toString().padLeft(2, '0');
@@ -27,7 +27,7 @@ class MessageGroupTile extends StatelessWidget {
   /// When set, each message offers its actions: long press on a phone,
   /// hover and right-click on a computer. Left null, the tile is
   /// display-only.
-  final TimelineController? controller;
+  final Timeline? controller;
 
   @override
   Widget build(BuildContext context) {
@@ -323,7 +323,7 @@ class _TouchMessage extends StatefulWidget {
   const _TouchMessage({required this.message, required this.controller});
 
   final Message message;
-  final TimelineController controller;
+  final Timeline controller;
 
   @override
   State<_TouchMessage> createState() => _TouchMessageState();
@@ -364,7 +364,7 @@ class _PointerMessage extends StatefulWidget {
   const _PointerMessage({required this.message, required this.controller});
 
   final Message message;
-  final TimelineController controller;
+  final Timeline controller;
 
   @override
   State<_PointerMessage> createState() => _PointerMessageState();

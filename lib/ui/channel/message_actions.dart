@@ -15,7 +15,7 @@ import '../theme/loaf_theme.dart';
 import '../emoji/emoji_picker.dart';
 import '../widgets/toast.dart';
 import '../widgets/action_menu.dart';
-import 'timeline_controller.dart';
+import 'timeline.dart';
 
 enum MessageAction { reply, copy, edit, delete }
 
@@ -88,7 +88,7 @@ List<ActionItem<_Pick>> _items(Message message, Member you) => [
 /// Touch: long press. Rises from the bottom, reactions within thumb reach.
 Future<void> showMessageActionsSheet(
   BuildContext context,
-  TimelineController controller,
+  Timeline controller,
   Message message,
 ) async {
   final pick = await showActionSheet<_Pick>(
@@ -107,7 +107,7 @@ Future<void> showMessageActionsSheet(
 /// since that is almost certainly why you right-clicked selected text.
 Future<void> showMessageContextMenu(
   BuildContext context,
-  TimelineController controller,
+  Timeline controller,
   Message message,
   Offset position, {
   String selection = '',
@@ -135,7 +135,7 @@ Future<void> showMessageContextMenu(
 /// is not stacked underneath a surface that is animating away.
 Future<void> _perform(
   BuildContext context,
-  TimelineController controller,
+  Timeline controller,
   Message message,
   _Pick pick, {
   Offset? position,
