@@ -34,6 +34,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     // A restored session has synced before; its rooms are already here.
     _synced = client.prevBatch != null;
     _rebuild();
+    // The status stream does not replay: a sync already under way when the
+    // shell opens is read from its last value.
+    final status = client.onSyncStatus.value;
+    if (status != null) _onStatus(status);
     unawaited(_loadMe());
   }
 

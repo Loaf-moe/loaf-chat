@@ -464,6 +464,20 @@ void main() {
     expect(seen.map((s) => s.$2), contains(1.0));
   });
 
+  test(
+    'a sync already under way when the rooms open shows its progress',
+    () async {
+      final client = await _client(firstSync: false);
+      client.onSyncStatus.add(
+        const SyncStatusUpdate(SyncStatus.processing, progress: 0.3),
+      );
+      final rooms = MatrixRooms(client);
+      addTearDown(rooms.dispose);
+      expect(rooms.synced, isFalse);
+      expect(rooms.syncProgress, 0.3);
+    },
+  );
+
   test('accepting an invite asks the server once, however many taps', () async {
     final api = _Api()..hold = Completer();
     final client = await _client(api: api);
