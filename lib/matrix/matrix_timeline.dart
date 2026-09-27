@@ -126,6 +126,14 @@ class MatrixTimeline extends ChangeNotifier
         ? ui.MessageStatus.sending
         : ui.MessageStatus.sent;
     if (event.type == EventTypes.Encrypted) {
+      // The relation stays in the clear: a reaction or an edit that cannot
+      // be read is still not a message of its own.
+      if (const {
+        RelationshipTypes.reaction,
+        RelationshipTypes.edit,
+      }.contains(event.relationshipType)) {
+        return null;
+      }
       return ui.Message(
         id: event.eventId,
         author: author,
@@ -341,6 +349,9 @@ class MatrixTimeline extends ChangeNotifier
   void retry(String messageId) {
     final event = _event(messageId);
     if (event == null || !_unsent(event)) return;
+    // A second tap while the first resend is on its way: the event still
+    // reads failed until the SDK moves it on, but is already being sent.
+    if (_inFlight.contains(event.eventId)) return;
     // The SDK resends only what it has marked failed; one left sending by
     // a quit app is failed in all but name.
     event.status = EventStatus.error;
@@ -359,7 +370,7 @@ class MatrixTimeline extends ChangeNotifier
   void discard(String messageId) {
     final event = _event(messageId);
     if (event == null || !_unsent(event)) return;
-    unawaited(event.cancelSend());
+    unawaited(event.cancelSend().then<void>((_) {}, onError: (Object _) {}));
   }
 
   // ── History ────────────────────────────────────────────────────────────

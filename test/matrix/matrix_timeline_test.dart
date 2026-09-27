@@ -390,6 +390,24 @@ void main() {
       expect(h.timeline.writable, isFalse);
     });
 
+    test('an encrypted reaction or edit it cannot read is not a row', () async {
+      Map<String, Object?> sealed([Map<String, Object?>? relatesTo]) =>
+          _event('m.room.encrypted', {
+            'algorithm': 'm.megolm.v1.aes-sha2',
+            'ciphertext': 'AwgA',
+            'sender_key': 'k',
+            'session_id': 's',
+            'device_id': 'D',
+            'm.relates_to': ?relatesTo,
+          });
+      final h = await _open([
+        sealed(),
+        sealed({'rel_type': 'm.annotation', 'event_id': r'$m1', 'key': '🔥'}),
+        sealed({'rel_type': 'm.replace', 'event_id': r'$m1'}),
+      ], encrypted: true);
+      expect(h.messages.single.locked, isTrue);
+    });
+
     test('an unencrypted room is writable', () async {
       final h = await _open([_text('hi')]);
       expect(h.timeline.writable, isTrue);
@@ -615,6 +633,28 @@ void main() {
       final m = h.messages.single;
       expect((m.body, m.edited), ('helo', false));
       expect(failures, ["couldn't save that edit"]);
+    });
+  });
+
+  group('retrying', () {
+    test('a second tap before the first resends sends once', () async {
+      final h = await _open([_text('hi')]);
+      h.api.refuseSend = true;
+      h.timeline.send('rejected');
+      await _settle();
+      final failed = h.byBody('rejected');
+
+      h.api
+        ..refuseSend = false
+        ..holdSend = Completer<void>();
+      h.timeline
+        ..retry(failed.id)
+        ..retry(failed.id);
+      await _settle();
+      h.api.holdSend!.complete();
+      await _settle();
+      expect(h.api.sent.map((s) => s.$2['body']), ['rejected']);
+      expect(h.byBody('rejected').status, MessageStatus.sent);
     });
   });
 
