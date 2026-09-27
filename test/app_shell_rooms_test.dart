@@ -8,6 +8,7 @@ import 'package:loaf_native/ui/auth/homeserver.dart';
 import 'package:loaf_native/ui/auth/loaf_session.dart';
 import 'package:loaf_native/ui/auth/sign_in_state.dart';
 import 'package:loaf_native/ui/channel/composer.dart';
+import 'package:loaf_native/ui/members/member_list.dart';
 import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/mock/mock_homeserver.dart';
 import 'package:loaf_native/ui/model/models.dart';
@@ -385,6 +386,23 @@ void main() {
       expect(find.text('ADMINS — 1'), findsOneWidget);
       expect(find.text('MEMBERS — 1'), findsOneWidget);
     });
+  });
+
+  group('a voice channel on the desktop', () {
+    testWidgets(
+      'shows the space\'s members, and the toggle hides them',
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester, _FakeRooms(spaces: [_bakery()]));
+        await tester.tap(_inList('oven'));
+        await tester.pumpAndSettle();
+        expect(find.byType(MemberList), findsOneWidget);
+        expect(find.text('Moddy'), findsOneWidget);
+        await tester.tap(find.byIcon(LucideIcons.users));
+        await tester.pumpAndSettle();
+        expect(find.byType(MemberList), findsNothing);
+      },
+    );
   });
 
   group('answering an invite', () {

@@ -832,7 +832,11 @@ class _AppShellState extends State<AppShell> {
                           _showMembers &&
                           _previewInvite == null &&
                           (channel!.kind == ChannelKind.text ||
-                              channel.kind == ChannelKind.room))
+                              channel.kind == ChannelKind.room ||
+                              // Before messages are wired, a voice channel
+                              // is the same pane, toggle and all.
+                              (channel.kind == ChannelKind.voice &&
+                                  !_can(RoomAbility.messages))))
                         DecoratedBox(
                           decoration: BoxDecoration(
                             border: Border(
