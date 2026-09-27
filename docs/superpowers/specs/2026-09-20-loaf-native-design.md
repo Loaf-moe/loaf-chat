@@ -38,7 +38,8 @@ than deferred: the early mockups showed Flutter makes it close to free, so every
 feature ships with its desktop form (pointer and keyboard idioms, wide layouts)
 at the same time as its mobile one. Android is best-effort in v1: it gets
 whatever works for free and no dedicated native glue (no FCM, no Android call
-UI) until someone needs it.
+UI) until someone needs it. Where a platform offers a native mechanism, that
+is the default; portable workarounds are only for platforms without one.
 
 **Distribution.** Paid Apple Developer account, TestFlight. App Store is not a
 v1 goal.
@@ -265,12 +266,15 @@ a preference. The password form stays behind a link, offered only where the
 server advertises `m.login.password`.
 
 **SSO** (`/login/sso/redirect/{idpId}?redirectUrl=…`, answered with a
-`loginToken` exchanged via `m.login.token`) splits by platform. On a phone it
-runs in the system's `ASWebAuthenticationSession` sheet, which the mock stands
-in for with a short "signing in…". On a computer the real browser opens and the
-screen becomes "finish in your browser", with open it again and cancel. The
-next-generation OAuth 2.0 API (MSC3861, advertised at `/auth_metadata`) looks
-the same: one "continue with" button.
+`loginToken` exchanged via `m.login.token`) splits by platform. On iOS and
+macOS it runs in the system's `ASWebAuthenticationSession` sign-in window,
+which closes itself and hands back to the app; the screen says "signing
+in…" meanwhile. Only where the platform has no such window (Linux, Windows)
+does the real browser open: the screen becomes "finish in your browser",
+with open it again and cancel, and when the browser hands back, the app
+comes to the front and the tab says it can be closed. The next-generation
+OAuth 2.0 API (MSC3861, advertised at `/auth_metadata`) looks the same: one
+"continue with" button.
 
 **Password** (`m.id.user`) shows the button busy while it works. `M_FORBIDDEN`
 is "that username and password didn't match" under the fields;
