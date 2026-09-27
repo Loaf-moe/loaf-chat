@@ -112,7 +112,8 @@ class MockSession extends ChangeNotifier implements LoafSession {
 
   /// Another of your devices asks this one to vouch for it. Only a verified
   /// device is asked, so this one becomes one. One asked while another is
-  /// being answered waits its turn, timing out if it has to.
+  /// being answered is dropped, as the real session drops it: it is never
+  /// shown, and times out on the device that asked.
   void receiveRequest() {
     _trust = DeviceTrust.verified;
     if (_incoming != null) {

@@ -82,7 +82,10 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **Encryption tests need the macOS build first** (`flutter build macos --debug`); a fresh clone fails them with that instruction. A test-only build of vodozemac would lift it.
 - **A restore does not resume after a quit.** Rooms fetch missing keys from backup as they open, so nothing is lost, only the count.
 - **Key backup without cross-signing is not healed by the key.** Such an account is offered setting up, which refuses and offers reset, since healing needs a re-auth inside unlocking.
-- **Minor leftovers from the task reviews:** the restore count counts keys attempted, not stored; making an identity takes every re-auth request on the client, not only its own; a re-auth "retry" also shows after a passed stage of a multi-stage flow; "they match" can be tapped twice while its answer is sending; the panel's composer choice listens to the timeline, but a trust flip really arrives through the shell's rebuild on the session changing.
+- **Minor leftovers from the task reviews:** the restore count counts keys attempted, not stored; making an identity takes every re-auth request on the client, not only its own; a re-auth "retry" also shows after a passed stage of a multi-stage flow; the panel's composer choice listens to the timeline, but a trust flip really arrives through the shell's rebuild on the session changing.
+- **A server that refuses a re-auth stage reads "couldn't reach".** A set-up or reset the server turned down (not a wrong password) says it couldn't reach the server, which is not the whole story.
+- **No test signs out during a restore, and `Verifier` has no `dispose`.** A restore running unseen when the session ends is left to the SDK's own teardown.
+- **A backup-only account hears "that didn't unlock anything".** Key backup without cross-signing isn't healed by the key (above), and the key panel's answer doesn't say why.
 
 ## Global constraints (all phases)
 
