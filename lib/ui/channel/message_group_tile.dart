@@ -74,7 +74,10 @@ class MessageGroupTile extends StatelessWidget {
 
   Widget _interactive(Message message) {
     final controller = this.controller;
-    if (controller == null) return _MessageBody(message: message);
+    // A locked message has nothing in it to copy, reply to or react to.
+    if (controller == null || message.locked) {
+      return _MessageBody(message: message);
+    }
     return isDesktop
         ? _PointerMessage(message: message, controller: controller)
         : _TouchMessage(message: message, controller: controller);
@@ -105,9 +108,15 @@ class _MessageBody extends StatelessWidget {
     this.onSelectionChanged,
     this.onReact,
     this.onAddReaction,
+    this.onRetry,
+    this.onDiscard,
   });
 
   final Message message;
+
+  /// A failed message's two ways forward: send it again, or give up on it.
+  final VoidCallback? onRetry;
+  final VoidCallback? onDiscard;
 
   /// Tapping a reaction pill toggles your own on it: join the 🔥 or take
   /// yours back. Null leaves the pills display-only.
@@ -124,8 +133,18 @@ class _MessageBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
+    if (message.locked) {
+      return Text(
+        'encrypted · readable once this device is verified',
+        style: loafBody(
+          15,
+          400,
+          height: 1.5,
+        ).copyWith(color: tokens.textMuted, fontStyle: FontStyle.italic),
+      );
+    }
     final replyTo = message.replyTo;
-    return Column(
+    final body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (replyTo != null) _ReplyContext(replyTo: replyTo),
@@ -144,6 +163,18 @@ class _MessageBody extends StatelessWidget {
         ],
       ],
     );
+    return switch (message.status) {
+      MessageStatus.sent => body,
+      // Dimmed until the server has it: it is on its way, not there yet.
+      MessageStatus.sending => Opacity(opacity: 0.5, child: body),
+      MessageStatus.failed => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Opacity(opacity: 0.5, child: body),
+          _FailedLine(onRetry: onRetry, onDiscard: onDiscard),
+        ],
+      ),
+    };
   }
 
   Widget _text(LoafTokens tokens) {
@@ -206,11 +237,17 @@ class _ReplyContext extends StatelessWidget {
                       ).copyWith(color: tokens.nameColor(replyTo.author.role)),
                     ),
                     TextSpan(
-                      text: '  ${replyTo.body}',
-                      style: loafBody(
-                        11,
-                        400,
-                      ).copyWith(color: tokens.textMuted),
+                      text: replyTo.stub
+                          ? '  a message further up'
+                          : replyTo.locked
+                          ? '  an encrypted message'
+                          : '  ${replyTo.body}',
+                      style: loafBody(11, 400).copyWith(
+                        color: tokens.textMuted,
+                        fontStyle: replyTo.stub || replyTo.locked
+                            ? FontStyle.italic
+                            : null,
+                      ),
                     ),
                   ],
                 ),
@@ -220,6 +257,45 @@ class _ReplyContext extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Under a message that did not send: say so, and offer both ways on.
+class _FailedLine extends StatelessWidget {
+  const _FailedLine({required this.onRetry, required this.onDiscard});
+
+  final VoidCallback? onRetry;
+  final VoidCallback? onDiscard;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    final quiet = loafBody(11, 400).copyWith(color: tokens.textMuted);
+    Widget action(String label, VoidCallback? onTap) => InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(LoafRadius.sm),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x1),
+        child: Text(
+          label,
+          style: loafBody(11, 600).copyWith(color: tokens.accent),
+        ),
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: LoafSpace.x1),
+      child: Row(
+        children: [
+          Icon(LucideIcons.circleAlert, size: 12, color: tokens.accent),
+          const SizedBox(width: LoafSpace.x1),
+          Text("didn't send", style: quiet),
+          Text(' · ', style: quiet),
+          action('retry', onRetry),
+          Text(' · ', style: quiet),
+          action('discard', onDiscard),
+        ],
       ),
     );
   }
@@ -349,9 +425,13 @@ class _TouchMessageState extends State<_TouchMessage> {
       on: _active,
       child: _MessageBody(
         message: widget.message,
-        onReact: (emoji) =>
-            widget.controller.toggleReaction(widget.message.id, emoji),
-        onAddReaction: (_) => _openSheet(),
+        onReact: canReactTo(widget.message)
+            ? (emoji) =>
+                  widget.controller.toggleReaction(widget.message.id, emoji)
+            : null,
+        onAddReaction: canReactTo(widget.message) ? (_) => _openSheet() : null,
+        onRetry: () => widget.controller.retry(widget.message.id),
+        onDiscard: () => widget.controller.discard(widget.message.id),
       ),
     ),
   );
@@ -392,7 +472,9 @@ class _PointerMessageState extends State<_PointerMessage> {
       _overMessage = message ?? _overMessage;
       _overToolbar = toolbar ?? _overToolbar;
     });
-    if (_overMessage || _overToolbar) {
+    // The toolbar reacts and replies, which wait until the server has the
+    // message; right-click still copies it.
+    if ((_overMessage || _overToolbar) && canReactTo(widget.message)) {
       _toolbar.show();
     } else {
       _toolbar.hide();
@@ -463,10 +545,16 @@ class _PointerMessageState extends State<_PointerMessage> {
               on: _active || _overMessage || _overToolbar,
               child: _MessageBody(
                 message: widget.message,
-                onReact: (emoji) =>
-                    widget.controller.toggleReaction(widget.message.id, emoji),
-                onAddReaction: _openMenu,
+                onReact: canReactTo(widget.message)
+                    ? (emoji) => widget.controller.toggleReaction(
+                        widget.message.id,
+                        emoji,
+                      )
+                    : null,
+                onAddReaction: canReactTo(widget.message) ? _openMenu : null,
                 onSelectionChanged: (text) => _selection = text,
+                onRetry: () => widget.controller.retry(widget.message.id),
+                onDiscard: () => widget.controller.discard(widget.message.id),
               ),
             ),
           ),

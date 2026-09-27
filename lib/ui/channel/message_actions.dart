@@ -23,15 +23,24 @@ enum MessageAction { reply, copy, edit, delete }
 const quickReactions = ['👍', '❤️', '😂', '😮', '🔥', '🥖'];
 
 /// Actions available on [message] to [you]. Edit and delete are yours alone;
-/// removing someone else's message is moderation, which v1 defers.
+/// removing someone else's message is moderation, which v1 defers. A
+/// message the server does not have yet can only be copied: replying,
+/// editing and deleting all point at an event it has not got.
 List<MessageAction> actionsFor(Message message, Member you) => [
-  MessageAction.reply,
-  MessageAction.copy,
-  if (message.author.id == you.id) ...[
-    MessageAction.edit,
-    MessageAction.delete,
+  if (message.status != MessageStatus.sent)
+    MessageAction.copy
+  else ...[
+    MessageAction.reply,
+    MessageAction.copy,
+    if (message.author.id == you.id) ...[
+      MessageAction.edit,
+      MessageAction.delete,
+    ],
   ],
 ];
+
+/// Whether [message] can take a reaction yet: only once the server has it.
+bool canReactTo(Message message) => message.status == MessageStatus.sent;
 
 extension on MessageAction {
   String get label => switch (this) {
@@ -93,8 +102,12 @@ Future<void> showMessageActionsSheet(
 ) async {
   final pick = await showActionSheet<_Pick>(
     context,
-    header: (context) =>
-        _ReactionRow(size: 44, onPick: (pick) => Navigator.pop(context, pick)),
+    header: canReactTo(message)
+        ? (context) => _ReactionRow(
+            size: 44,
+            onPick: (pick) => Navigator.pop(context, pick),
+          )
+        : null,
     items: _items(message, controller.you),
   );
   if (pick != null && context.mounted) {
@@ -115,7 +128,7 @@ Future<void> showMessageContextMenu(
   final pick = await showActionMenu<_Pick>(
     context,
     position: position,
-    leading: [_ReactionMenuEntry()],
+    leading: [if (canReactTo(message)) _ReactionMenuEntry()],
     items: [
       if (selection.isNotEmpty)
         ActionItem(

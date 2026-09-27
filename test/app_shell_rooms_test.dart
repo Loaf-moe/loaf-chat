@@ -246,6 +246,18 @@ void main() {
       expect(find.text("messages aren't wired up yet"), findsOneWidget);
     });
 
+    testWidgets('with messages but no calls, a voice channel still waits', (
+      tester,
+    ) async {
+      final rooms = _FakeRooms(spaces: [_bakery()])
+        ..abilities = {RoomAbility.messages};
+      await _pump(tester, rooms);
+      await tester.tap(_inList('oven'));
+      await tester.pumpAndSettle();
+      expect(find.text('join voice'), findsNothing);
+      expect(find.text("messages aren't wired up yet"), findsOneWidget);
+    });
+
     testWidgets('a DM offers no calls', (tester) async {
       await _pump(tester, _FakeRooms(homeRooms: [_dm]));
       expect(find.text("messages aren't wired up yet"), findsOneWidget);

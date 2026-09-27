@@ -689,9 +689,10 @@ class _AppShellState extends State<AppShell> {
     }
 
     // Before the backend can read messages, every room is its header and a
-    // line saying so — a voice channel too, since joining a call is a
-    // conversation's next step.
-    if (!_can(RoomAbility.messages)) {
+    // line saying so — and so is a voice channel before it can join calls,
+    // since joining one is that channel's only next step.
+    if (!_can(RoomAbility.messages) ||
+        (channel.kind == ChannelKind.voice && !_can(RoomAbility.calls))) {
       return ChannelView(
         channel: channel,
         timeline: null,
@@ -721,6 +722,9 @@ class _AppShellState extends State<AppShell> {
     return ChannelView(
       channel: channel,
       timeline: _rooms.timeline(channel.id),
+      onRead: _can(RoomAbility.markRead)
+          ? () => _rooms.markRead(channel.id)
+          : null,
       navigationAttention: _notices.any((n) => n.loud),
       callBar: _buildCallBar(),
       onOpenNavigation: openNavigation,

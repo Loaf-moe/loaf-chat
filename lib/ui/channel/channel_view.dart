@@ -1,11 +1,14 @@
 /// The channel reading surface: header, timeline and composer.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/toast.dart';
 import 'composer.dart';
 import 'message_group_tile.dart';
 import 'timeline.dart';
@@ -50,9 +53,14 @@ class ChannelView extends StatelessWidget {
     this.onStartCall,
     this.callPanel,
     this.callPanelExpanded = false,
+    this.onRead,
   });
 
   final Channel channel;
+
+  /// Someone else's message arrived while you were looking: you have read
+  /// it. Only heard while the app is in front.
+  final VoidCallback? onRead;
 
   /// DMs only: rings everyone in the chat. Null while a call here is already
   /// running: the panel is right there, so the header's buttons step aside.
@@ -108,19 +116,30 @@ class ChannelView extends StatelessWidget {
               Expanded(child: callPanel!)
             else ...[
               ?callPanel,
-              Expanded(child: _Timeline(controller: timeline!)),
+              Expanded(
+                // Keyed by the conversation, so switching rooms starts a
+                // fresh list that listens to the room it shows.
+                child: _Timeline(
+                  key: ObjectKey(timeline),
+                  controller: timeline!,
+                  onRead: onRead,
+                ),
+              ),
               if (channel.waitingFor.isNotEmpty)
                 _WaitingLine(people: channel.waitingFor),
               ?callBar,
-              Composer(
-                channelName: channel.name,
-                timeline: timeline!,
-                prefix: switch (channel) {
-                  Channel(kind: ChannelKind.direct, members: [_]) => '@',
-                  Channel(kind: ChannelKind.direct) => '',
-                  _ => '#',
-                },
-              ),
+              if (timeline!.writable)
+                Composer(
+                  channelName: channel.name,
+                  timeline: timeline!,
+                  prefix: switch (channel) {
+                    Channel(kind: ChannelKind.direct, members: [_]) => '@',
+                    Channel(kind: ChannelKind.direct) => '',
+                    _ => '#',
+                  },
+                )
+              else
+                const _EncryptedNote(),
             ],
           ],
         ),
@@ -280,9 +299,10 @@ class _HeaderIconButton extends StatelessWidget {
 }
 
 class _Timeline extends StatefulWidget {
-  const _Timeline({required this.controller});
+  const _Timeline({super.key, required this.controller, this.onRead});
 
   final Timeline controller;
+  final VoidCallback? onRead;
 
   @override
   State<_Timeline> createState() => _TimelineState();
@@ -290,40 +310,94 @@ class _Timeline extends StatefulWidget {
 
 class _TimelineState extends State<_Timeline> {
   final _scroll = ScrollController();
-  late int _count = widget.controller.messages.length;
+
+  /// The newest message when last heard from, to tell a new one from
+  /// older ones paging in above.
+  String? _lastId;
+  late final StreamSubscription<String> _failures;
 
   @override
   void initState() {
     super.initState();
+    _lastId = widget.controller.messages.lastOrNull?.id;
     widget.controller.addListener(_onMessages);
+    _scroll.addListener(_maybeLoadOlder);
+    _failures = widget.controller.failures.listen((text) {
+      if (mounted) showToast(context, text);
+    });
+    _checkFilled();
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_onMessages);
+    unawaited(_failures.cancel());
     _scroll.dispose();
     super.dispose();
   }
 
-  /// Sending brings you back to the newest message, even if you had
-  /// scrolled up to reread something. Other people's messages do not yank
-  /// you around.
+  /// A new newest message: yours brings you back down to it, even if you
+  /// had scrolled up to reread something; someone else's does not yank you
+  /// around, but is read if you are looking. Older messages paging in
+  /// above change neither.
   void _onMessages() {
-    final messages = widget.controller.messages;
-    final grew = messages.length > _count;
-    _count = messages.length;
+    final last = widget.controller.messages.lastOrNull;
+    final arrived = last != null && last.id != _lastId;
+    _lastId = last?.id;
     setState(() {});
-    if (grew &&
-        messages.last.author.id == widget.controller.you.id &&
-        _scroll.hasClients) {
-      _scroll.animateTo(0, duration: LoafMotion.normal, curve: LoafMotion.ease);
+    _checkFilled();
+    if (!arrived) return;
+    if (last.author.id == widget.controller.you.id) {
+      if (_scroll.hasClients) {
+        _scroll.animateTo(
+          0,
+          duration: LoafMotion.normal,
+          curve: LoafMotion.ease,
+        );
+      }
+    } else if (_looking) {
+      widget.onRead?.call();
     }
   }
+
+  /// In front and focused. A window behind another, or an app in the
+  /// background, is not reading anything.
+  bool get _looking {
+    final state = WidgetsBinding.instance.lifecycleState;
+    return state == null || state == AppLifecycleState.resumed;
+  }
+
+  /// Within a screen of the oldest message loaded: fetch more. The list is
+  /// reversed, so the oldest end is the far end of the scroll.
+  void _maybeLoadOlder() {
+    final timeline = widget.controller;
+    if (!timeline.canLoadOlder ||
+        timeline.loadingOlder ||
+        timeline.loadOlderFailed ||
+        !_scroll.hasClients) {
+      return;
+    }
+    final position = _scroll.position;
+    if (position.extentAfter < position.viewportDimension) {
+      timeline.loadOlder();
+    }
+  }
+
+  /// A short conversation never scrolls, so nothing would ask for more:
+  /// check once each change has been laid out.
+  void _checkFilled() => WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (mounted) _maybeLoadOlder();
+  });
 
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final entries = groupTimeline(controller.messages).reversed.toList();
+    final top = controller.loadingOlder
+        ? const _OlderLine(failed: false)
+        : controller.loadOlderFailed
+        ? _OlderLine(failed: true, onRetry: controller.loadOlder)
+        : null;
     return ListView.builder(
       controller: _scroll,
       reverse: true,
@@ -331,8 +405,9 @@ class _TimelineState extends State<_Timeline> {
         horizontal: LoafSpace.x4,
         vertical: LoafSpace.x2,
       ),
-      itemCount: entries.length,
+      itemCount: entries.length + (top == null ? 0 : 1),
       itemBuilder: (context, index) {
+        if (index == entries.length) return top;
         final entry = entries[index];
         return switch (entry) {
           DaySeparator() => _DaySeparatorTile(entry: entry),
@@ -343,6 +418,42 @@ class _TimelineState extends State<_Timeline> {
           ),
         };
       },
+    );
+  }
+}
+
+/// The top of a conversation while older messages are on their way, or
+/// when fetching them failed.
+class _OlderLine extends StatelessWidget {
+  const _OlderLine({required this.failed, this.onRetry});
+
+  final bool failed;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    final quiet = loafBody(13, 400).copyWith(color: tokens.textMuted);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: LoafSpace.x4),
+      child: Center(
+        child: failed
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text("couldn't load older messages · ", style: quiet),
+                  InkWell(
+                    onTap: onRetry,
+                    borderRadius: BorderRadius.circular(LoafRadius.sm),
+                    child: Text(
+                      'try again',
+                      style: loafBody(13, 600).copyWith(color: tokens.accent),
+                    ),
+                  ),
+                ],
+              )
+            : Text('loading older messages', style: quiet),
+      ),
     );
   }
 }
@@ -477,6 +588,37 @@ class _Unwired extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// In place of the composer in an encrypted room, until this device can
+/// encrypt: nothing is sent there unencrypted.
+class _EncryptedNote extends StatelessWidget {
+  const _EncryptedNote();
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        LoafSpace.x4,
+        LoafSpace.x3,
+        LoafSpace.x4,
+        LoafSpace.x4,
+      ),
+      child: Row(
+        children: [
+          Icon(LucideIcons.lock, size: 14, color: tokens.textMuted),
+          const SizedBox(width: LoafSpace.x2),
+          Expanded(
+            child: Text(
+              'sending here waits for encryption',
+              style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+            ),
+          ),
+        ],
       ),
     );
   }
