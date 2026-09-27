@@ -31,6 +31,10 @@ class MatrixDeviceVerification extends ChangeNotifier
   var _failed = false;
   var _disposed = false;
 
+  /// The answers already sent: each goes once, so a second tap while the
+  /// first is in flight (the phase moves only once it lands) sends nothing.
+  final _answered = <_Answer>{};
+
   Future<void> _request(Client client) async {
     try {
       final keys = client.userDeviceKeys[client.userID];
@@ -97,9 +101,13 @@ class MatrixDeviceVerification extends ChangeNotifier
 
   /// Runs one answer; one that fails to reach the server ends the
   /// verification, since the other side is left waiting on it.
-  void _answer(Future<void> Function(KeyVerification v) answer) {
+  void _answer(
+    Future<void> Function(KeyVerification v) answer, {
+    _Answer? once,
+  }) {
     final v = _verification;
     if (v == null || v.isDone) return;
+    if (once != null && !_answered.add(once)) return;
     unawaited(
       answer(v).catchError((Object e, StackTrace s) {
         Logs().w('[loaf] a verification answer did not go out', e, s);
@@ -109,13 +117,13 @@ class MatrixDeviceVerification extends ChangeNotifier
   }
 
   @override
-  void accept() => _answer((v) => v.acceptVerification());
+  void accept() => _answer((v) => v.acceptVerification(), once: _Answer.accept);
 
   @override
-  void match() => _answer((v) => v.acceptSas());
+  void match() => _answer((v) => v.acceptSas(), once: _Answer.match);
 
   @override
-  void mismatch() => _answer((v) => v.rejectSas());
+  void mismatch() => _answer((v) => v.rejectSas(), once: _Answer.mismatch);
 
   @override
   Future<UnlockResult> unlock(String keyOrPassphrase) async {
@@ -142,3 +150,5 @@ class MatrixDeviceVerification extends ChangeNotifier
     super.dispose();
   }
 }
+
+enum _Answer { accept, match, mismatch }

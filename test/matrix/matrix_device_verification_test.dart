@@ -92,6 +92,26 @@ void main() {
     expect(a.emoji, isEmpty);
   });
 
+  test('a second tap on they match sends nothing more', () async {
+    final (req1, _) = await toEmoji();
+    final a = MatrixDeviceVerification(req1);
+    addTearDown(a.dispose);
+    FakeMatrixApi.calledEndpoints.clear();
+    a.match();
+    a.match();
+    await sentTo('${room}m.key.verification.mac');
+    await _until(() => a.phase == DevicePhase.waitingForOther);
+    a.match();
+    // Room for a second send to have gone out, had there been one.
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(
+      FakeMatrixApi.calledEndpoints.keys.where(
+        (e) => e.startsWith('${room}m.key.verification.mac'),
+      ),
+      hasLength(1),
+    );
+  });
+
   test('a mismatch ends it at both ends', () async {
     final (req1, req2) = await toEmoji();
     final a = MatrixDeviceVerification(req1);
