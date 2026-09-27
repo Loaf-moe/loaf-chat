@@ -167,4 +167,13 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('history that stopped before any count says no "0 of 0"', (
+    tester,
+  ) async {
+    await _show(tester, const VerifyState(step: VerifyStep.done, failed: true));
+    expect(find.text('this session is verified'), findsOneWidget);
+    expect(find.text('history will arrive as you open rooms'), findsOneWidget);
+    expect(find.textContaining('0 of 0'), findsNothing);
+  });
 }

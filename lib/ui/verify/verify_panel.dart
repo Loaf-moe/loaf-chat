@@ -130,11 +130,16 @@ class _VerifyPanelState extends State<VerifyPanel> {
   String? get _unreachable =>
       _c.state.failed ? "couldn't reach ${_c.server} · try again" : null;
 
-  String? get _cutShort => _c.state.failed
-      ? 'restored ${thousands(_c.state.restored)} of '
-            '${thousands(_c.state.totalKeys)} · the rest arrive as you open '
-            'rooms'
-      : null;
+  String? get _cutShort {
+    final s = _c.state;
+    if (!s.failed) return null;
+    // Stopped before the backup was even counted: no numbers to give.
+    if (s.restored == 0 && s.totalKeys == 0) {
+      return 'history will arrive as you open rooms';
+    }
+    return 'restored ${thousands(s.restored)} of ${thousands(s.totalKeys)} · '
+        'the rest arrive as you open rooms';
+  }
 
   Widget _body(VerifyState s) => switch (s.step) {
     VerifyStep.choose => ChooseStep(
