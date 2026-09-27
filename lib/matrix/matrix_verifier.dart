@@ -140,9 +140,12 @@ class MatrixVerifier implements Verifier {
   }) async {
     if (!wipe) {
       final state = await client.getCryptoIdentityState();
+      // A published master key is an identity too, even with its secrets
+      // gone from secret storage: setting up must never replace it.
       if (state.keyBackupEnabled ||
           state.crossSigningEnabled ||
-          client.encryption!.ssss.defaultKeyId != null) {
+          client.encryption!.ssss.defaultKeyId != null ||
+          _publishedMasterKey != null) {
         throw RecoveryExists();
       }
       // Secret storage and cross-signing may be untouched, but the server

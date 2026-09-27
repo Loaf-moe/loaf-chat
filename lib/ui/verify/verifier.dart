@@ -135,7 +135,8 @@ abstract interface class Verifier {
   ///
   /// [wipe] is false for setting up recovery on a fresh account: it refuses,
   /// by throwing [RecoveryExists], an account that already keeps secret
-  /// storage, cross-signing or a key backup. [wipe] is true for a reset,
+  /// storage, cross-signing (a published master key counts) or a key backup.
+  /// [wipe] is true for a reset,
   /// which replaces them.
   Future<String?> createIdentity({
     required bool wipe,

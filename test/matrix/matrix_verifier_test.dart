@@ -312,6 +312,57 @@ void main() {
       );
     });
 
+    test('setting up refuses an account whose master key is published, even '
+        'with no secret storage or key backup', () async {
+      await _blankSecrets(client);
+      api.noBackupOnServer = true;
+      final master = client.userDeviceKeys[me]!.masterKey!.ed25519Key;
+      expect(master, isNotNull);
+
+      FakeMatrixApi.calledEndpoints.clear();
+      final asked = <AuthChallenge>[];
+      await expectLater(
+        verifier.createIdentity(wipe: false, onAuth: asked.add),
+        throwsA(isA<RecoveryExists>()),
+      );
+      expect(asked, isEmpty);
+      expect(client.userDeviceKeys[me]!.masterKey!.ed25519Key, master);
+      expect(
+        FakeMatrixApi.calledEndpoints.keys,
+        isNot(contains('/client/v3/keys/device_signing/upload')),
+      );
+    });
+
+    test('setting up refuses a key backup the server holds, with no master '
+        'key published either', () async {
+      await _blankSecrets(client);
+      client.userDeviceKeys[me]!.crossSigningKeys.clear();
+      FakeMatrixApi.calledEndpoints.clear();
+      await expectLater(
+        verifier.createIdentity(wipe: false, onAuth: (_) {}),
+        throwsA(isA<RecoveryExists>()),
+      );
+      expect(
+        FakeMatrixApi.calledEndpoints.keys,
+        isNot(contains('/client/v3/keys/device_signing/upload')),
+      );
+    });
+
+    test('setting up a genuinely new account makes an identity and returns '
+        'its key', () async {
+      // No secret storage, no published master key, and no backup on the
+      // server: M_NOT_FOUND on the backup version is the go-ahead.
+      await _blankSecrets(client);
+      client.userDeviceKeys[me]!.crossSigningKeys.clear();
+      api.noBackupOnServer = true;
+      final asked = <AuthChallenge>[];
+      final key = await verifier.createIdentity(wipe: false, onAuth: asked.add);
+      expect(key, startsWith('Es'));
+      expect(asked, isEmpty);
+      expect(client.userDeviceKeys[me]!.masterKey, isNotNull);
+      expect((await client.getCryptoIdentityState()).initialized, isTrue);
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
     test('asks for the password, again when it is wrong', () async {
       api.asks = AuthenticationTypes.password;
       final asked = <AuthChallenge>[];
@@ -417,6 +468,25 @@ void main() {
       expect(asked, isEmpty);
     }, timeout: const Timeout(Duration(minutes: 2)));
   });
+}
+
+/// Blanks every secret-storage entry this device would see, as a fresh
+/// account would have none. The fake server still publishes the fixture's
+/// cross-signing keys and serves its key backup unless told otherwise.
+Future<void> _blankSecrets(Client client) async {
+  for (final type in [
+    EventTypes.MegolmBackup,
+    EventTypes.CrossSigningSelfSigning,
+    EventTypes.CrossSigningUserSigning,
+    EventTypes.CrossSigningMasterKey,
+    EventTypes.SecretStorageDefaultKey,
+  ]) {
+    await client.setAccountData(me, type, {});
+  }
+  final state = await client.getCryptoIdentityState();
+  expect(state.keyBackupEnabled, isFalse);
+  expect(state.crossSigningEnabled, isFalse);
+  expect(client.encryption!.ssss.defaultKeyId, isNull);
 }
 
 Future<void> _until(bool Function() done) async {
