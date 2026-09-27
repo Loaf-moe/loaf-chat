@@ -31,12 +31,28 @@ class _Api extends FakeMatrixApi {
   /// no key backup on the server would answer.
   var noBackupOnServer = false;
 
+  /// 502s `/keys/device_signing/upload`: the new identity never goes up.
+  var failUpload = false;
+
+  /// 502s `POST .../room_keys/version`, which a new identity makes only
+  /// after its cross-signing keys went up.
+  var failNewBackup = false;
+
   static http.Response _json(Object body, [int status = 200]) =>
       http.Response(jsonEncode(body), status);
 
   @override
   Future<http.Response> mockIntercept(http.Request request) async {
     if (down) return _json({'errcode': 'M_UNKNOWN', 'error': 'down'}, 502);
+    if (failUpload &&
+        request.url.path.endsWith('/keys/device_signing/upload')) {
+      return _json({'errcode': 'M_UNKNOWN', 'error': 'down'}, 502);
+    }
+    if (failNewBackup &&
+        request.method == 'POST' &&
+        request.url.path.endsWith('/room_keys/version')) {
+      return _json({'errcode': 'M_UNKNOWN', 'error': 'down'}, 502);
+    }
     if (noBackupOnServer &&
         request.method == 'GET' &&
         request.url.path.endsWith('/room_keys/version')) {
@@ -352,6 +368,31 @@ void main() {
       asked.single.cancel();
       hold.complete();
       expect(await made, startsWith('Es'));
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('a failure after the new identity went up says it is incomplete, '
+        'not that nothing changed', () async {
+      api.failNewBackup = true;
+      final master = client.userDeviceKeys[me]!.masterKey!.ed25519Key;
+      await expectLater(
+        verifier.createIdentity(wipe: true, onAuth: (_) {}),
+        throwsA(isA<IdentityIncomplete>()),
+      );
+      expect(client.userDeviceKeys[me]!.masterKey!.ed25519Key, isNot(master));
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('a failure before the upload is the plain error', () async {
+      api.failUpload = true;
+      final master = client.userDeviceKeys[me]!.masterKey!.ed25519Key;
+      Object? thrown;
+      try {
+        await verifier.createIdentity(wipe: true, onAuth: (_) {});
+      } on Object catch (e) {
+        thrown = e;
+      }
+      expect(thrown, isNotNull);
+      expect(thrown, isNot(isA<IdentityIncomplete>()));
+      expect(client.userDeviceKeys[me]!.masterKey!.ed25519Key, master);
     }, timeout: const Timeout(Duration(minutes: 2)));
 
     test('a check this app cannot answer fails, and says so', () async {

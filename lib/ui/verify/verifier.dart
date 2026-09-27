@@ -105,6 +105,17 @@ class RecoveryExists implements Exception {
       'key';
 }
 
+/// Thrown by [Verifier.createIdentity] when it failed after the new
+/// identity's cross-signing keys were already on the server: the old
+/// identity is gone, and the new one's recovery key never reached anyone.
+/// Unlike any other failure, something did change; only another reset (which
+/// makes a fresh key) is the way forward.
+class IdentityIncomplete implements Exception {
+  @override
+  String toString() =>
+      'IdentityIncomplete: the new identity went up without its recovery key';
+}
+
 abstract interface class Verifier {
   /// The names of your other devices, which could vouch for this one.
   List<String> get otherSessions;

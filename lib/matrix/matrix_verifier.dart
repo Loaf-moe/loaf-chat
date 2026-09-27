@@ -149,6 +149,10 @@ class MatrixVerifier implements Verifier {
     }
   }
 
+  /// This account's master key as the server publishes it, if any.
+  String? get _publishedMasterKey =>
+      client.userDeviceKeys[client.userID]?.masterKey?.ed25519Key;
+
   @override
   Future<String?> createIdentity({
     required bool wipe,
@@ -196,10 +200,17 @@ class MatrixVerifier implements Verifier {
         ),
       );
     });
+    // Read before anything goes up, to tell afterwards whether a failure
+    // came before or after the old identity was replaced.
+    final masterBefore = _publishedMasterKey;
     try {
       return await client.initCryptoIdentity();
-    } on Object {
+    } on Object catch (e, s) {
       if (cancelled) return null;
+      if (_publishedMasterKey != masterBefore) {
+        Logs().e('[loaf] the new identity went up but did not finish', e, s);
+        throw IdentityIncomplete();
+      }
       rethrow;
     } finally {
       await asking.cancel();

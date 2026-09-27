@@ -66,6 +66,7 @@ class VerifyState {
     this.keySaved = false,
     this.inBrowser = false,
     this.closing = false,
+    this.incomplete = false,
   });
 
   final VerifyStep step;
@@ -92,4 +93,9 @@ class VerifyState {
 
   /// Done has lingered long enough to be read; the panel should go.
   final bool closing;
+
+  /// At [VerifyStep.resetConfirm]: a new identity went up but failed before
+  /// its recovery key came back, so it has none. Unlike [failed], something
+  /// changed, and only another reset makes a key.
+  final bool incomplete;
 }

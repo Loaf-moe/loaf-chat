@@ -213,6 +213,28 @@ void main() {
       },
     );
 
+    test('an identity that went up without its key lands on reset, saying '
+        'so', () async {
+      final v = _Verifier();
+      final c = over(v, purpose: VerifyPurpose.setUp)..createKey();
+      v.made.completeError(IdentityIncomplete());
+      await pumpEventQueue();
+      expect(c.state.step, VerifyStep.resetConfirm);
+      expect(c.state.incomplete, isTrue);
+      expect(c.state.checking, isFalse);
+      expect(trusted, 0);
+      c.dispose();
+
+      final v2 = _Verifier();
+      final c2 = over(v2)..cantDoEither();
+      c2.confirmReset();
+      v2.made.completeError(IdentityIncomplete());
+      await pumpEventQueue();
+      expect(c2.state.step, VerifyStep.resetConfirm);
+      expect(c2.state.incomplete, isTrue);
+      c2.dispose();
+    });
+
     testWidgets('setting up asks who you are when the server does', (
       tester,
     ) async {

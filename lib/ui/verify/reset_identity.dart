@@ -19,6 +19,7 @@ class ResetConfirmStep extends StatelessWidget {
     required this.onCancel,
     this.busy = false,
     this.failure,
+    this.incomplete = false,
   });
 
   final VoidCallback onReset;
@@ -27,6 +28,10 @@ class ResetConfirmStep extends StatelessWidget {
   /// Waiting for the server to ask who you are.
   final bool busy;
   final String? failure;
+
+  /// The last try put a new identity up but didn't finish it: said in place
+  /// of [failure], since here something did change.
+  final bool incomplete;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -40,7 +45,14 @@ class ResetConfirmStep extends StatelessWidget {
       const _Cost('people you talk to will see that your identity changed'),
       const SizedBox(height: LoafSpace.x2),
       const _Cost("encrypted history you can't reach now stays unreadable"),
-      if (failure case final failure?) ...[
+      if (incomplete) ...[
+        const SizedBox(height: LoafSpace.x3),
+        const ErrorNote(
+          message:
+              "your new identity went up but didn't finish, so it has no "
+              'recovery key yet · reset again to get one',
+        ),
+      ] else if (failure case final failure?) ...[
         const SizedBox(height: LoafSpace.x3),
         ErrorNote(message: failure),
       ],

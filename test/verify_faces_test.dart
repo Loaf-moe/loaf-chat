@@ -98,6 +98,24 @@ void main() {
     expect(_button(tester, 'cancel').onTap, isNull);
   });
 
+  testWidgets('a new identity that went up unfinished says so, and offers '
+      'reset', (tester) async {
+    await _show(
+      tester,
+      const VerifyState(step: VerifyStep.resetConfirm, incomplete: true),
+      purpose: VerifyPurpose.setUp,
+    );
+    expect(
+      find.text(
+        "your new identity went up but didn't finish, so it has no recovery "
+        'key yet · reset again to get one',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining("couldn't reach"), findsNothing);
+    expect(_button(tester, 'reset my identity').onTap, isNotNull);
+  });
+
   testWidgets('a browser visit that did not finish says so', (tester) async {
     await _show(
       tester,

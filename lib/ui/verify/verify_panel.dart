@@ -189,6 +189,7 @@ class _VerifyPanelState extends State<VerifyPanel> {
       onCancel: _c.back,
       busy: s.checking,
       failure: _unreachable,
+      incomplete: s.incomplete,
     ),
     VerifyStep.resetAuth => ResetAuthStep(
       byPassword: _c.reauthByPassword,

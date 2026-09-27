@@ -325,6 +325,17 @@ class VerificationController extends ChangeNotifier {
             onError: (Object e) {
               if (!current()) return;
               _challenge = null;
+              if (e is IdentityIncomplete) {
+                // The old identity is gone and the new one has no key:
+                // whatever was asked for, a reset is the only way on.
+                _set(
+                  const VerifyState(
+                    step: VerifyStep.resetConfirm,
+                    incomplete: true,
+                  ),
+                );
+                return;
+              }
               _set(
                 VerifyState(
                   step: from,
