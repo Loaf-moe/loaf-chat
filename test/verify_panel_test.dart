@@ -7,6 +7,8 @@ import 'package:loaf_native/ui/mock/mock_session.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/verification_controller.dart';
+import 'package:loaf_native/ui/verify/verify_panel.dart';
+import 'package:loaf_native/ui/verify/verify_state.dart';
 
 const _wide = Size(1440, 900);
 const _route = Duration(milliseconds: 400);
@@ -225,6 +227,46 @@ void main() {
     await tester.pumpAndSettle();
     expect(s.incoming, isNull);
   });
+
+  testWidgets(
+    'an unsaved new key cannot be escaped away, but a saved one can',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      final c = VerificationController.at(
+        const VerifyState(step: VerifyStep.showKey),
+        purpose: VerifyPurpose.setUp,
+        verifier: MockVerifier(),
+      );
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showVerifyPanel(context, c),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text('copy'), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('copy'), findsOneWidget, reason: 'the key is unsaved');
+
+      await tester.tap(find.text('copy'));
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.text('copy'), findsNothing);
+    },
+  );
 
   testWidgets('the panel title lines up with what it heads', (tester) async {
     await _pumpShell(tester);

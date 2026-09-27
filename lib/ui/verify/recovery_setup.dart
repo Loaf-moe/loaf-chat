@@ -16,6 +16,8 @@ class SetUpIntroStep extends StatelessWidget {
     super.key,
     required this.onCreate,
     this.busy = false,
+    this.rejected = false,
+    this.onReset,
     this.failure,
   });
 
@@ -23,6 +25,13 @@ class SetUpIntroStep extends StatelessWidget {
 
   /// The identity is being made; it can't be stopped part way.
   final bool busy;
+
+  /// This account already keeps a recovery key: setting up refused, rather
+  /// than replace it by accident.
+  final bool rejected;
+
+  /// Starts over instead, once [rejected].
+  final VoidCallback? onReset;
   final String? failure;
 
   @override
@@ -39,6 +48,14 @@ class SetUpIntroStep extends StatelessWidget {
       const StepNote(
         "keep it somewhere safe that isn't this device — a password manager is ideal.",
       ),
+      if (rejected) ...[
+        const SizedBox(height: LoafSpace.x3),
+        const ErrorNote(
+          message:
+              'this account already has a recovery key · use it on a '
+              'device that has it, or reset to start over',
+        ),
+      ],
       if (failure case final failure?) ...[
         const SizedBox(height: LoafSpace.x3),
         ErrorNote(message: failure),
@@ -48,6 +65,15 @@ class SetUpIntroStep extends StatelessWidget {
         label: busy ? 'creating…' : 'create my recovery key',
         onTap: busy ? null : onCreate,
       ),
+      if (rejected && onReset != null) ...[
+        const SizedBox(height: LoafSpace.x2),
+        LoafButton(
+          label: 'reset',
+          onTap: onReset,
+          emphasis: LoafButtonEmphasis.quiet,
+          size: LoafButtonSize.small,
+        ),
+      ],
     ],
   );
 }

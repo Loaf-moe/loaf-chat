@@ -12,19 +12,36 @@ import 'crypto_harness.dart';
 
 /// The fake server, able to go quiet, and to ask who you are before new
 /// cross-signing keys go up: by password (only [password] passes) or by
-/// its SSO page (passes once [ssoDone]).
+/// its SSO page (passes once [ssoDone]). It can also hold the upload open
+/// once the check has passed, and say there is no key backup at all.
 class _Api extends FakeMatrixApi {
   var down = false;
   String? asks;
   var password = 'right';
   var ssoDone = false;
 
+  /// Set to hold `/keys/device_signing/upload` open after the check has
+  /// passed, so a test can act while the real upload is still in flight.
+  Completer<void>? holdUpload;
+
+  /// True while [holdUpload] is being awaited.
+  var holding = false;
+
+  /// 404s `GET .../room_keys/version` as `M_NOT_FOUND`, as an account with
+  /// no key backup on the server would answer.
+  var noBackupOnServer = false;
+
   static http.Response _json(Object body, [int status = 200]) =>
       http.Response(jsonEncode(body), status);
 
   @override
-  FutureOr<http.Response> mockIntercept(http.Request request) {
+  Future<http.Response> mockIntercept(http.Request request) async {
     if (down) return _json({'errcode': 'M_UNKNOWN', 'error': 'down'}, 502);
+    if (noBackupOnServer &&
+        request.method == 'GET' &&
+        request.url.path.endsWith('/room_keys/version')) {
+      return _json({'errcode': 'M_NOT_FOUND', 'error': 'not found'}, 404);
+    }
     final stage = asks;
     if (stage != null &&
         request.url.path.endsWith('/keys/device_signing/upload')) {
@@ -46,8 +63,14 @@ class _Api extends FakeMatrixApi {
           if (auth?['password'] != null) 'errcode': 'M_FORBIDDEN',
         }, 401);
       }
+      final hold = holdUpload;
+      if (hold != null) {
+        holding = true;
+        await hold.future;
+        holding = false;
+      }
     }
-    return super.mockIntercept(request);
+    return await super.mockIntercept(request);
   }
 }
 
@@ -107,18 +130,57 @@ void main() {
       );
     });
 
-    test('cross-signing without key backup is healed by the key', () async {
+    test('a mistyped key is a wrong key, not an unreachable server', () async {
+      final key = await client.initCryptoIdentity();
+      await client.encryption!.ssss.clearCache();
+      final chars = key.split('');
+      // Keeps the length and the `Es` start; one base58 character (never
+      // `0`) becomes `0`.
+      final i = chars.indexWhere((c) => c != ' ', 2);
+      chars[i] = '0';
+      expect(await verifier.unlock(chars.join()), UnlockResult.wrongKey);
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('cross-signing without key backup is signed, and a backup the server '
+        'has is left alone', () async {
       await client.setAccountData(me, EventTypes.MegolmBackup, {});
       var state = await client.getCryptoIdentityState();
       expect(state.crossSigningEnabled, isTrue);
       expect(state.keyBackupEnabled, isFalse);
       final master = client.userDeviceKeys[me]!.masterKey!.ed25519Key;
+      FakeMatrixApi.calledEndpoints.clear();
 
       expect(await verifier.unlock(fixtureRecoveryKey), UnlockResult.unlocked);
+      expect(client.isUnknownSession, isFalse);
       state = await client.getCryptoIdentityState();
-      expect(state.keyBackupEnabled, isTrue);
+      expect(state.keyBackupEnabled, isFalse);
       expect(client.userDeviceKeys[me]!.masterKey!.ed25519Key, master);
+      // Only a GET checked the server's backup; nothing POSTed a new one.
+      expect(
+        FakeMatrixApi.calledEndpoints['/client/v3/room_keys/version']
+                ?.whereType<String>() ??
+            const [],
+        isEmpty,
+      );
     });
+
+    test(
+      'cross-signing with no backup on the server, the key adds one',
+      () async {
+        await client.setAccountData(me, EventTypes.MegolmBackup, {});
+        api.noBackupOnServer = true;
+        final master = client.userDeviceKeys[me]!.masterKey!.ed25519Key;
+
+        expect(
+          await verifier.unlock(fixtureRecoveryKey),
+          UnlockResult.unlocked,
+        );
+        final state = await client.getCryptoIdentityState();
+        expect(state.keyBackupEnabled, isTrue);
+        expect(client.userDeviceKeys[me]!.masterKey!.ed25519Key, master);
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
   });
 
   group('restoring history', () {
@@ -159,7 +221,7 @@ void main() {
     test('comes with a recovery key, and signs this device', () async {
       final asked = <AuthChallenge>[];
       FakeMatrixApi.calledEndpoints.clear();
-      final key = await verifier.createIdentity(onAuth: asked.add);
+      final key = await verifier.createIdentity(wipe: true, onAuth: asked.add);
       expect(key, startsWith('Es'));
       expect(asked, isEmpty);
       expect((await client.getCryptoIdentityState()).connected, isTrue);
@@ -171,10 +233,24 @@ void main() {
       );
     }, timeout: const Timeout(Duration(minutes: 2)));
 
+    test(
+      'setting up refuses an account that already keeps a recovery key',
+      () async {
+        final master = client.userDeviceKeys[me]!.masterKey!.ed25519Key;
+        final asked = <AuthChallenge>[];
+        await expectLater(
+          verifier.createIdentity(wipe: false, onAuth: asked.add),
+          throwsA(isA<RecoveryExists>()),
+        );
+        expect(asked, isEmpty);
+        expect(client.userDeviceKeys[me]!.masterKey!.ed25519Key, master);
+      },
+    );
+
     test('asks for the password, again when it is wrong', () async {
       api.asks = AuthenticationTypes.password;
       final asked = <AuthChallenge>[];
-      final made = verifier.createIdentity(onAuth: asked.add);
+      final made = verifier.createIdentity(wipe: true, onAuth: asked.add);
       await _until(() => asked.length == 1);
       expect(asked.single.kind, AuthKind.password);
       expect(asked.single.retry, isFalse);
@@ -191,7 +267,7 @@ void main() {
         'did not finish', () async {
       api.asks = AuthenticationTypes.sso;
       final asked = <AuthChallenge>[];
-      final made = verifier.createIdentity(onAuth: asked.add);
+      final made = verifier.createIdentity(wipe: true, onAuth: asked.add);
       await _until(() => asked.length == 1);
       expect(asked.single.kind, AuthKind.sso);
 
@@ -217,7 +293,7 @@ void main() {
       api.asks = AuthenticationTypes.password;
       final master = client.userDeviceKeys[me]!.masterKey!.ed25519Key;
       final asked = <AuthChallenge>[];
-      final made = verifier.createIdentity(onAuth: asked.add);
+      final made = verifier.createIdentity(wipe: true, onAuth: asked.add);
       await _until(() => asked.isNotEmpty);
       asked.single.cancel();
       expect(await made, isNull);
@@ -226,11 +302,26 @@ void main() {
       expect(await verifier.unlock(fixtureRecoveryKey), UnlockResult.unlocked);
     }, timeout: const Timeout(Duration(minutes: 2)));
 
+    test('cancelling once the answer went up is too late, and the key still '
+        'comes back', () async {
+      api.asks = AuthenticationTypes.password;
+      final hold = Completer<void>();
+      api.holdUpload = hold;
+      final asked = <AuthChallenge>[];
+      final made = verifier.createIdentity(wipe: true, onAuth: asked.add);
+      await _until(() => asked.isNotEmpty);
+      asked.single.password('right');
+      await _until(() => api.holding);
+      asked.single.cancel();
+      hold.complete();
+      expect(await made, startsWith('Es'));
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
     test('a check this app cannot answer fails, and says so', () async {
       api.asks = 'm.login.recaptcha';
       final asked = <AuthChallenge>[];
       await expectLater(
-        verifier.createIdentity(onAuth: asked.add),
+        verifier.createIdentity(wipe: true, onAuth: asked.add),
         throwsA(anything),
       );
       expect(asked, isEmpty);

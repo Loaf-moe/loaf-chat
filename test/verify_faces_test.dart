@@ -66,6 +66,27 @@ void main() {
     expect(_button(tester, 'create my recovery key').onTap, isNotNull);
   });
 
+  testWidgets(
+    'an account that already has a recovery key offers using it, or reset',
+    (tester) async {
+      final c = await _show(
+        tester,
+        const VerifyState(step: VerifyStep.setUpIntro, rejected: true),
+        purpose: VerifyPurpose.setUp,
+      );
+      expect(
+        find.text(
+          'this account already has a recovery key · use it on a device '
+          "that has it, or reset to start over",
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('reset'));
+      await tester.pump();
+      expect(c.state.step, VerifyStep.resetConfirm);
+    },
+  );
+
   testWidgets('a reset waiting for the server offers no cancel', (
     tester,
   ) async {

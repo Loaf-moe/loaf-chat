@@ -118,6 +118,18 @@ class VerificationController extends ChangeNotifier {
   bool get worksUnseen =>
       _state.step == VerifyStep.restoring || _state.step == VerifyStep.showKey;
 
+  /// Whether the panel must not be put away: a new identity is being made,
+  /// or its key is on screen unsaved. On a real server, trust flips to
+  /// verified the moment the identity exists, so the rail's notice goes
+  /// away — a panel put away here would lose the new key for good, since
+  /// nothing else ever shows it again.
+  bool get mustStay =>
+      (_state.checking &&
+          (_state.step == VerifyStep.setUpIntro ||
+              _state.step == VerifyStep.resetConfirm ||
+              _state.step == VerifyStep.resetAuth)) ||
+      (_state.step == VerifyStep.showKey && !_state.keySaved);
+
   void back() {
     if (!canGoBack) return;
     _turn++;
@@ -272,21 +284,22 @@ class VerificationController extends ChangeNotifier {
   void confirmReset() {
     if (_state.step != VerifyStep.resetConfirm || _state.checking) return;
     _set(const VerifyState(step: VerifyStep.resetConfirm, checking: true));
-    _create(from: VerifyStep.resetConfirm);
+    _create(from: VerifyStep.resetConfirm, wipe: true);
   }
 
   void createKey() {
     if (_state.step != VerifyStep.setUpIntro || _state.checking) return;
     _set(const VerifyState(step: VerifyStep.setUpIntro, checking: true));
-    _create(from: VerifyStep.setUpIntro);
+    _create(from: VerifyStep.setUpIntro, wipe: false);
   }
 
-  void _create({required VerifyStep from}) {
+  void _create({required VerifyStep from, required bool wipe}) {
     final turn = ++_turn;
     bool current() => turn == _turn && !_disposed;
     unawaited(
       verifier
           .createIdentity(
+            wipe: wipe,
             onAuth: (challenge) {
               if (!current()) return challenge.cancel();
               _challenge = challenge;
@@ -305,10 +318,16 @@ class VerificationController extends ChangeNotifier {
               _newKey = key;
               _go(VerifyStep.showKey);
             },
-            onError: (Object _) {
+            onError: (Object e) {
               if (!current()) return;
               _challenge = null;
-              _set(VerifyState(step: from, failed: true));
+              _set(
+                VerifyState(
+                  step: from,
+                  rejected: e is RecoveryExists,
+                  failed: e is! RecoveryExists,
+                ),
+              );
             },
           ),
     );

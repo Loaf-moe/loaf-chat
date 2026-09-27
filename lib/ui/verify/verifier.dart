@@ -95,6 +95,16 @@ abstract interface class AuthChallenge {
   void cancel();
 }
 
+/// Thrown by [Verifier.createIdentity] when `wipe` is false but the account
+/// already keeps a recovery key: setting up must never replace one by
+/// accident. Only an explicit reset (`wipe: true`) may do that.
+class RecoveryExists implements Exception {
+  @override
+  String toString() =>
+      'RecoveryExists: this account already has a recovery '
+      'key';
+}
+
 abstract interface class Verifier {
   /// The names of your other devices, which could vouch for this one.
   List<String> get otherSessions;
@@ -111,7 +121,13 @@ abstract interface class Verifier {
   /// Makes a fresh identity and returns its recovery key, or null when
   /// [onAuth]'s challenge was cancelled. The server may ask for
   /// authentication once or more; each ask is handed to [onAuth].
+  ///
+  /// [wipe] is false for setting up recovery on a fresh account: it refuses,
+  /// by throwing [RecoveryExists], an account that already keeps secret
+  /// storage, cross-signing or a key backup. [wipe] is true for a reset,
+  /// which replaces them.
   Future<String?> createIdentity({
+    required bool wipe,
     required void Function(AuthChallenge challenge) onAuth,
   });
 }

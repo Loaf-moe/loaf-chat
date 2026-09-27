@@ -205,6 +205,8 @@ class _VerifyPanelState extends State<VerifyPanel> {
     VerifyStep.setUpIntro => SetUpIntroStep(
       onCreate: _c.createKey,
       busy: s.checking,
+      rejected: s.rejected,
+      onReset: _c.cantDoEither,
       failure: _unreachable,
     ),
     VerifyStep.showKey => ShowKeyStep(
@@ -224,68 +226,71 @@ class _VerifyPanelState extends State<VerifyPanel> {
       listenable: _c,
       builder: (context, _) {
         final s = _c.state;
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                LoafSpace.x3,
-                isDesktop ? LoafSpace.x4 : 0,
-                LoafSpace.x5,
-                LoafSpace.x3,
-              ),
-              child: Row(
-                children: [
-                  if (_c.canGoBack)
-                    Tooltip(
-                      message: 'back',
-                      child: MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: _c.back,
-                          child: Padding(
-                            padding: const EdgeInsets.all(LoafSpace.x1),
-                            child: Icon(
-                              LucideIcons.chevronLeft,
-                              size: 20,
-                              color: tokens.textMuted,
+        return PopScope(
+          canPop: !_c.mustStay,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  LoafSpace.x3,
+                  isDesktop ? LoafSpace.x4 : 0,
+                  LoafSpace.x5,
+                  LoafSpace.x3,
+                ),
+                child: Row(
+                  children: [
+                    if (_c.canGoBack)
+                      Tooltip(
+                        message: 'back',
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: _c.back,
+                            child: Padding(
+                              padding: const EdgeInsets.all(LoafSpace.x1),
+                              child: Icon(
+                                LucideIcons.chevronLeft,
+                                size: 20,
+                                color: tokens.textMuted,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    )
-                  else
-                    // Lines the title up with the body's x5 inset.
+                      )
+                    else
+                      // Lines the title up with the body's x5 inset.
+                      const SizedBox(width: LoafSpace.x1),
                     const SizedBox(width: LoafSpace.x1),
-                  const SizedBox(width: LoafSpace.x1),
-                  Expanded(
-                    child: Text(
-                      _title(s.step),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: loafBody(
-                        17,
-                        600,
-                      ).copyWith(color: tokens.textStrong),
+                    Expanded(
+                      child: Text(
+                        _title(s.step),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: loafBody(
+                          17,
+                          600,
+                        ).copyWith(color: tokens.textStrong),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            Flexible(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(
-                  LoafSpace.x5,
-                  0,
-                  LoafSpace.x5,
-                  LoafSpace.x5,
+                  ],
                 ),
-                child: _body(s),
               ),
-            ),
-          ],
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(
+                    LoafSpace.x5,
+                    0,
+                    LoafSpace.x5,
+                    LoafSpace.x5,
+                  ),
+                  child: _body(s),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );

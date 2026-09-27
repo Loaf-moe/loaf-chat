@@ -79,6 +79,7 @@ class MockVerifier implements Verifier {
 
   @override
   Future<String?> createIdentity({
+    required bool wipe,
     required void Function(AuthChallenge challenge) onAuth,
   }) async {
     if (!identityExists()) {

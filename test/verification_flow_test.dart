@@ -187,6 +187,32 @@ void main() {
       c.dispose();
     });
 
+    test('setting up never wipes; resetting always does', () {
+      final v = _Verifier();
+      final c = over(v, purpose: VerifyPurpose.setUp)..createKey();
+      expect(v.lastWipe, isFalse);
+      c.dispose();
+
+      final v2 = _Verifier();
+      final c2 = over(v2)..cantDoEither();
+      c2.confirmReset();
+      expect(v2.lastWipe, isTrue);
+      c2.dispose();
+    });
+
+    test(
+      'an account that already has a recovery key rejects setting up',
+      () async {
+        final v = _RecoveryExistsVerifier();
+        final c = over(v, purpose: VerifyPurpose.setUp)..createKey();
+        await pumpEventQueue();
+        expect(c.state.step, VerifyStep.setUpIntro);
+        expect(c.state.rejected, isTrue);
+        expect(c.state.failed, isFalse);
+        c.dispose();
+      },
+    );
+
     testWidgets('setting up asks who you are when the server does', (
       tester,
     ) async {
@@ -294,6 +320,60 @@ void main() {
       c.dispose();
     });
   });
+
+  group('mustStay', () {
+    test('while a new identity is being made', () {
+      final v = _Verifier();
+      final c = over(v, purpose: VerifyPurpose.setUp)..createKey();
+      expect(c.state.step, VerifyStep.setUpIntro);
+      expect(c.state.checking, isTrue);
+      expect(c.mustStay, isTrue);
+      c.dispose();
+
+      final v2 = _Verifier();
+      final c2 = over(v2)..cantDoEither();
+      c2.confirmReset();
+      expect(c2.state.step, VerifyStep.resetConfirm);
+      expect(c2.mustStay, isTrue);
+      c2.dispose();
+
+      final v3 = _Verifier();
+      final c3 = over(v3)..cantDoEither();
+      c3.confirmReset();
+      v3.ask(AuthKind.password, retry: false);
+      expect(c3.state.step, VerifyStep.resetAuth);
+      expect(c3.mustStay, isFalse, reason: 'waiting for a password is not');
+      c3.reauthWithPassword('hunter2');
+      expect(c3.state.step, VerifyStep.resetAuth);
+      expect(c3.state.checking, isTrue);
+      expect(c3.mustStay, isTrue);
+      c3.dispose();
+    });
+
+    test('while the new key is on screen unsaved', () {
+      final c = VerificationController.at(
+        const VerifyState(step: VerifyStep.showKey),
+        verifier: _Verifier(),
+      );
+      expect(c.mustStay, isTrue);
+      c.keyKept();
+      expect(c.mustStay, isFalse);
+      c.dispose();
+    });
+
+    test('false at every other step', () {
+      for (final state in [
+        const VerifyState(step: VerifyStep.choose),
+        const VerifyState(step: VerifyStep.restoring),
+        const VerifyState(step: VerifyStep.recoveryKey, checking: true),
+        const VerifyState(step: VerifyStep.done),
+      ]) {
+        final c = VerificationController.at(state, verifier: _Verifier());
+        expect(c.mustStay, isFalse, reason: state.step.toString());
+        c.dispose();
+      }
+    });
+  });
 }
 
 class _Verifier implements Verifier {
@@ -303,6 +383,7 @@ class _Verifier implements Verifier {
   var made = Completer<String?>();
   late _Challenge challenge;
   late void Function(AuthChallenge) _onAuth;
+  bool? lastWipe;
 
   @override
   List<String> get otherSessions => const [];
@@ -318,8 +399,10 @@ class _Verifier implements Verifier {
 
   @override
   Future<String?> createIdentity({
+    required bool wipe,
     required void Function(AuthChallenge challenge) onAuth,
   }) {
+    lastWipe = wipe;
     _onAuth = onAuth;
     made = Completer();
     return made.future;
@@ -327,6 +410,31 @@ class _Verifier implements Verifier {
 
   void ask(AuthKind kind, {required bool retry}) =>
       _onAuth(challenge = _Challenge(kind, retry));
+}
+
+/// A fresh account whose setup finds a recovery key already there.
+class _RecoveryExistsVerifier implements Verifier {
+  @override
+  List<String> get otherSessions => const [];
+
+  @override
+  DeviceVerification verifyWithDevice() => throw UnimplementedError();
+
+  @override
+  Future<UnlockResult> unlock(String keyOrPassphrase) async =>
+      UnlockResult.wrongKey;
+
+  @override
+  Stream<RestoreProgress> restoreHistory() => const Stream.empty();
+
+  @override
+  Future<String?> createIdentity({
+    required bool wipe,
+    required void Function(AuthChallenge challenge) onAuth,
+  }) async {
+    if (!wipe) throw RecoveryExists();
+    return 'EsAB new key';
+  }
 }
 
 class _Challenge implements AuthChallenge {

@@ -4,7 +4,9 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
+import 'package:http/http.dart' as http;
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -59,14 +61,31 @@ class MatrixVerifier implements Verifier {
       } else if (state.initialized) {
         await client.restoreCryptoIdentity(keyOrPassphrase);
       } else if (state.crossSigningEnabled) {
-        // Cross-signing without key backup: the same key adds the backup,
-        // keeping every existing key.
-        await client.initCryptoIdentity(
-          reuseExistingStorageRecoveryKeyOrPassphrase: keyOrPassphrase,
-          setupMasterKey: false,
-          setupSelfSigningKey: false,
-          setupUserSigningKey: false,
-        );
+        // Cross-signing without key backup: heal only what's missing.
+        GetRoomKeysVersionCurrentResponse? serverBackup;
+        try {
+          serverBackup = await encryption.keyManager.getRoomKeysBackupInfo(
+            false,
+          );
+        } on MatrixException catch (e) {
+          if (e.error != MatrixError.M_NOT_FOUND) rethrow;
+        }
+        if (serverBackup != null) {
+          // The server already keeps a backup whose key isn't in secret
+          // storage yet: only sign this device, and never replace it.
+          await encryption.crossSigning.selfSign(
+            keyOrPassphrase: keyOrPassphrase,
+          );
+        } else {
+          // No backup on the server either: the same key adds one, keeping
+          // every existing key.
+          await client.initCryptoIdentity(
+            reuseExistingStorageRecoveryKeyOrPassphrase: keyOrPassphrase,
+            setupMasterKey: false,
+            setupSelfSigningKey: false,
+            setupUserSigningKey: false,
+          );
+        }
       } else {
         // No cross-signing in secret storage: no key can sign this device.
         Logs().w('[loaf] secret storage holds no cross-signing keys');
@@ -75,12 +94,26 @@ class MatrixVerifier implements Verifier {
       return UnlockResult.unlocked;
     } on InvalidPassphraseException {
       return UnlockResult.wrongKey;
+    } on FormatException {
+      return UnlockResult.wrongKey;
     } on BootstrapBadStateException catch (e, s) {
       Logs().w('[loaf] this account has no usable secret storage', e, s);
       return UnlockResult.wrongKey;
+    } on IOException catch (e, s) {
+      Logs().w('[loaf] reaching the server failed', e, s);
+      return UnlockResult.unreachable;
+    } on http.ClientException catch (e, s) {
+      Logs().w('[loaf] reaching the server failed', e, s);
+      return UnlockResult.unreachable;
+    } on TimeoutException catch (e, s) {
+      Logs().w('[loaf] reaching the server failed', e, s);
+      return UnlockResult.unreachable;
+    } on MatrixException catch (e, s) {
+      Logs().w('[loaf] reaching the server failed', e, s);
+      return UnlockResult.unreachable;
     } on Object catch (e, s) {
       Logs().w('[loaf] unlocking secret storage failed', e, s);
-      return UnlockResult.unreachable;
+      return UnlockResult.wrongKey;
     }
   }
 
@@ -118,8 +151,17 @@ class MatrixVerifier implements Verifier {
 
   @override
   Future<String?> createIdentity({
+    required bool wipe,
     required void Function(AuthChallenge challenge) onAuth,
   }) async {
+    if (!wipe) {
+      final state = await client.getCryptoIdentityState();
+      if (state.keyBackupEnabled ||
+          state.crossSigningEnabled ||
+          client.encryption!.ssss.defaultKeyId != null) {
+        throw RecoveryExists();
+      }
+    }
     var cancelled = false;
     var asked = 0;
     final asking = client.onUiaRequest.stream.listen((uia) {
@@ -177,38 +219,54 @@ class _Challenge implements AuthChallenge {
 
   Client get _client => _verifier.client;
 
+  /// Once an answer is on its way to the server, nothing here can take it
+  /// back: a stale tap (or a cancel that arrives after the right password
+  /// already went up) must do nothing rather than fail an upload that may
+  /// yet land — that would report "nothing was made" while the server
+  /// replaced the identity anyway.
+  bool get _live => _uia.state == UiaRequestState.waitForUser;
+
   @override
-  void password(String password) => unawaited(
-    _uia.completeStage(
-      AuthenticationPassword(
-        session: _uia.session,
-        password: password,
-        identifier: AuthenticationUserIdentifier(user: _client.userID!),
+  void password(String password) {
+    if (!_live) return;
+    unawaited(
+      _uia.completeStage(
+        AuthenticationPassword(
+          session: _uia.session,
+          password: password,
+          identifier: AuthenticationUserIdentifier(user: _client.userID!),
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   /// The server's own page for SSO, which signs you in and then tells you to
   /// go back to the app: it hands nothing back.
   @override
-  void openBrowser() => unawaited(
-    _verifier._openBrowser(
-      _client.homeserver!.resolveUri(
-        Uri(
-          path:
-              '/_matrix/client/v3/auth/${AuthenticationTypes.sso}/fallback/web',
-          queryParameters: {'session': _uia.session},
+  void openBrowser() {
+    if (!_live) return;
+    unawaited(
+      _verifier._openBrowser(
+        _client.homeserver!.resolveUri(
+          Uri(
+            path:
+                '/_matrix/client/v3/auth/${AuthenticationTypes.sso}/fallback/web',
+            queryParameters: {'session': _uia.session},
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   @override
-  void browserFinished() =>
-      unawaited(_uia.completeStage(AuthenticationData(session: _uia.session)));
+  void browserFinished() {
+    if (!_live) return;
+    unawaited(_uia.completeStage(AuthenticationData(session: _uia.session)));
+  }
 
   @override
   void cancel() {
+    if (!_live) return;
     onCancel();
     _uia.cancel();
   }
