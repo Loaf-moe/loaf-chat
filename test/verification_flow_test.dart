@@ -397,20 +397,22 @@ void main() {
     });
   });
 
-  group('mustStay', () {
-    test('while a new identity is being made', () {
+  group('mustStay and holdsKey', () {
+    test('making a new identity holds its key, but never traps the panel', () {
       final v = _Verifier();
       final c = over(v, purpose: VerifyPurpose.setUp)..createKey();
       expect(c.state.step, VerifyStep.setUpIntro);
       expect(c.state.checking, isTrue);
-      expect(c.mustStay, isTrue);
+      expect(c.mustStay, isFalse);
+      expect(c.holdsKey, isTrue);
       c.dispose();
 
       final v2 = _Verifier();
       final c2 = over(v2)..cantDoEither();
       c2.confirmReset();
       expect(c2.state.step, VerifyStep.resetConfirm);
-      expect(c2.mustStay, isTrue);
+      expect(c2.mustStay, isFalse);
+      expect(c2.holdsKey, isTrue);
       c2.dispose();
 
       final v3 = _Verifier();
@@ -418,11 +420,12 @@ void main() {
       c3.confirmReset();
       v3.ask(AuthKind.password, retry: false);
       expect(c3.state.step, VerifyStep.resetAuth);
-      expect(c3.mustStay, isFalse, reason: 'waiting for a password is not');
+      expect(c3.holdsKey, isFalse, reason: 'waiting for a password is not');
       c3.reauthWithPassword('hunter2');
       expect(c3.state.step, VerifyStep.resetAuth);
       expect(c3.state.checking, isTrue);
-      expect(c3.mustStay, isTrue);
+      expect(c3.mustStay, isFalse);
+      expect(c3.holdsKey, isTrue);
       c3.dispose();
     });
 
@@ -442,8 +445,10 @@ void main() {
         verifier: _Verifier(),
       );
       expect(c.mustStay, isTrue);
+      expect(c.holdsKey, isTrue);
       c.keyKept();
       expect(c.mustStay, isFalse);
+      expect(c.holdsKey, isFalse);
       c.dispose();
     });
 
@@ -452,10 +457,13 @@ void main() {
         const VerifyState(step: VerifyStep.choose),
         const VerifyState(step: VerifyStep.restoring),
         const VerifyState(step: VerifyStep.recoveryKey, checking: true),
+        const VerifyState(step: VerifyStep.resetAuth),
+        const VerifyState(step: VerifyStep.resetAuth, inBrowser: true),
         const VerifyState(step: VerifyStep.done),
       ]) {
         final c = VerificationController.at(state, verifier: _Verifier());
         expect(c.mustStay, isFalse, reason: state.step.toString());
+        expect(c.holdsKey, isFalse, reason: state.step.toString());
         c.dispose();
       }
     });

@@ -114,25 +114,34 @@ class VerificationController extends ChangeNotifier {
   };
 
   /// Whether closing the panel should leave this running: history keeps
-  /// restoring with nobody watching, a new key waits to be saved, or
-  /// [mustStay] — so the shell never disposes a flow that is making a key,
+  /// restoring with nobody watching, a new key is being made, or one waits
+  /// to be saved — so the shell never disposes a flow that holds a key,
   /// however its panel came to close.
   bool get worksUnseen =>
       _state.step == VerifyStep.restoring ||
       _state.step == VerifyStep.showKey ||
-      mustStay;
+      _making;
 
-  /// Whether the panel must not be put away: a new identity is being made,
-  /// or its key is on screen unsaved. On a real server, trust flips to
-  /// verified the moment the identity exists, so the rail's notice goes
-  /// away — a panel put away here would lose the new key for good, since
-  /// nothing else ever shows it again.
-  bool get mustStay =>
-      (_state.checking &&
-          (_state.step == VerifyStep.setUpIntro ||
-              _state.step == VerifyStep.resetConfirm ||
-              _state.step == VerifyStep.resetAuth)) ||
-      (_state.step == VerifyStep.showKey && !_state.keySaved);
+  /// Whether the panel must not be put away: the new key is on screen and
+  /// not yet kept anywhere. Copying or saving it always frees the panel, so
+  /// this is never a trap. Making the key doesn't hold the panel: with no
+  /// request timeout a hung server would trap it until the app quits, so
+  /// the shell keeps the flow instead ([worksUnseen], [holdsKey]).
+  bool get mustStay => _keyUnsaved;
+
+  /// Whether this flow holds a new recovery key nobody has kept yet: it is
+  /// being made, or shown unsaved. On a real server trust flips to verified
+  /// the moment the identity exists, so the rail's notice goes; the shell
+  /// shows this instead, since nothing else would ever show the key again.
+  bool get holdsKey => _making || _keyUnsaved;
+
+  bool get _making =>
+      _state.checking &&
+      (_state.step == VerifyStep.setUpIntro ||
+          _state.step == VerifyStep.resetConfirm ||
+          _state.step == VerifyStep.resetAuth);
+
+  bool get _keyUnsaved => _state.step == VerifyStep.showKey && !_state.keySaved;
 
   void back() {
     if (!canGoBack) return;

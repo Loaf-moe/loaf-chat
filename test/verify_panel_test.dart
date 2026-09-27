@@ -347,6 +347,55 @@ void main() {
     },
   );
 
+  testWidgets(
+    'a key put away while being made waits in the rail, and is saved there',
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      final s = await _pumpShell(tester);
+      await _toSetUp(tester, s);
+      await tester.tap(find.text('create my recovery key'));
+      await tester.pump();
+      expect(find.text('creating…'), findsOneWidget);
+
+      // Put away by tapping outside it: making a key never traps the panel.
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pump();
+      await tester.pump(_route);
+      expect(find.text('creating…'), findsNothing);
+      expect(find.byTooltip('your new recovery key'), findsOneWidget);
+      expect(find.byTooltip('set up recovery'), findsNothing);
+
+      await tester.pump(MockVerifier.keyCheckDelay);
+      await tester.tap(find.byTooltip('your new recovery key'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text("it's shown once. save it before anything else"),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('show'));
+      await tester.pump();
+      await tester.pump(_route);
+      expect(find.text(mockNewRecoveryKey), findsOneWidget);
+
+      // Unsaved, it can't be put away.
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+      expect(find.text(mockNewRecoveryKey), findsOneWidget);
+
+      await tester.tap(find.text('copy'));
+      await tester.pump();
+      await tester.tap(find.text("i've saved it"));
+      await tester.pump();
+      await tester.pump(VerificationController.doneLinger);
+      await tester.pumpAndSettle();
+      expect(find.text(mockNewRecoveryKey), findsNothing);
+      expect(find.byTooltip('your new recovery key'), findsNothing);
+      expect(s.trust, DeviceTrust.verified);
+    },
+  );
+
   testWidgets('the panel title lines up with what it heads', (tester) async {
     await _pumpShell(tester);
     await _openVerify(tester);

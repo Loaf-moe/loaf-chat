@@ -113,4 +113,16 @@ void main() {
     expect(find.text('later'), findsNothing);
     expect(find.text('set up'), findsOneWidget);
   });
+
+  testWidgets('a new recovery key cannot be put off', (tester) async {
+    await _pumpRail(tester, [AppNotice.newKey(onAction: () {}, making: true)]);
+    await tester.tap(find.byTooltip('your new recovery key'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text("it's being made — you'll need to save it"),
+      findsOneWidget,
+    );
+    expect(find.text('later'), findsNothing);
+    expect(find.text('show'), findsOneWidget);
+  });
 }

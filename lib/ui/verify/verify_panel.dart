@@ -31,8 +31,7 @@ Future<bool?> showVerifyPanel(
   context,
   child: VerifyPanel(controller: controller),
   // The sheet's drag-to-close pops straight past the panel's own
-  // PopScope, and some steps (making an identity, an unsaved key) must
-  // not be put away.
+  // PopScope, and an unsaved new key must not be put away.
   enableDrag: false,
 );
 

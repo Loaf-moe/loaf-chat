@@ -65,6 +65,20 @@ class AppNotice {
     onAction: onAction,
   );
 
+  /// A new identity's recovery key, made or being made while its panel was
+  /// put away. No dismiss: it is shown once, and only through here.
+  factory AppNotice.newKey({VoidCallback? onAction, required bool making}) =>
+      AppNotice(
+        icon: LucideIcons.keyRound,
+        title: 'your new recovery key',
+        body: making
+            ? "it's being made — you'll need to save it"
+            : "it's shown once. save it before anything else",
+        actionLabel: 'show',
+        tone: NoticeTone.attention,
+        onAction: onAction,
+      );
+
   final IconData icon;
   final String title;
   final String body;

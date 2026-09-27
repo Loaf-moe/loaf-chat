@@ -99,7 +99,7 @@ class _AppShellState extends State<AppShell> {
     _rooms
       ..removeListener(_onChange)
       ..dispose();
-    _verification?.dispose();
+    _keep(null)?.dispose();
     _incomingFlow?.dispose();
     _incomingFlow = null;
     if (widget.session == null) _session.dispose();
@@ -555,8 +555,20 @@ class _AppShellState extends State<AppShell> {
 
   /// The verification flow in hand, kept only while it works unseen
   /// (history restoring after the panel was put away, a new key being made
-  /// or waiting to be saved). Never an incoming request's.
+  /// or waiting to be saved). Never an incoming request's. Listened to, so
+  /// the rail follows a key it holds.
   VerificationController? _verification;
+
+  /// Swaps the flow in hand, moving the listener with it; returns the one
+  /// it replaced, for the caller to dispose.
+  VerificationController? _keep(VerificationController? v) {
+    final old = _verification;
+    if (identical(old, v)) return null;
+    old?.removeListener(_onChange);
+    v?.addListener(_onChange);
+    _verification = v;
+    return old;
+  }
 
   /// The incoming request's flow, while its panel is up. Its own slot: a
   /// request can arrive over any open flow, and must never end that one —
@@ -578,7 +590,6 @@ class _AppShellState extends State<AppShell> {
     if (kept != null && (kept.purpose == purpose || kept.worksUnseen)) {
       v = kept;
     } else {
-      kept?.dispose();
       v = VerificationController(
         purpose: purpose,
         verifier: _session.verifier,
@@ -586,14 +597,14 @@ class _AppShellState extends State<AppShell> {
         onTrusted: _session.markVerified,
       );
     }
-    _verification = v;
+    _keep(v)?.dispose();
     final finished = await showVerifyPanel(context, v);
     if (!mounted) return;
     if (finished == true) showToast(context, v.doneMessage);
-    // A flow put away mid-restore carries on; any other starts over next
-    // time, rather than resuming a stale wait.
+    // A flow put away mid-restore, or holding a key, carries on; any other
+    // starts over next time, rather than resuming a stale wait.
     if (!v.worksUnseen && identical(_verification, v)) {
-      _verification = null;
+      _keep(null);
       v.dispose();
     }
   }
@@ -622,9 +633,17 @@ class _AppShellState extends State<AppShell> {
   // ── Building ───────────────────────────────────────────────────────────
 
   List<AppNotice> get _notices => [
-    if (_session.trust == DeviceTrust.unverified)
-      AppNotice.verify(onAction: () => _openVerification(VerifyPurpose.verify)),
-    if (_session.trust == DeviceTrust.noIdentity)
+    // A key being made or shown unsaved outranks verifying: on a real server
+    // trust flips the moment the identity exists, and this is then the only
+    // way back to the key.
+    if (_verification case final kept? when kept.holdsKey)
+      AppNotice.newKey(
+        onAction: () => _openVerification(kept.purpose),
+        making: kept.state.step != VerifyStep.showKey,
+      )
+    else if (_session.trust == DeviceTrust.unverified)
+      AppNotice.verify(onAction: () => _openVerification(VerifyPurpose.verify))
+    else if (_session.trust == DeviceTrust.noIdentity)
       AppNotice.setUpRecovery(
         onAction: () => _openVerification(VerifyPurpose.setUp),
       ),
