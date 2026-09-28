@@ -94,6 +94,7 @@ void main() {
       find.widgetWithText(TextField, 'recovery key or passphrase'),
       'bread before breakfast',
     );
+    await tester.pump();
     await tester.tap(find.text('unlock'));
     await tester.pump(MockVerifier.keyCheckDelay);
     expect(find.text('restoring history'), findsOneWidget);
