@@ -3,10 +3,7 @@
 /// previewed first, the way an invite is.
 library;
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../model/models.dart';
@@ -73,10 +70,6 @@ class AddSpacePanel extends StatefulWidget {
 class _AddSpacePanelState extends State<AddSpacePanel> {
   static const _servers = ['loaf.moe', 'matrix.org'];
 
-  /// A phone keyboard fires a change per letter; wait for a pause before
-  /// asking the server.
-  static const _linkDebounce = Duration(milliseconds: 300);
-
   var _step = _Step.menu;
 
   /// Where the preview was reached from, for its back arrow.
@@ -93,10 +86,8 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
   /// Each server's public spaces, fetched once and kept until retried.
   final _exploreSnapshots = <String, AsyncSnapshot<List<SpacePreview>>>{};
 
-  Timer? _linkTimer;
-
-  /// The address the latest lookup was for, so a stale answer for an
-  /// address you have since edited away from is dropped.
+  /// The address the latest lookup was for, so a slow earlier answer for an
+  /// address you have since edited away from can't overwrite a later one.
   String? _linkFor;
   AsyncSnapshot<SpacePreview>? _linkSnapshot;
 
@@ -111,28 +102,19 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
 
   @override
   void dispose() {
-    _linkTimer?.cancel();
     for (final c in [_link, _search, _name, _otherServer]) {
       c.dispose();
     }
     super.dispose();
   }
 
+  /// A lookup only fires once the text is a complete address; a partial
+  /// one (or the same address already looked up) shows whatever it showed
+  /// before.
   void _onLinkChanged() => setState(() {
-    _linkTimer?.cancel();
     final address = parseSpaceAddress(_link.text);
-    if (address == null) return;
-    _linkTimer = Timer(_linkDebounce, () => _lookUp(address));
-    // A debounce with nothing else animating schedules no frame of its
-    // own; without a nudge, `pumpAndSettle` would call it settled before
-    // the timer ever elapses. Keep a frame pending until it fires.
-    _keepTicking();
+    if (address != null && address != _linkFor) _lookUp(address);
   });
-
-  void _keepTicking() {
-    if (_linkTimer?.isActive != true) return;
-    SchedulerBinding.instance.scheduleFrameCallback((_) => _keepTicking());
-  }
 
   void _lookUp(String address) {
     _linkFor = address;

@@ -74,14 +74,26 @@ const _somePreview = SpacePreview(
   memberCount: 1,
 );
 
+const _previewA = SpacePreview(
+  alias: '#a:loaf.moe',
+  space: Space(id: 'space-a', name: 'Space A', color: Colors.blue),
+  memberCount: 1,
+);
+
+const _previewB = SpacePreview(
+  alias: '#b:loaf.moe',
+  space: Space(id: 'space-b', name: 'Space B', color: Colors.green),
+  memberCount: 2,
+);
+
 /// A [SpaceDirectory] whose answers the test drives by hand, one
-/// [Completer] per call, so loading and failure states can be observed.
+/// [Completer] per call, so loading, failure and staleness can be observed.
 class _SlowDirectory implements SpaceDirectory {
   final publicSpacesCalls = <String>[];
   Completer<List<SpacePreview>>? _publicSpaces;
 
   final lookUpCalls = <String>[];
-  Completer<SpacePreview>? _lookUp;
+  final _lookUps = <String, Completer<SpacePreview>>{};
 
   @override
   Future<List<SpacePreview>> publicSpaces(String server) {
@@ -100,11 +112,15 @@ class _SlowDirectory implements SpaceDirectory {
   Future<SpacePreview> lookUp(String address) {
     lookUpCalls.add(address);
     final completer = Completer<SpacePreview>();
-    _lookUp = completer;
+    _lookUps[address] = completer;
     return completer.future;
   }
 
-  void failLookUp(Object error) => _lookUp!.completeError(error);
+  void completeLookUp(String address, SpacePreview preview) =>
+      _lookUps[address]!.complete(preview);
+
+  void failLookUp(String address, Object error) =>
+      _lookUps[address]!.completeError(error);
 }
 
 Future<void> _pumpPanel(
@@ -359,18 +375,41 @@ void main() {
       expect(directory.publicSpacesCalls, ['loaf.moe', 'loaf.moe']);
     });
 
-    testWidgets('a link is looked up once typing stops', (tester) async {
+    testWidgets('only a complete address is looked up', (tester) async {
       final directory = _SlowDirectory();
       await _pumpPanel(tester, directory);
       await _tapIn(tester, 'join with a link');
 
+      await tester.enterText(_inPanel(find.byType(TextField)), '#bak');
+      await tester.pump();
+      expect(directory.lookUpCalls, isEmpty);
+
       await tester.enterText(
         _inPanel(find.byType(TextField)),
-        '#test:loaf.moe',
+        '#bakers:loaf.moe',
       );
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+      expect(directory.lookUpCalls, ['#bakers:loaf.moe']);
+    });
 
-      expect(directory.lookUpCalls, ['#test:loaf.moe']);
+    testWidgets("a stale lookup's answer is dropped", (tester) async {
+      final directory = _SlowDirectory();
+      await _pumpPanel(tester, directory);
+      await _tapIn(tester, 'join with a link');
+
+      await tester.enterText(_inPanel(find.byType(TextField)), '#a:loaf.moe');
+      await tester.pump();
+      await tester.enterText(_inPanel(find.byType(TextField)), '#b:loaf.moe');
+      await tester.pump();
+      expect(directory.lookUpCalls, ['#a:loaf.moe', '#b:loaf.moe']);
+
+      directory.completeLookUp('#a:loaf.moe', _previewA);
+      await tester.pump();
+      expect(_inPanel(find.text('Space A')), findsNothing);
+
+      directory.completeLookUp('#b:loaf.moe', _previewB);
+      await tester.pump();
+      expect(_inPanel(find.text('Space B')), findsOneWidget);
     });
 
     testWidgets("a link that can't be reached says so, apart from not found", (
@@ -384,9 +423,9 @@ void main() {
         _inPanel(find.byType(TextField)),
         '#test:loaf.moe',
       );
-      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
 
-      directory.failLookUp(Exception('offline'));
+      directory.failLookUp('#test:loaf.moe', Exception('offline'));
       await tester.pump();
 
       expect(
