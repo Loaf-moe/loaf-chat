@@ -137,6 +137,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     RoomAbility.join,
     RoomAbility.leave,
     RoomAbility.addSpace,
+    RoomAbility.startDirect,
+    RoomAbility.invite,
   };
 
   @override
@@ -1035,15 +1037,63 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     );
   }
 
-  Future<Never> _unwired(String what) =>
-      Future.error(UnsupportedError('$what is not wired to the SDK yet'));
+  /// Opens a DM with exactly [members]: the existing one, joined or
+  /// invited, that already has exactly these people, or a new one. One
+  /// member reuses through the SDK's own [Client.startDirectChat]; several
+  /// are matched by hand, since the SDK only tracks reuse for the one-person
+  /// case.
+  @override
+  Future<Channel> createDirect(List<Member> members) async {
+    if (members.length == 1) {
+      final roomId = await client.startDirectChat(members.single.id);
+      _rebuild();
+      return _home.firstWhere((c) => c.id == roomId);
+    }
+    final ids = {for (final member in members) member.id};
+    for (final room in client.rooms) {
+      if (room.membership != Membership.join || !room.isDirectChat) continue;
+      // `m.heroes` is the server's own summary of who a room is with —
+      // joined or invited, excluding you — and needs no member list loaded,
+      // the same source `_others` reads a DM's other person from.
+      final heroes = (room.summary.mHeroes ?? const <String>[]).toSet();
+      if (heroes.length == ids.length && heroes.containsAll(ids)) {
+        _rebuild();
+        return _home.firstWhere((c) => c.id == room.id);
+      }
+    }
+    final roomId = await client.createRoom(
+      invite: ids.toList(),
+      isDirect: true,
+      preset: CreateRoomPreset.trustedPrivateChat,
+    );
+    await client.waitForRoomInSync(roomId, join: true);
+    final room = client.getRoomById(roomId);
+    // `createRoom`'s own `is_direct` flag is only a hint to invitees'
+    // clients; unlike `startDirectChat`, it does not touch `m.direct` here.
+    if (room != null && !room.isDirectChat) {
+      await room.addToDirectChat(ids.first);
+    }
+    _rebuild();
+    return _home.firstWhere((c) => c.id == roomId);
+  }
 
+  /// Invites everyone in [userIds] to [roomId], one at a time. Throws
+  /// [InviteRefused] naming whoever the server turned down; everyone else
+  /// still went through.
   @override
-  Future<Channel> createDirect(List<Member> members) =>
-      _unwired('starting a DM');
-  @override
-  Future<void> invite(String roomId, List<String> userIds) =>
-      _unwired('inviting');
+  Future<void> invite(String roomId, List<String> userIds) async {
+    final room = client.getRoomById(roomId);
+    if (room == null) return;
+    final failed = <String, String>{};
+    for (final userId in userIds) {
+      try {
+        await room.invite(userId);
+      } on MatrixException catch (e) {
+        failed[userId] = e.errorMessage;
+      }
+    }
+    if (failed.isNotEmpty) throw InviteRefused(failed);
+  }
 
   @override
   void dispose() {

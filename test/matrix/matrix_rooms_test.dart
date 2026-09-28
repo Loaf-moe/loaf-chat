@@ -32,6 +32,9 @@ class _Api extends FakeMatrixApi {
   /// false.
   final refuseNames = <String>{};
 
+  /// User ids an `/invite` call refuses, even while [refuse] is false.
+  final refuseInviteIds = <String>{};
+
   /// When set, the display name every profile answers with.
   String? profileName;
 
@@ -78,15 +81,20 @@ class _Api extends FakeMatrixApi {
       final id = isSpace
           ? '!created:example.com'
           : '!created-${_createdRooms++}:example.com';
-      if (isSpace) {
+      final isDirect = body['is_direct'] == true;
+      if (isSpace || isDirect) {
         final client = ownerClient!;
         unawaited(
           Future(
             () => client.handleSync(
               SyncUpdate.fromJson({
-                'next_batch': 'created-space-${_events++}',
+                'next_batch': 'created-room-${_events++}',
                 'rooms': {
-                  'join': {id: _room('created', type: 'm.space')},
+                  'join': {
+                    id: isSpace
+                        ? _room('created', type: 'm.space')
+                        : _room('created'),
+                  },
                 },
               }),
             ),
@@ -94,6 +102,20 @@ class _Api extends FakeMatrixApi {
         );
       }
       return http.Response(jsonEncode({'room_id': id}), 200);
+    }
+    if (request.method == 'POST' && path.endsWith('/invite')) {
+      final userId =
+          (jsonDecode(request.body) as Map<String, Object?>)['user_id']
+              as String;
+      answered.add(path);
+      await hold?.future;
+      if (refuse || refuseInviteIds.contains(userId)) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
+          403,
+        );
+      }
+      return http.Response(jsonEncode({}), 200);
     }
     final method = request.method;
     final isJoinOrLeave =
@@ -723,8 +745,7 @@ void main() {
     expect(rooms.me.name, 'test');
   });
 
-  test('you are you, and only invites, messages and reading are '
-      'wired', () async {
+  test('you are you, and the wired abilities show', () async {
     final rooms = await _rooms(await _client());
     expect(rooms.me.id, _me);
     expect(rooms.me.name, isNotEmpty);
@@ -737,8 +758,9 @@ void main() {
       RoomAbility.join,
       RoomAbility.leave,
       RoomAbility.addSpace,
+      RoomAbility.startDirect,
+      RoomAbility.invite,
     });
-    expect(rooms.invite('!x', []), throwsUnsupportedError);
   });
 
   group('toggles', () {
@@ -1027,6 +1049,128 @@ void main() {
         await _settle();
       },
     );
+  });
+
+  group('people', () {
+    const bob = Member('@bob:example.com', 'Bob', Colors.blue);
+    const carol = Member('@carol:example.com', 'Carol', Colors.blue);
+    const dave = Member('@dave:example.com', 'Dave', Colors.blue);
+    const erin = Member('@erin:example.com', 'Erin', Colors.blue);
+
+    /// A joined DM room with Carol (joined) and Dave (invited) in it.
+    Future<void> group(Client client) => _sync(client, {
+      'join': {
+        '!group:example.com': {
+          ..._room(
+            'carol, dave',
+            extra: [
+              _state(
+                'm.room.member',
+                {'membership': 'join', 'displayname': 'Carol'},
+                key: '@carol:example.com',
+                sender: '@carol:example.com',
+              ),
+              _state('m.room.member', {
+                'membership': 'invite',
+                'displayname': 'Dave',
+              }, key: '@dave:example.com'),
+            ],
+          ),
+          // The server's own summary of who a small room is with, joined
+          // or invited: what a group DM is matched by, without needing the
+          // full member list loaded.
+          'summary': {
+            'm.heroes': ['@carol:example.com', '@dave:example.com'],
+          },
+        },
+      },
+    });
+
+    /// Marks a room a direct chat the way `m.direct` account data does.
+    Future<void> direct(Client client, String roomId, {String? owner}) =>
+        client.handleSync(
+          SyncUpdate.fromJson({
+            'next_batch': 'direct-${_events++}',
+            'account_data': {
+              'events': [
+                {
+                  'type': 'm.direct',
+                  'content': {
+                    (owner ?? '@carol:example.com'): [roomId],
+                  },
+                },
+              ],
+            },
+          }),
+        );
+
+    test('a DM with someone you already talk to opens that DM', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+
+      final channel = await rooms.createDirect([bob]);
+
+      expect(channel.id, '!726s6s6q:example.com');
+      expect(api.answered.where((p) => p.endsWith('/createRoom')), isEmpty);
+      expect(rooms.homeRooms.map((c) => c.id), contains(channel.id));
+    });
+
+    test('a group DM with exactly those people is reused', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await group(client);
+      await direct(client, '!group:example.com');
+      await _settle();
+
+      final channel = await rooms.createDirect([carol, dave]);
+
+      expect(channel.id, '!group:example.com');
+      expect(api.answered.where((p) => p.endsWith('/createRoom')), isEmpty);
+    });
+
+    test('a group DM with different people is new', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await group(client);
+      await direct(client, '!group:example.com');
+      await _settle();
+
+      final channel = await rooms.createDirect([carol, erin]);
+
+      expect(
+        api.answered.where((p) => p.endsWith('/createRoom')),
+        hasLength(1),
+      );
+      expect(channel.id, isNot('!group:example.com'));
+      expect(rooms.homeRooms.map((c) => c.id), contains(channel.id));
+      expect(
+        rooms.homeRooms.firstWhere((c) => c.id == channel.id).kind,
+        ChannelKind.direct,
+      );
+    });
+
+    test('an invite names who did not go through', () async {
+      final api = _Api()..refuseInviteIds.add('@erin:example.com');
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _settle();
+
+      await expectLater(
+        rooms.invite('!general:example.com', [
+          '@carol:example.com',
+          '@erin:example.com',
+        ]),
+        throwsA(
+          isA<InviteRefused>().having((e) => e.failed.keys, 'failed', [
+            '@erin:example.com',
+          ]),
+        ),
+      );
+    });
   });
 
   group('spaces', () {
