@@ -169,9 +169,17 @@ class ResetAuthStep extends StatelessWidget {
             const ErrorNote(message: "that password didn't match"),
           ],
           const SizedBox(height: LoafSpace.x3),
-          LoafButton(
-            label: checking ? 'checking…' : 'continue',
-            onTap: checking ? null : onPassword,
+          // Lit only once there's a password to check: blank input is
+          // ignored by the controller, so a drawn-enabled button here would
+          // do nothing.
+          ListenableBuilder(
+            listenable: password,
+            builder: (context, _) => LoafButton(
+              label: checking ? 'checking…' : 'continue',
+              onTap: checking || password.text.trim().isEmpty
+                  ? null
+                  : onPassword,
+            ),
           ),
         ] else ...[
           if (rejected) ...[

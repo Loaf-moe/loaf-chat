@@ -216,6 +216,75 @@ void main() {
     expect(find.text("that didn't unlock anything"), findsOneWidget);
   });
 
+  testWidgets('unlock does nothing on an empty key, then lights up as typed', (
+    tester,
+  ) async {
+    final empty = TextEditingController();
+    addTearDown(empty.dispose);
+    await _pump(
+      tester,
+      RecoveryStep(
+        controller: empty,
+        checking: false,
+        rejected: false,
+        onSubmit: _noop,
+      ),
+    );
+    expect(
+      tester
+          .widget<LoafButton>(find.widgetWithText(LoafButton, 'unlock'))
+          .onTap,
+      isNull,
+    );
+
+    await tester.enterText(find.byType(TextField), 'a recovery key');
+    await tester.pump();
+    expect(
+      tester
+          .widget<LoafButton>(find.widgetWithText(LoafButton, 'unlock'))
+          .onTap,
+      isNotNull,
+    );
+  });
+
+  testWidgets(
+    'continue does nothing on an empty password, then lights up as typed',
+    (tester) async {
+      final empty = TextEditingController();
+      addTearDown(empty.dispose);
+      await _pump(
+        tester,
+        ResetAuthStep(
+          byPassword: true,
+          password: empty,
+          checking: false,
+          rejected: false,
+          inBrowser: false,
+          providerName: 'loaf.moe',
+          onPassword: _noop,
+          onSso: _noop,
+          onReopen: _noop,
+          onCancelBrowser: _noop,
+        ),
+      );
+      expect(
+        tester
+            .widget<LoafButton>(find.widgetWithText(LoafButton, 'continue'))
+            .onTap,
+        isNull,
+      );
+
+      await tester.enterText(find.byType(TextField), 'hunter2');
+      await tester.pump();
+      expect(
+        tester
+            .widget<LoafButton>(find.widgetWithText(LoafButton, 'continue'))
+            .onTap,
+        isNotNull,
+      );
+    },
+  );
+
   test('thousands', () {
     expect(thousands(0), '0');
     expect(thousands(999), '999');

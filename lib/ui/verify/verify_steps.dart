@@ -363,9 +363,14 @@ class RecoveryStep extends StatelessWidget {
         ErrorNote(message: failure),
       ],
       const SizedBox(height: LoafSpace.x4),
-      LoafButton(
-        label: checking ? 'checking…' : 'unlock',
-        onTap: checking ? null : onSubmit,
+      // Lit only once there's a key to check: blank input is ignored by the
+      // controller, so a drawn-enabled button here would do nothing.
+      ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => LoafButton(
+          label: checking ? 'checking…' : 'unlock',
+          onTap: checking || controller.text.trim().isEmpty ? null : onSubmit,
+        ),
       ),
     ],
   );

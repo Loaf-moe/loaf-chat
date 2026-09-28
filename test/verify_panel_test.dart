@@ -91,6 +91,7 @@ void main() {
         find.widgetWithText(TextField, 'recovery key or passphrase'),
         mockRecoveryKey,
       );
+      await tester.pump();
       await tester.tap(find.text('unlock'));
       await tester.pump(MockVerifier.keyCheckDelay);
       expect(s.trust, DeviceTrust.verified);
@@ -490,6 +491,7 @@ void main() {
           find.widgetWithText(TextField, 'recovery key or passphrase'),
           mockRecoveryKey,
         );
+        await tester.pump();
         await tester.tap(find.text('unlock'));
         await tester.pump(MockVerifier.keyCheckDelay);
         expect(find.text('restoring history'), findsOneWidget);
@@ -524,6 +526,7 @@ void main() {
           find.widgetWithText(TextField, 'recovery key or passphrase'),
           mockRecoveryKey,
         );
+        await tester.pump();
         await tester.tap(find.text('unlock'));
         await tester.pump(MockVerifier.keyCheckDelay);
         expect(find.text('restoring history'), findsOneWidget);
