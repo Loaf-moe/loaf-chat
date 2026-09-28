@@ -16,6 +16,7 @@ import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
+import 'matrix_hierarchy.dart';
 import 'matrix_timeline.dart';
 
 /// `m.room.create` types that make a room a voice channel: Element's video
@@ -40,15 +41,17 @@ class _Wish {
 
 class MatrixRooms extends ChangeNotifier implements Rooms {
   MatrixRooms(this.client) {
+    _hierarchy = MatrixHierarchy(
+      client,
+      onChange: () {
+        if (!_disposed) _rebuild();
+      },
+    );
     _subscriptions = [
       // After the rooms and account data of a sync are applied, including
       // syncs the SDK makes up itself (a leave the server has forgotten).
       // `SyncStatus.finished` would miss those.
-      client.onSync.stream.listen((_) {
-        _synced = true;
-        _progress = null;
-        _rebuild();
-      }),
+      client.onSync.stream.listen(_onSync),
       client.onSyncStatus.stream.listen(_onStatus),
     ];
     // A restored session has synced before; its rooms are already here.
@@ -62,6 +65,12 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   }
 
   final Client client;
+
+  /// A space's children the SDK doesn't have state for: unjoined channels,
+  /// and the children of an unjoined subspace. The hierarchy cache: the
+  /// other of the two small maps `MatrixRooms` keeps beside its derived
+  /// snapshot.
+  late final MatrixHierarchy _hierarchy;
 
   late final List<StreamSubscription<Object?>> _subscriptions;
   var _disposed = false;
@@ -148,6 +157,23 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   @override
   List<Invite> get invites => _invites;
+
+  /// After the rooms and account data of a sync are applied, including
+  /// syncs the SDK makes up itself (a leave the server has forgotten).
+  /// `SyncStatus.finished` would miss those. Also invalidates a joined
+  /// space's cached hierarchy when this sync shows its children changed.
+  void _onSync(SyncUpdate update) {
+    update.rooms?.join?.forEach((roomId, room) {
+      final changed =
+          (room.state?.any((e) => e.type == EventTypes.SpaceChild) ?? false) ||
+          (room.timeline?.events?.any((e) => e.type == EventTypes.SpaceChild) ??
+              false);
+      if (changed) _hierarchy.invalidate(roomId);
+    });
+    _synced = true;
+    _progress = null;
+    _rebuild();
+  }
 
   void _onStatus(SyncStatusUpdate update) {
     if (_synced) return;
@@ -286,20 +312,44 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   Space _space(Room space, Map<String, Room> joined) {
     final name = space.getLocalizedDisplayname();
+    final chunks = <String, SpaceRoomsChunk$2>{
+      for (final chunk in _hierarchy.children(space.id) ?? const [])
+        chunk.roomId: chunk,
+    };
     final top = <Channel>[];
     final categories = <ChannelCategory>[];
     for (final child in space.spaceChildren) {
-      final room = joined[child.roomId];
-      if (room == null) continue; // Not joined: phase 5 lists these.
-      if (room.isSpace) {
-        final channels = [
-          for (final r in _descendants(room, joined, {space.id})) _channel(r),
-        ];
+      final id = child.roomId;
+      if (id == null) continue;
+      final room = joined[id];
+      if (room != null) {
+        if (room.isSpace) {
+          final channels = [
+            for (final r in _descendants(room, joined, {space.id})) _channel(r),
+          ];
+          categories.add(
+            ChannelCategory(room.getLocalizedDisplayname(), channels),
+          );
+        } else {
+          top.add(_channel(room));
+        }
+        continue;
+      }
+      // Not joined: drawn from the hierarchy once it has landed.
+      final chunk = chunks[id];
+      if (chunk == null || !_hierarchyChildVisible(chunk, joined)) continue;
+      if (chunk.roomType == 'm.space') {
+        final channels = _hierarchyDescendants(chunk, joined, chunks, {
+          space.id,
+        }).toList();
         categories.add(
-          ChannelCategory(room.getLocalizedDisplayname(), channels),
+          ChannelCategory(
+            chunk.name ?? chunk.canonicalAlias ?? 'unnamed',
+            channels,
+          ),
         );
       } else {
-        top.add(_channel(room));
+        top.add(_hierarchyChannel(chunk));
       }
     }
     return Space(
@@ -309,6 +359,76 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       categories: [if (top.isNotEmpty) ChannelCategory('', top), ...categories],
       members: _members(space),
     );
+  }
+
+  /// Whether a hierarchy child is drawn at all: `invite` and `knock` never
+  /// are; `restricted` only if some allowed room is one you have joined,
+  /// or the chunk doesn't say — the common case, where the immediate
+  /// parent (already joined, or this call would not have reached it)
+  /// satisfies the rule.
+  bool _hierarchyChildVisible(
+    SpaceRoomsChunk$2 chunk,
+    Map<String, Room> joined,
+  ) {
+    switch (chunk.joinRule) {
+      case 'invite':
+      case 'knock':
+        return false;
+      case 'restricted':
+        final allowed = chunk.allowedRoomIds;
+        return allowed == null || allowed.any(joined.containsKey);
+      default:
+        return true;
+    }
+  }
+
+  /// A hierarchy subspace's channels: its own children, and those of any
+  /// further subspace under it, joined or not, flattened in. Mirrors
+  /// [_descendants] for the part of the tree the SDK has no [Room] for.
+  Iterable<Channel> _hierarchyDescendants(
+    SpaceRoomsChunk$2 space,
+    Map<String, Room> joined,
+    Map<String, SpaceRoomsChunk$2> chunks,
+    Set<String> seen,
+  ) sync* {
+    if (!seen.add(space.roomId)) return;
+    for (final childState in space.childrenState) {
+      final id = childState.stateKey;
+      if (id == null) continue;
+      final room = joined[id];
+      if (room != null) {
+        if (room.isSpace) {
+          yield* _descendants(room, joined, seen).map(_channel);
+        } else if (seen.add(room.id)) {
+          yield _channel(room);
+        }
+        continue;
+      }
+      final chunk = chunks[id];
+      if (chunk == null || !_hierarchyChildVisible(chunk, joined)) continue;
+      if (chunk.roomType == 'm.space') {
+        yield* _hierarchyDescendants(chunk, joined, chunks, seen);
+      } else if (seen.add(id)) {
+        yield _hierarchyChannel(chunk);
+      }
+    }
+  }
+
+  /// An unjoined hierarchy child as a row: only what `/hierarchy` gave us,
+  /// plus a `joined: true` wish already sent but not yet synced.
+  Channel _hierarchyChannel(SpaceRoomsChunk$2 chunk) {
+    final channel = Channel(
+      id: chunk.roomId,
+      name: chunk.name ?? chunk.canonicalAlias ?? 'unnamed',
+      kind: _voiceTypes.contains(chunk.roomType)
+          ? ChannelKind.voice
+          : ChannelKind.text,
+      joined: false,
+      topic: chunk.topic,
+    );
+    final wish = _wishes[chunk.roomId];
+    if (wish?.joined != true) return channel;
+    return channel.copyWith(joined: true);
   }
 
   /// A category's rooms: its joined non-space children, then those of any
@@ -690,7 +810,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         'joined',
         (wish) => wish.joined = false,
         (wish) => wish.joined = null,
-        room.leave,
+        () => room.leave().then((_) => _invalidateHierarchies()),
       );
     }
     return _wished(
@@ -698,9 +818,21 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       'joined',
       (wish) => wish.joined = true,
       (wish) => wish.joined = null,
-      // Task 4 fills in `via` from the space directory.
-      () => client.joinRoom(roomId, via: const []),
+      () => client
+          .joinRoom(roomId, via: _hierarchy.via(roomId))
+          .then((_) => _invalidateHierarchies()),
     );
+  }
+
+  /// Every joined space's hierarchy is stale once a room it lists is
+  /// joined or left: the child's own join state, or the count of children
+  /// left to join, has changed.
+  void _invalidateHierarchies() {
+    for (final room in client.rooms) {
+      if (room.isSpace && room.membership == Membership.join) {
+        _hierarchy.invalidate(room.id);
+      }
+    }
   }
 
   // ── Not wired yet ──────────────────────────────────────────────────────
@@ -753,6 +885,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     for (final t in _timelines.values) {
       t.dispose();
     }
+    _hierarchy.dispose();
     super.dispose();
   }
 }

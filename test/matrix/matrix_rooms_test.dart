@@ -26,6 +26,9 @@ class _Api extends FakeMatrixApi {
   /// When set, the display name every profile answers with.
   String? profileName;
 
+  /// Each space's `/hierarchy` pages, in order, keyed by space id.
+  final hierarchyPages = <String, List<Map<String, Object?>>>{};
+
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
     final path = request.url.path;
@@ -33,6 +36,16 @@ class _Api extends FakeMatrixApi {
         request.method == 'GET' &&
         path.contains('/profile/')) {
       return http.Response(jsonEncode({'displayname': profileName}), 200);
+    }
+    if (request.method == 'GET' && path.contains('/hierarchy')) {
+      final spaceId = Uri.decodeComponent(
+        path.split('/rooms/')[1].split('/hierarchy')[0],
+      );
+      final pages = hierarchyPages[spaceId] ?? const [];
+      final from = request.url.queryParameters['from'];
+      final index = from == null ? 0 : int.parse(from);
+      final page = index < pages.length ? pages[index] : {'rooms': <Object?>[]};
+      return http.Response(jsonEncode(page), 200);
     }
     final method = request.method;
     final isJoinOrLeave =
@@ -907,5 +920,52 @@ void main() {
       await _settle();
       expect(byId(rooms, '!m:example.com').muted, isFalse);
     });
+
+    test(
+      'joining an unjoined hierarchy child shows it joined at once',
+      () async {
+        final api = _Api()..hold = Completer();
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        api.hierarchyPages['!bakery:example.com'] = [
+          {
+            'rooms': [
+              {
+                'room_id': '!unjoined:example.com',
+                'guest_can_join': false,
+                'world_readable': true,
+                'num_joined_members': 1,
+                'name': 'proofing',
+                'join_rule': 'public',
+                'children_state': <Object?>[],
+              },
+            ],
+          },
+        ];
+        await _sync(client, {
+          'join': {
+            '!bakery:example.com': _room(
+              'Bakery',
+              type: 'm.space',
+              extra: [_child('!unjoined:example.com')],
+            ),
+          },
+        });
+        await _settle();
+        Channel unjoined() => rooms.spaces
+            .firstWhere((s) => s.id == '!bakery:example.com')
+            .categories
+            .first
+            .channels
+            .singleWhere((c) => c.id == '!unjoined:example.com');
+        expect(unjoined().joined, isFalse);
+
+        final result = rooms.setJoined('!unjoined:example.com', true);
+        expect(unjoined().joined, isTrue);
+        api.hold!.complete();
+        await result;
+        await _settle();
+      },
+    );
   });
 }
