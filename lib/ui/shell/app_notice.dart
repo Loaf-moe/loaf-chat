@@ -175,7 +175,11 @@ class NoticeTile extends StatelessWidget {
         Overlay.of(context).context.findRenderObject()! as RenderBox;
     final rect = tile.localToGlobal(Offset.zero, ancestor: overlay) & tile.size;
 
-    return showMenu<_Choice>(
+    // showMenu's own future resolves the instant the route is popped, while
+    // its card is still playing its exit fade — captured here so the choice
+    // isn't handed back until that route is actually gone.
+    TransitionRoute<_Choice>? route;
+    final future = showMenu<_Choice>(
       context: context,
       color: tokens.card,
       elevation: 0,
@@ -191,17 +195,25 @@ class NoticeTile extends StatelessWidget {
         overlay.size.width - rect.right - LoafSpace.x3,
         overlay.size.height - rect.top,
       ),
-      items: [_NoticeMenuEntry(notice: notice)],
+      items: [_NoticeMenuEntry(notice: notice, onRoute: (r) => route = r)],
     );
+    return future.then((choice) async {
+      await route?.completed;
+      return choice;
+    });
   }
 }
 
 enum _Choice { act, later }
 
 class _NoticeMenuEntry extends PopupMenuEntry<_Choice> {
-  const _NoticeMenuEntry({required this.notice});
+  const _NoticeMenuEntry({required this.notice, required this.onRoute});
 
   final AppNotice notice;
+
+  /// Hands back the popup's own route, read from this entry's context once
+  /// it's built inside it — the only place that context is reachable from.
+  final ValueChanged<TransitionRoute<_Choice>> onRoute;
 
   @override
   double get height => 120;
@@ -214,6 +226,13 @@ class _NoticeMenuEntry extends PopupMenuEntry<_Choice> {
 }
 
 class _NoticeMenuEntryState extends State<_NoticeMenuEntry> {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of<_Choice>(context);
+    if (route != null) widget.onRoute(route);
+  }
+
   @override
   Widget build(BuildContext context) => SizedBox(
     width: 280,

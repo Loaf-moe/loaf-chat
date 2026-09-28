@@ -78,6 +78,64 @@ void main() {
     expect(card.left, greaterThan(tile.right), reason: 'opens beside the rail');
   });
 
+  testWidgets(
+    "a computer notice's card is gone before its action opens a panel",
+    variant: _desktop,
+    (tester) async {
+      tester.view.physicalSize = const Size(400, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      late BuildContext rootContext;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) {
+                rootContext = context;
+                return Align(
+                  alignment: Alignment.centerLeft,
+                  child: SpacesRail(
+                    spaces: mockSpaces,
+                    selectedSpaceId: mockSpaces.first.id,
+                    onSelect: (_) {},
+                    notices: [
+                      AppNotice.verify(
+                        onAction: () => showDialog<void>(
+                          context: rootContext,
+                          builder: (_) => const Text('panel open'),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('verify this session'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('verify'));
+      // Pumps in small steps until the panel is open, so a panel that opens
+      // early — while the popover's own exit animation is still running —
+      // is caught rather than smoothed over by one big pump that settles
+      // past both.
+      for (
+        var i = 0;
+        i < 40 && find.text('panel open').evaluate().isEmpty;
+        i++
+      ) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(find.text('panel open'), findsOneWidget);
+      expect(find.textContaining('encrypted messages'), findsNothing);
+    },
+  );
+
   testWidgets('verification cannot be put off', (tester) async {
     await _pumpRail(tester, [AppNotice.verify(onAction: () {})]);
 
