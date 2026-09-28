@@ -178,11 +178,21 @@ class MockRooms extends ChangeNotifier implements Rooms {
     return SynchronousFuture(null);
   }
 
-  /// Joining a space you were invited to answers the invite.
+  /// Joining a space you were invited to answers the invite. Joining a
+  /// space you had left clears its own left mark, but not its channels':
+  /// a space rejoined starts as empty as a freshly joined one, and each
+  /// channel is joined on its own, same as any other unjoined channel. A
+  /// space already known — a fixture, or accepted earlier this session —
+  /// is not added a second time, so rejoining never duplicates its row.
   @override
   Future<void> joinSpace(Space space) {
     _change(() {
-      _acceptedSpaces.add(space);
+      final known = [
+        ...mockSpaces,
+        ..._acceptedSpaces,
+      ].any((s) => s.id == space.id);
+      if (!known) _acceptedSpaces.add(space);
+      _membership[space.id] = true;
       for (final invite in mockInvites) {
         if (invite.space?.id == space.id) _answeredInvites.add(invite.id);
       }

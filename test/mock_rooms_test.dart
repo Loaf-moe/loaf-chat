@@ -104,15 +104,18 @@ void main() {
     expect(_home(rooms, dm.id).waitingFor, [ada]);
   });
 
-  test('leaving a space takes its channels with it', () async {
+  test('leaving a space takes its channels with it, and joining it again '
+      'does not bring them back', () async {
     final space = mockSpaces.first;
     await rooms.leaveSpace(space.id);
     expect(rooms.spaces.map((s) => s.id), isNot(contains(space.id)));
-    final channelIds = space.allChannels.map((c) => c.id).toSet();
-    expect(
-      rooms.homeRooms.map((c) => c.id).toSet().intersection(channelIds),
-      isEmpty,
-    );
+
+    await rooms.joinSpace(space);
+    final rejoined = rooms.spaces.firstWhere((s) => s.id == space.id);
+    // Not vacuous: a left invite-only channel is dropped entirely, but
+    // the space's other channels are still listed, unjoined.
+    expect(rejoined.allChannels, isNotEmpty);
+    expect(rejoined.allChannels.every((c) => !c.joined), isTrue);
   });
 
   test('an invite answers at once', () async {
