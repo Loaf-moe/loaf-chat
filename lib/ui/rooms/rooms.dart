@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../channel/timeline.dart';
 import '../model/models.dart';
+import '../spaces/space_directory.dart';
 
 /// What a backend can do to your rooms yet. The shell draws no control for
 /// anything missing: a control that only pretends would lie about your real
@@ -28,6 +29,9 @@ enum RoomAbility {
   addSpace,
   startDirect,
 
+  /// Inviting people to a room or space.
+  invite,
+
   /// Voice channels and DM calls.
   calls,
 
@@ -36,6 +40,27 @@ enum RoomAbility {
 
   /// Your presence, status message and profile.
   editProfile,
+}
+
+/// The server turned down some of an invite. [failed] maps each user id
+/// that did not go through to why, in the server's words.
+class InviteRefused implements Exception {
+  const InviteRefused(this.failed);
+  final Map<String, String> failed;
+}
+
+/// Nothing is at that address.
+class SpaceNotFound implements Exception {
+  const SpaceNotFound();
+}
+
+/// A compound action stopped partway. [spaceId] is set when a space was
+/// made and still stands; [missing] names what did not happen, in the
+/// UI's words ("#general", "hangout", "3 channels").
+class PartlyDone implements Exception {
+  const PartlyDone({this.spaceId, this.missing = const []});
+  final String? spaceId;
+  final List<String> missing;
 }
 
 abstract interface class Rooms implements Listenable {
@@ -70,25 +95,36 @@ abstract interface class Rooms implements Listenable {
   Timeline? timeline(String roomId);
 
   void markRead(String roomId);
-  void setMuted(String roomId, bool muted);
-  void setJoined(String roomId, bool joined);
-  void setFavourite(String roomId, bool favourite);
+  Future<void> setMuted(String roomId, bool muted);
+  Future<void> setJoined(String roomId, bool joined);
+  Future<void> setFavourite(String roomId, bool favourite);
 
   /// Favourites in this order, first to last.
-  void reorderFavourites(List<String> roomIds);
-  void setLowPriority(String roomId, bool lowPriority);
+  Future<void> reorderFavourites(List<String> roomIds);
+  Future<void> setLowPriority(String roomId, bool lowPriority);
 
   /// Throws when the server says no; the invite then stays.
   Future<void> accept(Invite invite);
   Future<void> decline(Invite invite);
 
-  void joinSpace(Space space);
+  Future<void> joinSpace(Space space);
 
-  /// Returns the new space's id.
-  String createSpace(String name, {required Member me});
+  /// Leaves the space and every joined room inside it that no other joined
+  /// space lists. Throws [PartlyDone] if any refused.
+  Future<void> leaveSpace(String spaceId);
 
-  /// Returns the new DM, which is already in [homeRooms].
-  Channel createDirect(List<Member> members);
+  /// Returns the new space's id. Throws [PartlyDone] (with its id) when the
+  /// space stands but a channel is missing.
+  Future<String> createSpace(String name, {required Member me});
+
+  /// Returns the DM, which is already in [homeRooms]: an existing one with
+  /// exactly these people, or a new one.
+  Future<Channel> createDirect(List<Member> members);
+
+  /// Throws [InviteRefused] naming who did not go through.
+  Future<void> invite(String roomId, List<String> userIds);
+
+  SpaceDirectory get directory;
 
   void dispose();
 }

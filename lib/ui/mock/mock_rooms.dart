@@ -9,7 +9,9 @@ import 'package:flutter/foundation.dart';
 import '../channel/timeline_controller.dart';
 import '../rooms/rooms.dart';
 import '../spaces/add_space.dart' show spaceColorFor;
+import '../spaces/space_directory.dart';
 import 'fixtures.dart';
+import 'mock_space_directory.dart';
 
 class MockRooms extends ChangeNotifier implements Rooms {
   // This session's changes, layered over the fixtures by Space.withSession.
@@ -44,6 +46,9 @@ class MockRooms extends ChangeNotifier implements Rooms {
   var _started = 0;
 
   @override
+  final SpaceDirectory directory = MockSpaceDirectory();
+
+  @override
   Set<RoomAbility> get abilities => RoomAbility.values.toSet();
 
   @override
@@ -58,10 +63,14 @@ class MockRooms extends ChangeNotifier implements Rooms {
   /// With this session's reading applied, so badges recount. A left
   /// invite-only channel is dropped: only channels you could join in one
   /// tap are ever listed.
+  /// Spaces you have left this session are gone, the same way a left Home
+  /// room is: [_membership] carries the space's own id as well as its
+  /// channels'.
   @override
   List<Space> get spaces => [
     for (final space in [...mockSpaces, ..._acceptedSpaces])
-      space.withSession(membership: _membership, muted: _muted, read: _read),
+      if (_membership[space.id] != false)
+        space.withSession(membership: _membership, muted: _muted, read: _read),
   ];
 
   /// Home's rooms with this session's tags, mutes and reading applied.
@@ -108,30 +117,42 @@ class MockRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
-  void setMuted(String roomId, bool muted) =>
-      _change(() => _muted[roomId] = muted);
+  Future<void> setMuted(String roomId, bool muted) {
+    _change(() => _muted[roomId] = muted);
+    return SynchronousFuture(null);
+  }
 
   @override
-  void setJoined(String roomId, bool joined) =>
-      _change(() => _membership[roomId] = joined);
+  Future<void> setJoined(String roomId, bool joined) {
+    _change(() => _membership[roomId] = joined);
+    return SynchronousFuture(null);
+  }
 
   /// A new favourite goes last.
   @override
-  void setFavourite(String roomId, bool favourite) => _change(() {
-    _favourites.remove(roomId);
-    if (favourite) _favourites.add(roomId);
-  });
+  Future<void> setFavourite(String roomId, bool favourite) {
+    _change(() {
+      _favourites.remove(roomId);
+      if (favourite) _favourites.add(roomId);
+    });
+    return SynchronousFuture(null);
+  }
 
   @override
-  void reorderFavourites(List<String> roomIds) => _change(
-    () => _favourites
-      ..clear()
-      ..addAll(roomIds),
-  );
+  Future<void> reorderFavourites(List<String> roomIds) {
+    _change(
+      () => _favourites
+        ..clear()
+        ..addAll(roomIds),
+    );
+    return SynchronousFuture(null);
+  }
 
   @override
-  void setLowPriority(String roomId, bool lowPriority) =>
-      _change(() => _lowPriority[roomId] = lowPriority);
+  Future<void> setLowPriority(String roomId, bool lowPriority) {
+    _change(() => _lowPriority[roomId] = lowPriority);
+    return SynchronousFuture(null);
+  }
 
   /// A DM or room joins Home, newest; a space joins the rail. Answered at
   /// once, so callers carry on in the same frame.
@@ -159,17 +180,42 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   /// Joining a space you were invited to answers the invite.
   @override
-  void joinSpace(Space space) => _change(() {
-    _acceptedSpaces.add(space);
-    for (final invite in mockInvites) {
-      if (invite.space?.id == space.id) _answeredInvites.add(invite.id);
-    }
-  });
+  Future<void> joinSpace(Space space) {
+    _change(() {
+      _acceptedSpaces.add(space);
+      for (final invite in mockInvites) {
+        if (invite.space?.id == space.id) _answeredInvites.add(invite.id);
+      }
+    });
+    return SynchronousFuture(null);
+  }
+
+  /// Leaves the space at once: a space made or joined this session is
+  /// dropped from [_acceptedSpaces], and an original fixture space is
+  /// marked left the same way a Home room is, by its own id in
+  /// [_membership]. Either way every one of its channels is marked left
+  /// too, so rejoining the space starts fresh.
+  @override
+  Future<void> leaveSpace(String spaceId) {
+    _change(() {
+      final target = [
+        ...mockSpaces,
+        ..._acceptedSpaces,
+      ].firstWhere((s) => s.id == spaceId);
+      for (final channel in target.allChannels) {
+        _membership[channel.id] = false;
+      }
+      if (!_acceptedSpaces.remove(target)) {
+        _membership[spaceId] = false;
+      }
+    });
+    return SynchronousFuture(null);
+  }
 
   /// The mock's space creation: the space room, then #general and a voice
   /// channel as its children, both restricted to its members.
   @override
-  String createSpace(String name, {required Member me}) {
+  Future<String> createSpace(String name, {required Member me}) {
     final id = 'made-${_made++}';
     _change(
       () => _acceptedSpaces.add(
@@ -191,13 +237,13 @@ class MockRooms extends ChangeNotifier implements Rooms {
         ),
       ),
     );
-    return id;
+    return SynchronousFuture(id);
   }
 
   /// The mock's createRoom: is_direct, trusted_private_chat, the people
   /// invited, and the room added to m.direct.
   @override
-  Channel createDirect(List<Member> members) {
+  Future<Channel> createDirect(List<Member> members) {
     final room = Channel(
       id: 'dm-new-${_started++}',
       name: members.length == 1
@@ -211,8 +257,13 @@ class MockRooms extends ChangeNotifier implements Rooms {
       _acceptedRooms.add(room);
       _activity[room.id] = DateTime.now();
     });
-    return room;
+    return SynchronousFuture(room);
   }
+
+  /// The mock answers at once and never refuses.
+  @override
+  Future<void> invite(String roomId, List<String> userIds) =>
+      SynchronousFuture(null);
 
   @override
   TimelineController timeline(String roomId) {

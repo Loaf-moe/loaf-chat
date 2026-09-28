@@ -17,6 +17,7 @@ import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
 import 'package:loaf_native/ui/settings/settings_page.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
+import 'package:loaf_native/ui/spaces/space_directory.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -114,21 +115,27 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   void markRead(String roomId) => _unwired();
   @override
-  void setMuted(String roomId, bool muted) => _unwired();
+  Future<void> setMuted(String roomId, bool muted) => _unwired();
   @override
-  void setJoined(String roomId, bool joined) => _unwired();
+  Future<void> setJoined(String roomId, bool joined) => _unwired();
   @override
-  void setFavourite(String roomId, bool favourite) => _unwired();
+  Future<void> setFavourite(String roomId, bool favourite) => _unwired();
   @override
-  void reorderFavourites(List<String> roomIds) => _unwired();
+  Future<void> reorderFavourites(List<String> roomIds) => _unwired();
   @override
-  void setLowPriority(String roomId, bool lowPriority) => _unwired();
+  Future<void> setLowPriority(String roomId, bool lowPriority) => _unwired();
   @override
-  void joinSpace(Space space) => _unwired();
+  Future<void> joinSpace(Space space) => _unwired();
   @override
-  String createSpace(String name, {required Member me}) => _unwired();
+  Future<void> leaveSpace(String spaceId) => _unwired();
   @override
-  Channel createDirect(List<Member> members) => _unwired();
+  Future<String> createSpace(String name, {required Member me}) => _unwired();
+  @override
+  Future<Channel> createDirect(List<Member> members) => _unwired();
+  @override
+  Future<void> invite(String roomId, List<String> userIds) => _unwired();
+  @override
+  SpaceDirectory get directory => _unwired();
 }
 
 /// A session that is signed in and trusted, and counts sign-outs.

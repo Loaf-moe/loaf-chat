@@ -15,6 +15,7 @@ import '../ui/members/presence.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
+import '../ui/spaces/space_directory.dart';
 import 'matrix_timeline.dart';
 
 /// `m.room.create` types that make a room a voice channel: Element's video
@@ -459,26 +460,40 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     );
   }
 
-  Never _unwired(String what) =>
-      throw UnsupportedError('$what is not wired to the SDK yet');
+  Future<Never> _unwired(String what) =>
+      Future.error(UnsupportedError('$what is not wired to the SDK yet'));
 
+  // `setMuted` throws synchronously rather than through `_unwired`: its own
+  // test expects the throw on the call, not on the future it would return.
   @override
-  void setMuted(String roomId, bool muted) => _unwired('muting');
+  Future<void> setMuted(String roomId, bool muted) =>
+      throw UnsupportedError('muting is not wired to the SDK yet');
   @override
-  void setJoined(String roomId, bool joined) => _unwired('joining');
+  Future<void> setJoined(String roomId, bool joined) => _unwired('joining');
   @override
-  void setFavourite(String roomId, bool favourite) => _unwired('tagging');
+  Future<void> setFavourite(String roomId, bool favourite) =>
+      _unwired('tagging');
   @override
-  void reorderFavourites(List<String> roomIds) => _unwired('tagging');
+  Future<void> reorderFavourites(List<String> roomIds) => _unwired('tagging');
   @override
-  void setLowPriority(String roomId, bool lowPriority) => _unwired('tagging');
+  Future<void> setLowPriority(String roomId, bool lowPriority) =>
+      _unwired('tagging');
   @override
-  void joinSpace(Space space) => _unwired('joining a space');
+  Future<void> joinSpace(Space space) => _unwired('joining a space');
   @override
-  String createSpace(String name, {required Member me}) =>
+  Future<void> leaveSpace(String spaceId) => _unwired('leaving a space');
+  @override
+  Future<String> createSpace(String name, {required Member me}) =>
       _unwired('creating a space');
   @override
-  Channel createDirect(List<Member> members) => _unwired('starting a DM');
+  Future<Channel> createDirect(List<Member> members) =>
+      _unwired('starting a DM');
+  @override
+  Future<void> invite(String roomId, List<String> userIds) =>
+      _unwired('inviting');
+  @override
+  SpaceDirectory get directory =>
+      throw UnsupportedError('the space directory is not wired to the SDK yet');
 
   @override
   void dispose() {

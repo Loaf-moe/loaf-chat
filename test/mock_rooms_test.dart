@@ -89,19 +89,45 @@ void main() {
     expect(rooms.spaces.map((s) => s.id), contains(invite.space!.id));
   });
 
-  test('a made space has #general and a voice channel', () {
-    final id = rooms.createSpace('Crumb Club', me: currentUser);
+  test('a made space has #general and a voice channel', () async {
+    final id = await rooms.createSpace('Crumb Club', me: currentUser);
     final space = rooms.spaces.firstWhere((s) => s.id == id);
     expect(space.allChannels.map((c) => c.name), ['general', 'hangout']);
   });
 
-  test('a started DM is in Home, waiting on its people', () {
+  test('a started DM is in Home, waiting on its people', () async {
     final ada = rooms.homeRooms
         .firstWhere((c) => c.id == 'dm-ada')
         .members
         .single;
-    final dm = rooms.createDirect([ada]);
+    final dm = await rooms.createDirect([ada]);
     expect(_home(rooms, dm.id).waitingFor, [ada]);
+  });
+
+  test('leaving a space takes its channels with it', () async {
+    final space = mockSpaces.first;
+    await rooms.leaveSpace(space.id);
+    expect(rooms.spaces.map((s) => s.id), isNot(contains(space.id)));
+    final channelIds = space.allChannels.map((c) => c.id).toSet();
+    expect(
+      rooms.homeRooms.map((c) => c.id).toSet().intersection(channelIds),
+      isEmpty,
+    );
+  });
+
+  test('an invite answers at once', () async {
+    await rooms.invite('admins', ['@x:loaf.moe']);
+  });
+
+  test('the mock directory lists fixtures', () async {
+    expect(
+      await rooms.directory.publicSpaces('loaf.moe'),
+      mockDirectories['loaf.moe'],
+    );
+    expect(
+      () => rooms.directory.lookUp('#nowhere:loaf.moe'),
+      throwsA(isA<SpaceNotFound>()),
+    );
   });
 
   group('timelines', () {

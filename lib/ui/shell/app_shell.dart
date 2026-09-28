@@ -6,6 +6,8 @@
 /// screen — Discord's phone layout, which is the solved version of this.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -298,27 +300,36 @@ class _AppShellState extends State<AppShell> {
       case ChannelAction.markRead:
         _rooms.markRead(id);
       case ChannelAction.favourite:
-        _rooms.setFavourite(id, true);
+        unawaited(_rooms.setFavourite(id, true).catchError(_refused));
       case ChannelAction.unfavourite:
-        _rooms.setFavourite(id, false);
+        unawaited(_rooms.setFavourite(id, false).catchError(_refused));
       case ChannelAction.lowPriority:
-        _rooms.setLowPriority(id, true);
+        unawaited(_rooms.setLowPriority(id, true).catchError(_refused));
       case ChannelAction.notLowPriority:
-        _rooms.setLowPriority(id, false);
+        unawaited(_rooms.setLowPriority(id, false).catchError(_refused));
       case ChannelAction.olderConversations:
         break; // Handled before any state changes: it asks first.
       case ChannelAction.mute:
-        _rooms.setMuted(id, true);
+        unawaited(_rooms.setMuted(id, true).catchError(_refused));
       case ChannelAction.unmute:
-        _rooms.setMuted(id, false);
+        unawaited(_rooms.setMuted(id, false).catchError(_refused));
       case ChannelAction.leave:
         // Leaving the channel you are reading falls through to the space's
         // first joined text channel: see _channel.
-        _rooms.setJoined(id, false);
+        unawaited(_rooms.setJoined(id, false).catchError(_refused));
         // Leaving a voice channel you are in takes you out of the call too.
         if (_calls.session?.target.id == id) _calls.leave();
     }
   }
+
+  /// A quick toggle's refusal: the change snaps back once the listener
+  /// hears the backend's own state again, and a toast says to try again.
+  void _refused(Object error) {
+    if (mounted) showToast(context, "couldn't do that. try again?");
+  }
+
+  void _reorderFavourites(List<String> roomIds) =>
+      unawaited(_rooms.reorderFavourites(roomIds).catchError(_refused));
 
   /// Back to wherever the call lives: its voice channel, or its DM.
   void _goToCall() {
@@ -344,19 +355,27 @@ class _AppShellState extends State<AppShell> {
       joined: {for (final s in _spaces) s.id},
     );
     if (result == null || !mounted) return;
-    setState(() {
-      switch (result) {
-        case OpenSpace(:final id):
+    switch (result) {
+      case OpenSpace(:final id):
+        setState(() {
           _spaceId = id;
-        case JoinSpace(:final space):
-          _rooms.joinSpace(space);
+          _fullscreen = false;
+        });
+      case JoinSpace(:final space):
+        await _rooms.joinSpace(space);
+        if (!mounted) return;
+        setState(() {
           _spaceId = space.id;
-        case CreateSpace(:final name):
-          final id = _rooms.createSpace(name, me: _me);
+          _fullscreen = false;
+        });
+      case CreateSpace(:final name):
+        final id = await _rooms.createSpace(name, me: _me);
+        if (!mounted) return;
+        setState(() {
           _open(id, '$id-general');
-      }
-      _fullscreen = false;
-    });
+          _fullscreen = false;
+        });
+    }
     _scaffoldKey.currentState?.closeDrawer();
   }
 
@@ -381,14 +400,14 @@ class _AppShellState extends State<AppShell> {
       ],
     );
     if (start == null || !mounted) return;
-    setState(() {
-      switch (start) {
-        case OpenExisting(:final room):
-          _open(mockHome.id, room.id);
-        case CreateDirect(:final members):
-          _open(mockHome.id, _rooms.createDirect(members).id);
-      }
-    });
+    switch (start) {
+      case OpenExisting(:final room):
+        setState(() => _open(mockHome.id, room.id));
+      case CreateDirect(:final members):
+        final dm = await _rooms.createDirect(members);
+        if (!mounted) return;
+        setState(() => _open(mockHome.id, dm.id));
+    }
     _scaffoldKey.currentState?.closeDrawer();
   }
 
@@ -1002,7 +1021,7 @@ class _AppShellState extends State<AppShell> {
                     ? _newMessage
                     : null,
                 onReorderFavourites: _can(RoomAbility.tag)
-                    ? _rooms.reorderFavourites
+                    ? _reorderFavourites
                     : null,
               ),
             ),
