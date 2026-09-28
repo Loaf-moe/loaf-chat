@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/model/models.dart';
@@ -410,6 +411,41 @@ void main() {
 
       completer.complete('made-1');
       await tester.pump();
+    });
+
+    testWidgets("a create in flight can't be dismissed", (tester) async {
+      final completer = Completer<String>();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: _AddSpaceHost(
+            directory: _SlowDirectory(),
+            onCreate: (name) => completer.future,
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await _openCreateStep(tester, 'Crumb Club');
+      await tester.tap(find.text('create'));
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(_panel(), findsOneWidget, reason: 'escape does not cancel');
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(_panel(), findsOneWidget, reason: 'nor does the barrier');
+      // The system back gesture asks the route the same way.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(_panel(), findsOneWidget, reason: 'nor does back');
+
+      completer.complete('made-1');
+      await tester.pumpAndSettle();
+      expect(_panel(), findsNothing);
+      final host = tester.state<_AddSpaceHostState>(find.byType(_AddSpaceHost));
+      expect((host.result as OpenSpace).id, 'made-1');
     });
 
     testWidgets("a refused create stays open and says so", (tester) async {

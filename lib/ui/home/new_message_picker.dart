@@ -23,6 +23,9 @@ Future<StartMessage?> showNewMessagePicker(
   Future<Channel> Function(List<Member> members)? onStart,
 }) => showAdaptivePanel(
   context,
+  // The sheet's drag-to-close pops straight past the picker's PopScope, and
+  // a start in flight must not be put away; only wired pickers can be busy.
+  enableDrag: onStart == null,
   child: NewMessagePicker(people: people, rooms: rooms, onStart: onStart),
 );
 
@@ -144,100 +147,107 @@ class _NewMessagePickerState extends State<NewMessagePicker> {
     final matches = _matches;
     final now = DateTime.now();
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        LoafSpace.x4,
-        LoafSpace.x2,
-        LoafSpace.x4,
-        LoafSpace.x4,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'new message',
-            style: loafDisplay(20, 600).copyWith(color: tokens.textStrong),
-          ),
-          const SizedBox(height: LoafSpace.x3),
-          TextField(
-            controller: _query,
-            autofocus: true,
-            style: loafBody(15, 400).copyWith(color: tokens.textStrong),
-            decoration: InputDecoration(
-              isDense: true,
-              prefixIcon: Icon(
-                LucideIcons.search,
-                size: 18,
-                color: tokens.textMuted,
-              ),
-              hintText: 'a name, or @someone:server',
-              hintStyle: loafBody(15, 400).copyWith(color: tokens.textMuted),
-              filled: true,
-              fillColor: tokens.sunken,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(LoafRadius.md),
-                borderSide: BorderSide(color: tokens.border),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(LoafRadius.md),
-                borderSide: BorderSide(color: tokens.border),
-              ),
-              // Focus is not an alarm: a firmer outline, not the accent red.
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(LoafRadius.md),
-                borderSide: BorderSide(color: tokens.borderStrong, width: 1.5),
+    return PopScope(
+      // Dismissing mid-start would lose the outcome: no cancel while busy.
+      canPop: !_starting,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          LoafSpace.x4,
+          LoafSpace.x2,
+          LoafSpace.x4,
+          LoafSpace.x4,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'new message',
+              style: loafDisplay(20, 600).copyWith(color: tokens.textStrong),
+            ),
+            const SizedBox(height: LoafSpace.x3),
+            TextField(
+              controller: _query,
+              autofocus: true,
+              style: loafBody(15, 400).copyWith(color: tokens.textStrong),
+              decoration: InputDecoration(
+                isDense: true,
+                prefixIcon: Icon(
+                  LucideIcons.search,
+                  size: 18,
+                  color: tokens.textMuted,
+                ),
+                hintText: 'a name, or @someone:server',
+                hintStyle: loafBody(15, 400).copyWith(color: tokens.textMuted),
+                filled: true,
+                fillColor: tokens.sunken,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(LoafRadius.md),
+                  borderSide: BorderSide(color: tokens.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(LoafRadius.md),
+                  borderSide: BorderSide(color: tokens.border),
+                ),
+                // Focus is not an alarm: a firmer outline, not the accent red.
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(LoafRadius.md),
+                  borderSide: BorderSide(
+                    color: tokens.borderStrong,
+                    width: 1.5,
+                  ),
+                ),
               ),
             ),
-          ),
-          if (_picked.isNotEmpty) ...[
+            if (_picked.isNotEmpty) ...[
+              const SizedBox(height: LoafSpace.x2),
+              Wrap(
+                spacing: LoafSpace.x2,
+                runSpacing: LoafSpace.x2,
+                children: [
+                  for (final m in _picked)
+                    InputChip(
+                      label: Text(m.name),
+                      labelStyle: loafBody(
+                        13,
+                        500,
+                      ).copyWith(color: tokens.textStrong),
+                      backgroundColor: tokens.sunken,
+                      side: BorderSide(color: tokens.border),
+                      onDeleted: () => _toggle(m),
+                      deleteButtonTooltipMessage: 'Remove',
+                    ),
+                ],
+              ),
+            ],
             const SizedBox(height: LoafSpace.x2),
-            Wrap(
-              spacing: LoafSpace.x2,
-              runSpacing: LoafSpace.x2,
-              children: [
-                for (final m in _picked)
-                  InputChip(
-                    label: Text(m.name),
-                    labelStyle: loafBody(
-                      13,
-                      500,
-                    ).copyWith(color: tokens.textStrong),
-                    backgroundColor: tokens.sunken,
-                    side: BorderSide(color: tokens.border),
-                    onDeleted: () => _toggle(m),
-                    deleteButtonTooltipMessage: 'Remove',
-                  ),
-              ],
+            Expanded(
+              child: ListView(
+                children: [
+                  for (final m in matches)
+                    _PersonRow(
+                      key: ValueKey('person-${m.id}'),
+                      person: m,
+                      picked: _picked.any((p) => p.id == m.id),
+                      existing: existingWith(m, widget.rooms),
+                      now: now,
+                      onToggle: () => _toggle(m),
+                      onOpen: (room) =>
+                          Navigator.pop(context, OpenExisting(room)),
+                    ),
+                ],
+              ),
+            ),
+            if (_startFailed) ...[
+              const ErrorNote(message: "couldn't start. try again?"),
+              const SizedBox(height: LoafSpace.x2),
+            ],
+            const SizedBox(height: LoafSpace.x3),
+            LoafButton(
+              label: _starting ? 'starting…' : (start?.label ?? 'message'),
+              onTap: start == null || _starting ? null : () => _go(start),
             ),
           ],
-          const SizedBox(height: LoafSpace.x2),
-          Expanded(
-            child: ListView(
-              children: [
-                for (final m in matches)
-                  _PersonRow(
-                    key: ValueKey('person-${m.id}'),
-                    person: m,
-                    picked: _picked.any((p) => p.id == m.id),
-                    existing: existingWith(m, widget.rooms),
-                    now: now,
-                    onToggle: () => _toggle(m),
-                    onOpen: (room) =>
-                        Navigator.pop(context, OpenExisting(room)),
-                  ),
-              ],
-            ),
-          ),
-          if (_startFailed) ...[
-            const ErrorNote(message: "couldn't start. try again?"),
-            const SizedBox(height: LoafSpace.x2),
-          ],
-          const SizedBox(height: LoafSpace.x3),
-          LoafButton(
-            label: _starting ? 'starting…' : (start?.label ?? 'message'),
-            onTap: start == null || _starting ? null : () => _go(start),
-          ),
-        ],
+        ),
       ),
     );
   }

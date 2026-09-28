@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/home/direct_messages.dart';
@@ -218,6 +219,45 @@ void main() {
   });
 
   group('starting a DM with the server', () {
+    testWidgets("a start in flight can't be dismissed", (tester) async {
+      final completer = Completer<Channel>();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: _PickerHost(onStart: (members) => completer.future),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inPicker(find.text('Theo Crust')));
+      await tester.pumpAndSettle();
+      await tester.tap(_inPicker(find.text('message')));
+      await tester.pump();
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(_picker(), findsOneWidget, reason: 'escape does not cancel');
+      await tester.tapAt(const Offset(5, 5));
+      await tester.pumpAndSettle();
+      expect(_picker(), findsOneWidget, reason: 'nor does the barrier');
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(_picker(), findsOneWidget, reason: 'nor does back');
+
+      completer.complete(
+        const Channel(
+          id: 'dm-new-1',
+          name: 'Theo Crust',
+          kind: ChannelKind.direct,
+          members: [_theo],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(_picker(), findsNothing);
+      final host = tester.state<_PickerHostState>(find.byType(_PickerHost));
+      expect((host.result as OpenExisting).room.id, 'dm-new-1');
+    });
+
     testWidgets('starting a DM waits, and a refusal stays open', (
       tester,
     ) async {

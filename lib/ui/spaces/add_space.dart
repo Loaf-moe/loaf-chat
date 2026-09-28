@@ -49,6 +49,9 @@ Future<AddSpaceResult?> showAddSpace(
 }) => showAdaptivePanel(
   context,
   maxHeight: 620,
+  // The sheet's drag-to-close pops straight past the panel's PopScope, and
+  // a create in flight must not be put away; only wired panels can be busy.
+  enableDrag: onCreate == null,
   child: AddSpacePanel(
     joined: joined,
     directory: directory,
@@ -263,25 +266,30 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
       ),
       _Step.create => ('create a space', _create()),
     };
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        LoafSpace.x4,
-        LoafSpace.x2,
-        LoafSpace.x4,
-        LoafSpace.x4,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _Header(
-            title: title,
-            onBack: _step == _Step.menu || (_step == _Step.create && _creating)
-                ? null
-                : _back,
-          ),
-          const SizedBox(height: LoafSpace.x3),
-          Expanded(child: body),
-        ],
+    return PopScope(
+      // Dismissing mid-create would lose the outcome: no cancel while busy.
+      canPop: !_creating,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          LoafSpace.x4,
+          LoafSpace.x2,
+          LoafSpace.x4,
+          LoafSpace.x4,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _Header(
+              title: title,
+              onBack:
+                  _step == _Step.menu || (_step == _Step.create && _creating)
+                  ? null
+                  : _back,
+            ),
+            const SizedBox(height: LoafSpace.x3),
+            Expanded(child: body),
+          ],
+        ),
       ),
     );
   }
