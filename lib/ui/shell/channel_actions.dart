@@ -20,6 +20,7 @@ enum ChannelAction {
   olderConversations,
   mute,
   unmute,
+  invite,
   leave,
 }
 
@@ -47,6 +48,10 @@ List<ChannelAction> actionsFor(
       if (channel.earlier.isNotEmpty) ChannelAction.olderConversations,
     ],
     channel.muted ? ChannelAction.unmute : ChannelAction.mute,
+    // A 1:1 DM has exactly one person to invite already there: nobody else
+    // could be added to it.
+    if (!(channel.kind == ChannelKind.direct && channel.members.length == 1))
+      ChannelAction.invite,
     ChannelAction.leave,
   ])
     if (allowed == null || allowed.contains(action)) action,
@@ -103,6 +108,11 @@ ActionItem<ChannelAction> _item(ChannelAction action, String noun) =>
         value: ChannelAction.unmute,
         icon: LucideIcons.bell,
         label: 'Unmute $noun',
+      ),
+      ChannelAction.invite => const ActionItem(
+        value: ChannelAction.invite,
+        icon: LucideIcons.userPlus,
+        label: 'Invite people',
       ),
       ChannelAction.leave => ActionItem(
         value: ChannelAction.leave,

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
+import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'app_notice.dart';
 import 'user_bar.dart';
@@ -23,7 +24,13 @@ class SpacesRail extends StatelessWidget {
     this.homeRinging = false,
     this.onAddSpace,
     this.addSpace = true,
+    this.onSpaceActions,
   });
+
+  /// A space's menu was asked for — right-click on a computer, long press
+  /// on a phone — with the space's id. Left null, a space icon has no
+  /// gesture for it: the backend can do neither invite nor leave.
+  final ValueChanged<String>? onSpaceActions;
 
   /// The dashed "+": join, explore or create a space.
   final VoidCallback? onAddSpace;
@@ -85,6 +92,9 @@ class SpacesRail extends StatelessWidget {
                           selected: space.id == selectedSpaceId,
                           tokens: tokens,
                           onTap: () => onSelect(space.id),
+                          onActions: onSpaceActions == null
+                              ? null
+                              : () => onSpaceActions!(space.id),
                         ),
                         const SizedBox(height: 8),
                       ],
@@ -236,12 +246,17 @@ class _SpaceItem extends StatelessWidget {
     required this.selected,
     required this.tokens,
     required this.onTap,
+    this.onActions,
   });
 
   final Space space;
   final bool selected;
   final LoafTokens tokens;
   final VoidCallback onTap;
+
+  /// Opens this space's menu. Right-click on a computer, long press on a
+  /// phone — the same split as channel actions.
+  final VoidCallback? onActions;
 
   @override
   Widget build(BuildContext context) {
@@ -250,6 +265,8 @@ class _SpaceItem extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
+      onSecondaryTap: isDesktop ? onActions : null,
+      onLongPress: !isDesktop ? onActions : null,
       child: SizedBox(
         width: double.infinity,
         height: 48,

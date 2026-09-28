@@ -23,6 +23,7 @@ import '../home/home_sections.dart';
 import '../home/new_message_picker.dart';
 import '../spaces/add_space.dart';
 import '../home/invite_preview.dart';
+import '../members/invite_panel.dart';
 import '../members/member_list.dart';
 import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
@@ -44,6 +45,7 @@ import 'app_notice.dart';
 import 'channel_actions.dart';
 import 'profile_controller.dart';
 import 'shell_faces.dart';
+import 'space_actions.dart';
 import 'status_picker.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
@@ -172,6 +174,7 @@ class _AppShellState extends State<AppShell> {
     ],
     ChannelAction.olderConversations,
     if (_can(RoomAbility.mute)) ...[ChannelAction.mute, ChannelAction.unmute],
+    if (_can(RoomAbility.invite)) ChannelAction.invite,
     if (_can(RoomAbility.leave)) ChannelAction.leave,
   };
 
@@ -292,6 +295,11 @@ class _AppShellState extends State<AppShell> {
       _scaffoldKey.currentState?.closeDrawer();
       return;
     }
+    if (action == ChannelAction.invite) {
+      final row = _space.allChannels.firstWhere((c) => c.id == id);
+      await _openInvitePanel(id, row.name, row.members);
+      return;
+    }
     setState(() => _applyChannelAction(id, action));
   }
 
@@ -309,6 +317,8 @@ class _AppShellState extends State<AppShell> {
         unawaited(_rooms.setLowPriority(id, false).catchError(_refused));
       case ChannelAction.olderConversations:
         break; // Handled before any state changes: it asks first.
+      case ChannelAction.invite:
+        break; // Handled before any state changes: it opens the panel first.
       case ChannelAction.mute:
         unawaited(_rooms.setMuted(id, true).catchError(_refused));
       case ChannelAction.unmute:
@@ -382,9 +392,11 @@ class _AppShellState extends State<AppShell> {
 
   // ── New messages ───────────────────────────────────────────────────
 
-  Future<void> _newMessage() async {
+  /// Everyone you could start with or invite: people you share a space or
+  /// a DM with, keyed by id so someone in several places counts once.
+  Map<String, Member> _knownPeople() {
     final me = _me;
-    final people = <String, Member>{
+    return {
       for (final space in _spaces)
         for (final m in space.members)
           if (m.id != me.id) m.id: m,
@@ -392,9 +404,12 @@ class _AppShellState extends State<AppShell> {
         for (final m in room.members)
           if (m.id != me.id) m.id: m,
     };
+  }
+
+  Future<void> _newMessage() async {
     final start = await showNewMessagePicker(
       context,
-      people: people.values.toList(),
+      people: _knownPeople().values.toList(),
       rooms: [
         for (final room in _homeRooms)
           if (room.kind == ChannelKind.direct) room,
@@ -410,6 +425,77 @@ class _AppShellState extends State<AppShell> {
         setState(() => _open(mockHome.id, dm.id));
     }
     _scaffoldKey.currentState?.closeDrawer();
+  }
+
+  // ── Invites ──────────────────────────────────────────────────────────
+
+  /// Opens the invite panel for [roomId]: everyone known minus whoever is
+  /// already in it. On success it toasts how many went through; a refusal
+  /// is the panel's own to show and retry.
+  Future<void> _openInvitePanel(
+    String roomId,
+    String roomName,
+    List<Member> already,
+  ) async {
+    final alreadyIn = {for (final m in already) m.id};
+    final people = [
+      for (final m in _knownPeople().values)
+        if (!alreadyIn.contains(m.id)) m,
+    ];
+    await showInvitePanel(
+      context,
+      roomName: roomName,
+      people: people,
+      onInvite: (ids) async {
+        await _rooms.invite(roomId, ids);
+        if (mounted) {
+          showToast(
+            context,
+            ids.length == 1
+                ? 'invited 1 person'
+                : 'invited ${ids.length} people',
+          );
+        }
+      },
+    );
+  }
+
+  // ── Spaces ───────────────────────────────────────────────────────────
+
+  /// The space menu was asked for: resolves what it can offer and opens
+  /// it, a sheet on a phone, a menu on a computer.
+  Future<void> _openSpaceActions(String spaceId) async {
+    final space = _spaces.firstWhere((s) => s.id == spaceId);
+    final allowed = {
+      if (_can(RoomAbility.invite)) SpaceAction.invite,
+      if (_can(RoomAbility.leave)) SpaceAction.leave,
+    };
+    final chosen = await showSpaceActions(context, space, allowed: allowed);
+    if (chosen != null && mounted) await _spaceAction(space, chosen);
+  }
+
+  Future<void> _spaceAction(Space space, SpaceAction action) async {
+    switch (action) {
+      case SpaceAction.invite:
+        await _openInvitePanel(space.id, space.name, space.members);
+      case SpaceAction.leave:
+        final rooms = space.allChannels.where((c) => c.joined).length;
+        final confirmed = await confirmLeaveSpace(context, space, rooms: rooms);
+        if (!confirmed || !mounted) return;
+        // Once confirmed there is no cancelling it: move to Home at once
+        // rather than waiting on the network.
+        setState(() => _open(mockHome.id, null));
+        unawaited(
+          _rooms.leaveSpace(space.id).catchError((Object error) {
+            if (!mounted) return;
+            if (error is PartlyDone) {
+              showToast(context, "couldn't leave everything in ${space.name}");
+            } else {
+              _refused(error);
+            }
+          }),
+        );
+    }
   }
 
   // ── Invites ────────────────────────────────────────────────────────────
@@ -1005,6 +1091,10 @@ class _AppShellState extends State<AppShell> {
               homeRinging: _calls.incoming != null,
               onAddSpace: _addSpace,
               addSpace: _can(RoomAbility.addSpace),
+              onSpaceActions:
+                  _can(RoomAbility.invite) || _can(RoomAbility.leave)
+                  ? _openSpaceActions
+                  : null,
             ),
             Expanded(
               child: ChannelList(
