@@ -119,6 +119,21 @@ void main() {
   });
 
   testWidgets(
+    'emoji verification titles restoring by the route taken, not the key',
+    (tester) async {
+      await _pumpShell(tester);
+      await _openVerify(tester);
+      await tester.tap(find.text('use another device'));
+      await tester.pump(MockVerifier.acceptDelay);
+      await tester.tap(find.text('they match'));
+      await tester.pump(MockVerifier.confirmDelay);
+      expect(find.text('restoring history'), findsOneWidget);
+      expect(find.text('use another device'), findsOneWidget);
+      expect(find.text('use your recovery key'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'Escape puts the panel away on a computer',
     variant: TargetPlatformVariant.only(TargetPlatform.macOS),
     (tester) async {

@@ -121,8 +121,14 @@ class _VerifyPanelState extends State<VerifyPanel> {
       VerifyStep.compareEmoji ||
       VerifyStep.waitingForOther ||
       VerifyStep.cancelled => incoming ? 'new sign-in' : 'use another device',
-      VerifyStep.recoveryKey || VerifyStep.restoring =>
+      VerifyStep.recoveryKey =>
         incoming ? 'new sign-in' : 'use your recovery key',
+      VerifyStep.restoring =>
+        incoming
+            ? 'new sign-in'
+            : _c.viaDevice
+            ? 'use another device'
+            : 'use your recovery key',
       VerifyStep.resetConfirm => 'reset your identity',
       VerifyStep.resetAuth =>
         settingUp ? 'set up recovery' : 'reset your identity',

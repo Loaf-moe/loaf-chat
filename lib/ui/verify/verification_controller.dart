@@ -92,6 +92,12 @@ class VerificationController extends ChangeNotifier {
   /// started.
   DeviceVerification? _device;
 
+  /// Which route reached restoring/done: another device, or a recovery key.
+  /// The panel titles those steps by this rather than guessing from the
+  /// step alone, since both routes land on the same steps.
+  var _viaDevice = false;
+  bool get viaDevice => _viaDevice;
+
   /// Bumped whenever the flow moves on its own, so an answer to something
   /// since abandoned is dropped rather than jumping a step.
   var _turn = 0;
@@ -175,6 +181,7 @@ class VerificationController extends ChangeNotifier {
   // ── Another device ─────────────────────────────────────────────────────
 
   void useAnotherDevice() {
+    _viaDevice = true;
     _dropDevice(cancel: true);
     _go(VerifyStep.waitingForDevice);
     _follow(verifier.verifyWithDevice());
@@ -258,7 +265,10 @@ class VerificationController extends ChangeNotifier {
 
   // ── Recovery key ───────────────────────────────────────────────────────
 
-  void useRecoveryKey() => _go(VerifyStep.recoveryKey);
+  void useRecoveryKey() {
+    _viaDevice = false;
+    _go(VerifyStep.recoveryKey);
+  }
 
   void submitKey(String text) {
     if (_state.step != VerifyStep.recoveryKey || _state.checking) return;
