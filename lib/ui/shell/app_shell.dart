@@ -463,14 +463,19 @@ class _AppShellState extends State<AppShell> {
   // ── Spaces ───────────────────────────────────────────────────────────
 
   /// The space menu was asked for: resolves what it can offer and opens
-  /// it, a sheet on a phone, a menu on a computer.
-  Future<void> _openSpaceActions(String spaceId) async {
+  /// it, a sheet on a phone, a menu at [position] on a computer.
+  Future<void> _openSpaceActions(String spaceId, Offset position) async {
     final space = _spaces.firstWhere((s) => s.id == spaceId);
     final allowed = {
       if (_can(RoomAbility.invite)) SpaceAction.invite,
       if (_can(RoomAbility.leave)) SpaceAction.leave,
     };
-    final chosen = await showSpaceActions(context, space, allowed: allowed);
+    final chosen = await showSpaceActions(
+      context,
+      space,
+      position: position,
+      allowed: allowed,
+    );
     if (chosen != null && mounted) await _spaceAction(space, chosen);
   }
 

@@ -182,14 +182,21 @@ Finder _inList(String text) =>
 void main() {
   group('the space menu', () {
     testWidgets(
-      'right-clicking a space on a computer opens its menu',
+      'right-clicking a space on a computer opens its menu at the pointer',
       variant: _desktop,
       (tester) async {
         await _pump(tester, _FakeRooms(spaces: [_bakery()]));
-        await tester.tap(_spaceIcon(), buttons: kSecondaryButton);
+        // Near a corner of the icon rather than its center, and far from
+        // any fixed anchor elsewhere in the rail: a menu that ignored the
+        // click and opened at a hardcoded point would land well away from
+        // this.
+        final tap = tester.getCenter(_spaceIcon()) + const Offset(10, 10);
+        await tester.tapAt(tap, buttons: kSecondaryButton);
         await tester.pumpAndSettle();
         expect(find.text('Invite people'), findsOneWidget);
         expect(find.text('Leave space'), findsOneWidget);
+        final menu = tester.getTopLeft(find.text('Invite people'));
+        expect((menu - tap).distance, lessThan(80));
       },
     );
 

@@ -27,18 +27,13 @@ ActionItem<SpaceAction> _item(SpaceAction action) => switch (action) {
   ),
 };
 
-/// The rail's icons all sit in the same narrow column, so a fixed anchor
-/// near them reads naturally as "at the pointer" without needing the exact
-/// click point — the gesture that opens this menu only carries the space's
-/// id, not a screen position.
-const _railMenuAnchor = Offset(72, 120);
-
-/// Opens the space's actions — a sheet on mobile, a menu near the rail on
+/// Opens the space's actions — a sheet on mobile, a menu at [position] on
 /// desktop — and returns the one chosen, or null if dismissed. Only actions
 /// in [allowed] are offered; call this only when [allowed] is not empty.
 Future<SpaceAction?> showSpaceActions(
   BuildContext context,
   Space space, {
+  required Offset position,
   required Set<SpaceAction> allowed,
 }) {
   final items = [
@@ -46,7 +41,7 @@ Future<SpaceAction?> showSpaceActions(
       if (allowed.contains(action)) _item(action),
   ];
   return isDesktop
-      ? showActionMenu(context, position: _railMenuAnchor, items: items)
+      ? showActionMenu(context, position: position, items: items)
       : showActionSheet(
           context,
           header: (context) => _SheetHeader(space: space),

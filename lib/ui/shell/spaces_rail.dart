@@ -28,9 +28,10 @@ class SpacesRail extends StatelessWidget {
   });
 
   /// A space's menu was asked for — right-click on a computer, long press
-  /// on a phone — with the space's id. Left null, a space icon has no
-  /// gesture for it: the backend can do neither invite nor leave.
-  final ValueChanged<String>? onSpaceActions;
+  /// on a phone — with the space's id and where the gesture landed, for a
+  /// desktop menu to open at. Left null, a space icon has no gesture for
+  /// it: the backend can do neither invite nor leave.
+  final void Function(String spaceId, Offset globalPosition)? onSpaceActions;
 
   /// The dashed "+": join, explore or create a space.
   final VoidCallback? onAddSpace;
@@ -94,7 +95,8 @@ class SpacesRail extends StatelessWidget {
                           onTap: () => onSelect(space.id),
                           onActions: onSpaceActions == null
                               ? null
-                              : () => onSpaceActions!(space.id),
+                              : (position) =>
+                                    onSpaceActions!(space.id, position),
                         ),
                         const SizedBox(height: 8),
                       ],
@@ -254,9 +256,10 @@ class _SpaceItem extends StatelessWidget {
   final LoafTokens tokens;
   final VoidCallback onTap;
 
-  /// Opens this space's menu. Right-click on a computer, long press on a
-  /// phone — the same split as channel actions.
-  final VoidCallback? onActions;
+  /// Opens this space's menu at the gesture's global position. Right-click
+  /// on a computer, long press on a phone — the same split as channel
+  /// actions.
+  final ValueChanged<Offset>? onActions;
 
   @override
   Widget build(BuildContext context) {
@@ -265,8 +268,14 @@ class _SpaceItem extends StatelessWidget {
 
     return GestureDetector(
       onTap: onTap,
-      onSecondaryTap: isDesktop ? onActions : null,
-      onLongPress: !isDesktop ? onActions : null,
+      // Position matters only on desktop, where the menu opens at the
+      // pointer; a phone's action sheet has no need of it.
+      onSecondaryTapUp: isDesktop && onActions != null
+          ? (details) => onActions!(details.globalPosition)
+          : null,
+      onLongPressStart: !isDesktop && onActions != null
+          ? (details) => onActions!(details.globalPosition)
+          : null,
       child: SizedBox(
         width: double.infinity,
         height: 48,
