@@ -39,9 +39,9 @@ Future<void> _openVerify(WidgetTester tester) async {
   await tester.tap(find.byTooltip('verify this session'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('verify'));
-  // The panel is pushed once the notice has closed, a frame later.
-  await tester.pump();
-  await tester.pump(_route);
+  // On a computer the panel opens only once the notice's own popover has
+  // finished closing, so this settles past that before the panel is found.
+  await tester.pumpAndSettle();
 }
 
 /// A session whose trust the SDK hasn't re-read yet: the notice stays, so a
@@ -110,6 +110,11 @@ void main() {
     final s = await _pumpShell(tester);
     await _openVerify(tester);
     await tester.tap(find.text('use another device'));
+    await tester.pump();
+    expect(
+      find.text('accept the request on your other device'),
+      findsOneWidget,
+    );
     await tester.pump(MockVerifier.acceptDelay);
     expect(find.text('dog'), findsOneWidget);
     await tester.tap(find.text('they match'));
@@ -390,8 +395,9 @@ void main() {
         findsOneWidget,
       );
       await tester.tap(find.text('show'));
-      await tester.pump();
-      await tester.pump(_route);
+      // On a computer the panel opens only once the notice's own popover
+      // has finished closing, so this settles past that first.
+      await tester.pumpAndSettle();
       expect(find.text(mockNewRecoveryKey), findsOneWidget);
 
       // Unsaved, it can't be put away.

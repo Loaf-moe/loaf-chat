@@ -163,7 +163,7 @@ class _VerifyPanelState extends State<VerifyPanel> {
     VerifyStep.waitingForDevice => WaitingStep(
       label: _c.purpose == VerifyPurpose.incoming
           ? 'waiting for the new sign-in to start'
-          : "accept the request on another device where you're signed in",
+          : 'accept the request on your other device',
       onCancel: _c.canGoBack ? _c.back : null,
     ),
     VerifyStep.incomingPrompt => IncomingPromptStep(
