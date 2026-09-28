@@ -353,6 +353,7 @@ class _AppShellState extends State<AppShell> {
     final result = await showAddSpace(
       context,
       joined: {for (final s in _spaces) s.id},
+      directory: _rooms.directory,
     );
     if (result == null || !mounted) return;
     switch (result) {

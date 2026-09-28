@@ -3,15 +3,20 @@
 /// previewed first, the way an invite is.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../mock/fixtures.dart';
+import '../model/models.dart';
 import '../platform.dart';
+import '../rooms/rooms.dart' show SpaceNotFound;
 import '../theme/loaf_theme.dart';
 import '../widgets/adaptive_panel.dart';
 import '../widgets/loaf_button.dart';
 import 'space_address.dart';
+import 'space_directory.dart';
 
 /// What the panel asks the shell to do.
 sealed class AddSpaceResult {
@@ -39,14 +44,11 @@ class CreateSpace extends AddSpaceResult {
 Future<AddSpaceResult?> showAddSpace(
   BuildContext context, {
   required Set<String> joined,
+  required SpaceDirectory directory,
 }) => showAdaptivePanel(
   context,
   maxHeight: 620,
-  child: AddSpacePanel(
-    joined: joined,
-    directories: mockDirectories,
-    addresses: mockSpaceAddresses,
-  ),
+  child: AddSpacePanel(joined: joined, directory: directory),
 );
 
 enum _Step { menu, link, explore, preview, create }
@@ -55,24 +57,26 @@ class AddSpacePanel extends StatefulWidget {
   const AddSpacePanel({
     super.key,
     required this.joined,
-    required this.directories,
-    required this.addresses,
+    required this.directory,
   });
 
   /// Ids of the spaces you are in, which open rather than join.
   final Set<String> joined;
 
-  /// Each server's public spaces (`/publicRooms`, filtered to spaces).
-  final Map<String, List<SpacePreview>> directories;
-
-  /// What an address resolves to (`/directory/room` then `/hierarchy`).
-  final Map<String, SpacePreview> addresses;
+  /// Where a server's public spaces and a typed address are looked up.
+  final SpaceDirectory directory;
 
   @override
   State<AddSpacePanel> createState() => _AddSpacePanelState();
 }
 
 class _AddSpacePanelState extends State<AddSpacePanel> {
+  static const _servers = ['loaf.moe', 'matrix.org'];
+
+  /// A phone keyboard fires a change per letter; wait for a pause before
+  /// asking the server.
+  static const _linkDebounce = Duration(milliseconds: 300);
+
   var _step = _Step.menu;
 
   /// Where the preview was reached from, for its back arrow.
@@ -86,21 +90,109 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
   var _server = 'loaf.moe';
   var _typingServer = false;
 
+  /// Each server's public spaces, fetched once and kept until retried.
+  final _exploreSnapshots = <String, AsyncSnapshot<List<SpacePreview>>>{};
+
+  Timer? _linkTimer;
+
+  /// The address the latest lookup was for, so a stale answer for an
+  /// address you have since edited away from is dropped.
+  String? _linkFor;
+  AsyncSnapshot<SpacePreview>? _linkSnapshot;
+
   @override
   void initState() {
     super.initState();
-    for (final c in [_link, _search, _name, _otherServer]) {
+    _link.addListener(_onLinkChanged);
+    for (final c in [_search, _name, _otherServer]) {
       c.addListener(() => setState(() {}));
     }
   }
 
   @override
   void dispose() {
+    _linkTimer?.cancel();
     for (final c in [_link, _search, _name, _otherServer]) {
       c.dispose();
     }
     super.dispose();
   }
+
+  void _onLinkChanged() => setState(() {
+    _linkTimer?.cancel();
+    final address = parseSpaceAddress(_link.text);
+    if (address == null) return;
+    _linkTimer = Timer(_linkDebounce, () => _lookUp(address));
+    // A debounce with nothing else animating schedules no frame of its
+    // own; without a nudge, `pumpAndSettle` would call it settled before
+    // the timer ever elapses. Keep a frame pending until it fires.
+    _keepTicking();
+  });
+
+  void _keepTicking() {
+    if (_linkTimer?.isActive != true) return;
+    SchedulerBinding.instance.scheduleFrameCallback((_) => _keepTicking());
+  }
+
+  void _lookUp(String address) {
+    _linkFor = address;
+    setState(() => _linkSnapshot = const AsyncSnapshot.waiting());
+    widget.directory
+        .lookUp(address)
+        .then(
+          (preview) {
+            if (!mounted || _linkFor != address) return;
+            setState(
+              () => _linkSnapshot = AsyncSnapshot.withData(
+                ConnectionState.done,
+                preview,
+              ),
+            );
+          },
+          onError: (Object error) {
+            if (!mounted || _linkFor != address) return;
+            setState(
+              () => _linkSnapshot = AsyncSnapshot.withError(
+                ConnectionState.done,
+                error,
+              ),
+            );
+          },
+        );
+  }
+
+  /// Kicks off a server's directory once, folding a mock's synchronous
+  /// answer straight into the map so it shows with no extra frame: only an
+  /// answer that truly arrives later triggers a rebuild.
+  void _loadServer(String server) {
+    if (_exploreSnapshots.containsKey(server)) return;
+    _exploreSnapshots[server] = const AsyncSnapshot.waiting();
+    var settledSync = true;
+    widget.directory
+        .publicSpaces(server)
+        .then(
+          (spaces) {
+            _exploreSnapshots[server] = AsyncSnapshot.withData(
+              ConnectionState.done,
+              spaces,
+            );
+            if (!settledSync && mounted) setState(() {});
+          },
+          onError: (Object error) {
+            _exploreSnapshots[server] = AsyncSnapshot.withError(
+              ConnectionState.done,
+              error,
+            );
+            if (!settledSync && mounted) setState(() {});
+          },
+        );
+    settledSync = false;
+  }
+
+  void _retryExplore(String server) => setState(() {
+    _exploreSnapshots.remove(server);
+    _loadServer(server);
+  });
 
   void _go(_Step step) => setState(() => _step = step);
 
@@ -182,7 +274,9 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
   Widget _linkStep() {
     final tokens = LoafTokens.of(context);
     final address = parseSpaceAddress(_link.text);
-    final entry = address == null ? null : widget.addresses[address];
+    final snapshot = address != null && _linkFor == address
+        ? _linkSnapshot
+        : null;
     return ListView(
       children: [
         _Field(
@@ -191,17 +285,36 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
           icon: LucideIcons.link,
         ),
         const SizedBox(height: LoafSpace.x4),
-        if (address != null && entry == null)
-          Text(
-            'no space at that address',
-            style: loafBody(14, 500).copyWith(color: tokens.textMuted),
-          )
-        else if (entry != null)
-          _PreviewCard(
-            entry: entry,
-            joined: widget.joined.contains(entry.space.id),
-            onChoose: () => _choose(entry),
-          ),
+        if (snapshot != null)
+          switch (snapshot.connectionState) {
+            ConnectionState.waiting => const Center(
+              child: CircularProgressIndicator(),
+            ),
+            _ when snapshot.hasError =>
+              snapshot.error is SpaceNotFound
+                  ? Text(
+                      'no space at that address',
+                      style: loafBody(
+                        14,
+                        500,
+                      ).copyWith(color: tokens.textMuted),
+                    )
+                  : GestureDetector(
+                      onTap: () => _lookUp(address!),
+                      child: Text(
+                        "couldn't reach that server. try again?",
+                        style: loafBody(
+                          14,
+                          500,
+                        ).copyWith(color: tokens.textMuted),
+                      ),
+                    ),
+            _ => _PreviewCard(
+              entry: snapshot.data!,
+              joined: widget.joined.contains(snapshot.data!.space.id),
+              onChoose: () => _choose(snapshot.data!),
+            ),
+          },
       ],
     );
   }
@@ -209,8 +322,10 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
   Widget _explore() {
     final tokens = LoafTokens.of(context);
     final q = _search.text.trim().toLowerCase();
+    _loadServer(_server);
+    final snapshot = _exploreSnapshots[_server]!;
     final listed = [
-      for (final entry in widget.directories[_server] ?? const <SpacePreview>[])
+      for (final entry in snapshot.data ?? const <SpacePreview>[])
         if (q.isEmpty ||
             entry.space.name.toLowerCase().contains(q) ||
             (entry.topic ?? '').toLowerCase().contains(q))
@@ -234,7 +349,7 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
             const SizedBox(width: LoafSpace.x2),
             _ServerSwitch(
               server: _server,
-              servers: widget.directories.keys.toList(),
+              servers: _servers,
               onPick: (server) => setState(() {
                 _typingServer = server == null;
                 if (server != null) _server = server;
@@ -256,28 +371,41 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
         ],
         const SizedBox(height: LoafSpace.x3),
         Expanded(
-          child: listed.isEmpty
-              ? Center(
-                  child: Text(
-                    q.isEmpty
-                        ? 'nothing listed on $_server'
-                        : 'no spaces match "$q"',
-                    style: loafBody(14, 500).copyWith(color: tokens.textMuted),
-                  ),
-                )
-              : ListView(
-                  children: [
-                    for (final entry in listed)
-                      _DirectoryRow(
-                        key: ValueKey('directory-${entry.space.id}'),
-                        entry: entry,
-                        joined: widget.joined.contains(entry.space.id),
-                        onTap: () => widget.joined.contains(entry.space.id)
-                            ? _choose(entry)
-                            : _preview(entry),
-                      ),
-                  ],
+          child: switch (snapshot.connectionState) {
+            ConnectionState.waiting => const Center(
+              child: CircularProgressIndicator(),
+            ),
+            _ when snapshot.hasError => Center(
+              child: GestureDetector(
+                onTap: () => _retryExplore(_server),
+                child: Text(
+                  "couldn't reach $_server. try again?",
+                  style: loafBody(14, 500).copyWith(color: tokens.textMuted),
                 ),
+              ),
+            ),
+            _ when listed.isEmpty => Center(
+              child: Text(
+                q.isEmpty
+                    ? 'nothing listed on $_server'
+                    : 'no spaces match "$q"',
+                style: loafBody(14, 500).copyWith(color: tokens.textMuted),
+              ),
+            ),
+            _ => ListView(
+              children: [
+                for (final entry in listed)
+                  _DirectoryRow(
+                    key: ValueKey('directory-${entry.space.id}'),
+                    entry: entry,
+                    joined: widget.joined.contains(entry.space.id),
+                    onTap: () => widget.joined.contains(entry.space.id)
+                        ? _choose(entry)
+                        : _preview(entry),
+                  ),
+              ],
+            ),
+          },
         ),
       ],
     );

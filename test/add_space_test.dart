@@ -1,10 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/spaces/add_space.dart';
+import 'package:loaf_native/ui/spaces/space_directory.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
@@ -50,10 +54,72 @@ Future<void> _tapIn(WidgetTester tester, String text) async {
   await tester.pumpAndSettle();
 }
 
+/// Like [_tapIn], but a single `pump()`: for a tap that leaves a spinner
+/// on screen, where `pumpAndSettle` would never return.
+Future<void> _tapInNoSettle(WidgetTester tester, String text) async {
+  await tester.tap(_inPanel(find.text(text)).first);
+  await tester.pump();
+}
+
 Future<void> _typeAddress(WidgetTester tester, String address) async {
   await _tapIn(tester, 'join with a link');
   await tester.enterText(_inPanel(find.byType(TextField)), address);
   await tester.pumpAndSettle();
+}
+
+const _somePreview = SpacePreview(
+  alias: '#test:loaf.moe',
+  space: Space(id: 'test-space', name: 'Test Space', color: Colors.blue),
+  topic: 'a space for testing',
+  memberCount: 1,
+);
+
+/// A [SpaceDirectory] whose answers the test drives by hand, one
+/// [Completer] per call, so loading and failure states can be observed.
+class _SlowDirectory implements SpaceDirectory {
+  final publicSpacesCalls = <String>[];
+  Completer<List<SpacePreview>>? _publicSpaces;
+
+  final lookUpCalls = <String>[];
+  Completer<SpacePreview>? _lookUp;
+
+  @override
+  Future<List<SpacePreview>> publicSpaces(String server) {
+    publicSpacesCalls.add(server);
+    final completer = Completer<List<SpacePreview>>();
+    _publicSpaces = completer;
+    return completer.future;
+  }
+
+  void completePublicSpaces(List<SpacePreview> spaces) =>
+      _publicSpaces!.complete(spaces);
+
+  void failPublicSpaces(Object error) => _publicSpaces!.completeError(error);
+
+  @override
+  Future<SpacePreview> lookUp(String address) {
+    lookUpCalls.add(address);
+    final completer = Completer<SpacePreview>();
+    _lookUp = completer;
+    return completer.future;
+  }
+
+  void failLookUp(Object error) => _lookUp!.completeError(error);
+}
+
+Future<void> _pumpPanel(
+  WidgetTester tester,
+  SpaceDirectory directory, {
+  Set<String> joined = const {},
+}) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: loafDarkTheme(),
+      home: Scaffold(
+        body: AddSpacePanel(joined: joined, directory: directory),
+      ),
+    ),
+  );
 }
 
 void main() {
@@ -249,6 +315,84 @@ void main() {
       await _tapIn(tester, 'create');
 
       expect(_panel(), findsOneWidget, reason: 'nothing to create yet');
+    });
+  });
+
+  group('the directory', () {
+    testWidgets('explore shows a loading row until the directory answers', (
+      tester,
+    ) async {
+      final directory = _SlowDirectory();
+      await _pumpPanel(tester, directory);
+      await _tapInNoSettle(tester, 'explore public spaces');
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(_inPanel(find.text('Test Space')), findsNothing);
+
+      directory.completePublicSpaces([_somePreview]);
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(_inPanel(find.text('Test Space')), findsOneWidget);
+    });
+
+    testWidgets("explore says so when a server can't be reached", (
+      tester,
+    ) async {
+      final directory = _SlowDirectory();
+      await _pumpPanel(tester, directory);
+      await _tapInNoSettle(tester, 'explore public spaces');
+
+      directory.failPublicSpaces(Exception('offline'));
+      await tester.pump();
+
+      expect(
+        _inPanel(find.text("couldn't reach loaf.moe. try again?")),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        _inPanel(find.text("couldn't reach loaf.moe. try again?")),
+      );
+      await tester.pump();
+
+      expect(directory.publicSpacesCalls, ['loaf.moe', 'loaf.moe']);
+    });
+
+    testWidgets('a link is looked up once typing stops', (tester) async {
+      final directory = _SlowDirectory();
+      await _pumpPanel(tester, directory);
+      await _tapIn(tester, 'join with a link');
+
+      await tester.enterText(
+        _inPanel(find.byType(TextField)),
+        '#test:loaf.moe',
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(directory.lookUpCalls, ['#test:loaf.moe']);
+    });
+
+    testWidgets("a link that can't be reached says so, apart from not found", (
+      tester,
+    ) async {
+      final directory = _SlowDirectory();
+      await _pumpPanel(tester, directory);
+      await _tapIn(tester, 'join with a link');
+
+      await tester.enterText(
+        _inPanel(find.byType(TextField)),
+        '#test:loaf.moe',
+      );
+      await tester.pump(const Duration(milliseconds: 400));
+
+      directory.failLookUp(Exception('offline'));
+      await tester.pump();
+
+      expect(
+        _inPanel(find.text("couldn't reach that server. try again?")),
+        findsOneWidget,
+      );
     });
   });
 }
