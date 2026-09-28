@@ -17,6 +17,7 @@ import '../ui/rooms/rooms.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
 import 'matrix_hierarchy.dart';
+import 'matrix_space_directory.dart';
 import 'matrix_timeline.dart';
 
 /// `m.room.create` types that make a room a voice channel: Element's video
@@ -71,6 +72,11 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// other of the two small maps `MatrixRooms` keeps beside its derived
   /// snapshot.
   late final MatrixHierarchy _hierarchy;
+
+  /// Where spaces you have not joined are found: a server's public
+  /// directory, or an address someone shared. Also the via servers of the
+  /// last preview it served for a space, which [joinSpace] asks for.
+  late final MatrixSpaceDirectory _directory = MatrixSpaceDirectory(client);
 
   late final List<StreamSubscription<Object?>> _subscriptions;
   var _disposed = false;
@@ -130,6 +136,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     RoomAbility.tag,
     RoomAbility.join,
     RoomAbility.leave,
+    RoomAbility.addSpace,
   };
 
   @override
@@ -814,6 +821,199 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     }
   }
 
+  // ── Spaces ─────────────────────────────────────────────────────────────
+
+  /// Joins [space], then its subspaces and suggested channels, best-effort.
+  /// The via servers come from whatever preview [directory] last served for
+  /// this id; failing that, from the hierarchy cache (an invite's space has
+  /// no preview of its own).
+  @override
+  Future<void> joinSpace(Space space) async {
+    final via = _directory.viaFor(space.id);
+    await client.joinRoom(
+      space.id,
+      via: via.isNotEmpty ? via : _hierarchy.via(space.id),
+    );
+    _hierarchy.invalidate(space.id);
+    final rooms = <SpaceRoomsChunk$2>[];
+    String? from;
+    do {
+      final page = await client.getSpaceHierarchy(
+        space.id,
+        maxDepth: 1,
+        limit: 50,
+        from: from,
+      );
+      rooms.addAll(page.rooms);
+      from = page.nextBatch;
+    } while (from != null);
+    if (rooms.isEmpty) {
+      if (!_disposed) _rebuild();
+      return;
+    }
+    final head = rooms.first;
+    final childTypes = {for (final c in rooms.skip(1)) c.roomId: c.roomType};
+    final subspaces = <String, List<String>>{};
+    final suggested = <String, List<String>>{};
+    for (final child in head.childrenState) {
+      final id = child.stateKey;
+      if (id == null) continue;
+      final childVia = child.content.tryGetList<String>('via') ?? const [];
+      if (childTypes[id] == 'm.space') {
+        subspaces[id] = childVia;
+      } else if (child.content.tryGet<bool>('suggested') == true) {
+        suggested[id] = childVia;
+      }
+    }
+    for (final entry in [...subspaces.entries, ...suggested.entries]) {
+      try {
+        await client.joinRoom(entry.key, via: entry.value);
+      } on Object {
+        // Best-effort: a refused child is skipped, not thrown.
+      }
+    }
+    _invalidateHierarchies();
+    if (!_disposed) _rebuild();
+  }
+
+  /// Leaves [spaceId] and every joined room under it, deepest first, except
+  /// any room another joined top-level space also lists at any depth. Every
+  /// row hides at once; every leave is attempted even if an earlier one
+  /// refused.
+  @override
+  Future<void> leaveSpace(String spaceId) async {
+    final space = client.getRoomById(spaceId);
+    if (space == null) return;
+
+    final joinedSpaces = [
+      for (final room in client.rooms)
+        if (room.isSpace && room.membership == Membership.join) room,
+    ];
+    final childIds = {
+      for (final s in joinedSpaces)
+        for (final c in s.spaceChildren) ?c.roomId,
+    };
+    final otherTops = [
+      for (final s in joinedSpaces)
+        if (s.id != spaceId && !childIds.contains(s.id)) s,
+    ];
+    final protected = <String>{};
+    for (final top in otherTops) {
+      protected.addAll(_listedRoomIds(top, {}));
+    }
+
+    final descendants = <String>{};
+    void collect(Room room, Set<String> seen) {
+      if (!seen.add(room.id) || !room.isSpace) return;
+      for (final child in room.spaceChildren) {
+        final id = child.roomId;
+        if (id == null) continue;
+        final childRoom = client.getRoomById(id);
+        if (childRoom == null || childRoom.membership != Membership.join) {
+          continue;
+        }
+        if (childRoom.isSpace) collect(childRoom, seen);
+        if (!protected.contains(id)) descendants.add(id);
+      }
+    }
+
+    collect(space, {});
+    final order = [...descendants, spaceId];
+
+    for (final id in order) {
+      _wishes.putIfAbsent(id, _Wish.new).joined = false;
+    }
+    if (!_disposed) _rebuild();
+
+    final missing = <String>[];
+    for (final id in order) {
+      final room = client.getRoomById(id);
+      if (room == null) continue;
+      try {
+        await room.leave();
+      } on Object {
+        missing.add(room.getLocalizedDisplayname());
+        final wish = _wishes[id];
+        if (wish != null) {
+          wish.joined = null;
+          if (wish.isEmpty) _wishes.remove(id);
+        }
+      }
+    }
+    _invalidateHierarchies();
+    if (!_disposed) _rebuild();
+    if (missing.isNotEmpty) throw PartlyDone(missing: missing);
+  }
+
+  /// Every room [space] lists, at any depth, through joined rooms only —
+  /// the same limit the SDK's own state carries.
+  Set<String> _listedRoomIds(Room space, Set<String> seen) {
+    final ids = <String>{};
+    if (!seen.add(space.id) || !space.isSpace) return ids;
+    for (final child in space.spaceChildren) {
+      final id = child.roomId;
+      if (id == null) continue;
+      ids.add(id);
+      final childRoom = client.getRoomById(id);
+      if (childRoom != null) ids.addAll(_listedRoomIds(childRoom, seen));
+    }
+    return ids;
+  }
+
+  /// Makes a new private space with a `#general` text channel and a
+  /// `hangout` voice channel under it. Either channel failing leaves the
+  /// space standing but throws [PartlyDone].
+  @override
+  Future<String> createSpace(String name, {required Member me}) async {
+    final id = await client.createSpace(
+      name: name,
+      visibility: Visibility.private,
+      waitForSync: true,
+    );
+    final space = client.getRoomById(id);
+    final missing = <String>[];
+
+    Future<void> makeChannel(String label, String name, {String? type}) async {
+      try {
+        final roomId = await client.createRoom(
+          name: name,
+          preset: CreateRoomPreset.privateChat,
+          creationContent: type == null ? null : {'type': type},
+          initialState: [
+            StateEvent(
+              type: EventTypes.SpaceParent,
+              stateKey: id,
+              content: {
+                'via': [?client.userID?.domain],
+              },
+            ),
+            StateEvent(
+              type: EventTypes.RoomJoinRules,
+              content: {
+                'join_rule': 'restricted',
+                'allow': [
+                  {'type': 'm.room_membership', 'room_id': id},
+                ],
+              },
+            ),
+          ],
+        );
+        if (space != null) await space.setSpaceChild(roomId);
+      } on Object {
+        missing.add(label);
+      }
+    }
+
+    await makeChannel('#general', 'general');
+    await makeChannel('hangout', 'hangout', type: 'org.matrix.msc3417.call');
+
+    if (missing.isNotEmpty) throw PartlyDone(spaceId: id, missing: missing);
+    return id;
+  }
+
+  @override
+  SpaceDirectory get directory => _directory;
+
   // ── Not wired yet ──────────────────────────────────────────────────────
 
   @override
@@ -839,21 +1039,11 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       Future.error(UnsupportedError('$what is not wired to the SDK yet'));
 
   @override
-  Future<void> joinSpace(Space space) => _unwired('joining a space');
-  @override
-  Future<void> leaveSpace(String spaceId) => _unwired('leaving a space');
-  @override
-  Future<String> createSpace(String name, {required Member me}) =>
-      _unwired('creating a space');
-  @override
   Future<Channel> createDirect(List<Member> members) =>
       _unwired('starting a DM');
   @override
   Future<void> invite(String roomId, List<String> userIds) =>
       _unwired('inviting');
-  @override
-  SpaceDirectory get directory =>
-      throw UnsupportedError('the space directory is not wired to the SDK yet');
 
   @override
   void dispose() {

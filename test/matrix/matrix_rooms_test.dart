@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/material.dart' show Colors;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/client_factory.dart';
@@ -23,11 +24,25 @@ class _Api extends FakeMatrixApi {
   Completer<void>? hold;
   var refuse = false;
 
+  /// Joins and leaves whose room id (undecoded, matched against the
+  /// request path) are refused, even while [refuse] is false.
+  final refuseIds = <String>{};
+
+  /// `createRoom` calls whose `name` is refused, even while [refuse] is
+  /// false.
+  final refuseNames = <String>{};
+
   /// When set, the display name every profile answers with.
   String? profileName;
 
   /// Each space's `/hierarchy` pages, in order, keyed by space id.
   final hierarchyPages = <String, List<Map<String, Object?>>>{};
+
+  var _createdRooms = 0;
+
+  /// Set by [_client], since [FakeMatrixApi.client] is a setter only:
+  /// [mockIntercept] needs the client itself to push a fake sync.
+  Client? ownerClient;
 
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
@@ -47,6 +62,39 @@ class _Api extends FakeMatrixApi {
       final page = index < pages.length ? pages[index] : {'rooms': <Object?>[]};
       return http.Response(jsonEncode(page), 200);
     }
+    if (request.method == 'POST' && path.endsWith('/createRoom')) {
+      final body = jsonDecode(request.body) as Map<String, Object?>;
+      final creationContent = body['creation_content'] as Map<String, Object?>?;
+      final isSpace = creationContent?['type'] == 'm.space';
+      final name = body['name'] as String?;
+      answered.add(path);
+      await hold?.future;
+      if (refuse || (name != null && refuseNames.contains(name))) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
+          403,
+        );
+      }
+      final id = isSpace
+          ? '!created:example.com'
+          : '!created-${_createdRooms++}:example.com';
+      if (isSpace) {
+        final client = ownerClient!;
+        unawaited(
+          Future(
+            () => client.handleSync(
+              SyncUpdate.fromJson({
+                'next_batch': 'created-space-${_events++}',
+                'rooms': {
+                  'join': {id: _room('created', type: 'm.space')},
+                },
+              }),
+            ),
+          ),
+        );
+      }
+      return http.Response(jsonEncode({'room_id': id}), 200);
+    }
     final method = request.method;
     final isJoinOrLeave =
         method == 'POST' &&
@@ -56,14 +104,24 @@ class _Api extends FakeMatrixApi {
     final isMuteOrTag =
         (method == 'PUT' || method == 'DELETE') &&
         (path.contains('/pushrules/') || path.contains('/tags/'));
-    if (isJoinOrLeave || isMuteOrTag) {
+    final isSpaceState =
+        method == 'PUT' &&
+        (path.contains('/state/m.space.child/') ||
+            path.contains('/state/m.space.parent/'));
+    if (isJoinOrLeave || isMuteOrTag || isSpaceState) {
       answered.add(path);
       await hold?.future;
-      if (refuse) {
+      final blockedById = refuseIds.any(
+        (id) => path.contains(Uri.encodeComponent(id)),
+      );
+      if (refuse || (isJoinOrLeave && blockedById)) {
         return http.Response(
           jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
           403,
         );
+      }
+      if (isSpaceState) {
+        return http.Response(jsonEncode({'event_id': '\$ev${_events++}'}), 200);
       }
       return isJoinOrLeave
           ? http.Response(jsonEncode({'room_id': '!invited:example.com'}), 200)
@@ -81,6 +139,7 @@ Future<Client> _client({_Api? api, bool firstSync = true}) async {
     databasePath: inMemoryDatabasePath,
   );
   FakeMatrixApi.client = client;
+  api?.ownerClient = client;
   await client.init(
     newToken: 'abcd',
     newHomeserver: Uri.parse('https://fakeServer.notExisting'),
@@ -677,8 +736,9 @@ void main() {
       RoomAbility.tag,
       RoomAbility.join,
       RoomAbility.leave,
+      RoomAbility.addSpace,
     });
-    expect(rooms.createSpace('x', me: rooms.me), throwsUnsupportedError);
+    expect(rooms.invite('!x', []), throwsUnsupportedError);
   });
 
   group('toggles', () {
@@ -967,5 +1027,260 @@ void main() {
         await _settle();
       },
     );
+  });
+
+  group('spaces', () {
+    /// An `m.space.child` state event, for a `/hierarchy` chunk's
+    /// `children_state`.
+    Map<String, Object?> childState(
+      String id, {
+      List<String> via = const ['example.com'],
+      bool? suggested,
+    }) => {
+      'type': 'm.space.child',
+      'state_key': id,
+      'sender': _me,
+      'content': {'via': via, 'suggested': ?suggested},
+      'origin_server_ts': 1700000000000,
+    };
+
+    /// A `/hierarchy` chunk, as returned for a space or one of its children.
+    Map<String, Object?> hierarchyChunk(
+      String id, {
+      String? name,
+      String? roomType,
+      String joinRule = 'public',
+      List<Map<String, Object?>> children = const [],
+    }) => {
+      'room_id': id,
+      'guest_can_join': false,
+      'world_readable': true,
+      'num_joined_members': 1,
+      'name': ?name,
+      'join_rule': joinRule,
+      'room_type': ?roomType,
+      'children_state': children,
+    };
+
+    /// Room ids left, in call order, decoded from `/leave` paths.
+    List<String> leftIds(_Api api) => [
+      for (final p in api.answered.where((p) => p.endsWith('/leave')))
+        Uri.decodeComponent(p.split('/rooms/')[1].split('/leave')[0]),
+    ];
+
+    /// Room ids joined, in call order, decoded from `/join/` paths.
+    List<String> joinedIds(_Api api) => [
+      for (final p in api.answered.where((p) => p.contains('/join/')))
+        Uri.decodeComponent(p.split('/join/')[1]),
+    ];
+
+    test(
+      'joining a space joins its subspaces and suggested channels',
+      () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        api.hierarchyPages['!newspace:example.com'] = [
+          {
+            'rooms': [
+              hierarchyChunk(
+                '!newspace:example.com',
+                name: 'New',
+                children: [
+                  childState('!sub:example.com'),
+                  childState('!suggested:example.com', suggested: true),
+                  childState('!plain:example.com'),
+                ],
+              ),
+              hierarchyChunk(
+                '!sub:example.com',
+                name: 'Sub',
+                roomType: 'm.space',
+              ),
+              hierarchyChunk('!suggested:example.com', name: 'Suggested'),
+              hierarchyChunk('!plain:example.com', name: 'Plain'),
+            ],
+          },
+        ];
+
+        await rooms.joinSpace(
+          Space(id: '!newspace:example.com', name: 'New', color: Colors.blue),
+        );
+        await _settle();
+
+        final joined = joinedIds(api);
+        expect(joined, contains('!newspace:example.com'));
+        expect(joined, contains('!sub:example.com'));
+        expect(joined, contains('!suggested:example.com'));
+        expect(joined, isNot(contains('!plain:example.com')));
+      },
+    );
+
+    test('a refused suggested channel is skipped, not thrown', () async {
+      final api = _Api()..refuseIds.add('!suggested:example.com');
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      api.hierarchyPages['!newspace:example.com'] = [
+        {
+          'rooms': [
+            hierarchyChunk(
+              '!newspace:example.com',
+              name: 'New',
+              children: [childState('!suggested:example.com', suggested: true)],
+            ),
+            hierarchyChunk('!suggested:example.com', name: 'Suggested'),
+          ],
+        },
+      ];
+
+      await rooms.joinSpace(
+        Space(id: '!newspace:example.com', name: 'New', color: Colors.blue),
+      );
+      await _settle();
+
+      expect(joinedIds(api), contains('!suggested:example.com'));
+      expect(joinedIds(api), contains('!newspace:example.com'));
+    });
+
+    test(
+      'leaving a space leaves its rooms deepest first, then the space',
+      () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _bakery(client);
+        await _settle();
+
+        await rooms.leaveSpace('!bakery:example.com');
+        await _settle();
+
+        final left = leftIds(api);
+        expect(
+          left.indexOf('!crumb:example.com'),
+          lessThan(left.indexOf('!deeper:example.com')),
+        );
+        expect(
+          left.indexOf('!deeper:example.com'),
+          lessThan(left.indexOf('!recipes:example.com')),
+        );
+        expect(
+          left.indexOf('!sourdough:example.com'),
+          lessThan(left.indexOf('!recipes:example.com')),
+        );
+        expect(
+          left.indexOf('!recipes:example.com'),
+          lessThan(left.indexOf('!bakery:example.com')),
+        );
+        expect(
+          left.indexOf('!general:example.com'),
+          lessThan(left.indexOf('!bakery:example.com')),
+        );
+        expect(left.last, '!bakery:example.com');
+      },
+    );
+
+    test('leaving a space keeps rooms another joined space lists', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _sync(client, {
+        'join': {
+          '!twin:example.com': _room(
+            'twin',
+            type: 'm.space',
+            extra: [_child('!crumb:example.com')],
+          ),
+        },
+      });
+      await _settle();
+
+      await rooms.leaveSpace('!bakery:example.com');
+      await _settle();
+
+      final left = leftIds(api);
+      expect(left, isNot(contains('!crumb:example.com')));
+      expect(left, contains('!deeper:example.com'));
+      expect(left, contains('!bakery:example.com'));
+    });
+
+    test(
+      'a partly refused leave throws PartlyDone naming what stayed',
+      () async {
+        final api = _Api()..refuseIds.add('!oven:example.com');
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _bakery(client);
+        await _settle();
+
+        await expectLater(
+          rooms.leaveSpace('!bakery:example.com'),
+          throwsA(
+            isA<PartlyDone>().having((e) => e.missing, 'missing', ['oven']),
+          ),
+        );
+        await _settle();
+        // The space's own wish still hides it, so with the space gone from
+        // the rail, oven's real (still joined) state shows through in Home.
+        expect(rooms.homeRooms.map((c) => c.id), contains('!oven:example.com'));
+      },
+    );
+
+    test('disposing mid-leave notifies nothing', () async {
+      final api = _Api()..hold = Completer();
+      final client = await _client(api: api);
+      // Disposed explicitly below, so not through `_rooms`'s teardown too.
+      final rooms = MatrixRooms(client);
+      await _settle();
+      await _bakery(client);
+      await _settle();
+
+      var notifications = 0;
+      rooms.addListener(() => notifications++);
+      final result = rooms.leaveSpace('!bakery:example.com');
+      await _settle();
+      final before = notifications;
+
+      rooms.dispose();
+      api.hold!.complete();
+      await result;
+      await _settle();
+
+      expect(notifications, before);
+    });
+
+    test('creating a space makes #general and hangout under it', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+
+      final id = await rooms.createSpace('Bakers', me: rooms.me);
+      await _settle();
+
+      expect(id, '!created:example.com');
+      expect(
+        api.answered.where((p) => p.endsWith('/createRoom')),
+        hasLength(3),
+      );
+      expect(
+        api.answered.where((p) => p.contains('/state/m.space.child/')),
+        hasLength(2),
+      );
+    });
+
+    test('a refused channel still returns the space, as PartlyDone', () async {
+      final api = _Api()..refuseNames.add('hangout');
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+
+      await expectLater(
+        rooms.createSpace('Bakers', me: rooms.me),
+        throwsA(
+          isA<PartlyDone>()
+              .having((e) => e.spaceId, 'spaceId', '!created:example.com')
+              .having((e) => e.missing, 'missing', ['hangout']),
+        ),
+      );
+    });
   });
 }
