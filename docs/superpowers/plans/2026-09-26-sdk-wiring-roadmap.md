@@ -1,6 +1,6 @@
 # SDK Wiring Roadmap
 
-> **Status:** phases 1–4 have landed, each from its own rehearsed plan (`2026-09-26-real-sign-in.md`, `2026-09-26-rooms-from-sync.md`, `2026-09-27-timeline.md`, `2026-09-27-e2ee.md`). The app now talks to a real homeserver by default. Every later phase gets its own plan when it comes up.
+> **Status:** phases 1–5 have landed, each from its own rehearsed plan (`2026-09-26-real-sign-in.md`, `2026-09-26-rooms-from-sync.md`, `2026-09-27-timeline.md`, `2026-09-27-e2ee.md`, `2026-09-27-channel-space-actions.md`). The app now talks to a real homeserver by default. Every later phase gets its own plan when it comes up.
 
 **Goal:** Replace the mock source behind the finished UI with matrix-dart-sdk. Phases are ordered by what gets the app to "daily-drivable on loaf.moe" soonest for the least work.
 
@@ -26,7 +26,7 @@
 | 2 | **Rooms from sync:** rail, channel lists, Home sections, unreads, members | The first moment the app shows *your* loaf.moe. Read-only, so low risk **Plan: `2026-09-26-rooms-from-sync.md`** | M |
 | 3 | **Timeline:** read, send text, reply, react, edit, delete, read markers, pagination | Makes it usable for unencrypted rooms. `TimelineController`'s API already matches (`send`, `toggleReaction`, `saveEdit`, `delete`) **Plan: `2026-09-27-timeline.md`** | M |
 | 4 | **E2EE:** verify by emoji, recovery key, set up recovery, key backup restore, the incoming "is this you?" | Without it encrypted DMs are unreadable. vodozemac is already initialised by phase 1; the UI and `VerificationController` exist, so swap timers for `KeyVerification` and `Bootstrap` **Plan: `2026-09-27-e2ee.md`** | M–L |
-| 5 | **Channel and space actions:** join, leave, mute (push rule), DMs without duplicates, invites, `/hierarchy` browse, create space, tags and favourites | Every flow is already designed, and each is a thin call | M |
+| 5 | **Channel and space actions:** join, leave, mute (push rule), DMs without duplicates, invites, `/hierarchy` browse, create space, tags and favourites | Every flow is already designed, and each is a thin call **Plan: `2026-09-27-channel-space-actions.md`** | M |
 | 6 | **Presence and status, profile, settings** | Cheap polish | S |
 | 7 | **Voice channels** (MatrixRTC + `livekit_client`), connected-call bar, occupancy avatars | High delight, but heavy and needs a device | L |
 | 8 | **APNs push via Sygnal, DM ringing** (CallKit/PushKit, MSC4075) | Mac-only work, scheduled around Mac access | L |
@@ -47,7 +47,7 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 
 ## Deferred from phase 2, to place later
 
-- **Unjoined channels from `/hierarchy`**, and joining a space's category subspaces and suggested channels (phase 5, with joining).
+- ~~**Unjoined channels from `/hierarchy`**, and joining a space's category subspaces and suggested channels (phase 5, with joining).~~ Done in phase 5.
 - **Voice occupancy avatars** need a `VoIP` instance to read MatrixRTC memberships (phase 7).
 - **Avatar images** (`mxc` thumbnails) for spaces, rooms and people (phase 6 or 9). Initials on a colour until then.
 - **Presence of others** is `Presence.unknown` until phase 6.
@@ -87,6 +87,18 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **No test signs out during a restore, and `Verifier` has no `dispose`.** A restore running unseen when the session ends is left to the SDK's own teardown.
 - **A device list in settings, where a sign-in can be signed out.** "that's not me" says to sign the device out from another app, since settings can't yet; point it there once it can.
 - **A backup-only account hears "that didn't unlock anything".** Key backup without cross-signing isn't healed by the key (above), and the key panel's answer doesn't say why.
+
+## Deferred from phase 5, to place later
+
+- **Space settings, roles and power levels.** This is new UI the spec does not draw.
+- **Knocking.** Knock-only rooms and spaces are hidden rather than offered.
+- **Inviting by email (3PID).** loaf.moe has no identity server.
+- **Removing a room from a space, or adding an existing one.** This is space administration, and comes with settings.
+- **A panel dismissed mid-create.** It is blocked instead. On phones, a panel that can create or start a DM loses swipe-down-to-close even when idle, because Flutter's sheet drag pops past `PopScope`.
+- **Group DM reuse matches on the room summary's heroes,** which are capped at 5, so a group of more than 5 people always gets a new DM.
+- **Joining a space can cost two `/hierarchy` requests,** and leaving one walks every other joined space's tree. Both are fine at loaf.moe's size.
+- **The explore panel's server list** is a fixed `loaf.moe` and `matrix.org`, plus whatever you type.
+- **`test/matrix/matrix_timeline_test.dart` flakes on most full-suite runs on `main` too** (checked 2026-09-28: 3 of 4 runs had one or two failures, a different test each time). It passes alone. This joins the phase 3 note about it.
 
 ## Global constraints (all phases)
 
