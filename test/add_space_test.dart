@@ -7,9 +7,11 @@ import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
+import 'package:loaf_native/ui/rooms/rooms.dart' show PartlyDone;
 import 'package:loaf_native/ui/spaces/add_space.dart';
 import 'package:loaf_native/ui/spaces/space_directory.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/ui/widgets/loaf_button.dart';
 
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
 final _desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
@@ -127,15 +129,64 @@ Future<void> _pumpPanel(
   WidgetTester tester,
   SpaceDirectory directory, {
   Set<String> joined = const {},
+  Future<String> Function(String name)? onCreate,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
       theme: loafDarkTheme(),
       home: Scaffold(
-        body: AddSpacePanel(joined: joined, directory: directory),
+        body: AddSpacePanel(
+          joined: joined,
+          directory: directory,
+          onCreate: onCreate,
+        ),
       ),
     ),
   );
+}
+
+LoafButton _button(WidgetTester tester, String label) =>
+    tester.widget<LoafButton>(find.widgetWithText(LoafButton, label));
+
+/// Opens [AddSpacePanel] through the real [showAddSpace] route (a dialog on
+/// a computer here), so its popped result can be inspected.
+class _AddSpaceHost extends StatefulWidget {
+  const _AddSpaceHost({required this.directory, this.onCreate});
+
+  final SpaceDirectory directory;
+  final Future<String> Function(String name)? onCreate;
+
+  @override
+  State<_AddSpaceHost> createState() => _AddSpaceHostState();
+}
+
+class _AddSpaceHostState extends State<_AddSpaceHost> {
+  AddSpaceResult? result;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: TextButton(
+        onPressed: () async {
+          final r = await showAddSpace(
+            context,
+            joined: const {},
+            directory: widget.directory,
+            onCreate: widget.onCreate,
+          );
+          setState(() => result = r);
+        },
+        child: const Text('open'),
+      ),
+    ),
+  );
+}
+
+Future<void> _openCreateStep(WidgetTester tester, String name) async {
+  await tester.tap(find.text('create a space'));
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byType(TextField), name);
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -332,6 +383,83 @@ void main() {
 
       expect(_panel(), findsOneWidget, reason: 'nothing to create yet');
     });
+  });
+
+  group('creating with the server', () {
+    testWidgets('create reads creating and has no cancel while it works', (
+      tester,
+    ) async {
+      final completer = Completer<String>();
+      await _pumpPanel(
+        tester,
+        _SlowDirectory(),
+        onCreate: (name) => completer.future,
+      );
+      await _openCreateStep(tester, 'Crumb Club');
+
+      await tester.tap(find.text('create'));
+      await tester.pump();
+
+      expect(find.text('creating…'), findsOneWidget);
+      expect(_button(tester, 'creating…').onTap, isNull);
+      expect(
+        find.byTooltip('Back'),
+        findsNothing,
+        reason: 'an unstoppable step draws no cancel',
+      );
+
+      completer.complete('made-1');
+      await tester.pump();
+    });
+
+    testWidgets("a refused create stays open and says so", (tester) async {
+      await _pumpPanel(
+        tester,
+        _SlowDirectory(),
+        onCreate: (name) async => throw Exception('refused'),
+      );
+      await _openCreateStep(tester, 'Crumb Club');
+
+      await tester.tap(find.text('create'));
+      await tester.pumpAndSettle();
+
+      expect(_panel(), findsOneWidget);
+      expect(find.text("couldn't create. try again?"), findsOneWidget);
+      expect(_button(tester, 'create').onTap, isNotNull);
+    });
+
+    testWidgets(
+      'a space made without its channels still opens, and says what is missing',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: loafDarkTheme(),
+            home: _AddSpaceHost(
+              directory: _SlowDirectory(),
+              onCreate: (name) async => throw const PartlyDone(
+                spaceId: 'made-1',
+                missing: ['hangout'],
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+        await _openCreateStep(tester, 'Crumb Club');
+
+        await tester.tap(find.text('create'));
+        await tester.pumpAndSettle();
+
+        expect(_panel(), findsNothing);
+        final host = tester.state<_AddSpaceHostState>(
+          find.byType(_AddSpaceHost),
+        );
+        final result = host.result;
+        expect(result, isA<OpenSpace>());
+        expect((result as OpenSpace).id, 'made-1');
+        expect(result.missing, ['hangout']);
+      },
+    );
   });
 
   group('the directory', () {

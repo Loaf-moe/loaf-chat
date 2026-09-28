@@ -364,14 +364,26 @@ class _AppShellState extends State<AppShell> {
       context,
       joined: {for (final s in _spaces) s.id},
       directory: _rooms.directory,
+      onCreate: (name) => _rooms.createSpace(name, me: _me),
     );
     if (result == null || !mounted) return;
     switch (result) {
-      case OpenSpace(:final id):
+      case OpenSpace(:final id, :final missing):
         setState(() {
-          _spaceId = id;
-          _fullscreen = false;
+          if (missing.isEmpty) {
+            _spaceId = id;
+            _fullscreen = false;
+          } else {
+            _open(id, '$id-general');
+            _fullscreen = false;
+          }
         });
+        if (missing.isNotEmpty && mounted) {
+          showToast(
+            context,
+            "made it, but ${missing.join(' and ')} didn't happen",
+          );
+        }
       case JoinSpace(:final space):
         await _rooms.joinSpace(space);
         if (!mounted) return;
@@ -414,6 +426,7 @@ class _AppShellState extends State<AppShell> {
         for (final room in _homeRooms)
           if (room.kind == ChannelKind.direct) room,
       ],
+      onStart: _rooms.createDirect,
     );
     if (start == null || !mounted) return;
     switch (start) {

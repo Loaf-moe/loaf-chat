@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:loaf_native/ui/home/direct_messages.dart';
 import 'package:loaf_native/ui/home/new_message_picker.dart';
+import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/ui/widgets/loaf_button.dart';
 
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
 final _desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
@@ -54,6 +59,44 @@ Future<void> _pick(WidgetTester tester, String name) async {
 Future<void> _go(WidgetTester tester, String label) async {
   await tester.tap(_inPicker(find.text(label)));
   await tester.pumpAndSettle();
+}
+
+LoafButton _button(WidgetTester tester, String label) =>
+    tester.widget<LoafButton>(find.widgetWithText(LoafButton, label));
+
+const _theo = Member('@theo', 'Theo Crust', Color(0xFF0891B2));
+
+/// Opens [NewMessagePicker] through the real [showNewMessagePicker] route,
+/// so its popped result can be inspected.
+class _PickerHost extends StatefulWidget {
+  const _PickerHost({this.onStart});
+
+  final Future<Channel> Function(List<Member> members)? onStart;
+
+  @override
+  State<_PickerHost> createState() => _PickerHostState();
+}
+
+class _PickerHostState extends State<_PickerHost> {
+  StartMessage? result;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    body: Center(
+      child: TextButton(
+        onPressed: () async {
+          final r = await showNewMessagePicker(
+            context,
+            people: const [_theo],
+            rooms: const [],
+            onStart: widget.onStart,
+          );
+          setState(() => result = r);
+        },
+        child: const Text('open'),
+      ),
+    ),
+  );
 }
 
 void main() {
@@ -171,6 +214,57 @@ void main() {
       await _go(tester, 'open weekend crew');
 
       expect(find.text('bake-along saturday? i have too much flour'), findsOne);
+    });
+  });
+
+  group('starting a DM with the server', () {
+    testWidgets('starting a DM waits, and a refusal stays open', (
+      tester,
+    ) async {
+      final attempts = [Completer<Channel>(), Completer<Channel>()];
+      var attempt = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: _PickerHost(onStart: (members) => attempts[attempt++].future),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      await tester.tap(_inPicker(find.text('Theo Crust')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(_inPicker(find.text('message')));
+      await tester.pump();
+
+      expect(find.text('starting…'), findsOneWidget);
+      expect(_button(tester, 'starting…').onTap, isNull);
+
+      attempts[0].completeError(Exception('refused'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(_picker(), findsOneWidget);
+      expect(find.text("couldn't start. try again?"), findsOneWidget);
+      final host = tester.state<_PickerHostState>(find.byType(_PickerHost));
+      expect(host.result, isNull);
+
+      // A retry that goes through pops the DM it made.
+      await tester.tap(_inPicker(find.text('message')));
+      await tester.pump();
+      attempts[1].complete(
+        const Channel(
+          id: 'dm-new-1',
+          name: 'Theo Crust',
+          kind: ChannelKind.direct,
+          members: [_theo],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(_picker(), findsNothing);
+      expect(host.result, isA<OpenExisting>());
+      expect((host.result as OpenExisting).room.id, 'dm-new-1');
     });
   });
 

@@ -8,9 +8,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../model/models.dart';
 import '../platform.dart';
-import '../rooms/rooms.dart' show SpaceNotFound;
+import '../rooms/rooms.dart' show PartlyDone, SpaceNotFound;
 import '../theme/loaf_theme.dart';
 import '../widgets/adaptive_panel.dart';
+import '../widgets/error_note.dart';
 import '../widgets/loaf_button.dart';
 import 'space_address.dart';
 import 'space_directory.dart';
@@ -26,10 +27,12 @@ class JoinSpace extends AddSpaceResult {
   final Space space;
 }
 
-/// You are already in it: just go there.
+/// You are already in it: just go there. [missing] names anything a
+/// creation asked for that didn't happen ("#general", "hangout").
 class OpenSpace extends AddSpaceResult {
-  const OpenSpace(this.id);
+  const OpenSpace(this.id, {this.missing = const []});
   final String id;
+  final List<String> missing;
 }
 
 /// Make a new space with this name, `#general` and a voice channel.
@@ -42,10 +45,15 @@ Future<AddSpaceResult?> showAddSpace(
   BuildContext context, {
   required Set<String> joined,
   required SpaceDirectory directory,
+  Future<String> Function(String name)? onCreate,
 }) => showAdaptivePanel(
   context,
   maxHeight: 620,
-  child: AddSpacePanel(joined: joined, directory: directory),
+  child: AddSpacePanel(
+    joined: joined,
+    directory: directory,
+    onCreate: onCreate,
+  ),
 );
 
 enum _Step { menu, link, explore, preview, create }
@@ -55,6 +63,7 @@ class AddSpacePanel extends StatefulWidget {
     super.key,
     required this.joined,
     required this.directory,
+    this.onCreate,
   });
 
   /// Ids of the spaces you are in, which open rather than join.
@@ -62,6 +71,10 @@ class AddSpacePanel extends StatefulWidget {
 
   /// Where a server's public spaces and a typed address are looked up.
   final SpaceDirectory directory;
+
+  /// Makes the space on the server. Given, "create" waits on it in place
+  /// rather than popping [CreateSpace] for the caller to make later.
+  final Future<String> Function(String name)? onCreate;
 
   @override
   State<AddSpacePanel> createState() => _AddSpacePanelState();
@@ -90,6 +103,11 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
   /// address you have since edited away from can't overwrite a later one.
   String? _linkFor;
   AsyncSnapshot<SpacePreview>? _linkSnapshot;
+
+  /// Whether the server is being asked to make the space; unstoppable once
+  /// started, so no cancel is drawn while it runs.
+  var _creating = false;
+  var _createFailed = false;
 
   @override
   void initState() {
@@ -197,6 +215,41 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
         : JoinSpace(entry.space),
   );
 
+  /// Makes the space, waiting on the server when [AddSpacePanel.onCreate]
+  /// is wired up. Unstoppable once it starts: no cancel while it runs.
+  Future<void> _submit(String name) async {
+    final onCreate = widget.onCreate;
+    if (onCreate == null) {
+      Navigator.pop(context, CreateSpace(name));
+      return;
+    }
+    setState(() {
+      _creating = true;
+      _createFailed = false;
+    });
+    try {
+      final id = await onCreate(name);
+      if (!mounted) return;
+      Navigator.pop(context, OpenSpace(id));
+    } on PartlyDone catch (e) {
+      if (!mounted) return;
+      if (e.spaceId != null) {
+        Navigator.pop(context, OpenSpace(e.spaceId!, missing: e.missing));
+      } else {
+        setState(() {
+          _creating = false;
+          _createFailed = true;
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _creating = false;
+        _createFailed = true;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final (title, body) = switch (_step) {
@@ -220,7 +273,12 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _Header(title: title, onBack: _step == _Step.menu ? null : _back),
+          _Header(
+            title: title,
+            onBack: _step == _Step.menu || (_step == _Step.create && _creating)
+                ? null
+                : _back,
+          ),
           const SizedBox(height: LoafSpace.x3),
           Expanded(child: body),
         ],
@@ -422,12 +480,14 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
           'it starts with #general and a voice channel called hangout.',
           style: loafBody(13, 400).copyWith(color: tokens.textMuted),
         ),
+        if (_createFailed) ...[
+          const SizedBox(height: LoafSpace.x3),
+          const ErrorNote(message: "couldn't create. try again?"),
+        ],
         const Spacer(),
         LoafButton(
-          label: 'create',
-          onTap: name.isEmpty
-              ? null
-              : () => Navigator.pop(context, CreateSpace(name)),
+          label: _creating ? 'creating…' : 'create',
+          onTap: name.isEmpty || _creating ? null : () => _submit(name),
         ),
       ],
     );

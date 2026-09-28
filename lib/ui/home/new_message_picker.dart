@@ -10,6 +10,7 @@ import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/adaptive_panel.dart';
+import '../widgets/error_note.dart';
 import '../widgets/loaf_button.dart';
 import 'direct_messages.dart';
 
@@ -19,9 +20,10 @@ Future<StartMessage?> showNewMessagePicker(
   BuildContext context, {
   required List<Member> people,
   required List<Channel> rooms,
+  Future<Channel> Function(List<Member> members)? onStart,
 }) => showAdaptivePanel(
   context,
-  child: NewMessagePicker(people: people, rooms: rooms),
+  child: NewMessagePicker(people: people, rooms: rooms, onStart: onStart),
 );
 
 class NewMessagePicker extends StatefulWidget {
@@ -29,6 +31,7 @@ class NewMessagePicker extends StatefulWidget {
     super.key,
     required this.people,
     required this.rooms,
+    this.onStart,
   });
 
   /// Everyone you could start with: people you share a space or a DM with.
@@ -39,6 +42,10 @@ class NewMessagePicker extends StatefulWidget {
   /// Your DMs, for finding what already exists.
   final List<Channel> rooms;
 
+  /// Makes a new DM on the server. Given, starting waits on it in place
+  /// rather than popping [CreateDirect] for the caller to make later.
+  final Future<Channel> Function(List<Member> members)? onStart;
+
   @override
   State<NewMessagePicker> createState() => _NewMessagePickerState();
 }
@@ -46,6 +53,11 @@ class NewMessagePicker extends StatefulWidget {
 class _NewMessagePickerState extends State<NewMessagePicker> {
   final _query = TextEditingController();
   final _picked = <Member>[];
+
+  /// Whether the server is being asked to start the DM; unstoppable once
+  /// begun, so no cancel is drawn while it runs.
+  var _starting = false;
+  var _startFailed = false;
 
   @override
   void initState() {
@@ -99,6 +111,31 @@ class _NewMessagePickerState extends State<NewMessagePicker> {
     // A search did its job once someone is picked; clear it for the next.
     _query.clear();
   });
+
+  /// Carries out [start], waiting on the server when
+  /// [NewMessagePicker.onStart] is wired up for a fresh DM.
+  Future<void> _go(StartMessage start) async {
+    final onStart = widget.onStart;
+    if (start is! CreateDirect || onStart == null) {
+      Navigator.pop(context, start);
+      return;
+    }
+    setState(() {
+      _starting = true;
+      _startFailed = false;
+    });
+    try {
+      final room = await onStart(start.members);
+      if (!mounted) return;
+      Navigator.pop(context, OpenExisting(room));
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _starting = false;
+        _startFailed = true;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -191,10 +228,14 @@ class _NewMessagePickerState extends State<NewMessagePicker> {
               ],
             ),
           ),
+          if (_startFailed) ...[
+            const ErrorNote(message: "couldn't start. try again?"),
+            const SizedBox(height: LoafSpace.x2),
+          ],
           const SizedBox(height: LoafSpace.x3),
           LoafButton(
-            label: start?.label ?? 'message',
-            onTap: start == null ? null : () => Navigator.pop(context, start),
+            label: _starting ? 'starting…' : (start?.label ?? 'message'),
+            onTap: start == null || _starting ? null : () => _go(start),
           ),
         ],
       ),
