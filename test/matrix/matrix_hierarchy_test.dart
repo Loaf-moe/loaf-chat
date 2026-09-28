@@ -218,7 +218,6 @@ void main() {
     Future<MatrixRooms> bakeryWith(
       Client client,
       List<Map<String, Object?>> children,
-      List<Map<String, Object?>> hierarchyRooms,
     ) async {
       final rooms = MatrixRooms(client);
       addTearDown(rooms.dispose);
@@ -250,9 +249,7 @@ void main() {
           ],
         },
       ];
-      final rooms = await bakeryWith(client, [
-        _child('!unjoined:example.com'),
-      ], []);
+      final rooms = await bakeryWith(client, [_child('!unjoined:example.com')]);
       await _settle();
 
       final channel = bakery(rooms).categories.first.channels
@@ -277,7 +274,7 @@ void main() {
       final rooms = await bakeryWith(client, [
         _child('!invited:example.com'),
         _child('!knockable:example.com'),
-      ], []);
+      ]);
       await _settle();
 
       final ids = bakery(rooms).categories
@@ -293,7 +290,7 @@ void main() {
       api.hierarchyPages['!bakery:example.com'] = [
         {'rooms': <Object?>[]},
       ];
-      final rooms = await bakeryWith(client, [], []);
+      final rooms = await bakeryWith(client, []);
       await _settle();
       expect(bakery(rooms).categories, isEmpty);
       expect(
@@ -346,9 +343,7 @@ void main() {
           ],
         },
       ];
-      final rooms = await bakeryWith(client, [
-        _child('!unjoined:example.com'),
-      ], []);
+      final rooms = await bakeryWith(client, [_child('!unjoined:example.com')]);
       await _settle();
 
       await rooms.setJoined('!unjoined:example.com', true);
@@ -362,5 +357,66 @@ void main() {
         unorderedEquals(['one.example.com', 'two.example.com']),
       );
     });
+
+    test(
+      'a new child in a nested subspace fetches its top space again',
+      () async {
+        final api = _Api();
+        final client = await _client(api);
+        api.hierarchyPages['!bakery:example.com'] = [
+          {
+            'rooms': [
+              _chunk('!annex:example.com', name: 'annex', roomType: 'm.space'),
+            ],
+          },
+        ];
+        final rooms = await bakeryWith(client, [_child('!annex:example.com')]);
+        await _settle();
+        expect(
+          bakery(rooms).categories
+              .singleWhere((c) => c.name == 'annex')
+              .channels,
+          isEmpty,
+        );
+        // Bakery's own initial state lists annex too, so it may already
+        // have refetched itself once by now — that's fine. What matters
+        // is that the sync below, naming annex rather than bakery, makes
+        // it fetch again.
+        final callsBefore = api.hierarchyCalls
+            .where((id) => id == '!bakery:example.com')
+            .length;
+
+        // Annex itself is joined; its new child, listed by its own
+        // m.space.child, is not — its name only comes from the top
+        // space's hierarchy, which the sync below must refetch.
+        api.hierarchyPages['!bakery:example.com'] = [
+          {
+            'rooms': [
+              _chunk('!annex:example.com', name: 'annex', roomType: 'm.space'),
+              _chunk('!fresh:example.com', name: 'fresh'),
+            ],
+          },
+        ];
+        await _sync(client, {
+          'join': {
+            '!annex:example.com': _room(
+              'annex',
+              type: 'm.space',
+              extra: [_child('!fresh:example.com')],
+            ),
+          },
+        });
+        await _settle();
+
+        expect(
+          api.hierarchyCalls.where((id) => id == '!bakery:example.com').length,
+          greaterThan(callsBefore),
+        );
+        final channels = bakery(rooms).categories
+            .singleWhere((c) => c.name == 'annex')
+            .channels;
+        expect(channels.map((c) => c.id), contains('!fresh:example.com'));
+      },
+    );
   });
 }

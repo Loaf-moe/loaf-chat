@@ -168,7 +168,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
           (room.state?.any((e) => e.type == EventTypes.SpaceChild) ?? false) ||
           (room.timeline?.events?.any((e) => e.type == EventTypes.SpaceChild) ??
               false);
-      if (changed) _hierarchy.invalidate(roomId);
+      if (changed) _hierarchy.invalidateContaining(roomId);
     });
     _synced = true;
     _progress = null;
@@ -312,6 +312,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   Space _space(Room space, Map<String, Room> joined) {
     final name = space.getLocalizedDisplayname();
+    // What `/hierarchy` gave us for this space's whole tree: metadata for
+    // an unjoined child, at any depth, that the SDK's own state cannot
+    // give — plus the children of an unjoined subspace, whose state the
+    // SDK never has at all.
     final chunks = <String, SpaceRoomsChunk$2>{
       for (final chunk in _hierarchy.children(space.id) ?? const [])
         chunk.roomId: chunk,
@@ -322,34 +326,19 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       final id = child.roomId;
       if (id == null) continue;
       final room = joined[id];
-      if (room != null) {
-        if (room.isSpace) {
-          final channels = [
-            for (final r in _descendants(room, joined, {space.id})) _channel(r),
-          ];
-          categories.add(
-            ChannelCategory(room.getLocalizedDisplayname(), channels),
-          );
-        } else {
-          top.add(_channel(room));
-        }
-        continue;
-      }
-      // Not joined: drawn from the hierarchy once it has landed.
-      final chunk = chunks[id];
-      if (chunk == null || !_hierarchyChildVisible(chunk, joined)) continue;
-      if (chunk.roomType == 'm.space') {
-        final channels = _hierarchyDescendants(chunk, joined, chunks, {
+      final chunk = room == null ? chunks[id] : null;
+      if (room == null && chunk == null) continue; // Not joined, not fetched.
+      if (room == null && !_hierarchyChildVisible(chunk!, joined)) continue;
+      final isSpace = room?.isSpace ?? chunk!.roomType == 'm.space';
+      if (isSpace) {
+        final channels = _categoryChannels(id, joined, chunks, {
           space.id,
         }).toList();
-        categories.add(
-          ChannelCategory(
-            chunk.name ?? chunk.canonicalAlias ?? 'unnamed',
-            channels,
-          ),
-        );
+        final categoryName =
+            room?.getLocalizedDisplayname() ?? _chunkName(chunk!);
+        categories.add(ChannelCategory(categoryName, channels));
       } else {
-        top.add(_hierarchyChannel(chunk));
+        top.add(room != null ? _channel(room) : _hierarchyChannel(chunk!));
       }
     }
     return Space(
@@ -382,44 +371,16 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     }
   }
 
-  /// A hierarchy subspace's channels: its own children, and those of any
-  /// further subspace under it, joined or not, flattened in. Mirrors
-  /// [_descendants] for the part of the tree the SDK has no [Room] for.
-  Iterable<Channel> _hierarchyDescendants(
-    SpaceRoomsChunk$2 space,
-    Map<String, Room> joined,
-    Map<String, SpaceRoomsChunk$2> chunks,
-    Set<String> seen,
-  ) sync* {
-    if (!seen.add(space.roomId)) return;
-    for (final childState in space.childrenState) {
-      final id = childState.stateKey;
-      if (id == null) continue;
-      final room = joined[id];
-      if (room != null) {
-        if (room.isSpace) {
-          yield* _descendants(room, joined, seen).map(_channel);
-        } else if (seen.add(room.id)) {
-          yield _channel(room);
-        }
-        continue;
-      }
-      final chunk = chunks[id];
-      if (chunk == null || !_hierarchyChildVisible(chunk, joined)) continue;
-      if (chunk.roomType == 'm.space') {
-        yield* _hierarchyDescendants(chunk, joined, chunks, seen);
-      } else if (seen.add(id)) {
-        yield _hierarchyChannel(chunk);
-      }
-    }
-  }
+  /// What a hierarchy chunk is called, absent a room to ask.
+  String _chunkName(SpaceRoomsChunk$2 chunk) =>
+      chunk.name ?? chunk.canonicalAlias ?? 'unnamed';
 
   /// An unjoined hierarchy child as a row: only what `/hierarchy` gave us,
   /// plus a `joined: true` wish already sent but not yet synced.
   Channel _hierarchyChannel(SpaceRoomsChunk$2 chunk) {
     final channel = Channel(
       id: chunk.roomId,
-      name: chunk.name ?? chunk.canonicalAlias ?? 'unnamed',
+      name: _chunkName(chunk),
       kind: _voiceTypes.contains(chunk.roomType)
           ? ChannelKind.voice
           : ChannelKind.text,
@@ -431,23 +392,41 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     return channel.copyWith(joined: true);
   }
 
-  /// A category's rooms: its joined non-space children, then those of any
-  /// subspaces under it, flattened in. [seen] stops a space that lists an
-  /// ancestor from looping, and a room listed under two of the category's
-  /// subspaces from appearing in it twice.
-  Iterable<Room> _descendants(
-    Room space,
+  /// A category's channels: [id]'s own non-space children — from its own
+  /// state if joined, from the cached hierarchy chunk if not — then those
+  /// of any subspace under it, joined or not, flattened in. [seen] stops a
+  /// space that lists an ancestor from looping, and a room listed under
+  /// two of the category's subspaces from appearing in it twice.
+  Iterable<Channel> _categoryChannels(
+    String id,
     Map<String, Room> joined,
+    Map<String, SpaceRoomsChunk$2> chunks,
     Set<String> seen,
   ) sync* {
-    if (!seen.add(space.id)) return;
-    for (final child in space.spaceChildren) {
-      final room = joined[child.roomId];
-      if (room == null) continue;
-      if (room.isSpace) {
-        yield* _descendants(room, joined, seen);
-      } else if (seen.add(room.id)) {
-        yield room;
+    if (!seen.add(id)) return;
+    final room = joined[id];
+    final childIds = room != null
+        ? [for (final child in room.spaceChildren) child.roomId]
+        : [
+            for (final child in chunks[id]?.childrenState ?? const [])
+              child.stateKey,
+          ];
+    for (final childId in childIds) {
+      if (childId == null) continue;
+      final childRoom = joined[childId];
+      final childChunk = childRoom == null ? chunks[childId] : null;
+      if (childRoom == null && childChunk == null) continue;
+      if (childRoom == null && !_hierarchyChildVisible(childChunk!, joined)) {
+        continue;
+      }
+      final childIsSpace =
+          childRoom?.isSpace ?? childChunk!.roomType == 'm.space';
+      if (childIsSpace) {
+        yield* _categoryChannels(childId, joined, chunks, seen);
+      } else if (seen.add(childId)) {
+        yield childRoom != null
+            ? _channel(childRoom)
+            : _hierarchyChannel(childChunk!);
       }
     }
   }

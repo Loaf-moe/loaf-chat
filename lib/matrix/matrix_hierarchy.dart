@@ -71,6 +71,20 @@ class MatrixHierarchy {
     _failed.remove(spaceId);
   }
 
+  /// [invalidate]s [roomId] itself, and every cached space whose tree
+  /// carries [roomId] anywhere in it. A change reported for a room only
+  /// reaches here because we're joined to it — which can be a subspace
+  /// nested well under a top space's own id, the only kind of id ever
+  /// fetched — so the top space's tree is what actually needs refetching.
+  void invalidateContaining(String roomId) {
+    for (final spaceId in _trees.keys.toList()) {
+      if (spaceId == roomId ||
+          _trees[spaceId]!.any((chunk) => chunk.roomId == roomId)) {
+        invalidate(spaceId);
+      }
+    }
+  }
+
   /// Servers to join [roomId] through: the `via` of the `m.space.child`
   /// that lists it, in whichever cached tree carries it.
   List<String> via(String roomId) {
