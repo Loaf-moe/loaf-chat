@@ -15,9 +15,9 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 const _me = '@test:fakeServer.notExisting';
 
-/// The fake server, plus answers it lacks: joining and leaving a room.
-/// [hold] keeps those answers back until completed; [refuse] makes them
-/// a 403.
+/// The fake server, plus answers it lacks: joining and leaving a room, muting
+/// (the push-rules endpoints) and tagging. [hold] keeps those answers back
+/// until completed; [refuse] makes them a 403.
 class _Api extends FakeMatrixApi {
   final answered = <String>[];
   Completer<void>? hold;
@@ -34,16 +34,27 @@ class _Api extends FakeMatrixApi {
         path.contains('/profile/')) {
       return http.Response(jsonEncode({'displayname': profileName}), 200);
     }
-    if (request.method == 'POST' &&
-        (path.endsWith('/join') || path.endsWith('/leave'))) {
+    final method = request.method;
+    final isJoinOrLeave =
+        method == 'POST' &&
+        (path.endsWith('/join') ||
+            path.contains('/join/') ||
+            path.endsWith('/leave'));
+    final isMuteOrTag =
+        (method == 'PUT' || method == 'DELETE') &&
+        (path.contains('/pushrules/') || path.contains('/tags/'));
+    if (isJoinOrLeave || isMuteOrTag) {
       answered.add(path);
       await hold?.future;
-      return refuse
-          ? http.Response(
-              jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
-              403,
-            )
-          : http.Response(jsonEncode({'room_id': '!invited:example.com'}), 200);
+      if (refuse) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
+          403,
+        );
+      }
+      return isJoinOrLeave
+          ? http.Response(jsonEncode({'room_id': '!invited:example.com'}), 200)
+          : http.Response(jsonEncode({}), 200);
     }
     return super.mockIntercept(request);
   }
@@ -649,10 +660,252 @@ void main() {
       RoomAbility.answerInvites,
       RoomAbility.messages,
       RoomAbility.markRead,
+      RoomAbility.mute,
+      RoomAbility.tag,
+      RoomAbility.join,
+      RoomAbility.leave,
     });
-    expect(
-      () => rooms.setMuted('!calls:example.com', true),
-      throwsUnsupportedError,
+    expect(rooms.createSpace('x', me: rooms.me), throwsUnsupportedError);
+  });
+
+  group('toggles', () {
+    Channel byId(MatrixRooms rooms, String id) =>
+        {for (final c in rooms.homeRooms) c.id: c}[id]!;
+
+    Map<String, Object?> tag(String name, {required double order}) => {
+      'type': 'm.tag',
+      'content': {
+        'tags': {
+          name: {'order': order},
+        },
+      },
+    };
+
+    test('muting shows at once and sends the push rule', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _sync(client, {
+        'join': {'!m:example.com': _room('mute me')},
+      });
+      await _settle();
+
+      final result = rooms.setMuted('!m:example.com', true);
+      expect(byId(rooms, '!m:example.com').muted, isTrue);
+      await result;
+      await _settle();
+
+      expect(byId(rooms, '!m:example.com').muted, isTrue);
+      expect(api.answered.where((p) => p.contains('/pushrules/')), isNotEmpty);
+    });
+
+    test('a refused mute snaps back and throws', () async {
+      final api = _Api()..refuse = true;
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _sync(client, {
+        'join': {'!m:example.com': _room('mute me')},
+      });
+      await _settle();
+
+      await expectLater(
+        rooms.setMuted('!m:example.com', true),
+        throwsA(isA<MatrixException>()),
+      );
+      await _settle();
+      expect(byId(rooms, '!m:example.com').muted, isFalse);
+    });
+
+    test('a refused call only rolls back its own wish', () async {
+      final api = _Api()..hold = Completer();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _sync(client, {
+        'join': {'!m:example.com': _room('mute me')},
+      });
+      await _settle();
+
+      final first = rooms.setMuted('!m:example.com', true);
+      await _settle();
+      // The room's real state is still unmuted, so muting off again settles
+      // at once: no push rule needs to change.
+      final second = rooms.setMuted('!m:example.com', false);
+      await _settle();
+      expect(byId(rooms, '!m:example.com').muted, isFalse);
+
+      api.refuse = true;
+      api.hold!.complete();
+      await expectLater(first, throwsA(isA<MatrixException>()));
+      await second;
+      await _settle();
+
+      // The older refusal does not undo the newer wish.
+      expect(byId(rooms, '!m:example.com').muted, isFalse);
+    });
+
+    test('favouriting a low-priority room clears low priority', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _sync(client, {
+        'join': {
+          '!low:example.com': _room(
+            'low',
+            accountData: [
+              {
+                'type': 'm.tag',
+                'content': {
+                  'tags': {'m.lowpriority': <String, Object?>{}},
+                },
+              },
+            ],
+          ),
+        },
+      });
+      await _settle();
+      expect(byId(rooms, '!low:example.com').lowPriority, isTrue);
+
+      final result = rooms.setFavourite('!low:example.com', true);
+      expect(byId(rooms, '!low:example.com').favourite, isTrue);
+      expect(byId(rooms, '!low:example.com').lowPriority, isFalse);
+      await result;
+      await _settle();
+
+      final channel = byId(rooms, '!low:example.com');
+      expect(channel.favourite, isTrue);
+      expect(channel.lowPriority, isFalse);
+      expect(
+        api.answered.where((p) => p.contains('/tags/m.favourite')),
+        isNotEmpty,
+      );
+      expect(
+        api.answered.where((p) => p.contains('/tags/m.lowpriority')),
+        isNotEmpty,
+      );
+    });
+
+    test('reordering sends only the rooms that moved', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _sync(client, {
+        'join': {
+          '!a:example.com': _room(
+            'a',
+            accountData: [tag('m.favourite', order: 0.25)],
+          ),
+          '!b:example.com': _room(
+            'b',
+            accountData: [tag('m.favourite', order: 0.5)],
+          ),
+          '!c:example.com': _room(
+            'c',
+            accountData: [tag('m.favourite', order: 0.75)],
+          ),
+        },
+      });
+      await _settle();
+
+      // a stays first; b and c swap.
+      await rooms.reorderFavourites([
+        '!a:example.com',
+        '!c:example.com',
+        '!b:example.com',
+      ]);
+      await _settle();
+
+      final favTags = api.answered
+          .where((p) => p.contains('/tags/m.favourite'))
+          .toList();
+      expect(favTags, hasLength(2));
+      expect(favTags.any((p) => p.contains('!a%3A')), isFalse);
+      expect(byId(rooms, '!b:example.com').favouriteOrder, 0.75);
+      expect(byId(rooms, '!c:example.com').favouriteOrder, 0.5);
+    });
+
+    test(
+      'leaving hides the row at once, and a refusal brings it back',
+      () async {
+        final api = _Api()..refuse = true;
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _sync(client, {
+          'join': {'!l:example.com': _room('leave me')},
+        });
+        await _settle();
+        expect(rooms.homeRooms.map((c) => c.id), contains('!l:example.com'));
+
+        final result = rooms.setJoined('!l:example.com', false);
+        expect(
+          rooms.homeRooms.map((c) => c.id),
+          isNot(contains('!l:example.com')),
+        );
+        await expectLater(result, throwsA(isA<MatrixException>()));
+        await _settle();
+
+        expect(rooms.homeRooms.map((c) => c.id), contains('!l:example.com'));
+      },
     );
+
+    test('a wish clears when sync agrees', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _sync(client, {
+        'join': {'!m:example.com': _room('mute me')},
+      });
+      await _settle();
+
+      await rooms.setMuted('!m:example.com', true);
+      await _settle();
+      expect(byId(rooms, '!m:example.com').muted, isTrue);
+
+      // The server agrees: the wish is gone, so a later change from another
+      // device is drawn straight through.
+      await client.handleSync(
+        SyncUpdate.fromJson({
+          'next_batch': 'agree',
+          'account_data': {
+            'events': [
+              {
+                'type': 'm.push_rules',
+                'content': {
+                  'global': {
+                    'override': [
+                      {
+                        'rule_id': '!m:example.com',
+                        'actions': <Object>[],
+                        'default': false,
+                        'enabled': true,
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        }),
+      );
+      await _settle();
+      expect(byId(rooms, '!m:example.com').muted, isTrue);
+
+      await client.handleSync(
+        SyncUpdate.fromJson({
+          'next_batch': 'other-device',
+          'account_data': {
+            'events': [
+              {
+                'type': 'm.push_rules',
+                'content': {
+                  'global': {'override': <Object>[]},
+                },
+              },
+            ],
+          },
+        }),
+      );
+      await _settle();
+      expect(byId(rooms, '!m:example.com').muted, isFalse);
+    });
   });
 }

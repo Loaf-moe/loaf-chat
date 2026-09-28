@@ -262,7 +262,7 @@ class _AppShellState extends State<AppShell> {
     // A backend that cannot join has nothing to open here.
     if (joining && !_can(RoomAbility.join)) return;
     setState(() {
-      if (joining) _rooms.setJoined(id, true);
+      if (joining) unawaited(_rooms.setJoined(id, true).catchError(_refused));
       _open(_spaceId, id);
       // A computer connects on click; a phone shows the lobby first, since a
       // stray tap there should never open a live mic.

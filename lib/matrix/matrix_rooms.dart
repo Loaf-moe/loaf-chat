@@ -22,6 +22,22 @@ import 'matrix_timeline.dart';
 /// rooms, stable and unstable.
 const _voiceTypes = {'m.call', 'org.matrix.msc3417.call'};
 
+/// What a row should show while its change is on its way. A field is
+/// cleared when a sync shows it, or when its call fails.
+class _Wish {
+  bool? muted;
+  bool? favourite;
+  double? favouriteOrder;
+  bool? lowPriority;
+  bool? joined;
+  bool get isEmpty =>
+      muted == null &&
+      favourite == null &&
+      favouriteOrder == null &&
+      lowPriority == null &&
+      joined == null;
+}
+
 class MatrixRooms extends ChangeNotifier implements Rooms {
   MatrixRooms(this.client) {
     _subscriptions = [
@@ -86,11 +102,25 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   final _reading = <String>{};
   final _readAgain = <String>{};
 
+  /// Each room's pending change of mute, tag or membership, drawn on top of
+  /// the SDK's own state until a sync agrees or the call fails. The pending
+  /// overlay: one of the two small maps `MatrixRooms` keeps beside its
+  /// derived snapshot.
+  final _wishes = <String, _Wish>{};
+
+  /// Each (room, field)'s latest wish, so a failed older call doesn't undo
+  /// a newer one.
+  final _generation = <(String, String), int>{};
+
   @override
   Set<RoomAbility> get abilities => const {
     RoomAbility.answerInvites,
     RoomAbility.messages,
     RoomAbility.markRead,
+    RoomAbility.mute,
+    RoomAbility.tag,
+    RoomAbility.join,
+    RoomAbility.leave,
   };
 
   @override
@@ -148,10 +178,22 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   // ── Mapping ────────────────────────────────────────────────────────────
 
   void _rebuild() {
+    _settleWishes();
     final joined = {
       for (final room in client.rooms)
-        if (room.membership == Membership.join) room.id: room,
+        if (room.membership == Membership.join &&
+            _wishes[room.id]?.joined != false)
+          room.id: room,
     };
+    // A join wished but not yet synced: drawn as joined from wherever its
+    // room now lists it. Task 4 fills in the case where there is no [Room]
+    // object yet (an unjoined hierarchy child).
+    for (final entry in _wishes.entries) {
+      if (entry.value.joined == true && !joined.containsKey(entry.key)) {
+        final room = client.getRoomById(entry.key);
+        if (room != null) joined[entry.key] = room;
+      }
+    }
     final spaces = [
       for (final room in joined.values)
         if (room.isSpace) room,
@@ -188,6 +230,42 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       if (room.membership == Membership.invite) _loadInvite(room);
     }
     _notify();
+  }
+
+  /// Clears every wished field whose server value now matches it, and drops
+  /// any wish left empty. Called at the start of [_rebuild], so a sync that
+  /// agrees with a wish lets the server's own state, including a later
+  /// change from elsewhere, show through again.
+  void _settleWishes() {
+    for (final id in _wishes.keys.toList()) {
+      final wish = _wishes[id]!;
+      final room = client.getRoomById(id);
+      if (wish.muted != null &&
+          room != null &&
+          (room.pushRuleState != PushRuleState.notify) == wish.muted) {
+        wish.muted = null;
+      }
+      if (wish.favourite != null &&
+          room != null &&
+          (room.tags[TagType.favourite] != null) == wish.favourite) {
+        wish.favourite = null;
+      }
+      if (wish.favouriteOrder != null &&
+          room != null &&
+          room.tags[TagType.favourite]?.order == wish.favouriteOrder) {
+        wish.favouriteOrder = null;
+      }
+      if (wish.lowPriority != null &&
+          room != null &&
+          room.isLowPriority == wish.lowPriority) {
+        wish.lowPriority = null;
+      }
+      if (wish.joined != null &&
+          (room?.membership == Membership.join) == wish.joined) {
+        wish.joined = null;
+      }
+      if (wish.isEmpty) _wishes.remove(id);
+    }
   }
 
   /// Brings back an invite's own membership event and its inviter, which a
@@ -268,7 +346,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         : ChannelKind.room;
     final topic = room.topic;
     final favourite = room.tags[TagType.favourite];
-    return Channel(
+    final channel = Channel(
       id: room.id,
       name: room.getLocalizedDisplayname(),
       kind: kind,
@@ -289,6 +367,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       favouriteOrder: favourite?.order,
       lowPriority: room.isLowPriority,
       lastActivity: room.latestEventReceivedTime,
+    );
+    final wish = _wishes[room.id];
+    if (wish == null) return channel;
+    return channel.copyWith(
+      muted: wish.muted,
+      favourite: wish.favourite,
+      favouriteOrder: wish.favouriteOrder,
+      lowPriority: wish.lowPriority,
+      joined: wish.joined,
     );
   }
 
@@ -439,6 +526,183 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     );
   }
 
+  // ── Toggles ────────────────────────────────────────────────────────────
+
+  /// Applies an optimistic change to [roomId]'s row and sends it to the
+  /// server. Shows at once through [set]; [unset] undoes only the fields
+  /// this very call owns, so a failure never undoes a newer wish on the
+  /// same field. See `_Wish` and the module doc for the design.
+  Future<void> _wished(
+    String roomId,
+    String field,
+    void Function(_Wish) set,
+    void Function(_Wish) unset,
+    Future<void> Function() call,
+  ) => _wishedFields(roomId, {field: (set, unset)}, call);
+
+  /// As [_wished], for a call that wishes several fields at once (favourite
+  /// and low priority both change with one tag call). Each field keeps its
+  /// own generation, so a later call touching only one of them is never
+  /// undone by an earlier one failing.
+  Future<void> _wishedFields(
+    String roomId,
+    Map<String, (void Function(_Wish), void Function(_Wish))> fields,
+    Future<void> Function() call,
+  ) async {
+    final wish = _wishes.putIfAbsent(roomId, _Wish.new);
+    final mine = <String, int>{};
+    fields.forEach((field, fns) {
+      fns.$1(wish);
+      final key = (roomId, field);
+      mine[field] = _generation[key] = (_generation[key] ?? 0) + 1;
+    });
+    _rebuild();
+    try {
+      await call();
+    } catch (_) {
+      final w = _wishes[roomId];
+      if (w != null) {
+        fields.forEach((field, fns) {
+          if (_generation[(roomId, field)] == mine[field]) fns.$2(w);
+        });
+        if (w.isEmpty) _wishes.remove(roomId);
+      }
+      if (!_disposed) _rebuild();
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> setMuted(String roomId, bool muted) {
+    final room = client.getRoomById(roomId);
+    if (room == null) return Future.value();
+    return _wished(
+      roomId,
+      'muted',
+      (wish) => wish.muted = muted,
+      (wish) => wish.muted = null,
+      () => room.setPushRuleState(
+        muted ? PushRuleState.dontNotify : PushRuleState.notify,
+      ),
+    );
+  }
+
+  @override
+  Future<void> setFavourite(String roomId, bool favourite) {
+    final room = client.getRoomById(roomId);
+    if (room == null) return Future.value();
+    return favourite ? _favouriteOn(room) : _favouriteOff(room);
+  }
+
+  Future<void> _favouriteOn(Room room) => _wishedFields(
+    room.id,
+    {
+      'favourite': ((w) => w.favourite = true, (w) => w.favourite = null),
+      'lowPriority': (
+        (w) => w.lowPriority = false,
+        (w) => w.lowPriority = null,
+      ),
+    },
+    () async {
+      await room.addTag(TagType.favourite, order: _afterLastFavourite());
+      if (room.tags[TagType.lowPriority] != null) {
+        await room.removeTag(TagType.lowPriority);
+      }
+    },
+  );
+
+  Future<void> _favouriteOff(Room room) => _wished(
+    room.id,
+    'favourite',
+    (wish) => wish.favourite = false,
+    (wish) => wish.favourite = null,
+    () => room.removeTag(TagType.favourite),
+  );
+
+  /// A little past the highest order any joined room's favourite tag has
+  /// now, so a new favourite lands last; 0.5 when there are none yet.
+  double _afterLastFavourite() {
+    var last = -1.0;
+    for (final room in client.rooms) {
+      if (room.membership != Membership.join) continue;
+      final order = room.tags[TagType.favourite]?.order;
+      if (order != null && order > last) last = order;
+    }
+    return last < 0 ? 0.5 : (last + 1) / 2;
+  }
+
+  @override
+  Future<void> setLowPriority(String roomId, bool lowPriority) {
+    final room = client.getRoomById(roomId);
+    if (room == null) return Future.value();
+    return lowPriority ? _lowPriorityOn(room) : _lowPriorityOff(room);
+  }
+
+  Future<void> _lowPriorityOn(Room room) => _wishedFields(
+    room.id,
+    {
+      'lowPriority': ((w) => w.lowPriority = true, (w) => w.lowPriority = null),
+      'favourite': ((w) => w.favourite = false, (w) => w.favourite = null),
+    },
+    () async {
+      await room.addTag(TagType.lowPriority);
+      if (room.tags[TagType.favourite] != null) {
+        await room.removeTag(TagType.favourite);
+      }
+    },
+  );
+
+  Future<void> _lowPriorityOff(Room room) => _wished(
+    room.id,
+    'lowPriority',
+    (wish) => wish.lowPriority = false,
+    (wish) => wish.lowPriority = null,
+    () => room.removeTag(TagType.lowPriority),
+  );
+
+  /// Favourites in [roomIds]' order, first to last. Only rooms whose
+  /// position actually changed are sent, one at a time.
+  @override
+  Future<void> reorderFavourites(List<String> roomIds) async {
+    final n = roomIds.length;
+    for (var i = 0; i < n; i++) {
+      final room = client.getRoomById(roomIds[i]);
+      if (room == null) continue;
+      final order = (i + 1) / (n + 1);
+      if (room.tags[TagType.favourite]?.order == order) continue;
+      await _wished(
+        room.id,
+        'favouriteOrder',
+        (wish) => wish.favouriteOrder = order,
+        (wish) => wish.favouriteOrder = null,
+        () => room.addTag(TagType.favourite, order: order),
+      );
+    }
+  }
+
+  @override
+  Future<void> setJoined(String roomId, bool joined) {
+    if (!joined) {
+      final room = client.getRoomById(roomId);
+      if (room == null) return Future.value();
+      return _wished(
+        roomId,
+        'joined',
+        (wish) => wish.joined = false,
+        (wish) => wish.joined = null,
+        room.leave,
+      );
+    }
+    return _wished(
+      roomId,
+      'joined',
+      (wish) => wish.joined = true,
+      (wish) => wish.joined = null,
+      // Task 4 fills in `via` from the space directory.
+      () => client.joinRoom(roomId, via: const []),
+    );
+  }
+
   // ── Not wired yet ──────────────────────────────────────────────────────
 
   @override
@@ -463,21 +727,6 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   Future<Never> _unwired(String what) =>
       Future.error(UnsupportedError('$what is not wired to the SDK yet'));
 
-  // `setMuted` throws synchronously rather than through `_unwired`: its own
-  // test expects the throw on the call, not on the future it would return.
-  @override
-  Future<void> setMuted(String roomId, bool muted) =>
-      throw UnsupportedError('muting is not wired to the SDK yet');
-  @override
-  Future<void> setJoined(String roomId, bool joined) => _unwired('joining');
-  @override
-  Future<void> setFavourite(String roomId, bool favourite) =>
-      _unwired('tagging');
-  @override
-  Future<void> reorderFavourites(List<String> roomIds) => _unwired('tagging');
-  @override
-  Future<void> setLowPriority(String roomId, bool lowPriority) =>
-      _unwired('tagging');
   @override
   Future<void> joinSpace(Space space) => _unwired('joining a space');
   @override
