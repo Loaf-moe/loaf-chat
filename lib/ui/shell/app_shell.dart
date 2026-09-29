@@ -385,7 +385,16 @@ class _AppShellState extends State<AppShell> {
           );
         }
       case JoinSpace(:final space):
-        await _rooms.joinSpace(space);
+        try {
+          await _rooms.joinSpace(space);
+        } on Object {
+          // The panel is already closed, so the toast is the way forward:
+          // stay where you were rather than open a space that isn't joined.
+          if (mounted) {
+            showToast(context, "couldn't join ${space.name}. try again?");
+          }
+          return;
+        }
         if (!mounted) return;
         setState(() {
           _spaceId = space.id;

@@ -837,11 +837,24 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       via: via.isNotEmpty ? via : _hierarchy.via(space.id),
     );
     _hierarchy.invalidate(space.id);
+    // The space itself is joined by now: whatever goes wrong walking its
+    // children must not read as a failed join.
+    try {
+      await _joinChildren(space.id);
+    } on Object {
+      // Best-effort: no children joined, the space still is.
+    }
+    _invalidateHierarchies();
+    if (!_disposed) _rebuild();
+  }
+
+  /// Joins the subspaces and suggested channels one level under [spaceId].
+  Future<void> _joinChildren(String spaceId) async {
     final rooms = <SpaceRoomsChunk$2>[];
     String? from;
     do {
       final page = await client.getSpaceHierarchy(
-        space.id,
+        spaceId,
         maxDepth: 1,
         limit: 50,
         from: from,
@@ -849,10 +862,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       rooms.addAll(page.rooms);
       from = page.nextBatch;
     } while (from != null);
-    if (rooms.isEmpty) {
-      if (!_disposed) _rebuild();
-      return;
-    }
+    if (rooms.isEmpty) return;
     final head = rooms.first;
     final childTypes = {for (final c in rooms.skip(1)) c.roomId: c.roomType};
     final subspaces = <String, List<String>>{};
@@ -874,8 +884,6 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         // Best-effort: a refused child is skipped, not thrown.
       }
     }
-    _invalidateHierarchies();
-    if (!_disposed) _rebuild();
   }
 
   /// Leaves [spaceId] and every joined room under it, deepest first, except
@@ -1090,6 +1098,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         await room.invite(userId);
       } on MatrixException catch (e) {
         failed[userId] = e.errorMessage;
+      } on Object {
+        // A dropped connection fails this one id, not the ones after it,
+        // and a retry then resends only who is left.
+        failed[userId] = "couldn't reach the server";
       }
     }
     if (failed.isNotEmpty) throw InviteRefused(failed);

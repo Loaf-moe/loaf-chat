@@ -164,6 +164,43 @@ void main() {
     expect(preview.inviteOnly, isFalse);
   });
 
+  test(
+    'a browsed space is joined through the server it was listed on',
+    () async {
+      final api = _Api()
+        ..publicRoomsResponse = {
+          'chunk': [chunk('!bakers:example.org', name: 'Bakers')],
+        };
+      final client = await _client(api: api);
+      final directory = MatrixSpaceDirectory(client);
+
+      await directory.publicSpaces('example.org');
+
+      expect(directory.viaFor('!bakers:example.org'), ['example.org']);
+    },
+  );
+
+  test('browsing does not overwrite a via a lookup saved', () async {
+    final api = _Api()
+      ..aliasRoomId = '!bakers:example.org'
+      ..aliasServers = ['other.net']
+      ..publicRoomsResponse = {
+        'chunk': [chunk('!bakers:example.org', name: 'Bakers')],
+      };
+    api.hierarchyPages['!bakers:example.org'] = [
+      {
+        'rooms': [hierarchyChunk('!bakers:example.org', name: 'Bakers')],
+      },
+    ];
+    final client = await _client(api: api);
+    final directory = MatrixSpaceDirectory(client);
+
+    await directory.lookUp('#bakers:example.org');
+    await directory.publicSpaces('example.org');
+
+    expect(directory.viaFor('!bakers:example.org'), ['other.net']);
+  });
+
   test('an alias looks up and previews', () async {
     final api = _Api()
       ..aliasRoomId = '!bakers:loaf.moe'

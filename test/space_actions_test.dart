@@ -13,6 +13,7 @@ import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
+import 'package:loaf_native/ui/spaces/add_space.dart';
 import 'package:loaf_native/ui/spaces/space_directory.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/verifier.dart';
@@ -114,13 +115,25 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   Future<void> setLowPriority(String roomId, bool lowPriority) => _unwired();
   @override
-  Future<void> joinSpace(Space space) => _unwired();
+  Future<void> joinSpace(Space space) => throw StateError('refused');
   @override
   Future<String> createSpace(String name, {required Member me}) => _unwired();
   @override
   Future<Channel> createDirect(List<Member> members) => _unwired();
   @override
-  SpaceDirectory get directory => _unwired();
+  SpaceDirectory get directory => _Directory();
+}
+
+/// Any address resolves to a space that is not joined.
+class _Directory implements SpaceDirectory {
+  @override
+  Future<List<SpacePreview>> publicSpaces(String server) async => const [];
+  @override
+  Future<SpacePreview> lookUp(String address) async => const SpacePreview(
+    alias: '#pies:loaf.test',
+    space: Space(id: '!pies', name: 'Pies', color: Color(0xFF4E9E76)),
+    memberCount: 3,
+  );
 }
 
 class _Session extends ChangeNotifier implements LoafSession {
@@ -180,6 +193,30 @@ Finder _inList(String text) =>
     find.descendant(of: find.byType(ChannelList), matching: find.text(text));
 
 void main() {
+  group('joining a space', () {
+    testWidgets(
+      "a join the server refuses toasts, and stays where you were",
+      variant: _desktop,
+      (tester) async {
+        final rooms = _FakeRooms(spaces: [_bakery()])
+          ..abilities = {RoomAbility.addSpace};
+        await _pump(tester, rooms);
+        await tester.tap(find.byTooltip('Add a space'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('join with a link'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField).last, '#pies:loaf.test');
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('join'));
+        await tester.pumpAndSettle();
+
+        expect(find.text("couldn't join Pies. try again?"), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        expect(find.byType(AddSpacePanel), findsNothing);
+      },
+    );
+  });
+
   group('the space menu', () {
     testWidgets(
       'right-clicking a space on a computer opens its menu at the pointer',

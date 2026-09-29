@@ -35,6 +35,13 @@ class _Api extends FakeMatrixApi {
   /// User ids an `/invite` call refuses, even while [refuse] is false.
   final refuseInviteIds = <String>{};
 
+  /// User ids an `/invite` call answers with a body that is not JSON, so
+  /// the SDK throws something other than a [MatrixException].
+  final brokenInviteIds = <String>{};
+
+  /// When set, every `/hierarchy` call fails with a server error.
+  var failHierarchy = false;
+
   /// When set, the display name every profile answers with.
   String? profileName;
 
@@ -56,6 +63,12 @@ class _Api extends FakeMatrixApi {
       return http.Response(jsonEncode({'displayname': profileName}), 200);
     }
     if (request.method == 'GET' && path.contains('/hierarchy')) {
+      if (failHierarchy) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_UNKNOWN', 'error': 'boom'}),
+          500,
+        );
+      }
       final spaceId = Uri.decodeComponent(
         path.split('/rooms/')[1].split('/hierarchy')[0],
       );
@@ -109,6 +122,9 @@ class _Api extends FakeMatrixApi {
               as String;
       answered.add(path);
       await hold?.future;
+      if (brokenInviteIds.contains(userId)) {
+        return http.Response('not json', 200);
+      }
       if (refuse || refuseInviteIds.contains(userId)) {
         return http.Response(
           jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
@@ -1169,6 +1185,50 @@ void main() {
             '@erin:example.com',
           ]),
         ),
+      );
+    });
+  });
+
+  group('a failing invite or hierarchy', () {
+    test('an error that is not the server\'s fails only that id', () async {
+      final api = _Api()..brokenInviteIds.add('@erin:example.com');
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _settle();
+
+      await expectLater(
+        rooms.invite('!general:example.com', [
+          '@erin:example.com',
+          '@carol:example.com',
+        ]),
+        throwsA(
+          isA<InviteRefused>().having((e) => e.failed.keys, 'failed', [
+            '@erin:example.com',
+          ]),
+        ),
+      );
+      expect(
+        api.answered.where((p) => p.endsWith('/invite')),
+        hasLength(2),
+        reason: 'carol was still invited after erin failed',
+      );
+    });
+
+    test('joining a space survives its hierarchy failing', () async {
+      final api = _Api()..failHierarchy = true;
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+
+      await rooms.joinSpace(
+        Space(id: '!newspace:example.com', name: 'New', color: Colors.blue),
+      );
+      await _settle();
+
+      expect(
+        api.answered.where((p) => p.contains('/join/')),
+        hasLength(1),
+        reason: 'the space joined; no children did',
       );
     });
   });

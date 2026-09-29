@@ -33,13 +33,15 @@ class MatrixSpaceDirectory implements SpaceDirectory {
       server: server,
       filter: PublicRoomQueryFilter(roomTypes: ['m.space']),
     );
-    return [for (final chunk in response.chunk) _fromChunk(chunk)];
+    return [for (final chunk in response.chunk) _fromChunk(chunk, server)];
   }
 
-  SpacePreview _fromChunk(PublishedRoomsChunk chunk) {
+  SpacePreview _fromChunk(PublishedRoomsChunk chunk, String server) {
     final id = chunk.roomId;
     final name = chunk.name ?? chunk.canonicalAlias ?? 'unnamed';
-    _via[id] = const [];
+    // The listing came from [server], so it certainly knows the space. A
+    // via a lookup already saved is at least as good: keep it.
+    if (_via[id]?.isEmpty ?? true) _via[id] = [server];
     return SpacePreview(
       alias: chunk.canonicalAlias ?? id,
       space: Space(id: id, name: name, color: spaceColorFor(name)),
