@@ -58,13 +58,35 @@ void main() {
   testWidgets("a malformed id can't be invited", (tester) async {
     await _pump(tester, onInvite: (_) async {});
     final field = find.byType(TextField).last;
-    for (final bad in ['bob', '@bob', 'bob:loaf.moe']) {
+    for (final bad in ['bob', '@bob', 'bob:']) {
       await tester.enterText(field, bad);
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump();
       expect(find.byType(InputChip), findsNothing);
     }
     expect(_enabled(tester), isFalse);
+  });
+
+  testWidgets('an id typed without @ still makes a chip', (tester) async {
+    await _pump(tester, onInvite: (_) async {});
+    await tester.enterText(find.byType(TextField).last, 'bob:loaf.moe');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(find.widgetWithText(InputChip, '@bob:loaf.moe'), findsOneWidget);
+    expect(_enabled(tester), isTrue);
+  });
+
+  testWidgets('a malformed id says why', (tester) async {
+    await _pump(tester, onInvite: (_) async {});
+    final field = find.byType(TextField).last;
+    await tester.enterText(field, 'bob');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(find.text("that's not an id like @name:server"), findsOneWidget);
+
+    await tester.enterText(field, 'bob:');
+    await tester.pump();
+    expect(find.text("that's not an id like @name:server"), findsNothing);
   });
 
   testWidgets('inviting shows inviting and no cancel', (tester) async {

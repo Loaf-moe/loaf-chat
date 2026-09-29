@@ -298,6 +298,36 @@ void main() {
       await tester.pumpAndSettle();
       expect(_spaceIcon(), findsOneWidget);
     });
+
+    testWidgets(
+      'leaving another space keeps you where you are',
+      variant: _desktop,
+      (tester) async {
+        const pies = Space(
+          id: '!pies',
+          name: 'Pies',
+          color: Color(0xFF4E9E76),
+          members: [_me],
+          categories: [
+            ChannelCategory('', [Channel(id: '!crusts', name: 'crusts')]),
+          ],
+        );
+        await _pump(tester, _FakeRooms(spaces: [_bakery(), pies]));
+        await tester.tap(find.byKey(const ValueKey('space-!pies')));
+        await tester.pumpAndSettle();
+        expect(_inList('crusts'), findsOneWidget);
+
+        await tester.tap(_spaceIcon(), buttons: kSecondaryButton);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Leave space'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('leave'));
+        await tester.pumpAndSettle();
+
+        expect(_spaceIcon(), findsNothing);
+        expect(_inList('crusts'), findsOneWidget);
+      },
+    );
   });
 
   testWidgets('a channel offers invite people', variant: _desktop, (

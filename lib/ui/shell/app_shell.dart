@@ -509,9 +509,10 @@ class _AppShellState extends State<AppShell> {
         final rooms = space.allChannels.where((c) => c.joined).length;
         final confirmed = await confirmLeaveSpace(context, space, rooms: rooms);
         if (!confirmed || !mounted) return;
-        // Once confirmed there is no cancelling it: move to Home at once
-        // rather than waiting on the network.
-        setState(() => _open(mockHome.id, null));
+        // Once confirmed there is no cancelling it. If you are inside the
+        // space, move to Home at once rather than waiting on the network;
+        // from anywhere else, stay where you are.
+        if (_spaceId == space.id) setState(() => _open(mockHome.id, null));
         unawaited(
           _rooms.leaveSpace(space.id).catchError((Object error) {
             if (!mounted) return;

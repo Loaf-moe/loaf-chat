@@ -75,6 +75,9 @@ class _InvitePanelState extends State<InvitePanel> {
   void initState() {
     super.initState();
     _search.addListener(() => setState(() {}));
+    _idField.addListener(() {
+      if (_idNote != null) setState(() => _idNote = null);
+    });
   }
 
   @override
@@ -101,11 +104,19 @@ class _InvitePanelState extends State<InvitePanel> {
     if (!_checked.remove(m.id)) _checked.add(m.id);
   });
 
+  /// Why the typed id made no chip, until the text changes.
+  String? _idNote;
+
   void _addChip() {
-    final id = _idField.text.trim();
-    if (!_mxid.hasMatch(id) || _chips.contains(id) || _checked.contains(id)) {
+    final typed = _idField.text.trim();
+    if (typed.isEmpty) return;
+    // The field already shows an "@", so typing one is optional.
+    final id = typed.startsWith('@') ? typed : '@$typed';
+    if (!_mxid.hasMatch(id)) {
+      setState(() => _idNote = "that's not an id like @name:server");
       return;
     }
+    if (_chips.contains(id) || _checked.contains(id)) return;
     setState(() {
       _chips.add(id);
       _idField.clear();
@@ -213,6 +224,14 @@ class _InvitePanelState extends State<InvitePanel> {
               onSubmitted: (_) => _addChip(),
               decoration: field(hint: '@name:server', icon: LucideIcons.atSign),
             ),
+            if (_idNote != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  _idNote!,
+                  style: loafBody(12, 500).copyWith(color: tokens.accent),
+                ),
+              ),
             if (_chips.isNotEmpty) ...[
               const SizedBox(height: LoafSpace.x2),
               Wrap(
