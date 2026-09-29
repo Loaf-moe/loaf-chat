@@ -97,6 +97,8 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **A panel dismissed mid-create.** It is blocked instead. On phones, a panel that can create or start a DM loses swipe-down-to-close even when idle, because Flutter's sheet drag pops past `PopScope`.
 - **Group DM reuse matches on the room summary's heroes,** which are capped at 5, so a group of more than 5 people always gets a new DM.
 - **Joining a space can cost two `/hierarchy` requests,** and leaving one walks every other joined space's tree. Both are fine at loaf.moe's size.
+- **Favourite or low priority can roll back the display when their second call fails** though the first landed; the next sync heals it.
+- **`createDirect` can throw a bare StateError** if a reused DM is not yet in Home after sync; it should say so plainly.
 - **The explore panel's server list** is a fixed `loaf.moe` and `matrix.org`, plus whatever you type.
 - **`test/matrix/matrix_timeline_test.dart` flakes on most full-suite runs on `main` too** (checked 2026-09-28: 3 of 4 runs had one or two failures, a different test each time). It passes alone. This joins the phase 3 note about it.
 

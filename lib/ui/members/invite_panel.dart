@@ -22,6 +22,9 @@ Future<void> showInvitePanel(
   required Future<void> Function(List<String> ids) onInvite,
 }) => showAdaptivePanel(
   context,
+  // The sheet's drag-to-close pops straight past the panel's PopScope, and
+  // an invite in flight must not be put away.
+  enableDrag: false,
   child: InvitePanel(roomName: roomName, people: people, onInvite: onInvite),
 );
 
@@ -177,108 +180,115 @@ class _InvitePanelState extends State<InvitePanel> {
           ),
         );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        LoafSpace.x4,
-        LoafSpace.x2,
-        LoafSpace.x4,
-        LoafSpace.x4,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            'invite to ${widget.roomName}',
-            style: loafDisplay(20, 600).copyWith(color: tokens.textStrong),
-          ),
-          const SizedBox(height: LoafSpace.x3),
-          TextField(
-            controller: _search,
-            style: loafBody(15, 400).copyWith(color: tokens.textStrong),
-            decoration: field(hint: 'search people', icon: LucideIcons.search),
-          ),
-          const SizedBox(height: LoafSpace.x2),
-          TextField(
-            controller: _idField,
-            style: loafBody(15, 400).copyWith(color: tokens.textStrong),
-            onSubmitted: (_) => _addChip(),
-            decoration: field(hint: '@name:server', icon: LucideIcons.atSign),
-          ),
-          if (_chips.isNotEmpty) ...[
-            const SizedBox(height: LoafSpace.x2),
-            Wrap(
-              spacing: LoafSpace.x2,
-              runSpacing: LoafSpace.x2,
-              children: [
-                for (final id in _chips)
-                  InputChip(
-                    label: Text(id),
-                    labelStyle: loafBody(
-                      13,
-                      500,
-                    ).copyWith(color: tokens.textStrong),
-                    backgroundColor: tokens.sunken,
-                    side: BorderSide(
-                      color: _failed.containsKey(id)
-                          ? tokens.accent
-                          : tokens.border,
-                    ),
-                    onDeleted: () => setState(() {
-                      _chips.remove(id);
-                      _failed.remove(id);
-                    }),
-                    deleteButtonTooltipMessage: 'Remove',
-                  ),
-              ],
+    return PopScope(
+      // Dismissing mid-send would lose who was refused: no cancel while busy.
+      canPop: !_sending,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          LoafSpace.x4,
+          LoafSpace.x2,
+          LoafSpace.x4,
+          LoafSpace.x4,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'invite to ${widget.roomName}',
+              style: loafDisplay(20, 600).copyWith(color: tokens.textStrong),
             ),
-          ],
-          // A failed chip's own text; a failed known person is marked on
-          // their row instead, so it is not said twice.
-          for (final id in _failed.keys)
-            if (!knownIds.contains(id))
+            const SizedBox(height: LoafSpace.x3),
+            TextField(
+              controller: _search,
+              style: loafBody(15, 400).copyWith(color: tokens.textStrong),
+              decoration: field(
+                hint: 'search people',
+                icon: LucideIcons.search,
+              ),
+            ),
+            const SizedBox(height: LoafSpace.x2),
+            TextField(
+              controller: _idField,
+              style: loafBody(15, 400).copyWith(color: tokens.textStrong),
+              onSubmitted: (_) => _addChip(),
+              decoration: field(hint: '@name:server', icon: LucideIcons.atSign),
+            ),
+            if (_chips.isNotEmpty) ...[
+              const SizedBox(height: LoafSpace.x2),
+              Wrap(
+                spacing: LoafSpace.x2,
+                runSpacing: LoafSpace.x2,
+                children: [
+                  for (final id in _chips)
+                    InputChip(
+                      label: Text(id),
+                      labelStyle: loafBody(
+                        13,
+                        500,
+                      ).copyWith(color: tokens.textStrong),
+                      backgroundColor: tokens.sunken,
+                      side: BorderSide(
+                        color: _failed.containsKey(id)
+                            ? tokens.accent
+                            : tokens.border,
+                      ),
+                      onDeleted: () => setState(() {
+                        _chips.remove(id);
+                        _failed.remove(id);
+                      }),
+                      deleteButtonTooltipMessage: 'Remove',
+                    ),
+                ],
+              ),
+            ],
+            // A failed chip's own text; a failed known person is marked on
+            // their row instead, so it is not said twice.
+            for (final id in _failed.keys)
+              if (!knownIds.contains(id))
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    "$id didn't go through",
+                    style: loafBody(12, 500).copyWith(color: tokens.accent),
+                  ),
+                ),
+            if (_error != null)
               Padding(
-                padding: const EdgeInsets.only(top: 4),
+                padding: const EdgeInsets.only(top: LoafSpace.x2),
                 child: Text(
-                  "$id didn't go through",
-                  style: loafBody(12, 500).copyWith(color: tokens.accent),
+                  _error!,
+                  style: loafBody(13, 500).copyWith(color: tokens.accent),
                 ),
               ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: LoafSpace.x2),
-              child: Text(
-                _error!,
-                style: loafBody(13, 500).copyWith(color: tokens.accent),
+            const SizedBox(height: LoafSpace.x2),
+            Expanded(
+              child: ListView(
+                children: [
+                  for (final m in matches)
+                    _PersonRow(
+                      key: ValueKey('invite-${m.id}'),
+                      person: m,
+                      checked: _checked.contains(m.id),
+                      failed: _failed.containsKey(m.id),
+                      onToggle: () => _toggle(m),
+                    ),
+                ],
               ),
             ),
-          const SizedBox(height: LoafSpace.x2),
-          Expanded(
-            child: ListView(
-              children: [
-                for (final m in matches)
-                  _PersonRow(
-                    key: ValueKey('invite-${m.id}'),
-                    person: m,
-                    checked: _checked.contains(m.id),
-                    failed: _failed.containsKey(m.id),
-                    onToggle: () => _toggle(m),
-                  ),
-              ],
+            const SizedBox(height: LoafSpace.x3),
+            LoafButton(
+              label: _label,
+              leading: _sending
+                  ? const SizedBox(
+                      width: 15,
+                      height: 15,
+                      child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+                    )
+                  : null,
+              onTap: _sending || _selectedIds.isEmpty ? null : _send,
             ),
-          ),
-          const SizedBox(height: LoafSpace.x3),
-          LoafButton(
-            label: _label,
-            leading: _sending
-                ? const SizedBox(
-                    width: 15,
-                    height: 15,
-                    child: CircularProgressIndicator.adaptive(strokeWidth: 2),
-                  )
-                : null,
-            onTap: _sending || _selectedIds.isEmpty ? null : _send,
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

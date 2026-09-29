@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/members/invite_panel.dart';
 import 'package:loaf_native/ui/model/models.dart';
@@ -120,4 +121,24 @@ void main() {
       ]);
     },
   );
+
+  testWidgets("an invite in flight can't be dismissed", (tester) async {
+    final gate = Completer<void>();
+    await _pump(tester, onInvite: (_) => gate.future);
+    await tester.tap(find.text('Mika Rye'));
+    await tester.pump();
+    await tester.tap(find.text('invite'));
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(find.byType(InvitePanel), findsOneWidget, reason: 'not by escape');
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.byType(InvitePanel), findsOneWidget, reason: 'nor by back');
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(InvitePanel), findsNothing);
+  });
 }
