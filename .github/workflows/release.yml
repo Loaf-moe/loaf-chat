@@ -1,0 +1,155 @@
+# Pushing a tag like v0.1.0, on main, is the whole release.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.version.outputs.name }}
+      build: ${{ steps.version.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::the tag is not on main"; exit 1; }
+          name="${GITHUB_REF_NAME#v}"
+          [[ "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+            || { echo "::error::tags look like v1.2.3"; exit 1; }
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          # Every updater compares this, so it only ever goes up.
+          echo "build=$(git rev-list --count "$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: >
+          mise exec -- flutter build macos --release
+          --build-name=${{ needs.version.outputs.name }}
+          --build-number=${{ needs.version.outputs.build }}
+          --dart-define=LOAF_BUILD=${{ needs.version.outputs.build }}
+      - run: tool/release/macos.sh "${{ needs.version.outputs.name }}" dist
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/
+
+  linux:
+    needs: version
+    # The oldest runner, for the oldest glibc: the AppImage runs on whatever
+    # the tester has.
+    runs-on: ubuntu-22.04
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev jq
+      - uses: jdx/mise-action@v2
+      - run: >
+          mise exec -- flutter build linux --release
+          --build-name=${{ needs.version.outputs.name }}
+          --build-number=${{ needs.version.outputs.build }}
+          --dart-define=LOAF_BUILD=${{ needs.version.outputs.build }}
+      - run: >
+          tool/release/appimage.sh "${{ needs.version.outputs.name }}"
+          "${{ needs.version.outputs.build }}" dist
+        env:
+          APPIMAGE_PRIVATE_KEY: ${{ secrets.APPIMAGE_PRIVATE_KEY }}
+      # Tarred: artifacts drop the executable bit.
+      - run: tar -cf dist/bundle.tar -C build/linux/x64/release bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/
+
+  flatpak:
+    needs: [version, linux]
+    runs-on: ubuntu-latest
+    environment: release
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: dist
+      - run: |
+          mkdir -p build/linux/x64/release
+          tar -xf dist/bundle.tar -C build/linux/x64/release
+          # The repo so far, so this build lands on top of the last ones.
+          if git clone --depth 1 --branch gh-pages \
+              "https://github.com/${GITHUB_REPOSITORY}.git" pages-before; then
+            mv pages-before/repo repo
+          fi
+      - run: tool/release/flatpak.sh "${{ needs.version.outputs.name }}" repo
+        env:
+          FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+      - run: tar -cf repo.tar repo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: repo.tar
+
+  publish:
+    needs: [version, macos, linux, flatpak]
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.version.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Release assets first
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --draft \
+                 --title "Loaf Chat $VERSION" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" --clobber \
+            artifacts/macos/*.dmg artifacts/linux/*.AppImage
+          # Public before any feed names them: a feed never points at a
+          # file that is not there.
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+      - name: Feeds last
+        run: |
+          mkdir dist
+          tar -xf artifacts/flatpak/repo.tar -C dist
+          cp artifacts/macos/appcast.xml artifacts/linux/latest.json dist/
+          tool/release/pages.sh dist pages
+          cd pages
+          # One commit, replaced each time: the branch keeps no history.
+          git init -b gh-pages
+          git add -A
+          git -c user.name="loaf chat releases" -c user.email="releases@loaf.moe" \
+            commit -q -m "Loaf Chat $VERSION"
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages

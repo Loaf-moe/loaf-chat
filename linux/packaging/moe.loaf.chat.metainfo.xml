@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>moe.loaf.chat</id>
+  <name>Loaf Chat</name>
+  <summary>A Matrix client for loaf.moe</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+  <description>
+    <p>A Matrix client for loaf.moe, shaped like a place you hang out.</p>
+  </description>
+  <launchable type="desktop-id">moe.loaf.chat.desktop</launchable>
+  <url type="homepage">https://github.com/Loaf-moe/loaf-chat</url>
+</component>

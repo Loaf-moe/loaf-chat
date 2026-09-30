@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Loaf Chat
+Comment=A Matrix client for loaf.moe
+Exec=loaf-chat
+Icon=moe.loaf.chat
+Categories=Network;InstantMessaging;Chat;
+StartupWMClass=moe.loaf.chat
+Terminal=false
