@@ -249,11 +249,11 @@ void main() {
       },
     );
 
-    testWidgets('a room says messages are not wired, with no composer', (
+    testWidgets('a room says messages are not available, with no composer', (
       tester,
     ) async {
       await _pump(tester, _FakeRooms(spaces: [_bakery()]));
-      expect(find.text("messages aren't wired up yet"), findsOneWidget);
+      expect(find.text("messages aren't available here yet"), findsOneWidget);
       expect(find.byType(Composer), findsNothing);
     });
 
@@ -265,7 +265,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Voice connected'), findsNothing);
       expect(find.text('join voice'), findsNothing);
-      expect(find.text("messages aren't wired up yet"), findsOneWidget);
+      expect(find.text("voice chat isn't available yet"), findsOneWidget);
+      expect(find.textContaining('wired'), findsNothing);
     });
 
     testWidgets('with messages but no calls, a voice channel still waits', (
@@ -277,12 +278,52 @@ void main() {
       await tester.tap(_inList('oven'));
       await tester.pumpAndSettle();
       expect(find.text('join voice'), findsNothing);
-      expect(find.text("messages aren't wired up yet"), findsOneWidget);
+      expect(find.text("voice chat isn't available yet"), findsOneWidget);
+      expect(
+        find.text(
+          "loaf can't connect to voice channels yet. "
+          'text channels work as usual.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text("messages aren't available here yet"), findsNothing);
     });
+
+    testWidgets(
+      'with messages but no calls, a voice channel offers no call controls',
+      variant: _desktop,
+      (tester) async {
+        final rooms = _FakeRooms(spaces: [_bakery()])
+          ..abilities = {RoomAbility.messages};
+        await _pump(tester, rooms);
+        await tester.tap(_inList('oven'));
+        await tester.pumpAndSettle();
+        expect(find.byIcon(LucideIcons.mic), findsNothing);
+        expect(find.byIcon(LucideIcons.micOff), findsNothing);
+        expect(find.byIcon(LucideIcons.headphones), findsNothing);
+        expect(find.byIcon(LucideIcons.phoneOff), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'with messages but no calls, the members toggle still works in voice',
+      variant: _desktop,
+      (tester) async {
+        final rooms = _FakeRooms(spaces: [_bakery()])
+          ..abilities = {RoomAbility.messages};
+        await _pump(tester, rooms);
+        await tester.tap(_inList('oven'));
+        await tester.pumpAndSettle();
+        expect(find.byType(MemberList), findsOneWidget);
+        await tester.tap(find.byIcon(LucideIcons.users));
+        await tester.pumpAndSettle();
+        expect(find.byType(MemberList), findsNothing);
+      },
+    );
 
     testWidgets('a DM offers no calls', (tester) async {
       await _pump(tester, _FakeRooms(homeRooms: [_dm]));
-      expect(find.text("messages aren't wired up yet"), findsOneWidget);
+      expect(find.text("messages aren't available here yet"), findsOneWidget);
       expect(find.byTooltip('Start a voice call'), findsNothing);
       expect(find.byTooltip('Start a video call'), findsNothing);
     });

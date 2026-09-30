@@ -214,6 +214,10 @@ class _AppShellState extends State<AppShell> {
 
   bool _can(RoomAbility ability) => _rooms.abilities.contains(ability);
 
+  /// Whether a voice channel opens to its call page. Without both, it is a
+  /// room's header over a line saying voice isn't available.
+  bool get _voiceWorks => _can(RoomAbility.messages) && _can(RoomAbility.calls);
+
   /// The row actions the rooms can carry out. Older conversations is only
   /// a way to reach a room, so it is always there.
   Set<ChannelAction> get _allowedActions => {
@@ -932,7 +936,7 @@ class _AppShellState extends State<AppShell> {
     // line saying so — and so is a voice channel before it can join calls,
     // since joining one is that channel's only next step.
     if (!_can(RoomAbility.messages) ||
-        (channel.kind == ChannelKind.voice && !_can(RoomAbility.calls))) {
+        (channel.kind == ChannelKind.voice && !_voiceWorks)) {
       return ChannelView(
         channel: channel,
         timeline: null,
@@ -1051,10 +1055,10 @@ class _AppShellState extends State<AppShell> {
                           _previewInvite == null &&
                           (channel!.kind == ChannelKind.text ||
                               channel.kind == ChannelKind.room ||
-                              // Before messages are wired, a voice channel
-                              // is the same pane, toggle and all.
+                              // A voice channel that can't be joined yet is
+                              // the same pane as a room, toggle and all.
                               (channel.kind == ChannelKind.voice &&
-                                  !_can(RoomAbility.messages))))
+                                  !_voiceWorks)))
                         DecoratedBox(
                           decoration: BoxDecoration(
                             border: Border(

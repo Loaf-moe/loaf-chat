@@ -120,7 +120,11 @@ class ChannelView extends StatelessWidget {
               onStartCall: onStartCall,
             ),
             if (timeline == null)
-              const Expanded(child: _Unwired())
+              Expanded(
+                child: channel.kind == ChannelKind.voice
+                    ? const _NoVoice()
+                    : const _NoMessages(),
+              )
             else if (callPanel != null && callPanelExpanded)
               Expanded(child: callPanel!)
             else ...[
@@ -235,6 +239,7 @@ class _ChannelHeader extends StatelessWidget {
                     LucideIcons.users,
                   ChannelKind.direct => LucideIcons.atSign,
                   ChannelKind.room => LucideIcons.messagesSquare,
+                  ChannelKind.voice => LucideIcons.volume2,
                   _ => LucideIcons.hash,
                 },
                 size: 18,
@@ -601,26 +606,78 @@ class _WaitingLine extends StatelessWidget {
 }
 
 /// Where the timeline goes, before this backend can read one.
-class _Unwired extends StatelessWidget {
-  const _Unwired();
+class _NoMessages extends StatelessWidget {
+  const _NoMessages();
+
+  @override
+  Widget build(BuildContext context) => const _Placeholder(
+    icon: LucideIcons.messagesSquare,
+    title: "messages aren't available here yet",
+  );
+}
+
+/// A voice channel, before this backend can join calls. Joining is the
+/// channel's only next step, so it says plainly that voice isn't there
+/// rather than drawing controls that would do nothing.
+class _NoVoice extends StatelessWidget {
+  const _NoVoice();
+
+  @override
+  Widget build(BuildContext context) => const _Placeholder(
+    icon: LucideIcons.volumeOff,
+    title: "voice chat isn't available yet",
+    detail:
+        "loaf can't connect to voice channels yet. "
+        'text channels work as usual.',
+  );
+}
+
+/// A quiet, centred line in place of a conversation.
+class _Placeholder extends StatelessWidget {
+  const _Placeholder({required this.icon, required this.title, this.detail});
+
+  final IconData icon;
+  final String title;
+  final String? detail;
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
+    final detail = this.detail;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(LoafSpace.x6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.messagesSquare, size: 28, color: tokens.textMuted),
-            const SizedBox(height: LoafSpace.x3),
-            Text(
-              "messages aren't wired up yet",
-              textAlign: TextAlign.center,
-              style: loafBody(13, 400).copyWith(color: tokens.textMuted),
-            ),
-          ],
+        child: ConstrainedBox(
+          // Keeps the detail line a readable measure on a wide window.
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 28, color: tokens.textMuted),
+              const SizedBox(height: LoafSpace.x3),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style:
+                    loafBody(
+                      detail == null ? 13 : 15,
+                      detail == null ? 400 : 600,
+                    ).copyWith(
+                      color: detail == null
+                          ? tokens.textMuted
+                          : tokens.textStrong,
+                    ),
+              ),
+              if (detail != null) ...[
+                const SizedBox(height: LoafSpace.x1),
+                Text(
+                  detail,
+                  textAlign: TextAlign.center,
+                  style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
