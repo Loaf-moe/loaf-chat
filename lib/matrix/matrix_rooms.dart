@@ -156,7 +156,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   late final AvatarImages avatarImages = MatrixAvatarImages(client);
 
   @override
-  late final Profile profile = MatrixProfile(client, identity: () => me);
+  Profile get profile => _profile ??= MatrixProfile(client, identity: () => me);
+
+  /// Made on first read, so rooms nobody asks for a profile never publish.
+  Profile? _profile;
 
   @override
   Member get me {
@@ -1143,7 +1146,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       t.dispose();
     }
     _hierarchy.dispose();
-    profile.dispose();
+    _profile?.dispose();
     super.dispose();
   }
 }

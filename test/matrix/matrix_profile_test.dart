@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_profile.dart';
+import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/ui/members/presence.dart' as loaf;
 import 'package:matrix/matrix.dart' hide Presence;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -140,6 +141,30 @@ void main() {
     await _settle();
     expect(api.bodies, hasLength(1));
     expect(api.bodies.single['presence'], 'online');
+  });
+
+  test('the launch publish keeps the status the server already has', () async {
+    final api = _Api();
+    final client = await _client(api);
+    await client.database.storePresence(
+      _me,
+      CachedPresence(PresenceType.online, null, 'baking', null, _me),
+    );
+    final profile = MatrixProfile(client);
+    addTearDown(profile.dispose);
+    await _settle();
+    expect(api.bodies.first['status_msg'], 'baking');
+    expect(profile.status, 'baking');
+  });
+
+  test('rooms never asked for a profile publish nothing', () async {
+    final api = _Api();
+    final client = await _client(api);
+    final rooms = MatrixRooms(client);
+    await _settle();
+    rooms.dispose();
+    await _settle();
+    expect(api.bodies, isEmpty);
   });
 
   test('a refused publish means the server shares none', () async {

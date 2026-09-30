@@ -22,7 +22,7 @@ class MatrixProfile extends ChangeNotifier implements Profile {
       client.onSync.stream.listen(_onSync),
       client.onSyncStatus.stream.listen(_onSyncStatus),
     ];
-    unawaited(_loadOwnStatus());
+    _ownStatus = _loadOwnStatus();
     // The status stream does not replay, and a sync may already be done.
     final status = client.onSyncStatus.value;
     if (status != null) _onSyncStatus(status);
@@ -48,6 +48,10 @@ class MatrixProfile extends ChangeNotifier implements Profile {
   var _statusTurn = 0;
 
   var _published = false;
+
+  /// The stored own status, read at start. The publish waits on it so it
+  /// never sends an empty status over the one the server has.
+  late final Future<void> _ownStatus;
 
   @override
   PresenceChoice get choice => _choice;
@@ -135,6 +139,8 @@ class MatrixProfile extends ChangeNotifier implements Profile {
   /// "does this server share presence at all?". A refusal answers no; a
   /// failure that says nothing about it decides nothing.
   Future<void> _publish() async {
+    await _ownStatus;
+    if (_disposed) return;
     try {
       await client.setPresence(
         client.userID!,
