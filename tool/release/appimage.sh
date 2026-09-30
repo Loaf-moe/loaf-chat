@@ -9,9 +9,10 @@ work="$(mktemp -d)"
 appdir="$work/Loaf-Chat.AppDir"
 mkdir -p "$out" "$appdir"
 
-# The key goes to a file now and out of the environment, so nothing
-# downloaded or run below can read it.
-echo "$APPIMAGE_PRIVATE_KEY" > "$work/key.pem"
+# The key lives in a plain, unexported shell variable and leaves the
+# environment now, so nothing downloaded or run below can read it, and it is
+# not on disk while appimagetool runs.
+private_key="$APPIMAGE_PRIVATE_KEY"
 unset APPIMAGE_PRIVATE_KEY
 
 cp -r "$bundle"/. "$appdir/"
@@ -30,15 +31,28 @@ tool_sha=ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
 curl -fsSL -o "$work/appimagetool" "$tool_url"
 echo "$tool_sha  $work/appimagetool" | sha256sum -c -
 chmod +x "$work/appimagetool"
+# Pinned: the tool would otherwise fetch the floating `continuous` runtime,
+# which becomes the head of the file we sign. To bump, take the x86_64
+# `runtime-x86_64` asset of a tagged AppImage/type2-runtime release, run
+# `sha256sum` on it, and update both lines.
+runtime_url=https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+runtime_sha=2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+curl -fsSL -o "$work/runtime" "$runtime_url"
+echo "$runtime_sha  $work/runtime" | sha256sum -c -
 name="Loaf-Chat-$version-x86_64.AppImage"
 # Runners have no FUSE, so the tool unpacks itself to run.
-ARCH=x86_64 "$work/appimagetool" --appimage-extract-and-run "$appdir" "$out/$name"
+ARCH=x86_64 "$work/appimagetool" --appimage-extract-and-run \
+  --runtime-file "$work/runtime" "$appdir" "$out/$name"
 
 sha="$(sha256sum "$out/$name" | cut -d' ' -f1)"
 size="$(stat -c %s "$out/$name")"
 # Exactly Release.signedText in lib/update/release_feed.dart: no last newline.
 printf 'loaf-chat-appimage\n%s\n%s\n%s' "$version" "$build" "$sha" > "$work/signed.txt"
+# The key touches disk only for the signing, and only this user can read it.
+(umask 077; printf '%s\n' "$private_key" > "$work/key.pem")
+unset private_key
 signature="$(openssl pkeyutl -sign -inkey "$work/key.pem" -rawin -in "$work/signed.txt" | base64 -w0)"
+rm -f "$work/key.pem"
 
 jq -n --arg version "$version" --argjson build "$build" \
   --arg url "https://github.com/Loaf-moe/loaf-chat/releases/download/v$version/$name" \
