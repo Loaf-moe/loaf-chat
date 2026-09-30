@@ -104,9 +104,13 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 
 ## Deferred from phase 6, to place later
 
-- **By hand on loaf.moe, pending:** whether tuwunel shares presence, accepts `busy`, and keeps `busy` across a `set_presence=unavailable` sync; do not disturb silencing the phone and surviving a relaunch; the native pickers (PHPicker on iOS, NSOpenPanel on macOS); and a real SSO device sign-out.
+- **Checked by hand on loaf.moe (2026-09-29):** tuwunel shares presence; do not disturb, status messages, the blank-name guard and the devices list work against the real server; the NSOpenPanel picker opens filtered to images; and verification with a new FluffyChat session works end to end. Driving it found two bugs, both fixed: avatars fell back to initials in every dialog, sheet and popover (the scope lived below the root navigator), and Escape didn't leave the inline device rename on macOS (it arrives as `cancelOperation:`).
+- **Assumed, not yet seen:** that tuwunel keeps `busy` rather than falling back to `unavailable` (FluffyChat doesn't show presence), and that do not disturb silences the phone and survives a relaunch. PHPicker on iOS and a real SSO device sign-out are still untried.
+- **Every device reads IP 10.89.0.2.** tuwunel sees the reverse proxy's internal address on uwutah, so it likely isn't trusting `X-Forwarded-For` from Traefik. A server fix, not the app's.
+- **The "verified" badge is drawn in the accent red**, which reads like a warning. A design call.
+- **Overlays carry the avatar scope by hand.** The shared helpers do; a new raw `showDialog` that draws an avatar must too.
 - **Other people's `busy` doesn't survive a relaunch.** The SDK's database stores it as offline.
-- **A status message on a server that shares no presence.** Status travels on `PUT /presence`, so where that is refused the status field can't save; the by-hand check decides whether to hide it.
+- **A status message on a server that shares no presence.** Status travels on `PUT /presence`, so where that is refused the status field can't save. loaf.moe shares presence, so this only matters on other servers.
 - **The other settings sections** (appearance, notifications, voice & video, stickers, developer, about), **verifying another of your devices from settings,** and **cropping a picked picture.**
 - **A remote account-data or push-rule change that lands while you're choosing a presence** isn't re-read until the next one.
 - **`lib/ui/settings/devices_section.dart` holds the section, its rows, the rename sheet and the sign-out flow** in one 600-line file.
