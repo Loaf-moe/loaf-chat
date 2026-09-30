@@ -70,7 +70,8 @@ class AddSpacePanel extends StatefulWidget {
     this.onCreate,
   });
 
-  /// Ids of the spaces you are in, which open rather than join.
+  /// Ids of the spaces and rooms you are in, which open rather than join:
+  /// an address can name a room as easily as a space.
   final Set<String> joined;
 
   /// Where a server's public spaces and a typed address are looked up.

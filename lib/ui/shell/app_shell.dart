@@ -322,7 +322,10 @@ class _AppShellState extends State<AppShell> {
     if (joining && !_can(RoomAbility.join)) return;
     setState(() {
       if (joining) unawaited(_rooms.setJoined(id, true).catchError(_refused));
-      _open(_spaceId, id);
+      // The place on screen, not [_spaceId]: that can still name a space
+      // chosen but not synced yet, and a choice kept under it would never
+      // be the one [_channel] reads, so every tap here would do nothing.
+      _open(_placeId, id);
       // A computer connects on click; a phone shows the lobby first, since a
       // stray tap there should never open a live mic.
       if (channel.kind == ChannelKind.voice &&
@@ -415,10 +418,43 @@ class _AppShellState extends State<AppShell> {
 
   // ── Adding spaces ──────────────────────────────────────────────────
 
+  /// Every room you are in that an address could name: the spaces on the
+  /// rail, the channels you joined in them, and Home's rooms.
+  Set<String> get _joinedIds => {
+    for (final space in _spaces) ...[
+      space.id,
+      for (final c in space.allChannels)
+        if (c.joined) c.id,
+    ],
+    for (final room in _rooms.homeRooms) room.id,
+  };
+
+  /// Goes to [id] wherever it lives: a space opens onto its conversation,
+  /// and a room you are in opens in its space or in Home. Anything else is
+  /// a space the server has made or let you into but sync has yet to
+  /// bring, chosen now so the shell moves there once it arrives.
+  void _goTo(String id) {
+    if (_spaces.any((s) => s.id == id)) {
+      _spaceId = id;
+      _open(id, _channel?.id);
+      return;
+    }
+    final space = _spaces
+        .where((s) => s.allChannels.any((c) => c.id == id && c.joined))
+        .firstOrNull;
+    if (space != null) {
+      _open(space.id, id);
+    } else if (_rooms.homeRooms.any((r) => r.id == id)) {
+      _open(mockHome.id, id);
+    } else {
+      _open(id, null);
+    }
+  }
+
   Future<void> _addSpace() async {
     final result = await showAddSpace(
       context,
-      joined: {for (final s in _spaces) s.id},
+      joined: _joinedIds,
       directory: _rooms.directory,
       onCreate: (name) => _rooms.createSpace(name, me: _me),
     );
@@ -427,11 +463,9 @@ class _AppShellState extends State<AppShell> {
       case OpenSpace(:final id, :final missing):
         setState(() {
           if (missing.isEmpty) {
-            _spaceId = id;
-            _fullscreen = false;
+            _goTo(id);
           } else {
             _open(id, '$id-general');
-            _fullscreen = false;
           }
         });
         if (missing.isNotEmpty && mounted) {
@@ -452,10 +486,7 @@ class _AppShellState extends State<AppShell> {
           return;
         }
         if (!mounted) return;
-        setState(() {
-          _spaceId = space.id;
-          _fullscreen = false;
-        });
+        setState(() => _goTo(space.id));
       case CreateSpace(:final name):
         final id = await _rooms.createSpace(name, me: _me);
         if (!mounted) return;

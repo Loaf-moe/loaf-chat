@@ -58,7 +58,7 @@ Space _bakery() => const Space(
 /// only what is granted through [abilities] can be done, and leaving a
 /// space really does take it off [spaces].
 class _FakeRooms extends ChangeNotifier implements Rooms {
-  _FakeRooms({this.spaces = const []});
+  _FakeRooms({this.spaces = const [], this.homeRooms = const []});
 
   @override
   AvatarImages get avatarImages => const NoAvatarImages();
@@ -81,7 +81,7 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   List<Space> spaces;
   @override
-  List<Channel> homeRooms = const [];
+  List<Channel> homeRooms;
   @override
   List<Invite> invites = const [];
 
@@ -125,26 +125,40 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   Future<void> reorderFavourites(List<String> roomIds) => _unwired();
   @override
   Future<void> setLowPriority(String roomId, bool lowPriority) => _unwired();
+
+  /// What joining answers with: refused, unless a test says otherwise.
+  Future<void> Function(Space space) onJoin = (_) =>
+      throw StateError('refused');
+
   @override
-  Future<void> joinSpace(Space space) => throw StateError('refused');
+  Future<void> joinSpace(Space space) => onJoin(space);
   @override
   Future<String> createSpace(String name, {required Member me}) => _unwired();
   @override
   Future<Channel> createDirect(List<Member> members) => _unwired();
-  @override
-  SpaceDirectory get directory => _Directory();
-}
 
-/// Any address resolves to a space that is not joined.
-class _Directory implements SpaceDirectory {
-  @override
-  Future<List<SpacePreview>> publicSpaces(String server) async => const [];
-  @override
-  Future<SpacePreview> lookUp(String address) async => const SpacePreview(
+  /// What any address resolves to: a space that is not joined, unless a
+  /// test says otherwise.
+  SpacePreview lookedUp = const SpacePreview(
     alias: '#pies:loaf.test',
     space: Space(id: '!pies', name: 'Pies', color: Color(0xFF4E9E76)),
     memberCount: 3,
   );
+
+  @override
+  SpaceDirectory get directory => _Directory(this);
+}
+
+/// Any address resolves to whatever [_FakeRooms.lookedUp] is.
+class _Directory implements SpaceDirectory {
+  _Directory(this.rooms);
+
+  final _FakeRooms rooms;
+
+  @override
+  Future<List<SpacePreview>> publicSpaces(String server) async => const [];
+  @override
+  Future<SpacePreview> lookUp(String address) async => rooms.lookedUp;
 }
 
 class _Session extends ChangeNotifier implements LoafSession {
@@ -199,6 +213,37 @@ Future<void> _pump(
   }
 }
 
+const _rosa = Member(
+  '@rosa:loaf.test',
+  'Rosa',
+  Color(0xFF4E9E76),
+  presence: Presence.unknown,
+);
+
+const _dms = [
+  Channel(id: '!dm', name: 'Moddy', kind: ChannelKind.direct, members: [_mod]),
+  Channel(
+    id: '!dm-rosa',
+    name: 'Rosa',
+    kind: ChannelKind.direct,
+    members: [_rosa],
+  ),
+];
+
+/// The conversation the shell has open.
+String _selected(WidgetTester tester) =>
+    tester.widget<ChannelList>(find.byType(ChannelList)).selectedChannelId;
+
+/// Looks [address] up through the rail's "+", as far as the preview.
+Future<void> _lookUp(WidgetTester tester, String address) async {
+  await tester.tap(find.byTooltip('Add a space'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('join with a link'));
+  await tester.pumpAndSettle();
+  await tester.enterText(find.byType(TextField).last, address);
+  await tester.pumpAndSettle();
+}
+
 Finder _spaceIcon() => find.byKey(const ValueKey('space-!bakery'));
 Finder _inList(String text) =>
     find.descendant(of: find.byType(ChannelList), matching: find.text(text));
@@ -224,6 +269,87 @@ void main() {
         expect(find.text("couldn't join Pies. try again?"), findsOneWidget);
         expect(tester.takeException(), isNull);
         expect(find.byType(AddSpacePanel), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a room you are already in offers open, not join, and opens it',
+      variant: _desktop,
+      (tester) async {
+        final rooms = _FakeRooms(spaces: [_bakery()], homeRooms: _dms)
+          ..abilities = {RoomAbility.addSpace}
+          ..onJoin = ((_) => fail('an already-joined room is not joined again'))
+          ..lookedUp = const SpacePreview(
+            alias: '#rosa:loaf.test',
+            space: Space(
+              id: '!dm-rosa',
+              name: 'Rosa',
+              color: Color(0xFF4E9E76),
+            ),
+            memberCount: 2,
+          );
+        await _pump(tester, rooms);
+        await _lookUp(tester, '#rosa:loaf.test');
+        expect(find.text('join'), findsNothing);
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AddSpacePanel), findsNothing);
+        expect(_selected(tester), '!dm-rosa');
+        // And the shell still answers: the next DM tapped is the one open.
+        await tester.tap(_inList('Moddy'));
+        await tester.pumpAndSettle();
+        expect(_selected(tester), '!dm');
+      },
+    );
+
+    testWidgets(
+      'a joined channel of a space opens in its space',
+      variant: _desktop,
+      (tester) async {
+        final rooms = _FakeRooms(spaces: [_bakery()], homeRooms: _dms)
+          ..abilities = {RoomAbility.addSpace}
+          ..lookedUp = const SpacePreview(
+            alias: '#general:loaf.test',
+            space: Space(
+              id: '!general',
+              name: 'general',
+              color: Color(0xFF4E9E76),
+            ),
+            memberCount: 2,
+          );
+        await _pump(tester, rooms);
+        await tester.tap(find.byKey(const ValueKey('home')));
+        await tester.pumpAndSettle();
+        await _lookUp(tester, '#general:loaf.test');
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+
+        expect(_selected(tester), '!general');
+        expect(_inList('general'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a join that has not synced yet leaves every conversation selectable',
+      variant: _desktop,
+      (tester) async {
+        // The server said yes, but the space is not among the spaces yet:
+        // the shell waits on it from Home, where tapping must still work.
+        final rooms = _FakeRooms(spaces: [_bakery()], homeRooms: _dms)
+          ..abilities = {RoomAbility.addSpace}
+          ..onJoin = (_) async {};
+        await _pump(tester, rooms);
+        await _lookUp(tester, '#pies:loaf.test');
+        await tester.tap(find.text('join'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(_inList('Rosa'));
+        await tester.pumpAndSettle();
+        expect(_selected(tester), '!dm-rosa');
+        await tester.tap(_inList('Moddy'));
+        await tester.pumpAndSettle();
+        expect(_selected(tester), '!dm');
       },
     );
   });
