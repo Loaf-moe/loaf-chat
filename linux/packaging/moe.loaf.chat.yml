@@ -24,7 +24,8 @@ modules:
       - ln -s /app/loaf-chat/loaf-chat /app/bin/loaf-chat
       - install -Dm644 moe.loaf.chat.desktop /app/share/applications/moe.loaf.chat.desktop
       - install -Dm644 moe.loaf.chat.metainfo.xml /app/share/metainfo/moe.loaf.chat.metainfo.xml
-      - install -Dm644 app_icon_512.png /app/share/icons/hicolor/512x512/apps/moe.loaf.chat.png
+      - install -Dm644 moe.loaf.chat.svg /app/share/icons/hicolor/scalable/apps/moe.loaf.chat.svg
+      - install -Dm644 moe.loaf.chat.png /app/share/icons/hicolor/512x512/apps/moe.loaf.chat.png
     sources:
       - type: dir
         path: ../../build/linux/x64/release/bundle
@@ -34,4 +35,6 @@ modules:
       - type: file
         path: moe.loaf.chat.metainfo.xml
       - type: file
-        path: ../../macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png
+        path: moe.loaf.chat.svg
+      - type: file
+        path: moe.loaf.chat.png

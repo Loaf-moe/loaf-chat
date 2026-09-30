@@ -17,7 +17,7 @@ unset APPIMAGE_PRIVATE_KEY
 
 cp -r "$bundle"/. "$appdir/"
 cp linux/packaging/moe.loaf.chat.desktop "$appdir/"
-cp macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png "$appdir/moe.loaf.chat.png"
+cp linux/packaging/moe.loaf.chat.png "$appdir/"
 cat > "$appdir/AppRun" <<'EOF'
 #!/bin/sh
 exec "$(dirname "$(readlink -f "$0")")/loaf-chat" "$@"

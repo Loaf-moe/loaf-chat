@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<!-- loaf.moe mark: navy tile (radius 0.32x), Lora SemiBold "l." glyph paths
+     sized/positioned to match the design system's Logo.jsx tile spec
+     (font-size 0.62x, weight 600, letter-spacing -0.02em, centered) -->
+<rect width="100" height="100" rx="32" fill="#003049"/>
+<g transform="translate(34.513 72.2) scale(0.06186 -0.06186)">
+<path d="M28 53Q57 53 69.5 65.5Q82 78 84.5 101.0Q87 124 87 153V585Q87 602 88.0 622.5Q89 643 91 665Q74 664 54.0 663.0Q34 662 20 661V726Q66 726 95.5 730.5Q125 735 141.5 742.0Q158 749 165 755H210L211 143Q211 127 210.0 104.5Q209 82 206 61Q223 63 241.0 63.5Q259 64 271 64V0H28Z" fill="#FFF7ED"/>
+<g transform="translate(279 0)">
+<path d="M119 -16Q90 -16 70.5 5.5Q51 27 51 57Q51 88 71.5 109.5Q92 131 119 131Q148 131 167.0 109.5Q186 88 186 57Q186 27 167.0 5.5Q148 -16 119 -16Z" fill="#D62828"/>
+</g>
+</g>
+</svg>

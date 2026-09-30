@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The "l." of tool/icons/tile.svg. Its 100-unit tile maps onto the 72dp a
+     launcher shows of the 108dp layer, so the mark keeps its size in the tile
+     whatever shape the launcher masks it to. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:translateX="18"
+        android:translateY="18"
+        android:scaleX="0.72"
+        android:scaleY="0.72">
+        <group
+            android:translateX="34.513"
+            android:translateY="72.2"
+            android:scaleX="0.06186"
+            android:scaleY="-0.06186">
+            <path
+                android:fillColor="#FFF7ED"
+                android:pathData="M28 53Q57 53 69.5 65.5Q82 78 84.5 101.0Q87 124 87 153V585Q87 602 88.0 622.5Q89 643 91 665Q74 664 54.0 663.0Q34 662 20 661V726Q66 726 95.5 730.5Q125 735 141.5 742.0Q158 749 165 755H210L211 143Q211 127 210.0 104.5Q209 82 206 61Q223 63 241.0 63.5Q259 64 271 64V0H28Z" />
+            <group android:translateX="279">
+                <path
+                    android:fillColor="#D62828"
+                    android:pathData="M119 -16Q90 -16 70.5 5.5Q51 27 51 57Q51 88 71.5 109.5Q92 131 119 131Q148 131 167.0 109.5Q186 88 186 57Q186 27 167.0 5.5Q148 -16 119 -16Z" />
+            </group>
+        </group>
+    </group>
+</vector>
