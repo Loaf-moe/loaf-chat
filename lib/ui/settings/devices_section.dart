@@ -87,6 +87,9 @@ class _DevicesSectionState extends State<DevicesSection> {
       initial: device.name,
       onSave: (name) => _rename(device.id, name),
     ),
+    // Drag-to-close pops straight past the sheet's PopScope, and a save
+    // under way must not be put away.
+    enableDrag: false,
   );
 
   Future<void> _signOut(LoafDevice device) => showAdaptivePanel<bool>(

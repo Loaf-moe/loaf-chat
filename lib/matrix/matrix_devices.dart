@@ -77,7 +77,9 @@ class MatrixDevices extends ChangeNotifier implements Devices {
   Future<void> rename(String id, String name) async {
     await client.updateDevice(id, displayName: name);
     if (_disposed) return;
-    await load();
+    // The rename landed; a list that can't be fetched now is not a failed
+    // rename, and the next load shows the new name.
+    await _reload();
   }
 
   @override
@@ -135,7 +137,12 @@ class MatrixDevices extends ChangeNotifier implements Devices {
       },
     );
     final ok = await done.future;
-    if (ok && !_disposed) await load();
+    if (ok && !_disposed) {
+      // Gone at the server, so gone here even if the list can't be fetched.
+      _list = _list?.where((d) => d.id != id).toList();
+      notifyListeners();
+      await _reload();
+    }
     return ok;
   }
 

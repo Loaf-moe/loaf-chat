@@ -59,6 +59,17 @@ class _HandDevices extends ChangeNotifier implements Devices {
   }
 }
 
+/// A rename that stays out until the test lets it through.
+class _SlowRename extends MockDevices {
+  final renamed = Completer<void>();
+
+  @override
+  Future<void> rename(String id, String name) async {
+    await renamed.future;
+    await super.rename(id, name);
+  }
+}
+
 class _Held implements AuthChallenge {
   _Held(this._devices, this._done);
 
@@ -174,6 +185,27 @@ void main() {
     await tester.pump(MockDevices.answerDelay);
     await tester.pumpAndSettle();
     expect(find.text('kitchen tablet'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('dragging the rename sheet does not put away a save', (
+    tester,
+  ) async {
+    final devices = _SlowRename();
+    await _pump(tester, devices, size: const Size(400, 900));
+    await tester.tap(find.text('element on phone'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'kitchen tablet');
+    await tester.tap(find.text('save'));
+    await tester.pump();
+
+    // The sheet's own drag pops past the lock unless it is switched off.
+    await tester.fling(find.text('saving…'), const Offset(0, 500), 2000);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(TextField), findsOneWidget);
+
+    devices.renamed.complete();
+    await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
   });
 

@@ -16,6 +16,9 @@ class _Api extends FakeMatrixApi {
   final requests = <String>[];
   var deletes = 0;
 
+  /// The device list can't be fetched: the reload after a write fails.
+  var listFails = false;
+
   /// Keeps the next DELETE back until completed.
   Completer<void>? hold;
 
@@ -47,6 +50,7 @@ class _Api extends FakeMatrixApi {
     final path = request.url.path;
     if (path == '/_matrix/client/v3/devices' && request.method == 'GET') {
       requests.add('GET devices');
+      if (listFails) return http.Response('{}', 500);
       return http.Response(jsonEncode({'devices': devices}), 200);
     }
     final id = path.startsWith('/_matrix/client/v3/devices/')
@@ -138,6 +142,13 @@ void main() {
     );
   });
 
+  test('a rename that landed is not a failure when the reload fails', () async {
+    final (api, devices) = await _open();
+    api.listFails = true;
+    await devices.rename('OTHER', 'kitchen tablet');
+    expect(api.requests, contains('PUT OTHER kitchen tablet'));
+  });
+
   test('a device-list change in sync reloads', () async {
     final api = _Api();
     final client = await _client(api);
@@ -181,6 +192,21 @@ void main() {
       );
       expect(ok, isTrue);
       expect(devices.list!.any((d) => d.id == 'OTHER'), isFalse);
+    });
+
+    test('signed out is signed out when the reload fails', () async {
+      final (api, devices) = await _open();
+      api.listFails = true;
+      var heard = 0;
+      devices.addListener(() => heard++);
+      final ok = await devices.signOut(
+        'OTHER',
+        onAuth: (c) => c.password('right'),
+      );
+      expect(ok, isTrue);
+      expect(devices.list!.any((d) => d.id == 'OTHER'), isFalse);
+      expect(devices.list!.any((d) => d.id == 'NAMELESS'), isTrue);
+      expect(heard, greaterThan(0));
     });
 
     test('a wrong password asks again with retry', () async {
