@@ -8,19 +8,18 @@ Build the macOS app once with `mise exec -- flutter build macos --debug`,
 then run `mise exec -- flutter test`. Encryption tests load vodozemac's
 native library from that build, and fail saying so without it.
 
-## Getting Started
+## Installing
 
-This project is a starting point for a Flutter application.
+Download Loaf Chat for macOS or Linux from <https://get.loaf.moe>. Every copy
+installed from there updates itself. Phones get Loaf Chat through TestFlight.
 
-A few resources to get you started if this is your first Flutter project:
+## Releasing
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Push a tag like `v0.1.0` that sits on `main`. `.github/workflows/release.yml`
+does the rest: it builds, signs and notarizes, publishes a GitHub Release, and
+rewrites get.loaf.moe, including the download page in `tool/release/site/`.
+Preview that page with `tool/release/site.sh <latest.json> <out dir>`.
+The signing keys were made once by `tool/release/keygen.sh`.
 
 ## Licence
 

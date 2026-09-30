@@ -18,6 +18,8 @@ touch "$pages/.nojekyll"
 gpgkey="$(gpg --dearmor < tool/release/keys/flatpak.asc | base64 -w0)"
 test -n "$gpgkey" || { echo "flatpak.asc produced an empty GPG key" >&2; exit 1; }
 
+tool/release/site.sh "$dist/latest.json" "$pages"
+
 cat > "$pages/loaf-chat.flatpakref" <<EOF
 [Flatpak Ref]
 Name=moe.loaf.chat

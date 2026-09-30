@@ -1,0 +1,208 @@
+<!doctype html>
+<!--
+  get.loaf.moe's front page, for testers. tool/release/site.sh fills in the
+  double-brace placeholders at release time and refuses to publish if any are
+  left.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loaf Chat</title>
+  <meta name="description" content="Loaf Chat {{VERSION}}, an early build for testers, for macOS and Linux.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='10' fill='%23003049'/%3E%3Ctext x='11' y='24' font-family='Georgia,serif' font-size='22' font-weight='600' fill='%23FFF7ED'%3El%3C/text%3E%3Ccircle cx='21' cy='22' r='2.4' fill='%23d62828'/%3E%3C/svg%3E">
+  <style>
+    /* The app's own fonts, served from here rather than a font CDN. */
+    @font-face { font-family: 'Lora'; src: url('fonts/Lora.ttf') format('truetype'); font-weight: 400 700; font-display: swap; }
+    @font-face { font-family: 'Lora'; src: url('fonts/Lora-Italic.ttf') format('truetype'); font-weight: 400 700; font-style: italic; font-display: swap; }
+    @font-face { font-family: 'Outfit'; src: url('fonts/Outfit.ttf') format('truetype'); font-weight: 300 700; font-display: swap; }
+    @font-face { font-family: 'IBM Plex Mono'; src: url('fonts/IBMPlexMono-Regular.ttf') format('truetype'); font-weight: 400; font-display: swap; }
+
+    /* loaf.moe tokens. Dark is the app's derived navy palette. */
+    :root {
+      --page: #FFF7ED;
+      --card: #FFFFFF;
+      --sunken: #F9FAFB;
+      --border: #E5E7EB;
+      --ink: #003049;
+      --body: #33596d;
+      --muted: #6B7280;
+      --accent: #d62828;
+      --accent-hover: #a30000;
+      --tile: #003049;
+      --tile-ink: #FFF7ED;
+      --shadow-sm: 0 1px 3px rgba(0,48,73,.08);
+      --shadow-lg: 0 8px 24px rgba(0,48,73,.12);
+      --shadow-accent: 0 4px 16px rgba(214,40,40,.35);
+      --display: 'Lora', Georgia, serif;
+      --ui: 'Outfit', system-ui, sans-serif;
+      --mono: 'IBM Plex Mono', ui-monospace, monospace;
+      --ease-out: cubic-bezier(.22,1,.36,1);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #001E2F;
+        --card: #01283C;
+        --sunken: #00121F;
+        --border: #093147;
+        --ink: #FFF7ED;
+        --body: #d9e0e4;
+        --muted: #8098a4;
+        --tile: #000016;
+        --shadow-sm: none;
+        --shadow-lg: 0 8px 24px rgba(0,0,0,.35);
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--body);
+      font: 400 15px/1.6 var(--ui);
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 56px 20px 40px; }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    a:hover { color: var(--accent-hover); }
+
+    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 40px;
+             font: 600 21px/1 var(--display); letter-spacing: -.02em; color: var(--ink); }
+    .tile { display: inline-flex; align-items: center; justify-content: center;
+            width: 34px; height: 34px; border-radius: 11px; background: var(--tile);
+            color: var(--tile-ink); font: 600 21px/1 var(--display); box-shadow: var(--shadow-sm); }
+    .dot { color: var(--accent); }
+
+    h1 { margin: 0 0 12px; color: var(--ink); font: 600 clamp(32px, 6vw, 44px)/1.1 var(--display);
+         letter-spacing: -.02em; }
+    h1 em { color: var(--accent); font-weight: 500; }
+    .lede { margin: 0 0 8px; font-size: 18px; }
+    .meta { margin: 0 0 36px; font: 400 12px/1.5 var(--mono); letter-spacing: .08em;
+            text-transform: uppercase; color: var(--muted); }
+
+    .downloads { display: flex; flex-direction: column; gap: 16px; }
+    /* Your own computer goes first; the script below sets data-os. */
+    [data-os="linux"] .platform-linux { order: -1; }
+
+    .platform { background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+                padding: 24px; box-shadow: var(--shadow-sm); }
+    .platform h2 { margin: 0 0 4px; color: var(--ink); font: 600 22px/1.3 var(--display); letter-spacing: -.02em; }
+    .platform > p { margin: 0 0 18px; color: var(--muted); font-size: 14px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+              min-height: 44px; padding: 0 22px; border-radius: 9999px; border: 1.5px solid transparent;
+              font: 600 15px/1 var(--ui); text-decoration: none; cursor: pointer;
+              transition: background-color 120ms var(--ease-out), transform 120ms var(--ease-out),
+                          box-shadow 120ms var(--ease-out); }
+    .button:active { transform: translateY(1px) scale(.985); box-shadow: none; }
+    .button-primary { background: var(--accent); color: #fff; box-shadow: var(--shadow-accent); }
+    .button-primary:hover { background: var(--accent-hover); color: #fff; }
+    .button-secondary { background: transparent; color: var(--ink); border-color: var(--border); }
+    .button-secondary:hover { background: var(--sunken); color: var(--ink); }
+    .button svg { width: 18px; height: 18px; flex: none; }
+
+    .command { display: flex; align-items: center; gap: 8px; margin-top: 16px;
+               background: var(--sunken); border: 1px solid var(--border); border-radius: 12px;
+               padding: 8px 8px 8px 14px; }
+    .command code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap;
+                    font: 400 13px/1.5 var(--mono); color: var(--ink); user-select: all; }
+    .copy { flex: none; min-height: 32px; padding: 0 14px; font-size: 13px; }
+    .note { margin: 14px 0 0; color: var(--muted); font-size: 13px; }
+
+    .updates { margin: 40px 0 0; padding: 22px 24px; border-radius: 16px; background: var(--sunken);
+               border: 1px solid var(--border); }
+    .updates h2 { margin: 0 0 6px; color: var(--ink); font: 600 18px/1.3 var(--display); }
+    .updates p { margin: 0; }
+
+    footer { max-width: 760px; margin: 0 auto; padding: 0 20px 48px; color: var(--muted); font-size: 14px; }
+    footer p { margin: 0 0 6px; }
+
+    @media (max-width: 480px) {
+      main { padding-top: 36px; }
+      .platform { padding: 20px; }
+      .actions .button { flex: 1 1 100%; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .button { transition: none; }
+    }
+  </style>
+  <script>
+    // Put this computer's download first. Without script, macOS then Linux.
+    (function () {
+      var p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+      var ua = navigator.userAgent || '';
+      if (/linux/i.test(p + ' ' + ua) && !/android/i.test(ua)) {
+        document.documentElement.setAttribute('data-os', 'linux');
+      }
+    })();
+  </script>
+</head>
+<body>
+  <main>
+    <div class="brand"><span class="tile" aria-hidden="true">l<span class="dot">.</span></span>loaf chat</div>
+
+    <h1>Loaf Chat, fresh out of the <em>oven</em></h1>
+    <p class="lede">An early build for testers: chat with your crew on loaf.moe, from your own computer.</p>
+    <p class="meta">version {{VERSION}} · macOS &amp; Linux</p>
+
+    <div class="downloads">
+      <section class="platform platform-mac" aria-labelledby="mac">
+        <h2 id="mac">macOS</h2>
+        <p>macOS 12 or newer, Apple silicon or Intel.</p>
+        <div class="actions">
+          <a class="button button-primary" href="{{DMG_URL}}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
+            download for mac
+          </a>
+        </div>
+        <p class="note">Open the .dmg and drag Loaf Chat into Applications.</p>
+      </section>
+
+      <section class="platform platform-linux" aria-labelledby="linux">
+        <h2 id="linux">Linux</h2>
+        <p>64-bit Intel or AMD.</p>
+        <div class="actions">
+          <a class="button button-primary" href="loaf-chat.flatpakref">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
+            install with flatpak
+          </a>
+          <a class="button button-secondary" href="{{APPIMAGE_URL}}">get the AppImage</a>
+        </div>
+        <div class="command">
+          <code id="flatpak-command">flatpak install https://get.loaf.moe/loaf-chat.flatpakref</code>
+          <button class="button button-secondary copy" type="button" data-copy="flatpak-command" hidden>copy</button>
+        </div>
+        <p class="note">Keep the AppImage somewhere you can write to, like ~/Applications, so it can update itself.</p>
+      </section>
+    </div>
+
+    <section class="updates" aria-labelledby="updates">
+      <h2 id="updates">It keeps itself fresh</h2>
+      <p>Loaf Chat fetches new builds on its own. When one's ready, a little tile appears at the bottom of your spaces rail. Restart whenever suits you, or just quit and it's there next time.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Found a crumb out of place? Tell us in <a href="https://matrix.to/#/#feedback:loaf.moe">#feedback:loaf.moe</a>.</p>
+    <p><a href="https://github.com/Loaf-moe/loaf-chat">Source code</a> · AGPL-3.0</p>
+  </footer>
+
+  <script>
+    // The copy button only appears when copying can work.
+    if (navigator.clipboard) {
+      document.querySelectorAll('[data-copy]').forEach(function (button) {
+        button.hidden = false;
+        button.addEventListener('click', function () {
+          var text = document.getElementById(button.dataset.copy).textContent;
+          navigator.clipboard.writeText(text).then(function () {
+            button.textContent = 'copied';
+            setTimeout(function () { button.textContent = 'copy'; }, 1600);
+          });
+        });
+      });
+    }
+  </script>
+</body>
+</html>
