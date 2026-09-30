@@ -74,10 +74,30 @@ class AppImageUpdater extends StateUpdater {
       if (response.statusCode != 200) {
         throw HttpException('${response.statusCode}', uri: asset.url);
       }
-      await response.stream.pipe(part.openWrite());
-      final length = await part.length();
+      // Refuse up front if Content-Length differs from expected size.
+      final contentLength = response.contentLength;
+      if (contentLength != null && contentLength != -1 && contentLength != asset.size) {
+        throw StateError('Content-Length $contentLength != ${asset.size}');
+      }
+
+      // Write to file while counting bytes and refusing if oversized.
+      var bytesWritten = 0;
+      final sink = part.openWrite();
+      try {
+        await response.stream.forEach((bytes) {
+          bytesWritten += bytes.length;
+          if (bytesWritten > asset.size) {
+            throw StateError('download exceeded ${asset.size} bytes');
+          }
+          sink.add(bytes);
+        });
+      } finally {
+        await sink.flush();
+        await sink.close();
+      }
+
       final digest = await sha256.bind(part.openRead()).first;
-      if (length != asset.size || '$digest' != asset.sha256) {
+      if (bytesWritten != asset.size || '$digest' != asset.sha256) {
         throw StateError('the download does not match the feed');
       }
       final chmod = await Process.run('chmod', ['+x', part.path]);

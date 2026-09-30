@@ -17,6 +17,7 @@ class _Server {
   String feed = '';
   List<int> download = utf8.encode(_new);
   bool cutDownloadShort = false;
+  int downloadRequestCount = 0;
 
   Uri get feedUri => Uri.parse('http://localhost:${_http.port}/latest.json');
   Uri get downloadUri => Uri.parse('http://localhost:${_http.port}/app');
@@ -27,16 +28,19 @@ class _Server {
       final response = request.response;
       if (request.uri.path == '/latest.json') {
         response.write(server.feed);
-      } else if (server.cutDownloadShort) {
-        // Promises more than it sends, so the connection drops part-way.
-        response.contentLength = server.download.length;
-        response.add(server.download.sublist(0, 4));
-        try {
-          await response.close();
-        } catch (_) {}
-        return;
       } else {
-        response.add(server.download);
+        server.downloadRequestCount++;
+        if (server.cutDownloadShort) {
+          // Promises more than it sends, so the connection drops part-way.
+          response.contentLength = server.download.length;
+          response.add(server.download.sublist(0, 4));
+          try {
+            await response.close();
+          } catch (_) {}
+          return;
+        } else {
+          response.add(server.download);
+        }
       }
       await response.close();
     });
@@ -86,6 +90,7 @@ void main() {
     appImage = File('${dir.path}/Loaf-Chat.AppImage')..writeAsStringSync(_old);
     launched.clear();
     quits = 0;
+    server.downloadRequestCount = 0;
   });
 
   tearDown(() async {
@@ -157,6 +162,12 @@ void main() {
         ..offer()
         ..cutDownloadShort = true;
     }),
+    ('the server sends more than advertised', () {
+      final original = server.download;
+      server.download = utf8.encode(_old);
+      server.offer();
+      server.download = original + utf8.encode(' extra data');
+    }),
   ]) {
     test('$name leaves the file alone', () async {
       arrange();
@@ -202,6 +213,7 @@ void main() {
     await Future.wait([u.check(), u.check()]);
     expect(u.state, isA<UpdateReady>());
     expect(leftovers(), isFalse);
+    expect(server.downloadRequestCount, 1);
   });
 
   test('once ready, later checks leave it be', () async {
