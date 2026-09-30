@@ -106,7 +106,7 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 
 - **By hand on loaf.moe, pending:** whether tuwunel shares presence, accepts `busy`, and keeps `busy` across a `set_presence=unavailable` sync; do not disturb silencing the phone and surviving a relaunch; the native pickers (PHPicker on iOS, NSOpenPanel on macOS); and a real SSO device sign-out.
 - **Other people's `busy` doesn't survive a relaunch.** The SDK's database stores it as offline.
-- **The SDK now keeps downloaded media on disk for 30 days** (`fileStorageLocation`), and signing out doesn't clear it.
+- **A status message on a server that shares no presence.** Status travels on `PUT /presence`, so where that is refused the status field can't save; the by-hand check decides whether to hide it.
 - **The other settings sections** (appearance, notifications, voice & video, stickers, developer, about), **verifying another of your devices from settings,** and **cropping a picked picture.**
 - **A remote account-data or push-rule change that lands while you're choosing a presence** isn't re-read until the next one.
 - **`lib/ui/settings/devices_section.dart` holds the section, its rows, the rename sheet and the sign-out flow** in one 600-line file.
