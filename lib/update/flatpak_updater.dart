@@ -55,12 +55,7 @@ class FlatpakUpdater extends StateUpdater {
         await portal.update();
         move(UpdateReady(await _version()));
       } catch (e, s) {
-        try {
-          updateLog('the Flatpak was not updated', e, s);
-        } catch (_) {
-          // updateLog may fail in test contexts with async stack traces,
-          // but we must still transition state.
-        }
+        updateLog('the Flatpak was not updated', e, s);
         move(const UpdateIdle());
       }
     }
@@ -82,12 +77,7 @@ class FlatpakUpdater extends StateUpdater {
     try {
       await portal.spawnLatest();
     } catch (e, s) {
-      try {
-        updateLog('the new Flatpak did not start', e, s);
-      } catch (_) {
-        // updateLog may fail in test contexts with async stack traces,
-        // but we must still handle the error.
-      }
+      updateLog('the new Flatpak did not start', e, s);
       move(ready);
       return;
     }

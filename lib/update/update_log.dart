@@ -6,5 +6,5 @@ import 'package:flutter/foundation.dart';
 
 void updateLog(String message, [Object? error, StackTrace? stack]) {
   debugPrint('[loaf update] $message${error == null ? '' : ': $error'}');
-  if (stack != null) debugPrintStack(stackTrace: stack, maxFrames: 8);
+  if (stack != null) debugPrint('$stack'.split('\n').take(8).join('\n'));
 }
