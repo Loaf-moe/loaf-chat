@@ -2,6 +2,7 @@
 /// the file exists. Fetches the feed, downloads beside the running file,
 /// checks the signature and the hash, and renames over it. The rename is
 /// atomic, so a crash leaves the old file or the new one, never a mix.
+// ignore_for_file: prefer_initializing_formals (public name is appImage, field stays private)
 library;
 
 import 'dart:async';
@@ -92,8 +93,21 @@ class AppImageUpdater extends StateUpdater {
           sink.add(bytes);
         });
       } finally {
-        await sink.flush();
-        await sink.close();
+        try {
+          await sink.flush();
+          await sink.close();
+        } catch (_) {
+          // Ignore cleanup errors to avoid masking the real exception.
+        }
+      }
+
+      // Fsync to disk before rename, so a power loss cannot leave the new
+      // name pointing at a partial file.
+      final raf = await part.open(mode: FileMode.append);
+      try {
+        await raf.flush();
+      } finally {
+        await raf.close();
       }
 
       final digest = await sha256.bind(part.openRead()).first;
