@@ -9,6 +9,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/loaf_theme.dart';
+import 'avatar_images.dart';
 
 /// Opens [builder]'s popover next to [anchor] (global coordinates). A click
 /// outside or Escape closes it.
@@ -18,6 +19,7 @@ Future<T?> showAnchoredPopover<T>(
   required WidgetBuilder builder,
 }) {
   final tokens = LoafTokens.of(context);
+  final from = context;
   return Navigator.of(context).push(
     _AnchoredPopoverRoute<T>(
       anchor: anchor,
@@ -32,7 +34,8 @@ Future<T?> showAnchoredPopover<T>(
           side: BorderSide(color: tokens.border),
         ),
         clipBehavior: Clip.antiAlias,
-        child: builder(context),
+        // The route is on the root navigator, above the shell's scope.
+        child: AvatarImagesScope.carry(from, child: builder(context)),
       ),
     ),
   );

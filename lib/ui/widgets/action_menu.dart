@@ -6,6 +6,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/loaf_theme.dart';
+import 'avatar_images.dart';
 
 /// One row of an action list. [value] is what the sheet or menu returns.
 class ActionItem<T> {
@@ -33,6 +34,7 @@ Future<T?> showActionSheet<T>(
   required List<ActionItem<T>> items,
 }) {
   final tokens = LoafTokens.of(context);
+  final from = context;
   return showModalBottomSheet<T>(
     context: context,
     backgroundColor: tokens.card,
@@ -42,48 +44,52 @@ Future<T?> showActionSheet<T>(
         top: Radius.circular(LoafRadius.xxxl),
       ),
     ),
-    builder: (context) => SafeArea(
-      top: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (header != null) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                LoafSpace.x4,
-                0,
-                LoafSpace.x4,
-                LoafSpace.x3,
+    // The header may draw avatars, and the sheet sits above the shell.
+    builder: (context) => AvatarImagesScope.carry(
+      from,
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (header != null) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  LoafSpace.x4,
+                  0,
+                  LoafSpace.x4,
+                  LoafSpace.x3,
+                ),
+                child: header(context),
               ),
-              child: header(context),
-            ),
-            Divider(height: 1, color: tokens.border),
-          ],
-          // A long list scrolls rather than overflowing the sheet's height
-          // cap; a short one still hugs its content.
-          Flexible(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final item in items)
-                    InkWell(
-                      onTap: () => Navigator.pop(context, item.value),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: LoafSpace.x5,
-                          vertical: 14,
+              Divider(height: 1, color: tokens.border),
+            ],
+            // A long list scrolls rather than overflowing the sheet's height
+            // cap; a short one still hugs its content.
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final item in items)
+                      InkWell(
+                        onTap: () => Navigator.pop(context, item.value),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: LoafSpace.x5,
+                            vertical: 14,
+                          ),
+                          child: ActionLabel(item: item, compact: false),
                         ),
-                        child: ActionLabel(item: item, compact: false),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     ),
   );

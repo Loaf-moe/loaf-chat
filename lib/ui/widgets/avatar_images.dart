@@ -33,6 +33,15 @@ class AvatarImagesScope extends InheritedWidget {
       context.dependOnInheritedWidgetOfExactType<AvatarImagesScope>()?.images ??
       const NoAvatarImages();
 
+  /// Carries the scope [from] sees into [child]. Dialogs, sheets and popovers
+  /// are routes on the root navigator, which sits above the shell that hosts
+  /// the scope, so they can't see it. Each shared helper that opens one
+  /// re-provides it here, the way it does the presence setting, rather than
+  /// hoisting the scope above the navigator: the rooms that own the images
+  /// are created and disposed by the shell, not by anything above it.
+  static Widget carry(BuildContext from, {required Widget child}) =>
+      AvatarImagesScope(images: of(from), child: child);
+
   @override
   bool updateShouldNotify(AvatarImagesScope old) => images != old.images;
 }

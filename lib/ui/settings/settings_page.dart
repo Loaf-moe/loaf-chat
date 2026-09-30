@@ -16,6 +16,7 @@ import '../model/models.dart';
 
 import '../shell/profile_controller.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/avatar_images.dart';
 import '../widgets/loaf_button.dart';
 import 'account_section.dart';
 import 'devices.dart';
@@ -55,13 +56,17 @@ Future<void> showSettings(
 }) => showDialog<void>(
   context: context,
   barrierColor: const Color(0x99000016),
-  builder: (_) => SettingsModal(
-    initial: initial,
-    devices: devices,
-    profile: profile,
-    me: me,
-    editable: editable,
-    onSignOut: onSignOut,
+  // The dialog is a root-navigator route, above the shell's avatar scope.
+  builder: (_) => AvatarImagesScope.carry(
+    context,
+    child: SettingsModal(
+      initial: initial,
+      devices: devices,
+      profile: profile,
+      me: me,
+      editable: editable,
+      onSignOut: onSignOut,
+    ),
   ),
 );
 
