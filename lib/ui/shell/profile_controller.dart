@@ -43,6 +43,21 @@ class ProfileController extends ChangeNotifier {
 
   PresenceChoice get choice => _profile.choice;
   String get status => _profile.status;
+  String get displayName => _profile.displayName;
+  AvatarRef? get avatar => _profile.avatar;
+  bool get savingAccount => _profile.savingAccount;
+  bool get uploadingAvatar => _profile.uploadingAvatar;
+
+  /// Saves name and status together. Throws [AccountSaveFailed] naming what
+  /// didn't save; the caller owns the toast, since the fields it keeps are
+  /// its own.
+  Future<void> saveAccount({
+    required String displayName,
+    required String status,
+  }) => _profile.saveAccount(displayName: displayName, status: status);
+
+  /// PNG bytes, or null to remove. Throws when the server refuses.
+  Future<void> setAvatar(Uint8List? png) => _profile.setAvatar(png);
 
   /// You, as other people see you.
   Member get me => _profile.me;

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -8,7 +9,8 @@ import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_profile.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/ui/members/presence.dart' as loaf;
-import 'package:loaf_native/ui/shell/profile.dart' show HalfApplied;
+import 'package:loaf_native/ui/shell/profile.dart'
+    show AccountSaveFailed, HalfApplied;
 import 'package:matrix/matrix.dart' hide Presence;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -29,6 +31,14 @@ class _Api extends FakeMatrixApi {
   Client? client;
   var refuseBusy = false;
   var refuseMute = false;
+
+  /// Profile writes and uploads, in order: `PUT displayname {…}`,
+  /// `POST upload`, `PUT avatar_url {…}`.
+  final wire = <String>[];
+  var refuseName = false;
+
+  /// Holds the next display name write until completed.
+  Completer<void>? nameGate;
 
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
@@ -65,6 +75,25 @@ class _Api extends FakeMatrixApi {
           },
         }),
       );
+      return http.Response(jsonEncode({}), 200);
+    }
+    if (request.method == 'PUT' && path.endsWith('/displayname')) {
+      wire.add('PUT displayname ${request.body}');
+      final hold = nameGate;
+      nameGate = null;
+      if (hold != null) await hold.future;
+      if (refuseName) return _refused('M_UNKNOWN', 500);
+      return http.Response(jsonEncode({}), 200);
+    }
+    if (request.method == 'POST' && path.contains('/media/v3/upload')) {
+      wire.add('POST upload');
+      return http.Response(
+        jsonEncode({'content_uri': 'mxc://fakeServer.notExisting/new'}),
+        200,
+      );
+    }
+    if (request.method == 'PUT' && path.endsWith('/avatar_url')) {
+      wire.add('PUT avatar_url ${request.body}');
       return http.Response(jsonEncode({}), 200);
     }
     if (request.method == 'PUT' &&
@@ -531,6 +560,117 @@ void main() {
       profile.away(true);
       await _settle();
       expect(api.bodies, hasLength(sent));
+    });
+  });
+
+  group('name and picture', () {
+    final png = Uint8List.fromList([1, 2, 3]);
+
+    test('the server has your name at start', () async {
+      final (_, _, profile) = await _profile();
+      expect(profile.displayName, 'Some First Name Some Last Name');
+    });
+
+    test('the rooms know you by the profile once it has loaded', () async {
+      final api = _Api();
+      final client = await _client(api);
+      final rooms = MatrixRooms(client);
+      addTearDown(rooms.dispose);
+      rooms.profile;
+      await _settle();
+      await rooms.profile.saveAccount(displayName: 'Mochi', status: '');
+      expect(rooms.me.name, 'Mochi');
+    });
+
+    test('saving sends only what changed', () async {
+      final (api, _, profile) = await _profile();
+      final sent = api.bodies.length;
+      await profile.saveAccount(displayName: 'Mochi', status: profile.status);
+      expect(api.wire, ['PUT displayname {"displayname":"Mochi"}']);
+      expect(api.bodies, hasLength(sent));
+      expect(profile.displayName, 'Mochi');
+      expect(profile.savingAccount, isFalse);
+    });
+
+    test('a changed status alone sends no name', () async {
+      final (api, _, profile) = await _profile();
+      await profile.saveAccount(
+        displayName: profile.displayName,
+        status: 'baking',
+      );
+      expect(api.wire, isEmpty);
+      expect(api.bodies.last['status_msg'], 'baking');
+    });
+
+    test('a refused name is named', () async {
+      final (api, _, profile) = await _profile();
+      api.refuseName = true;
+      await expectLater(
+        profile.saveAccount(displayName: 'Mochi', status: profile.status),
+        throwsA(
+          isA<AccountSaveFailed>()
+              .having((e) => e.name, 'name', isTrue)
+              .having((e) => e.status, 'status', isFalse),
+        ),
+      );
+      expect(profile.displayName, 'Some First Name Some Last Name');
+      expect(profile.savingAccount, isFalse);
+    });
+
+    test('both refused names both', () async {
+      final (api, _, profile) = await _profile();
+      api.refuseName = true;
+      api.refuseWith = (errcode: 'M_UNKNOWN', status: 500);
+      await expectLater(
+        profile.saveAccount(displayName: 'Mochi', status: 'baking'),
+        throwsA(
+          isA<AccountSaveFailed>()
+              .having((e) => e.name, 'name', isTrue)
+              .having((e) => e.status, 'status', isTrue),
+        ),
+      );
+    });
+
+    test('an avatar goes up and is set', () async {
+      final (api, _, profile) = await _profile();
+      await profile.setAvatar(png);
+      expect(api.wire, [
+        'POST upload',
+        'PUT avatar_url {"avatar_url":"mxc://fakeserver.notexisting/new"}',
+      ]);
+      expect(profile.uploadingAvatar, isFalse);
+    });
+
+    test('removing sends an empty avatar_url', () async {
+      final (api, _, profile) = await _profile();
+      await profile.setAvatar(null);
+      expect(api.wire, ['PUT avatar_url {"avatar_url":""}']);
+    });
+
+    test('uploading is on while it is in flight', () async {
+      final (_, _, profile) = await _profile();
+      final done = profile.setAvatar(png);
+      expect(profile.uploadingAvatar, isTrue);
+      await done;
+      expect(profile.uploadingAvatar, isFalse);
+    });
+
+    test('disposing mid-save notifies nothing', () async {
+      final (api, _, profile) = await _profile();
+      final gate = api.nameGate = Completer<void>();
+      final saving = profile.saveAccount(
+        displayName: 'Mochi',
+        status: profile.status,
+      );
+      await _settle();
+      var heard = 0;
+      profile.addListener(() => heard++);
+      profile.dispose();
+      // The write was already in flight; releasing it must not touch us.
+      gate.complete();
+      await saving;
+      await _settle();
+      expect(heard, 0);
     });
   });
 }

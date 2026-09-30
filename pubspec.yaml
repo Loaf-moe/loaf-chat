@@ -45,6 +45,7 @@ dependencies:
   window_to_front: ^0.0.4
   file_selector: ^1.1.0
   share_plus: ^13.3.0
+  image_picker: ^1.2.3
 
 dev_dependencies:
   flutter_test:

@@ -30,8 +30,48 @@ class MockProfile extends ChangeNotifier implements Profile {
   }
 
   @override
-  Member get me =>
-      currentUser.copyWith(presence: _choice.shown, statusMessage: _status);
+  String get displayName => _name;
+  var _name = currentUser.name;
+
+  @override
+  AvatarRef? get avatar => _avatar;
+  AvatarRef? _avatar = currentUser.avatar;
+
+  @override
+  bool get savingAccount => false;
+
+  @override
+  bool get uploadingAvatar => false;
+
+  @override
+  Member get me => currentUser.copyWith(
+    name: _name,
+    presence: _choice.shown,
+    statusMessage: _status,
+    avatar: _avatar,
+  );
+
+  @override
+  Future<void> saveAccount({
+    required String displayName,
+    required String status,
+  }) {
+    final name = displayName.trim();
+    final trimmed = status.trim();
+    if (name.isNotEmpty && name != _name) _name = name;
+    _status = trimmed;
+    notifyListeners();
+    return SynchronousFuture(null);
+  }
+
+  /// Nothing to upload to: a ref the mock can't draw keeps initials showing,
+  /// but "remove picture" comes and goes honestly.
+  @override
+  Future<void> setAvatar(Uint8List? png) {
+    _avatar = png == null ? null : AvatarRef('mock:${png.length}');
+    notifyListeners();
+    return SynchronousFuture(null);
+  }
 
   /// Fixture rows already carry their presence, so there is nothing to add.
   @override

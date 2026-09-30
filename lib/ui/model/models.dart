@@ -87,12 +87,13 @@ class Member {
   }
 
   Member copyWith({
+    String? name,
     Presence? presence,
     String? statusMessage,
     AvatarRef? avatar,
   }) => Member(
     id,
-    name,
+    name ?? this.name,
     color,
     avatar: avatar ?? this.avatar,
     presence: presence ?? this.presence,

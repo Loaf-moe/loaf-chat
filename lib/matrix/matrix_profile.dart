@@ -21,7 +21,11 @@ class MatrixProfile extends ChangeNotifier implements Profile {
       // Presence rides on the sync, after the SDK has stored it.
       client.onSync.stream.listen(_onSync),
       client.onSyncStatus.stream.listen(_onSyncStatus),
+      // The SDK marks your cached profile outdated when your own member
+      // event changes, here or on another device.
+      client.onUserProfileUpdate.stream.listen(_onProfileUpdate),
     ];
+    unawaited(_loadProfile());
     // What was chosen, on this or another device; nothing is sent for it.
     _choice = _reconcile(_stored, client.allPushNotificationsMuted);
     client.syncPresence = _syncWire(_choice);
@@ -52,6 +56,18 @@ class MatrixProfile extends ChangeNotifier implements Profile {
 
   var _published = false;
 
+  /// What the server has for you; null until it has said, or when it has no
+  /// name (a blank one is no name).
+  String? _name;
+  AvatarRef? _avatar;
+
+  /// Bumped by every local write to the above, so a fetch that started
+  /// before it can't put back what it replaced.
+  var _profileTurn = 0;
+
+  var _saving = 0;
+  var _uploading = false;
+
   /// Automatic idle is on: nobody is at this device.
   var _away = false;
 
@@ -74,12 +90,62 @@ class MatrixProfile extends ChangeNotifier implements Profile {
   @override
   bool get presenceShared => _shared;
 
+  /// The name the server has, or null while it hasn't said.
+  String? get loadedName => _name;
+
+  @override
+  String get displayName {
+    final id = client.userID ?? '';
+    return _name ?? id.localpart ?? id;
+  }
+
+  @override
+  AvatarRef? get avatar => _avatar;
+
+  @override
+  bool get savingAccount => _saving > 0;
+
+  @override
+  bool get uploadingAvatar => _uploading;
+
   @override
   Member get me {
     final id = client.userID ?? '';
     final base =
         identity?.call() ?? Member(id, id.localpart ?? id, spaceColorFor(id));
-    return base.copyWith(presence: _choice.shown, statusMessage: _status);
+    return base.copyWith(
+      name: _name,
+      avatar: _avatar,
+      presence: _choice.shown,
+      statusMessage: _status,
+    );
+  }
+
+  void _onProfileUpdate(String userId) {
+    if (_disposed || userId != client.userID) return;
+    unawaited(_loadProfile());
+  }
+
+  /// [fresh] skips the SDK's cache, for right after a write of ours (which
+  /// the SDK doesn't know to mark outdated).
+  Future<void> _loadProfile({bool fresh = false}) async {
+    final turn = _profileTurn;
+    try {
+      final profile = await client.getUserProfile(
+        client.userID!,
+        maxCacheAge: fresh ? Duration.zero : const Duration(days: 1),
+      );
+      if (_disposed || turn != _profileTurn) return;
+      final name = profile.displayname?.trim();
+      final next = name == null || name.isEmpty ? null : profile.displayname;
+      final avatar = AvatarRef.maybe(profile.avatarUrl?.toString());
+      if (next == _name && avatar == _avatar) return;
+      _name = next;
+      _avatar = avatar;
+      _notify();
+    } catch (_) {
+      // Offline: what was shown stands, and a member event tries again.
+    }
   }
 
   @override
@@ -349,6 +415,80 @@ class MatrixProfile extends ChangeNotifier implements Profile {
       }
       rethrow;
     }
+  }
+
+  @override
+  Future<void> saveAccount({
+    required String displayName,
+    required String status,
+  }) async {
+    final name = displayName.trim();
+    final trimmed = status.trim();
+    // A blank name is no change: the server would keep it blank.
+    final nameChanged = name.isNotEmpty && name != this.displayName;
+    final statusChanged = trimmed != _status;
+    if (!nameChanged && !statusChanged) return;
+    _saving++;
+    _notify();
+    var nameFailed = false;
+    var statusFailed = false;
+    try {
+      if (nameChanged) {
+        final turn = ++_profileTurn;
+        try {
+          await client.setProfileField(client.userID!, 'displayname', {
+            'displayname': name,
+          });
+          if (!_disposed && turn == _profileTurn) {
+            _name = name;
+            _notify();
+          }
+        } catch (_) {
+          nameFailed = true;
+        }
+      }
+      if (statusChanged) {
+        try {
+          await setStatus(trimmed);
+        } catch (_) {
+          statusFailed = true;
+        }
+      }
+    } finally {
+      _saving--;
+      _notify();
+    }
+    if (_disposed || !(nameFailed || statusFailed)) return;
+    throw AccountSaveFailed(name: nameFailed, status: statusFailed);
+  }
+
+  @override
+  Future<void> setAvatar(Uint8List? png) async {
+    // The button is disabled meanwhile; this is the backstop.
+    if (_uploading) return;
+    _uploading = true;
+    _notify();
+    try {
+      await client.setAvatar(
+        png == null
+            ? null
+            : MatrixImageFile(
+                bytes: png,
+                name: 'avatar.png',
+                mimeType: 'image/png',
+              ),
+      );
+      _profileTurn++;
+      if (png == null && !_disposed) {
+        _avatar = null;
+        _notify();
+      }
+    } finally {
+      _uploading = false;
+      _notify();
+    }
+    // The upload's uri isn't handed back, so ask the server what it has.
+    if (png != null) await _loadProfile(fresh: true);
   }
 
   void _notify() {

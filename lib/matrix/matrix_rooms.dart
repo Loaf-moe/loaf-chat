@@ -156,13 +156,19 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   late final AvatarImages avatarImages = MatrixAvatarImages(client);
 
   @override
-  Profile get profile => _profile ??= MatrixProfile(client, identity: () => me);
+  Profile get profile => _madeProfile;
+
+  MatrixProfile get _madeProfile => _profile ??=
+      // [_baseMe], not [me]: [me] reads the profile, and the profile reads
+      // this, so pointing it at [me] would loop.
+      MatrixProfile(client, identity: () => _baseMe)..addListener(_notify);
 
   /// Made on first read, so rooms nobody asks for a profile never publish.
-  Profile? _profile;
+  MatrixProfile? _profile;
 
-  @override
-  Member get me {
+  /// You before the profile has loaded: the name the rooms fetched, or the
+  /// localpart, with no picture.
+  Member get _baseMe {
     final id = client.userID ?? '';
     return Member(
       id,
@@ -170,6 +176,14 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       spaceColorFor(id),
       presence: Presence.unknown,
     );
+  }
+
+  @override
+  Member get me {
+    final profile = _profile;
+    // A profile nobody asked for has nothing to add.
+    if (profile == null) return _baseMe;
+    return _baseMe.copyWith(name: profile.loadedName, avatar: profile.avatar);
   }
 
   @override

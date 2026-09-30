@@ -14,10 +14,14 @@ import '../members/presence.dart';
 import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
+import '../shell/profile.dart';
 import '../shell/profile_controller.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/action_menu.dart';
 import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
+import '../widgets/toast.dart';
+import 'avatar_picker.dart';
 
 class AccountSection extends StatefulWidget {
   const AccountSection({
@@ -25,6 +29,7 @@ class AccountSection extends StatefulWidget {
     this.profile,
     this.me,
     this.editable = true,
+    this.pickPicture = pickAvatarBytes,
   });
 
   /// Shared with the account panel's picker. Left null (in isolation, as in
@@ -38,6 +43,9 @@ class AccountSection extends StatefulWidget {
   /// as fact, with nothing to edit or save.
   final bool editable;
 
+  /// Where a picture comes from: the platform's picker. Swapped in tests.
+  final Future<Uint8List?> Function() pickPicture;
+
   @override
   State<AccountSection> createState() => _AccountSectionState();
 }
@@ -48,10 +56,16 @@ class _AccountSectionState extends State<AccountSection> {
   /// The mock's ids are bare localparts; a real one is whole already.
   String get _matrixId => _me.id.contains(':') ? _me.id : '${_me.id}:loaf.moe';
 
-  late final _name = TextEditingController(text: _me.name);
   late final _ownProfile = widget.profile == null ? ProfileController() : null;
   ProfileController get _profile => widget.profile ?? _ownProfile!;
+  late final _name = TextEditingController(text: _profile.displayName);
   late final _status = TextEditingController(text: _profile.status);
+
+  /// What the profile last had, so a field nobody has typed in follows a
+  /// change from elsewhere (the name arriving from the server) while one
+  /// being edited is left alone.
+  late var _seenName = _profile.displayName;
+  late var _seenStatus = _profile.status;
 
   @override
   void initState() {
@@ -59,7 +73,77 @@ class _AccountSectionState extends State<AccountSection> {
     _profile.addListener(_onProfile);
   }
 
-  void _onProfile() => setState(() {});
+  void _onProfile() {
+    // Mid-save the profile moves ahead of the fields, and back again when a
+    // write is refused. Neither is news to the fields: their text stays.
+    if (!_profile.savingAccount) {
+      if (_name.text == _seenName) _name.text = _profile.displayName;
+      if (_status.text == _seenStatus) _status.text = _profile.status;
+      _seenName = _profile.displayName;
+      _seenStatus = _profile.status;
+    }
+    setState(() {});
+  }
+
+  Future<void> _save() async {
+    try {
+      await _profile.saveAccount(displayName: _name.text, status: _status.text);
+    } on AccountSaveFailed catch (e) {
+      if (!mounted) return;
+      showToast(context, switch ((e.name, e.status)) {
+        (true, true) => "couldn't save your changes. try again?",
+        (true, false) => "couldn't save your name. try again?",
+        _ => "couldn't save your status. try again?",
+      });
+    }
+  }
+
+  void _discard() {
+    _name.text = _profile.displayName;
+    _status.text = _profile.status;
+  }
+
+  /// Choosing runs the platform picker, shrinks the result and uploads it;
+  /// removing uploads nothing. Either failing is one toast, and the badge is
+  /// live again.
+  Future<void> _changePicture(Offset at) async {
+    final items = [
+      const ActionItem(
+        value: _PictureAction.choose,
+        icon: LucideIcons.image,
+        label: 'choose a picture…',
+      ),
+      if (_profile.avatar != null)
+        const ActionItem(
+          value: _PictureAction.remove,
+          icon: LucideIcons.trash2,
+          label: 'remove picture',
+          destructive: true,
+        ),
+    ];
+    final action = isDesktop
+        ? await showActionMenu<_PictureAction>(
+            context,
+            position: at,
+            items: items,
+          )
+        : await showActionSheet<_PictureAction>(context, items: items);
+    if (action == null || !mounted) return;
+    try {
+      switch (action) {
+        case _PictureAction.choose:
+          final bytes = await widget.pickPicture();
+          if (bytes == null) return;
+          await _profile.setAvatar(await shrinkToPng(bytes));
+        case _PictureAction.remove:
+          await _profile.setAvatar(null);
+      }
+    } catch (_) {
+      if (mounted) {
+        showToast(context, "couldn't change your picture. try again?");
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -73,6 +157,10 @@ class _AccountSectionState extends State<AccountSection> {
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
+    final saving = _profile.savingAccount;
+    // Editing shows what the profile has; a read-only backend, what it was
+    // given.
+    final me = widget.editable ? _profile.me : _me;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(LoafSpace.x6),
@@ -86,12 +174,18 @@ class _AccountSectionState extends State<AccountSection> {
               // No page title: the nav says which section this is, and on a
               // phone so does the card header.
               _FieldLabel(tokens: tokens, label: 'avatar'),
-              _AvatarRow(tokens: tokens, me: _me, editable: widget.editable),
+              _AvatarRow(
+                tokens: tokens,
+                me: me,
+                editable: widget.editable,
+                uploading: _profile.uploadingAvatar,
+                onChange: _changePicture,
+              ),
               const SizedBox(height: LoafSpace.x6),
 
               _FieldLabel(tokens: tokens, label: 'display name'),
               if (widget.editable)
-                _TextRow(tokens: tokens, controller: _name)
+                _TextRow(tokens: tokens, controller: _name, readOnly: saving)
               else
                 _ReadOnlyRow(tokens: tokens, value: _me.name, mono: false),
               const SizedBox(height: LoafSpace.x5),
@@ -109,10 +203,18 @@ class _AccountSectionState extends State<AccountSection> {
                 _FieldLabel(tokens: tokens, label: 'presence'),
                 // Applies at once, like the picker: presence is a switch, not
                 // a form field.
-                _PresenceChips(
-                  value: _profile.choice,
-                  onChanged: _profile.choose,
-                ),
+                if (_profile.presenceShared)
+                  _PresenceChips(
+                    value: _profile.choice,
+                    onChanged: _profile.choose,
+                  )
+                else
+                  // Nothing to choose: this server neither sends nor takes
+                  // presence. Same words as the status picker.
+                  Text(
+                    "this server doesn't share presence",
+                    style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+                  ),
                 const SizedBox(height: LoafSpace.x5),
 
                 _FieldLabel(tokens: tokens, label: 'status'),
@@ -120,6 +222,7 @@ class _AccountSectionState extends State<AccountSection> {
                   tokens: tokens,
                   controller: _status,
                   hint: 'what are you up to?',
+                  readOnly: saving,
                 ),
                 const SizedBox(height: LoafSpace.x6),
 
@@ -131,16 +234,18 @@ class _AccountSectionState extends State<AccountSection> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       LoafButton(
-                        label: 'save changes',
+                        label: saving ? 'saving…' : 'save changes',
                         size: LoafButtonSize.small,
-                        onTap: () => _profile.setStatus(_status.text),
+                        // A save can't be called back, so no cancel: the
+                        // button just waits, drawn as unavailable.
+                        onTap: saving ? null : _save,
                       ),
                       const SizedBox(width: LoafSpace.x2),
                       LoafButton(
                         label: 'discard',
                         emphasis: LoafButtonEmphasis.quiet,
                         size: LoafButtonSize.small,
-                        onTap: () => _status.text = _profile.status,
+                        onTap: saving ? null : _discard,
                       ),
                     ],
                   ),
@@ -154,11 +259,15 @@ class _AccountSectionState extends State<AccountSection> {
   }
 }
 
+enum _PictureAction { choose, remove }
+
 class _AvatarRow extends StatelessWidget {
   const _AvatarRow({
     required this.tokens,
     required this.me,
     required this.editable,
+    required this.uploading,
+    required this.onChange,
   });
 
   final LoafTokens tokens;
@@ -167,43 +276,79 @@ class _AvatarRow extends StatelessWidget {
   /// Offers a new picture: the camera badge and its hint.
   final bool editable;
 
+  /// A picture is on its way up. There is no stopping it, so the badge
+  /// waits instead.
+  final bool uploading;
+
+  /// Opens the choices at a point (where a menu goes on a computer).
+  final void Function(Offset at) onChange;
+
   @override
   Widget build(BuildContext context) => Row(
     children: [
-      SizedBox(
-        width: 88,
-        height: 88,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            LoafAvatar(
-              label: me.initials,
-              color: me.color,
-              size: 88,
-              image: me.avatar,
-              textStyle: loafBody(30, 600),
-            ),
-            if (editable)
-              Positioned(
-                right: -2,
-                bottom: -2,
-                child: Container(
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: tokens.card,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: tokens.border),
-                    boxShadow: tokens.shadowSm,
-                  ),
-                  child: Icon(
-                    LucideIcons.camera,
-                    size: 15,
-                    color: tokens.textBody,
+      GestureDetector(
+        key: const Key('change-picture'),
+        behavior: HitTestBehavior.opaque,
+        onTapUp: editable && !uploading
+            ? (d) => onChange(d.globalPosition)
+            : null,
+        // Right-click is the computer's way in; a phone has no such thing.
+        onSecondaryTapUp: editable && !uploading && isDesktop
+            ? (d) => onChange(d.globalPosition)
+            : null,
+        child: SizedBox(
+          width: 88,
+          height: 88,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              LoafAvatar(
+                label: me.initials,
+                color: me.color,
+                size: 88,
+                image: me.avatar,
+                textStyle: loafBody(30, 600),
+              ),
+              if (uploading)
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: tokens.card.withValues(alpha: 0.6),
+                    ),
+                    child: const Center(
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator.adaptive(
+                          strokeWidth: 2.5,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-          ],
+              if (editable)
+                Positioned(
+                  right: -2,
+                  bottom: -2,
+                  child: Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: tokens.card,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: tokens.border),
+                      boxShadow: tokens.shadowSm,
+                    ),
+                    child: Icon(
+                      LucideIcons.camera,
+                      size: 15,
+                      color: tokens.textBody,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
       const SizedBox(width: LoafSpace.x5),
@@ -218,7 +363,7 @@ class _AvatarRow extends StatelessWidget {
             if (editable) ...[
               const SizedBox(height: 2),
               Text(
-                'png or jpg, at least 256px',
+                "any picture, it's shrunk to fit",
                 style: loafBody(11, 400).copyWith(color: tokens.textMuted),
               ),
             ],
@@ -249,11 +394,19 @@ class _FieldLabel extends StatelessWidget {
 }
 
 class _TextRow extends StatelessWidget {
-  const _TextRow({required this.tokens, required this.controller, this.hint});
+  const _TextRow({
+    required this.tokens,
+    required this.controller,
+    this.hint,
+    this.readOnly = false,
+  });
 
   final LoafTokens tokens;
   final TextEditingController controller;
   final String? hint;
+
+  /// Held still while a save is on its way.
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -267,6 +420,7 @@ class _TextRow extends StatelessWidget {
     child: Center(
       child: TextField(
         controller: controller,
+        readOnly: readOnly,
         style: loafBody(15, 400, height: 1.4).copyWith(color: tokens.textBody),
         decoration: InputDecoration(
           // Collapsed so the Center does the vertical work; a decorator left

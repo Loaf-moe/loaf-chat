@@ -18,9 +18,27 @@ class HalfApplied implements Exception {
   String toString() => 'HalfApplied: do not disturb only half-applied';
 }
 
+/// Saving the name and the status together, and part of it didn't land.
+/// The flags say which part; the rest did.
+class AccountSaveFailed implements Exception {
+  const AccountSaveFailed({required this.name, required this.status});
+
+  final bool name;
+  final bool status;
+
+  @override
+  String toString() => 'AccountSaveFailed(name: $name, status: $status)';
+}
+
 abstract interface class Profile implements Listenable {
   PresenceChoice get choice;
   String get status;
+
+  /// The name others see for you, as the server last had it.
+  String get displayName;
+
+  /// Your picture, or null for initials.
+  AvatarRef? get avatar;
 
   /// Whether your homeserver shares presence at all.
   bool get presenceShared;
@@ -39,6 +57,19 @@ abstract interface class Profile implements Listenable {
 
   /// Empty clears it.
   Future<void> setStatus(String status);
+
+  /// Saves the name and the status together; throws [AccountSaveFailed]
+  /// naming what didn't save. Unchanged fields aren't sent.
+  Future<void> saveAccount({
+    required String displayName,
+    required String status,
+  });
+
+  /// PNG bytes, or null to remove. One upload at a time.
+  Future<void> setAvatar(Uint8List? png);
+
+  bool get savingAccount;
+  bool get uploadingAvatar;
 
   /// Automatic idle: nobody is at the device (backgrounded, or no input for
   /// a while). Only shows while the choice is online; never changes
