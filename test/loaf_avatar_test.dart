@@ -120,6 +120,11 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.byType(Image), findsOneWidget);
+    // Decoded, so it really is painted: the failing case's contrast.
+    expect(
+      find.descendant(of: find.byType(Image), matching: find.byType(RawImage)),
+      findsOneWidget,
+    );
     expect(find.text('AB'), findsOneWidget);
     expect(tester.getSize(find.byType(LoafAvatar)), const Size(36, 36));
   });
@@ -133,7 +138,12 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.text('AB'), findsOneWidget);
-    expect(find.byType(SizedBox), findsWidgets);
+    // The error builder replaced the image: nothing is painted over the
+    // label (a decoded picture would leave a RawImage here).
+    expect(
+      find.descendant(of: find.byType(Image), matching: find.byType(RawImage)),
+      findsNothing,
+    );
     expect(tester.takeException(), isNull);
   });
 
