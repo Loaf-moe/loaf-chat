@@ -199,10 +199,14 @@ void main() {
     await tester.tap(find.text('save'));
     await tester.pump();
 
-    // The sheet's own drag pops past the lock unless it is switched off.
-    await tester.fling(find.text('saving…'), const Offset(0, 500), 2000);
+    final before = tester.getTopLeft(find.byType(TextField));
+    // The sheet's own drag goes past the lock (it drags away and, where it
+    // pops, closes) unless it is switched off.
+    // From the sheet's empty lower half, clear of anything that takes drags.
+    await tester.flingFrom(const Offset(200, 800), const Offset(0, 400), 2000);
     await tester.pump(const Duration(seconds: 1));
     expect(find.byType(TextField), findsOneWidget);
+    expect(tester.getTopLeft(find.byType(TextField)), before);
 
     devices.renamed.complete();
     await tester.pump(MockDevices.answerDelay);
