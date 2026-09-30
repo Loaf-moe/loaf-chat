@@ -1,4 +1,4 @@
-# loaf_native
+# Loaf Chat
 
 A Matrix client for loaf.moe, shaped like a place you hang out.
 
@@ -21,3 +21,7 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+## Licence
+
+AGPL-3.0-only. See `LICENSE`.

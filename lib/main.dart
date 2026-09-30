@@ -47,7 +47,7 @@ class LoafApp extends StatelessWidget {
   Widget build(BuildContext context) => ValueListenableBuilder(
     valueListenable: themeMode,
     builder: (context, mode, _) => MaterialApp(
-      title: 'Loaf',
+      title: 'Loaf Chat',
       debugShowCheckedModeBanner: false,
       theme: loafLightTheme(),
       darkTheme: loafDarkTheme(),
