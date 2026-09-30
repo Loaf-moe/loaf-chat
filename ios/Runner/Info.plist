@@ -67,6 +67,6 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>pick a picture for your profile</string>
+	<string>send photos and videos, and pick a picture for your profile</string>
 </dict>
 </plist>

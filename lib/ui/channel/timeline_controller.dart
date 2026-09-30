@@ -10,7 +10,7 @@ import 'package:flutter/foundation.dart';
 import '../mock/fixtures.dart';
 import 'timeline.dart';
 
-export 'timeline.dart' show ComposerMode, ComposerTarget, Timeline;
+export 'timeline.dart' show Attachment, ComposerMode, ComposerTarget, Timeline;
 
 class TimelineController extends ChangeNotifier
     with ComposerAiming
@@ -87,6 +87,23 @@ class TimelineController extends ChangeNotifier
         author: you,
         sentAt: DateTime.now(),
         body: body,
+        replyTo: target?.mode == ComposerMode.reply ? target!.message : null,
+      ),
+    );
+    aim(null);
+  }
+
+  /// Lands [file] as a message from [you], drawn as a Matrix file message is:
+  /// its name behind a paperclip. Nothing is uploaded anywhere.
+  @override
+  void sendFile(Attachment file) {
+    final target = this.target;
+    _messages.add(
+      Message(
+        id: 'local-${_sent++}',
+        author: you,
+        sentAt: DateTime.now(),
+        body: '📎 ${file.name}',
         replyTo: target?.mode == ComposerMode.reply ? target!.message : null,
       ),
     );

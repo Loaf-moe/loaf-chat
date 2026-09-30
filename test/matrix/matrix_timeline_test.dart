@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/matrix/matrix_timeline.dart';
+import 'package:loaf_native/ui/channel/timeline.dart' show Attachment;
 import 'package:loaf_native/ui/model/models.dart' hide Role;
 import 'package:matrix/matrix.dart' hide Timeline;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -23,6 +25,9 @@ class _Api extends FakeMatrixApi {
   final redacted = <String>[];
   final markers = <Map<String, Object?>>[];
   var refuseSend = false;
+
+  /// The largest upload the server says it takes.
+  var uploadLimit = 50000000;
 
   /// Answers sends with a server error rather than a refusal: the SDK marks
   /// the echo failed but, unlike a 403, does not throw.
@@ -53,6 +58,12 @@ class _Api extends FakeMatrixApi {
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
     final path = Uri.decodeComponent(request.url.path);
+    if (path.endsWith('/media/config')) {
+      return _json({'m.upload.size': uploadLimit});
+    }
+    if (request.method == 'POST' && path.endsWith('/media/v3/upload')) {
+      return _json({'content_uri': 'mxc://example.com/up${_ids++}'});
+    }
     if (!path.contains('/rooms/$_roomId/')) {
       return super.mockIntercept(request);
     }
@@ -470,6 +481,55 @@ void main() {
       });
       expect(h.timeline.target, isNull);
       expect(h.byBody('answer').replyTo!.id, r'$q');
+    });
+
+    test('a file goes up, then as a message of its type', () async {
+      final h = await _open([_text('hi')]);
+      h.timeline.sendFile(
+        Attachment(
+          name: 'notes.txt',
+          bytes: Uint8List.fromList(utf8.encode('rye, water, salt')),
+        ),
+      );
+      await _settle();
+      final content = h.api.sent.single.$2;
+      expect(content['msgtype'], MessageTypes.File);
+      expect(content['body'], 'notes.txt');
+      expect(content['url'], startsWith('mxc://example.com/'));
+      expect(h.messages.last.body, '📎 notes.txt');
+      expect(h.messages.last.status, MessageStatus.sent);
+    });
+
+    test('a picture goes as an image, and a reply as a reply', () async {
+      final h = await _open([_text('show me', id: r'$q')]);
+      h.timeline.startReply(h.byBody('show me'));
+      h.timeline.sendFile(
+        Attachment(
+          name: 'loaf.png',
+          mimeType: 'image/png',
+          bytes: Uint8List.fromList([1, 2, 3]),
+        ),
+      );
+      expect(h.timeline.target, isNull);
+      await _settle();
+      final content = h.api.sent.single.$2;
+      expect(content['msgtype'], MessageTypes.Image);
+      expect((content['m.relates_to']! as Map)['m.in_reply_to'], {
+        'event_id': r'$q',
+      });
+    });
+
+    test('a file too big for the server fails, and says why', () async {
+      final h = await _open([_text('hi')]);
+      h.api.uploadLimit = 2;
+      final said = h.timeline.failures.first;
+      h.timeline.sendFile(
+        Attachment(name: 'big.bin', bytes: Uint8List.fromList([1, 2, 3])),
+      );
+      expect(await said, 'big.bin is too big for this server');
+      await _settle();
+      expect(h.api.sent, isEmpty);
+      expect(h.byBody('📎 big.bin').status, MessageStatus.failed);
     });
 
     test('a refused message stays, failed, until retried', () async {

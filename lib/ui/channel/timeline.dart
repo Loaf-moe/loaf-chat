@@ -9,6 +9,20 @@ import '../model/models.dart';
 
 enum ComposerMode { reply, edit }
 
+/// A file picked to send: what the platform's picker handed back, read into
+/// memory, since a Matrix upload is one request of the whole thing.
+@immutable
+class Attachment {
+  const Attachment({required this.name, required this.bytes, this.mimeType});
+
+  final String name;
+  final Uint8List bytes;
+
+  /// As the picker reported it, when it did; otherwise worked out from
+  /// [name] and the bytes at send time.
+  final String? mimeType;
+}
+
 /// A message the composer is replying to or editing.
 @immutable
 class ComposerTarget {
@@ -56,6 +70,10 @@ abstract interface class Timeline implements Listenable {
   /// Posts [text], quoting the reply target if there is one. Blank text
   /// never sends.
   void send(String text);
+
+  /// Posts [file] as a media message — an image, a video, a sound or any
+  /// other file, by its type — quoting the reply target if there is one.
+  void sendFile(Attachment file);
 
   /// Adds your [emoji] to the message, or takes it back if it is already
   /// yours.

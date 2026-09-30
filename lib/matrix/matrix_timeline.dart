@@ -296,6 +296,37 @@ class MatrixTimeline extends ChangeNotifier
   }
 
   @override
+  void sendFile(ui.Attachment file) {
+    final target = this.target;
+    final replyTo = target?.mode == ui.ComposerMode.reply
+        ? _event(target!.message.id)
+        : null;
+    // By type, so an image goes as m.image with a thumbnail and a video as
+    // m.video: other clients draw those inline rather than as a download.
+    final matrixFile = MatrixFile.fromMimeType(
+      bytes: file.bytes,
+      name: file.name,
+      mimeType: file.mimeType,
+    );
+    // Like text, a failure shows on the message itself, which stays to
+    // retry — except one the server will never take, which says why.
+    unawaited(
+      _send(
+        (txid) =>
+            room.sendFileEvent(matrixFile, txid: txid, inReplyTo: replyTo),
+      ).then<void>(
+        (_) {},
+        onError: (Object error) {
+          if (error is FileTooBigMatrixException && !_disposed) {
+            _failures.add('${file.name} is too big for this server');
+          }
+        },
+      ),
+    );
+    aim(null);
+  }
+
+  @override
   void saveEdit(String messageId, String text) {
     final body = text.trim();
     final current = messages.where((m) => m.id == messageId).firstOrNull;

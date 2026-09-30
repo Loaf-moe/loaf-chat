@@ -48,6 +48,8 @@ class _FakeTimeline extends ChangeNotifier
   @override
   void send(String text) => calls.add('send $text');
   @override
+  void sendFile(Attachment file) => calls.add('file ${file.name}');
+  @override
   void toggleReaction(String messageId, String emoji) =>
       calls.add('react $messageId $emoji');
   @override

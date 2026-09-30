@@ -1,6 +1,5 @@
-/// The message composer at the bottom of a channel. A mockup: typing and
-/// sending do not append anything, but the send button's enabled state
-/// really does track the text field.
+/// The message composer at the bottom of a channel: text, emoji, and files
+/// attached from the platform's own picker.
 library;
 
 import 'package:flutter/material.dart';
@@ -8,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../members/role_colors.dart';
+import '../widgets/toast.dart';
+import 'attach.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'message_actions.dart';
@@ -41,6 +42,7 @@ class Composer extends StatefulWidget {
     required this.channelName,
     this.timeline,
     this.prefix = '#',
+    this.pickFiles = pickAttachments,
   });
 
   final String channelName;
@@ -51,6 +53,9 @@ class Composer extends StatefulWidget {
 
   /// Supplies the message being replied to or edited, if any.
   final Timeline? timeline;
+
+  /// Asks for files to attach. The platform's own picker, but for tests.
+  final AttachmentPicker pickFiles;
 
   @override
   State<Composer> createState() => _ComposerState();
@@ -124,6 +129,27 @@ class _ComposerState extends State<Composer> {
     );
   }
 
+  /// Sends each picked file as its own message. A reply target goes with
+  /// the first, as it would with text.
+  Future<void> _attach() async {
+    final timeline = widget.timeline;
+    if (timeline == null) return;
+    final picked = await widget.pickFiles(context);
+    for (final file in picked) {
+      final Uint8List bytes;
+      try {
+        bytes = await file.readAsBytes();
+      } on Object {
+        if (mounted) showToast(context, "couldn't read ${file.name}");
+        continue;
+      }
+      if (!mounted) return;
+      timeline.sendFile(
+        Attachment(name: file.name, bytes: bytes, mimeType: file.mimeType),
+      );
+    }
+  }
+
   Future<void> _submit() async {
     final timeline = widget.timeline;
     if (timeline == null) return;
@@ -192,12 +218,20 @@ class _ComposerState extends State<Composer> {
             target: target,
             onCancel: () => widget.timeline?.clearTarget(),
           ),
-        _field(tokens, hasTarget: target != null),
+        _field(
+          tokens,
+          hasTarget: target != null,
+          editing: target?.mode == ComposerMode.edit,
+        ),
       ],
     );
   }
 
-  Widget _field(LoafTokens tokens, {required bool hasTarget}) {
+  Widget _field(
+    LoafTokens tokens, {
+    required bool hasTarget,
+    required bool editing,
+  }) {
     return Container(
       margin: EdgeInsets.fromLTRB(
         LoafSpace.x4,
@@ -224,7 +258,15 @@ class _ComposerState extends State<Composer> {
         // beside the last line rather than floating to the middle.
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          _IconAction(icon: LucideIcons.plus, onTap: () {}),
+          // An edit changes words only, so there is nothing to attach to it.
+          if (!editing)
+            _IconAction(
+              icon: LucideIcons.plus,
+              tooltip: 'Attach files',
+              onTap: _attach,
+            )
+          else
+            const SizedBox(width: LoafSpace.x2),
           Expanded(
             child: Padding(
               // Centres the line box in the control height. Arithmetic, not
@@ -269,7 +311,6 @@ class _ComposerState extends State<Composer> {
               onTap: () => _pickEmoji(button),
             ),
           ),
-          _IconAction(icon: LucideIcons.paperclip, onTap: () {}),
           const SizedBox(width: LoafSpace.x1),
           // Enabled for an emptied edit too: sending that is how you ask to
           // delete the message.
