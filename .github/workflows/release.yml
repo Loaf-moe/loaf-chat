@@ -72,10 +72,13 @@ jobs:
     environment: release
     steps:
       - uses: actions/checkout@v4
+      # libwebkit2gtk and libsoup: desktop_webview_window (via
+      # flutter_web_auth_2) requires them at CMake time.
       - run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config \
-            libgtk-3-dev liblzma-dev libstdc++-12-dev jq
+            libgtk-3-dev liblzma-dev libstdc++-12-dev jq \
+            libwebkit2gtk-4.1-dev libsoup-3.0-dev
       - uses: jdx/mise-action@v2
       - run: >
           mise exec -- flutter build linux --release
