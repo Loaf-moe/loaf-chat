@@ -7,6 +7,7 @@ import 'package:loaf_native/ui/auth/loaf_session.dart';
 import 'package:loaf_native/ui/auth/sign_in_state.dart';
 import 'package:loaf_native/ui/channel/timeline.dart';
 import 'package:loaf_native/ui/mock/mock_homeserver.dart';
+import 'package:loaf_native/ui/mock/mock_profile.dart';
 import 'package:loaf_native/ui/mock/mock_verifier.dart';
 import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/model/models.dart';
@@ -17,6 +18,7 @@ import 'package:loaf_native/ui/spaces/add_space.dart';
 import 'package:loaf_native/ui/spaces/space_directory.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/verifier.dart';
+import 'package:loaf_native/ui/shell/profile.dart';
 import 'package:loaf_native/ui/widgets/avatar_images.dart';
 
 // Widget-level tests for the space menu, leave-space confirmation and the
@@ -58,6 +60,8 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
 
   @override
   AvatarImages get avatarImages => const NoAvatarImages();
+  @override
+  Profile get profile => MockProfile();
   @override
   Set<RoomAbility> abilities = {
     RoomAbility.answerInvites,

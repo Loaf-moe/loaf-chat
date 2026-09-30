@@ -8,10 +8,12 @@ import 'package:flutter/foundation.dart';
 
 import '../channel/timeline_controller.dart';
 import '../rooms/rooms.dart';
+import '../shell/profile.dart';
 import '../spaces/add_space.dart' show spaceColorFor;
 import '../spaces/space_directory.dart';
 import '../widgets/avatar_images.dart';
 import 'fixtures.dart';
+import 'mock_profile.dart';
 import 'mock_space_directory.dart';
 
 class MockRooms extends ChangeNotifier implements Rooms {
@@ -51,6 +53,9 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   @override
   AvatarImages get avatarImages => const NoAvatarImages();
+
+  @override
+  final Profile profile = MockProfile();
 
   @override
   Set<RoomAbility> get abilities => RoomAbility.values.toSet();
@@ -307,6 +312,7 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   @override
   void dispose() {
+    profile.dispose();
     _shared.dispose();
     for (final t in _timelines.values) {
       t.dispose();

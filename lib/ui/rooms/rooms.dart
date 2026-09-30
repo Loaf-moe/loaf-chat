@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../channel/timeline.dart';
 import '../model/models.dart';
+import '../shell/profile.dart';
 import '../spaces/space_directory.dart';
 import '../widgets/avatar_images.dart';
 
@@ -81,6 +82,10 @@ abstract interface class Rooms implements Listenable {
   /// Turns the avatar refs on this account's people, rooms and spaces into
   /// images.
   AvatarImages get avatarImages;
+
+  /// Your presence and status, and everyone else's. The rooms own it and
+  /// dispose of it with themselves.
+  Profile get profile;
 
   /// The rail, in order.
   List<Space> get spaces;

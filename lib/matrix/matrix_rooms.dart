@@ -8,17 +8,19 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 // The SDK has a Presence and a Timeline of its own; loaf's are the ones the
 // UI draws.
-import 'package:matrix/matrix.dart' hide Presence, Timeline;
+import 'package:matrix/matrix.dart' hide Presence, Profile, Timeline;
 
 import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
+import '../ui/shell/profile.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
 import '../ui/widgets/avatar_images.dart';
 import 'matrix_avatar_images.dart';
 import 'matrix_hierarchy.dart';
+import 'matrix_profile.dart';
 import 'matrix_space_directory.dart';
 import 'matrix_timeline.dart';
 
@@ -141,6 +143,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     RoomAbility.addSpace,
     RoomAbility.startDirect,
     RoomAbility.invite,
+    RoomAbility.editProfile,
   };
 
   @override
@@ -151,6 +154,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   @override
   late final AvatarImages avatarImages = MatrixAvatarImages(client);
+
+  @override
+  late final Profile profile = MatrixProfile(client, identity: () => me);
 
   @override
   Member get me {
@@ -1137,6 +1143,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       t.dispose();
     }
     _hierarchy.dispose();
+    profile.dispose();
     super.dispose();
   }
 }

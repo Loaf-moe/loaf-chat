@@ -766,6 +766,7 @@ void main() {
     expect(rooms.me.id, _me);
     expect(rooms.me.name, isNotEmpty);
     expect(rooms.abilities, {
+      RoomAbility.editProfile,
       RoomAbility.answerInvites,
       RoomAbility.messages,
       RoomAbility.markRead,

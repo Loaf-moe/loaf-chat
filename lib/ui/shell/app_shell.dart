@@ -71,9 +71,13 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-  final _profile = ProfileController();
   late final LoafSession _session = widget.session ?? MockSession();
   late final Rooms _rooms = widget.rooms?.call() ?? MockRooms();
+  // The rooms own the profile and dispose it; the controller only views it.
+  late final _profile = ProfileController(
+    profile: _rooms.profile,
+    onError: _profileFailed,
+  );
   late final _calls = CallController(
     me: currentUser,
     rings: mockRings,
@@ -97,6 +101,16 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _onChange() => setState(() {});
+
+  /// A presence or status write the server refused: the profile has already
+  /// put things back, so a toast says to try again.
+  void _profileFailed(ProfileCall call, Object error) {
+    if (!mounted) return;
+    showToast(context, switch (call) {
+      ProfileCall.presence => "couldn't change your presence. try again?",
+      ProfileCall.status => "couldn't save your status. try again?",
+    });
+  }
 
   @override
   void dispose() {
@@ -1072,12 +1086,21 @@ class _AppShellState extends State<AppShell> {
     // Your own row shows your presence and status, which only a backend
     // that edits your profile has; elsewhere the room's row, with your real
     // power level, is the better one.
-    Member you(Member m) =>
-        m.id == me.id && _can(RoomAbility.editProfile) ? me : m;
+    Member you(Member m) {
+      if (!_can(RoomAbility.editProfile)) return m;
+      if (m.id == me.id) return me;
+      // Others show what the server last said of them; where nothing was
+      // heard, the row's own presence stands.
+      final heard = _profile.presenceOf(m.id);
+      return heard == null
+          ? m
+          : m.copyWith(presence: heard.$1, statusMessage: heard.$2);
+    }
+
     final List<Member> members;
     switch (channel.kind) {
       case ChannelKind.direct:
-        members = [me, ...channel.members];
+        members = [me, for (final m in channel.members) you(m)];
       case ChannelKind.room:
         _rooms.loadMembers(channel.id);
         members = [for (final m in channel.members) you(m)];
