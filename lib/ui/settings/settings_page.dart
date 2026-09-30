@@ -7,6 +7,9 @@
 /// Inside the card, wide shows the nav beside the detail; narrow shows the
 /// nav and swaps to the detail in place. The detail never pushes an app-level
 /// route, because a route would escape the card it belongs to.
+///
+/// Only sections that do something are listed: a section with nothing behind
+/// it yet is left out rather than shown as a placeholder.
 library;
 
 import 'package:flutter/material.dart';
@@ -24,13 +27,7 @@ import 'devices_section.dart';
 
 enum SettingsSection {
   account('account', LucideIcons.circleUser),
-  appearance('appearance', LucideIcons.palette),
-  notifications('notifications', LucideIcons.bell),
-  devices('devices', LucideIcons.monitorSmartphone),
-  voice('voice & video', LucideIcons.video),
-  stickers('stickers', LucideIcons.sticker),
-  developer('developer', LucideIcons.terminal),
-  about('about', LucideIcons.info);
+  devices('devices', LucideIcons.monitorSmartphone);
 
   const SettingsSection(this.label, this.icon);
 
@@ -44,7 +41,9 @@ const _twoPaneFrom = 900.0;
 /// Opens settings over the current screen. [profile] is shared with the
 /// account panel's status picker, so both edit the same presence. [me] is
 /// who the account section shows, and [editable] whether it offers to
-/// change anything; [onSignOut] is what the sign-out button does.
+/// change anything; [onSignOut] is what the sign-out button does, and left
+/// null there is no sign-out button. [devices] left null leaves the devices
+/// section out.
 Future<void> showSettings(
   BuildContext context, {
   ProfileController? profile,
@@ -83,17 +82,21 @@ class SettingsModal extends StatefulWidget {
 
   final ProfileController? profile;
 
-  /// Left null, the devices section stays the placeholder: a backend that
-  /// can't list sessions has none to show.
+  /// Left null, there is no devices section: a backend that can't list
+  /// sessions has none to show.
   final Devices? devices;
 
   /// Left null (in isolation, as in tests), the mock's account.
   final Member? me;
   final bool editable;
+
+  /// Left null, there is no sign-out button: one that did nothing would be a
+  /// lie.
   final VoidCallback? onSignOut;
 
   /// Settings opens on the account, which carries the profile — the thing
-  /// people actually come here to change.
+  /// people actually come here to change. A section that isn't offered falls
+  /// back to the account.
   final SettingsSection initial;
 
   @override
@@ -101,7 +104,16 @@ class SettingsModal extends StatefulWidget {
 }
 
 class _SettingsModalState extends State<SettingsModal> {
-  late var _section = widget.initial;
+  /// What this backend can back. The account always; devices only with
+  /// something that lists them.
+  List<SettingsSection> get _sections => [
+    SettingsSection.account,
+    if (widget.devices != null) SettingsSection.devices,
+  ];
+
+  late var _section = _sections.contains(widget.initial)
+      ? widget.initial
+      : SettingsSection.account;
 
   /// Narrow only: null means the nav is showing.
   SettingsSection? _pushed;
@@ -162,6 +174,7 @@ class _SettingsModalState extends State<SettingsModal> {
       SizedBox(
         width: 260,
         child: _Nav(
+          sections: _sections,
           selected: _section,
           onSelect: (s) => setState(() => _section = s),
           onSignOut: _signOut,
@@ -175,6 +188,7 @@ class _SettingsModalState extends State<SettingsModal> {
     final pushed = _pushed;
     if (pushed == null) {
       return _Nav(
+        sections: _sections,
         selected: null,
         onSelect: (s) => setState(() => _pushed = s),
         onSignOut: _signOut,
@@ -258,8 +272,14 @@ class _CardHeader extends StatelessWidget {
 }
 
 class _Nav extends StatelessWidget {
-  const _Nav({required this.selected, required this.onSelect, this.onSignOut});
+  const _Nav({
+    required this.sections,
+    required this.selected,
+    required this.onSelect,
+    this.onSignOut,
+  });
 
+  final List<SettingsSection> sections;
   final VoidCallback? onSignOut;
 
   /// Null on the narrow layout, where nothing is selected in place.
@@ -284,7 +304,7 @@ class _Nav extends StatelessWidget {
                 LoafSpace.x2,
               ),
               children: [
-                for (final section in SettingsSection.values)
+                for (final section in sections)
                   _NavItem(
                     section: section,
                     active: section == selected,
@@ -293,8 +313,10 @@ class _Nav extends StatelessWidget {
               ],
             ),
           ),
-          const Divider(height: 1),
-          _SignOut(tokens: tokens, onTap: onSignOut),
+          if (onSignOut case final signOut?) ...[
+            const Divider(height: 1),
+            _SignOut(onTap: signOut),
+          ],
         ],
       ),
     );
@@ -356,10 +378,9 @@ class _NavItem extends StatelessWidget {
 }
 
 class _SignOut extends StatelessWidget {
-  const _SignOut({required this.tokens, this.onTap});
+  const _SignOut({required this.onTap});
 
-  final LoafTokens tokens;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -371,7 +392,7 @@ class _SignOut extends StatelessWidget {
         icon: LucideIcons.logOut,
         emphasis: LoafButtonEmphasis.quiet,
         size: LoafButtonSize.small,
-        onTap: onTap ?? () {},
+        onTap: onTap,
       ),
     ),
   );
@@ -393,34 +414,16 @@ class _Detail extends StatelessWidget {
   final bool editable;
 
   @override
-  Widget build(BuildContext context) {
-    final tokens = LoafTokens.of(context);
-
-    if (section == SettingsSection.account) {
-      return AccountSection(profile: profile, me: me, editable: editable);
-    }
-
-    final devices = this.devices;
-    if (section == SettingsSection.devices && devices != null) {
-      return DevicesSection(devices: devices);
-    }
-
-    // Honest placeholder: the IA is decided, these screens are not designed.
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(LoafSpace.x6),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(section.icon, size: 28, color: tokens.textMuted),
-            const SizedBox(height: LoafSpace.x3),
-            Text(
-              '${section.label} is not designed yet',
-              style: loafBody(13, 400).copyWith(color: tokens.textMuted),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => switch (section) {
+    SettingsSection.account => AccountSection(
+      profile: profile,
+      me: me,
+      editable: editable,
+    ),
+    // Only offered with devices to show; the null check is the backstop.
+    SettingsSection.devices => switch (devices) {
+      final devices? => DevicesSection(devices: devices),
+      null => AccountSection(profile: profile, me: me, editable: editable),
+    },
+  };
 }
