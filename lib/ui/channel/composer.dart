@@ -1,5 +1,6 @@
-/// The message composer at the bottom of a channel: text, emoji, and files
-/// attached from the platform's own picker.
+/// The message composer at the bottom of a channel: text, emoji — picked, or
+/// typed as `:shortcodes:` — and files attached from the platform's own
+/// picker.
 library;
 
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'message_actions.dart';
 import '../emoji/emoji_picker.dart';
+import '../emoji/shortcodes.dart';
 import 'timeline.dart';
 
 /// Every control in the composer row is this tall. Equal heights are what
@@ -67,6 +69,19 @@ class _ComposerState extends State<Composer> {
   bool _hasText = false;
   ComposerTarget? _target;
 
+  /// Emoji for the `:shortcode` being typed, best first, and which one
+  /// Enter or Tab would take. Empty when there is no popup.
+  List<ShortcodeMatch> _suggestions = const [];
+  ShortcodeQuery? _query;
+  int _highlight = 0;
+
+  /// Where the shortcode Escape waved away starts. It stays away while
+  /// that one is being typed, and comes back for the next.
+  int? _dismissedAt;
+
+  final _fieldLink = LayerLink();
+  final _suggestionsPortal = OverlayPortalController();
+
   @override
   void initState() {
     super.initState();
@@ -80,15 +95,84 @@ class _ComposerState extends State<Composer> {
     _controller.addListener(() {
       final hasText = _controller.text.trim().isNotEmpty;
       if (hasText != _hasText) setState(() => _hasText = hasText);
+      _suggest();
     });
+    _focus.addListener(_suggest);
     widget.timeline?.addListener(_onTimeline);
     _focus.onKeyEvent = _onKey;
   }
 
+  /// Offers emoji for the shortcode at the cursor, if one is being typed
+  /// into a focused field.
+  void _suggest() {
+    final query = _focus.hasFocus ? shortcodeAt(_controller.value) : null;
+    if (query?.start != _dismissedAt) _dismissedAt = null;
+    final matches = query == null || query.start == _dismissedAt
+        ? const <ShortcodeMatch>[]
+        : shortcodes.search(query.query, limit: 6);
+    if (matches.isEmpty && _suggestions.isEmpty) return;
+    setState(() {
+      // A new letter narrows the list: start again from the best.
+      if (query != _query) _highlight = 0;
+      _query = query;
+      _suggestions = matches;
+    });
+    matches.isEmpty ? _suggestionsPortal.hide() : _suggestionsPortal.show();
+  }
+
+  /// Puts [match]'s emoji where its shortcode was being typed.
+  void _acceptSuggestion(ShortcodeMatch match) {
+    final query = _query;
+    if (query == null) return;
+    final value = _controller.value;
+    final end = value.selection.baseOffset;
+    final emoji = match.emoji.char;
+    _controller.value = TextEditingValue(
+      text: value.text.replaceRange(query.start, end, emoji),
+      selection: TextSelection.collapsed(offset: query.start + emoji.length),
+    );
+  }
+
+  /// Arrow keys move through the suggestions, Enter or Tab takes one, and
+  /// Escape puts them away. On any platform with a keyboard: an iPad's
+  /// works the same way.
+  KeyEventResult _onSuggestionKey(KeyEvent event) {
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    final n = _suggestions.length;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowDown) {
+      setState(() => _highlight = (_highlight + 1) % n);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
+      setState(() => _highlight = (_highlight - 1 + n) % n);
+      return KeyEventResult.handled;
+    }
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        (key == LogicalKeyboardKey.tab &&
+            !HardwareKeyboard.instance.isShiftPressed)) {
+      _acceptSuggestion(_suggestions[_highlight]);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.escape) {
+      _dismissedAt = _query?.start;
+      _suggest();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   /// Desktop keys: Enter sends, Shift+Enter falls through to the field as a
   /// newline, Escape backs out of a reply or edit. On a phone Return is a
-  /// newline and the send button sends, so none of this applies.
+  /// newline and the send button sends, so none of this applies. While
+  /// emoji are being suggested, the keys work those first.
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (_suggestions.isNotEmpty) {
+      final result = _onSuggestionKey(event);
+      if (result == KeyEventResult.handled) return result;
+    }
     if (!isDesktop || event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
     final enter =
@@ -153,7 +237,9 @@ class _ComposerState extends State<Composer> {
   Future<void> _submit() async {
     final timeline = widget.timeline;
     if (timeline == null) return;
-    final text = _controller.text;
+    // A complete :shortcode: goes as its emoji, whether or not it was
+    // picked from the suggestions.
+    final text = shortcodes.expand(_controller.text);
     final target = _target;
 
     if (target != null && target.mode == ComposerMode.edit) {
@@ -200,6 +286,7 @@ class _ComposerState extends State<Composer> {
   @override
   void dispose() {
     widget.timeline?.removeListener(_onTimeline);
+    _focus.removeListener(_suggest);
     _controller.dispose();
     _focus.dispose();
     super.dispose();
@@ -232,14 +319,7 @@ class _ComposerState extends State<Composer> {
     required bool hasTarget,
     required bool editing,
   }) {
-    return Container(
-      margin: EdgeInsets.fromLTRB(
-        LoafSpace.x4,
-        // The card already separates the field from the timeline.
-        hasTarget ? LoafSpace.x2 : LoafSpace.x4,
-        LoafSpace.x4,
-        LoafSpace.x3,
-      ),
+    final field = Container(
       decoration: BoxDecoration(
         color: tokens.card,
         borderRadius: BorderRadius.circular(LoafRadius.xxl),
@@ -319,6 +399,130 @@ class _ComposerState extends State<Composer> {
             onTap: _submit,
           ),
         ],
+      ),
+    );
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        LoafSpace.x4,
+        // The card already separates the field from the timeline.
+        hasTarget ? LoafSpace.x2 : LoafSpace.x4,
+        LoafSpace.x4,
+        LoafSpace.x3,
+      ),
+      child: OverlayPortal(
+        controller: _suggestionsPortal,
+        // As in the hover toolbar, the Align only loosens the overlay's
+        // constraints so the follower shrinks to the list.
+        overlayChildBuilder: (context) => Align(
+          alignment: Alignment.topLeft,
+          child: CompositedTransformFollower(
+            link: _fieldLink,
+            targetAnchor: Alignment.topLeft,
+            followerAnchor: Alignment.bottomLeft,
+            offset: const Offset(0, -LoafSpace.x1),
+            // Part of the field as far as taps go, so picking one keeps the
+            // keyboard and focus where they are.
+            child: TextFieldTapRegion(
+              child: _ShortcodeSuggestions(
+                matches: _suggestions,
+                highlight: _highlight,
+                onHover: (i) => setState(() => _highlight = i),
+                onPick: _acceptSuggestion,
+              ),
+            ),
+          ),
+        ),
+        child: CompositedTransformTarget(link: _fieldLink, child: field),
+      ),
+    );
+  }
+}
+
+/// Emoji for the `:shortcode` being typed, above the field. Each row shows
+/// the emoji and the code it matched under, so the next time it can simply
+/// be typed.
+class _ShortcodeSuggestions extends StatelessWidget {
+  const _ShortcodeSuggestions({
+    required this.matches,
+    required this.highlight,
+    required this.onHover,
+    required this.onPick,
+  });
+
+  final List<ShortcodeMatch> matches;
+  final int highlight;
+  final ValueChanged<int> onHover;
+  final ValueChanged<ShortcodeMatch> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    // A finger needs a taller row than a pointer.
+    final rowHeight = isDesktop ? 32.0 : 44.0;
+    return DecoratedBox(
+      key: const ValueKey('shortcode-suggestions'),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(LoafRadius.lg),
+        boxShadow: tokens.shadowMd,
+      ),
+      child: Material(
+        color: tokens.card,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(LoafRadius.lg),
+          side: BorderSide(color: tokens.border),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 200, maxWidth: 320),
+          child: Padding(
+            padding: const EdgeInsets.all(LoafSpace.x1),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < matches.length; i++)
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    onEnter: (_) => onHover(i),
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onPick(matches[i]),
+                      child: Container(
+                        height: rowHeight,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: LoafSpace.x2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: i == highlight
+                              ? tokens.border
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(LoafRadius.md),
+                        ),
+                        child: Row(
+                          children: [
+                            Text(
+                              matches[i].emoji.char,
+                              style: const TextStyle(fontSize: 18),
+                            ),
+                            const SizedBox(width: LoafSpace.x2),
+                            Flexible(
+                              child: Text(
+                                ':${matches[i].code}:',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: loafMono(13)
+                                    .copyWith(color: tokens.textBody),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/channel/composer.dart';
@@ -145,6 +146,147 @@ void main() {
     testWidgets('there is one way to attach, not two', (tester) async {
       await pumpWith(tester, () async => []);
       expect(find.byIcon(LucideIcons.paperclip), findsNothing);
+    });
+  });
+
+  group('shortcodes', () {
+    final desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
+    final mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
+    final suggestions = find.byKey(const ValueKey('shortcode-suggestions'));
+
+    Future<TimelineController> pump(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(800, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final timeline = TimelineController(const [], you: currentUser);
+      addTearDown(timeline.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: Composer(channelName: 'general', timeline: timeline),
+            ),
+          ),
+        ),
+      );
+      return timeline;
+    }
+
+    Future<void> type(WidgetTester tester, String text) async {
+      await tester.showKeyboard(find.byType(TextField));
+      await tester.enterText(find.byType(TextField), text);
+      await tester.pumpAndSettle();
+    }
+
+    String field(WidgetTester tester) =>
+        tester.widget<TextField>(find.byType(TextField)).controller!.text;
+
+    /// The emoji a suggestion row offers, top to bottom.
+    List<String> offered(WidgetTester tester) => tester
+        .widgetList<Text>(
+          find.descendant(of: suggestions, matching: find.byType(Text)),
+        )
+        .map((t) => t.data!)
+        .where((t) => !t.startsWith(':'))
+        .toList();
+
+    testWidgets('a colon and two letters offers matching emoji', (
+      tester,
+    ) async {
+      await pump(tester);
+      await type(tester, 'hi :s');
+      expect(suggestions, findsNothing);
+      await type(tester, 'hi :smil');
+      expect(suggestions, findsOneWidget);
+      expect(offered(tester).first, '😄');
+      expect(find.text(':smile:'), findsOneWidget);
+    });
+
+    testWidgets('a closed shortcode, or none at all, offers nothing', (
+      tester,
+    ) async {
+      await pump(tester);
+      await type(tester, 'hi :smile: there');
+      expect(suggestions, findsNothing);
+      await type(tester, 'at 12:30');
+      expect(suggestions, findsNothing);
+    });
+
+    testWidgets(
+      'tapping a suggestion puts its emoji in place',
+      variant: mobile,
+      (tester) async {
+        await pump(tester);
+        await type(tester, 'hi :smil');
+        await tester.tap(find.text(':smile:'));
+        await tester.pumpAndSettle();
+        expect(field(tester), 'hi 😄');
+        expect(suggestions, findsNothing);
+      },
+    );
+
+    testWidgets(
+      'arrows move, Enter takes, and nothing is sent',
+      variant: desktop,
+      (tester) async {
+        final timeline = await pump(tester);
+        await type(tester, 'hi :smil');
+        final second = offered(tester)[1];
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+
+        expect(field(tester), 'hi $second');
+        expect(timeline.messages, isEmpty);
+        expect(suggestions, findsNothing);
+
+        // With nothing suggested, Enter sends again.
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(timeline.messages.single.body, 'hi $second');
+      },
+    );
+
+    testWidgets('Tab takes the first', variant: desktop, (tester) async {
+      await pump(tester);
+      await type(tester, ':thumbsu');
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      expect(field(tester), '👍');
+    });
+
+    testWidgets(
+      'Escape puts them away until the next shortcode',
+      variant: desktop,
+      (tester) async {
+        await pump(tester);
+        await type(tester, ':smil');
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(suggestions, findsNothing);
+
+        await type(tester, ':smile');
+        expect(suggestions, findsNothing, reason: 'still the same one');
+
+        await type(tester, ':smile :hear');
+        expect(suggestions, findsOneWidget);
+      },
+    );
+
+    testWidgets('a complete shortcode goes as its emoji', (tester) async {
+      final timeline = await pump(tester);
+      await type(tester, 'fresh :bread: and `:bread:` :notathing:');
+      await tester.tap(find.byIcon(LucideIcons.send));
+      await tester.pumpAndSettle();
+      expect(
+        timeline.messages.single.body,
+        'fresh 🍞 and `:bread:` :notathing:',
+      );
     });
   });
 }
