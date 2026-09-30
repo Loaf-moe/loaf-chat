@@ -11,6 +11,7 @@ import '../call/call_view.dart';
 import '../mock/fixtures.dart';
 import '../shell/channel_list.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
 
 /// An answer on its way to the server.
@@ -180,15 +181,11 @@ class _PersonAvatar extends StatelessWidget {
   final Member member;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: 72,
-    height: 72,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(color: member.color, shape: BoxShape.circle),
-    child: Text(
-      member.initials,
-      style: loafBody(26, 600).copyWith(color: Colors.white),
-    ),
+  Widget build(BuildContext context) => LoafAvatar(
+    label: member.initials,
+    color: member.color,
+    size: 72,
+    textStyle: loafBody(26, 600),
   );
 }
 

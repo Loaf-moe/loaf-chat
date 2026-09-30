@@ -16,6 +16,7 @@ import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../shell/profile_controller.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
 
 class AccountSection extends StatefulWidget {
@@ -175,16 +176,11 @@ class _AvatarRow extends StatelessWidget {
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            Container(
-              decoration: BoxDecoration(
-                color: me.color,
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                me.initials,
-                style: loafBody(30, 600).copyWith(color: Colors.white),
-              ),
+            LoafAvatar(
+              label: me.initials,
+              color: me.color,
+              size: 88,
+              textStyle: loafBody(30, 600),
             ),
             if (editable)
               Positioned(

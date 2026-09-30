@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_avatar.dart';
 import 'call_controller.dart';
 
 /// What a tile draws. Built from a [CallParticipant], or from your own
@@ -199,15 +200,11 @@ class _CallTileState extends State<CallTile> {
   Widget _avatar(Member member) => LayoutBuilder(
     builder: (context, constraints) {
       final size = (constraints.biggest.shortestSide * 0.42).clamp(28.0, 96.0);
-      return Container(
-        width: size,
-        height: size,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(color: member.color, shape: BoxShape.circle),
-        child: Text(
-          member.initials,
-          style: loafBody(size * 0.36, 600).copyWith(color: Colors.white),
-        ),
+      return LoafAvatar(
+        label: member.initials,
+        color: member.color,
+        size: size,
+        textStyle: loafBody(size * 0.36, 600),
       );
     },
   );

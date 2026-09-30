@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_avatar.dart';
 import 'app_notice.dart';
 import 'user_bar.dart';
 
@@ -310,16 +311,12 @@ class _SpaceItem extends StatelessWidget {
                           ),
                         ),
                       ),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: space.color,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        space.initials,
-                        style: loafBody(17, 600).copyWith(color: Colors.white),
-                      ),
+                    LoafAvatar(
+                      label: space.initials,
+                      color: space.color,
+                      size: 48,
+                      radius: 16,
+                      textStyle: loafBody(17, 600),
                     ),
                     if (showBadge)
                       Positioned(

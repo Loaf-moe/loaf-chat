@@ -10,6 +10,7 @@ import '../mock/fixtures.dart';
 import '../rooms/rooms.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/adaptive_panel.dart';
+import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
 
 /// A full Matrix id, such as `@someone:matrix.org`.
@@ -340,18 +341,11 @@ class _PersonRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Container(
-              width: 32,
-              height: 32,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: person.color,
-                shape: BoxShape.circle,
-              ),
-              child: Text(
-                person.initials.characters.first,
-                style: loafBody(13, 600).copyWith(color: Colors.white),
-              ),
+            LoafAvatar(
+              label: person.initials.characters.first,
+              color: person.color,
+              size: 32,
+              textStyle: loafBody(13, 600),
             ),
             const SizedBox(width: LoafSpace.x3),
             Expanded(

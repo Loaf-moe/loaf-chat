@@ -11,6 +11,7 @@ import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/adaptive_panel.dart';
 import '../widgets/error_note.dart';
+import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
 import 'direct_messages.dart';
 
@@ -296,19 +297,11 @@ class _PersonRow extends StatelessWidget {
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      Container(
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: person.color,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Text(
-                          person.initials.characters.first,
-                          style: loafBody(
-                            13,
-                            600,
-                          ).copyWith(color: Colors.white),
-                        ),
+                      LoafAvatar(
+                        label: person.initials.characters.first,
+                        color: person.color,
+                        size: 32,
+                        textStyle: loafBody(13, 600),
                       ),
                       Positioned(
                         right: -2,

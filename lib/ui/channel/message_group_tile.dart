@@ -11,6 +11,7 @@ import '../members/role_colors.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_avatar.dart';
 import 'message_actions.dart';
 import 'timeline.dart';
 
@@ -95,13 +96,11 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CircleAvatar(
-      radius: 18,
-      backgroundColor: member.color,
-      child: Text(
-        member.initials,
-        style: loafBody(13, 600).copyWith(color: Colors.white),
-      ),
+    return LoafAvatar(
+      label: member.initials,
+      color: member.color,
+      size: 36,
+      textStyle: loafBody(13, 600),
     );
   }
 }

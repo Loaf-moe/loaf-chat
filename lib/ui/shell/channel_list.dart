@@ -11,6 +11,7 @@ import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_avatar.dart';
 import 'channel_actions.dart';
 import 'user_bar.dart';
 
@@ -685,18 +686,12 @@ class RoomAvatar extends StatelessWidget {
     final fill =
         color ??
         _palette[id.codeUnits.fold(0, (a, b) => a + b) % _palette.length];
-    return Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: fill,
-        borderRadius: BorderRadius.circular(size * 0.3),
-      ),
-      child: Text(
-        name.characters.first.toUpperCase(),
-        style: loafBody(size * 0.5, 700).copyWith(color: Colors.white),
-      ),
+    return LoafAvatar(
+      label: name.characters.first.toUpperCase(),
+      color: fill,
+      size: size,
+      radius: size * 0.3,
+      textStyle: loafBody(size * 0.5, 700),
     );
   }
 }
@@ -895,18 +890,14 @@ class _MemberAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(color: member.color, shape: BoxShape.circle),
-      child: Text(
-        // Two letters don't fit a group DM's tiny overlapping pair.
-        size < 18 ? member.initials.characters.first : member.initials,
-        // Scales with the circle: a group DM's overlapping pair is smaller
-        // than a voice occupant's avatar.
-        style: loafBody(size * 0.42, 600).copyWith(color: Colors.white),
-      ),
+    return LoafAvatar(
+      // Two letters don't fit a group DM's tiny overlapping pair.
+      label: size < 18 ? member.initials.characters.first : member.initials,
+      color: member.color,
+      size: size,
+      // Scales with the circle: a group DM's overlapping pair is smaller
+      // than a voice occupant's avatar.
+      textStyle: loafBody(size * 0.42, 600),
     );
   }
 }

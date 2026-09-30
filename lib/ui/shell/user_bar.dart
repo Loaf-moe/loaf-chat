@@ -13,6 +13,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_avatar.dart';
 
 class UserBar extends StatelessWidget {
   const UserBar({
@@ -167,16 +168,11 @@ class _Avatar extends StatelessWidget {
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              Container(
-                decoration: BoxDecoration(
-                  color: me.color,
-                  shape: BoxShape.circle,
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  me.initials,
-                  style: loafBody(13, 600).copyWith(color: Colors.white),
-                ),
+              LoafAvatar(
+                label: me.initials,
+                color: me.color,
+                size: 36,
+                textStyle: loafBody(13, 600),
               ),
               Positioned(
                 right: -2,

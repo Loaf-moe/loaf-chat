@@ -10,6 +10,7 @@ import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
+import '../widgets/loaf_avatar.dart';
 
 enum SpaceAction { invite, leave }
 
@@ -96,18 +97,12 @@ class _SheetHeader extends StatelessWidget {
     final tokens = LoafTokens.of(context);
     return Row(
       children: [
-        Container(
-          width: 22,
-          height: 22,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: space.color,
-            borderRadius: BorderRadius.circular(7),
-          ),
-          child: Text(
-            space.initials,
-            style: loafBody(11, 600).copyWith(color: Colors.white),
-          ),
+        LoafAvatar(
+          label: space.initials,
+          color: space.color,
+          size: 22,
+          radius: 7,
+          textStyle: loafBody(11, 600),
         ),
         const SizedBox(width: LoafSpace.x2),
         Expanded(

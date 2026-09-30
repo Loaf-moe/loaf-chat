@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_avatar.dart';
 import 'presence.dart';
 import 'presence_dot.dart';
 import 'role_colors.dart';
@@ -191,16 +192,11 @@ class _PresenceAvatar extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          Container(
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: member.color,
-              shape: BoxShape.circle,
-            ),
-            child: Text(
-              member.initials,
-              style: loafBody(12, 600).copyWith(color: Colors.white),
-            ),
+          LoafAvatar(
+            label: member.initials,
+            color: member.color,
+            size: _size,
+            textStyle: loafBody(12, 600),
           ),
           Positioned(
             right: -2,

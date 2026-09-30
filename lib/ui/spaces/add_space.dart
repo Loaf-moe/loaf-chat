@@ -12,6 +12,7 @@ import '../rooms/rooms.dart' show PartlyDone, SpaceNotFound;
 import '../theme/loaf_theme.dart';
 import '../widgets/adaptive_panel.dart';
 import '../widgets/error_note.dart';
+import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
 import 'space_address.dart';
 import 'space_directory.dart';
@@ -543,18 +544,12 @@ class SpaceAvatar extends StatelessWidget {
   final double size;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    alignment: Alignment.center,
-    decoration: BoxDecoration(
-      color: color,
-      borderRadius: BorderRadius.circular(size / 3),
-    ),
-    child: Text(
-      spaceInitials(name),
-      style: loafBody(size * 0.36, 600).copyWith(color: Colors.white),
-    ),
+  Widget build(BuildContext context) => LoafAvatar(
+    label: spaceInitials(name),
+    color: color,
+    size: size,
+    radius: size / 3,
+    textStyle: loafBody(size * 0.36, 600),
   );
 }
 

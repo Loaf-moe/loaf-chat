@@ -16,6 +16,7 @@ import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/adaptive_panel.dart';
 import '../widgets/error_note.dart';
+import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
 import '../widgets/loaf_field.dart';
 import 'browser_wait.dart';
@@ -601,19 +602,12 @@ class _Avatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
     return Center(
-      child: Container(
-        width: 64,
-        height: 64,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: member.color,
-          shape: BoxShape.circle,
-          boxShadow: tokens.shadowMd,
-        ),
-        child: Text(
-          member.initials,
-          style: loafBody(24, 600).copyWith(color: Colors.white),
-        ),
+      child: LoafAvatar(
+        label: member.initials,
+        color: member.color,
+        size: 64,
+        boxShadow: tokens.shadowMd,
+        textStyle: loafBody(24, 600),
       ),
     );
   }
