@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_session.dart';
@@ -7,10 +9,11 @@ import 'package:loaf_native/ui/auth/loaf_session.dart';
 import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-Future<MatrixSession> _session() async {
+Future<MatrixSession> _session({String? mediaPath}) async {
   final client = await openClient(
     httpClient: FakeMatrixApi(),
     databasePath: inMemoryDatabasePath,
+    mediaPath: mediaPath,
   );
   FakeMatrixApi.client = client;
   await client.init(waitForFirstSync: false);
@@ -88,6 +91,20 @@ void main() {
     await _signIn(s);
     await _settle();
     expect(s.account, AccountState.signedIn);
+  });
+
+  test('signing out clears downloaded media', () async {
+    final dir = Directory.systemTemp.createTempSync('loaf-media');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final s = await _session(mediaPath: dir.path);
+    await _signIn(s);
+    await _settle();
+    File('${dir.path}/abc').writeAsStringSync('a picture');
+    s.signOut();
+    await _settle();
+    expect(s.account, AccountState.signedOut);
+    expect(dir.existsSync(), isTrue);
+    expect(dir.listSync(), isEmpty);
   });
 
   test('a second sign-out while one is in flight does nothing', () async {

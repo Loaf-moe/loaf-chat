@@ -32,10 +32,11 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
     _subscriptions = [
       // The SDK reports a failed init as an error on this stream; the state
       // it leaves behind is still worth reading.
-      client.onLoginStateChanged.stream.listen(
-        (_) => _refresh(),
-        onError: (Object _) => _refresh(),
-      ),
+      client.onLoginStateChanged.stream.listen((state) {
+        _refresh();
+        // However it ended (here, or another device signing this one out).
+        if (state == LoginState.loggedOut) unawaited(_clearMedia());
+      }, onError: (Object _) => _refresh()),
       // Device keys are updated after a sync is handled, and `finished`
       // comes after that; `onSync` fires too early to see them.
       client.onSyncStatus.stream
@@ -130,6 +131,27 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
       // The server may be unreachable; logout clears this device either way.
     } finally {
       _signingOut = false;
+    }
+  }
+
+  /// The SDK clears its database on logout but never the folder downloaded
+  /// pictures sit in, so the next person to sign in would inherit them. The
+  /// files are flat in that folder; the folder itself stays for the next
+  /// session to fill.
+  Future<void> _clearMedia() async {
+    try {
+      final database = client.database;
+      final location = database is MatrixSdkDatabase
+          ? database.fileStorageLocation
+          : null;
+      if (location == null) return;
+      final dir = Directory.fromUri(location);
+      if (!await dir.exists()) return;
+      await for (final entry in dir.list()) {
+        await entry.delete(recursive: true);
+      }
+    } on Object catch (e, s) {
+      Logs().w("[loaf] couldn't clear downloaded media", e, s);
     }
   }
 
