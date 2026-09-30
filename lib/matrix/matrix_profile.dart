@@ -54,6 +54,10 @@ class MatrixProfile extends ChangeNotifier implements Profile {
   var _choiceTurn = 0;
   var _statusTurn = 0;
 
+  /// Status writes in flight. Your own presence coming back on the sync
+  /// while one is out is older than it, and must not undo it.
+  var _statusWrites = 0;
+
   var _published = false;
 
   /// What the server has for you; null until it has said, or when it has no
@@ -228,6 +232,12 @@ class MatrixProfile extends ChangeNotifier implements Profile {
         _shown(content['presence']),
         content['status_msg'] as String?,
       );
+      // Another of your devices set a status: follow it, or the next
+      // presence write from here (automatic idle sends one on every
+      // backgrounding) puts this device's stale text back over it.
+      if (event.senderId == client.userID && _statusWrites == 0) {
+        _status = (content['status_msg'] as String?) ?? '';
+      }
     }
     // Someone's presence arrived, so the server shares it.
     _shared = true;
@@ -405,6 +415,7 @@ class MatrixProfile extends ChangeNotifier implements Profile {
     final previous = _status;
     final turn = ++_statusTurn;
     _status = trimmed;
+    _statusWrites++;
     _notify();
     try {
       await _put(_choice);
@@ -414,6 +425,8 @@ class MatrixProfile extends ChangeNotifier implements Profile {
         _notify();
       }
       rethrow;
+    } finally {
+      _statusWrites--;
     }
   }
 

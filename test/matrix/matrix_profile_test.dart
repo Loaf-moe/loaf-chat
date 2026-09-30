@@ -254,6 +254,35 @@ void main() {
     expect(profile.status, '');
   });
 
+  test('a status set on another device is followed and kept', () async {
+    final (api, client, profile) = await _profile();
+    await _presence(client, _me, {
+      'presence': 'online',
+      'status_msg': 'from desktop',
+    });
+    expect(profile.status, 'from desktop');
+    expect(profile.me.statusMessage, 'from desktop');
+    // The next automatic idle carries it rather than this device's old text.
+    profile.away(true);
+    await _settle();
+    expect(api.bodies.last['status_msg'], 'from desktop');
+  });
+
+  test('your own older presence never undoes a status in flight', () async {
+    final (api, client, profile) = await _profile();
+    api.gate = Completer<bool>();
+    final gate = api.gate!;
+    final setting = profile.setStatus('baking');
+    await _presence(client, _me, {
+      'presence': 'online',
+      'status_msg': 'old text',
+    });
+    expect(profile.status, 'baking');
+    gate.complete(true);
+    await setting;
+    expect(profile.status, 'baking');
+  });
+
   test('the first finished sync publishes the choice once', () async {
     final (api, client, _) = await _profile();
     _finishSync(client);
