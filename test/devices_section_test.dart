@@ -205,6 +205,7 @@ void main() {
     expect(find.byType(TextField), findsOneWidget);
 
     devices.renamed.complete();
+    await tester.pump(MockDevices.answerDelay);
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
   });
