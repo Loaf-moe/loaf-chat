@@ -45,9 +45,13 @@ class IncomingPromptStep extends StatelessWidget {
 }
 
 class NotMeStep extends StatelessWidget {
-  const NotMeStep({super.key, required this.onClose});
+  const NotMeStep({super.key, required this.onClose, this.onOpenDevices});
 
   final VoidCallback onClose;
+
+  /// Where settings' devices section is, when this backend has one: the
+  /// way to sign the stranger out. Without it the note stays as it was.
+  final VoidCallback? onOpenDevices;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -61,13 +65,19 @@ class NotMeStep extends StatelessWidget {
         center: true,
       ),
       const SizedBox(height: LoafSpace.x2),
-      // Settings can't sign a device out yet, so it isn't pointed at.
-      const StepNote(
-        'someone may be signed in as you. change your password, and sign '
-        'that device out from another app.',
+      StepNote(
+        onOpenDevices == null
+            ? 'someone may be signed in as you. change your password, and '
+                  'sign that device out from another app.'
+            : 'someone may be signed in as you. change your password, and '
+                  'sign that device out in settings.',
         center: true,
       ),
       const SizedBox(height: LoafSpace.x5),
+      if (onOpenDevices != null) ...[
+        LoafButton(label: 'open devices', onTap: onOpenDevices),
+        const SizedBox(height: LoafSpace.x2),
+      ],
       LoafButton(
         label: 'close',
         emphasis: LoafButtonEmphasis.outlined,

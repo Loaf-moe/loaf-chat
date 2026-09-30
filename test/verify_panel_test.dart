@@ -271,7 +271,7 @@ void main() {
     await tester.tap(find.text("that's not me"));
     await tester.pump(_route);
     expect(
-      find.textContaining('sign that device out from another app'),
+      find.textContaining('sign that device out in settings'),
       findsOneWidget,
     );
     await tester.tap(find.text('close'));

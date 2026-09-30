@@ -766,6 +766,21 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  void _openDevices() {
+    if (!mounted) return;
+    unawaited(
+      showSettings(
+        context,
+        initial: SettingsSection.devices,
+        devices: _rooms.devices,
+        profile: _profile,
+        me: _me,
+        editable: _can(RoomAbility.editProfile),
+        onSignOut: _session.signOut,
+      ),
+    );
+  }
+
   /// Made fresh for each request and ended with its panel.
   Future<void> _answerIncoming(IncomingRequest request) async {
     final v = VerificationController(
@@ -777,7 +792,12 @@ class _AppShellState extends State<AppShell> {
       onTrusted: () {},
     );
     _incomingFlow = v;
-    final finished = await showVerifyPanel(context, v);
+    final finished = await showVerifyPanel(
+      context,
+      v,
+      // "that's not me" points at the sessions, where a stranger's signs out.
+      onOpenDevices: _can(RoomAbility.devices) ? _openDevices : null,
+    );
     // Already ended if the shell went while the panel was up.
     if (identical(_incomingFlow, v)) {
       _incomingFlow = null;
@@ -1201,6 +1221,7 @@ class _AppShellState extends State<AppShell> {
               me: _me,
               editable: _can(RoomAbility.editProfile),
               onSignOut: _session.signOut,
+              devices: _can(RoomAbility.devices) ? _rooms.devices : null,
             ),
             me: _me,
             onAvatarTap: _can(RoomAbility.editProfile)

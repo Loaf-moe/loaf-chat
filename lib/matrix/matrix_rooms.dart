@@ -14,12 +14,14 @@ import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
+import '../ui/settings/devices.dart';
 import '../ui/shell/profile.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
 import '../ui/widgets/avatar_images.dart';
 import 'matrix_avatar_images.dart';
 import 'matrix_hierarchy.dart';
+import 'matrix_devices.dart';
 import 'matrix_profile.dart';
 import 'matrix_space_directory.dart';
 import 'matrix_timeline.dart';
@@ -144,6 +146,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     RoomAbility.startDirect,
     RoomAbility.invite,
     RoomAbility.editProfile,
+    RoomAbility.devices,
   };
 
   @override
@@ -165,6 +168,13 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   /// Made on first read, so rooms nobody asks for a profile never publish.
   MatrixProfile? _profile;
+
+  @override
+  Devices get devices => _devices ??= MatrixDevices(client);
+
+  /// Made on first read: rooms nobody asks for devices never listen for
+  /// device-list changes.
+  MatrixDevices? _devices;
 
   /// You before the profile has loaded: the name the rooms fetched, or the
   /// localpart, with no picture.
@@ -1161,6 +1171,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     }
     _hierarchy.dispose();
     _profile?.dispose();
+    _devices?.dispose();
     super.dispose();
   }
 }

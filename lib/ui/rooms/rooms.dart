@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../channel/timeline.dart';
 import '../model/models.dart';
+import '../settings/devices.dart';
 import '../shell/profile.dart';
 import '../spaces/space_directory.dart';
 import '../widgets/avatar_images.dart';
@@ -42,6 +43,9 @@ enum RoomAbility {
 
   /// Your presence, status message and profile.
   editProfile,
+
+  /// Listing, renaming and signing out the account's sessions.
+  devices,
 }
 
 /// The server turned down some of an invite. [failed] maps each user id
@@ -86,6 +90,10 @@ abstract interface class Rooms implements Listenable {
   /// Your presence and status, and everyone else's. The rooms own it and
   /// dispose of it with themselves.
   Profile get profile;
+
+  /// Your signed-in sessions. Like [profile], the rooms own it and dispose
+  /// of it with themselves.
+  Devices get devices;
 
   /// The rail, in order.
   List<Space> get spaces;

@@ -777,6 +777,7 @@ void main() {
       RoomAbility.addSpace,
       RoomAbility.startDirect,
       RoomAbility.invite,
+      RoomAbility.devices,
     });
   });
 

@@ -18,6 +18,8 @@ import '../shell/profile_controller.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
 import 'account_section.dart';
+import 'devices.dart';
+import 'devices_section.dart';
 
 enum SettingsSection {
   account('account', LucideIcons.circleUser),
@@ -48,10 +50,14 @@ Future<void> showSettings(
   Member? me,
   bool editable = true,
   VoidCallback? onSignOut,
+  SettingsSection initial = SettingsSection.account,
+  Devices? devices,
 }) => showDialog<void>(
   context: context,
   barrierColor: const Color(0x99000016),
   builder: (_) => SettingsModal(
+    initial: initial,
+    devices: devices,
     profile: profile,
     me: me,
     editable: editable,
@@ -67,9 +73,14 @@ class SettingsModal extends StatefulWidget {
     this.me,
     this.editable = true,
     this.onSignOut,
+    this.devices,
   });
 
   final ProfileController? profile;
+
+  /// Left null, the devices section stays the placeholder: a backend that
+  /// can't list sessions has none to show.
+  final Devices? devices;
 
   /// Left null (in isolation, as in tests), the mock's account.
   final Member? me;
@@ -184,6 +195,7 @@ class _SettingsModalState extends State<SettingsModal> {
     profile: widget.profile,
     me: widget.me,
     editable: widget.editable,
+    devices: widget.devices,
   );
 }
 
@@ -366,8 +378,10 @@ class _Detail extends StatelessWidget {
     required this.profile,
     required this.me,
     required this.editable,
+    this.devices,
   });
 
+  final Devices? devices;
   final SettingsSection section;
   final ProfileController? profile;
   final Member? me;
@@ -379,6 +393,11 @@ class _Detail extends StatelessWidget {
 
     if (section == SettingsSection.account) {
       return AccountSection(profile: profile, me: me, editable: editable);
+    }
+
+    final devices = this.devices;
+    if (section == SettingsSection.devices && devices != null) {
+      return DevicesSection(devices: devices);
     }
 
     // Honest placeholder: the IA is decided, these screens are not designed.

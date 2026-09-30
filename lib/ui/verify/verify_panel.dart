@@ -26,10 +26,11 @@ import 'verify_steps.dart';
 /// it was put away early.
 Future<bool?> showVerifyPanel(
   BuildContext context,
-  VerificationController controller,
-) => showAdaptivePanel<bool>(
+  VerificationController controller, {
+  VoidCallback? onOpenDevices,
+}) => showAdaptivePanel<bool>(
   context,
-  child: VerifyPanel(controller: controller),
+  child: VerifyPanel(controller: controller, onOpenDevices: onOpenDevices),
   // The sheet's drag-to-close pops straight past the panel's own
   // PopScope, and an unsaved new key must not be put away.
   enableDrag: false,
@@ -40,10 +41,15 @@ class VerifyPanel extends StatefulWidget {
     super.key,
     required this.controller,
     this.saveKey = saveRecoveryKey,
+    this.onOpenDevices,
   });
 
   final VerificationController controller;
   final KeySaver saveKey;
+
+  /// Opens settings on the devices section, once this panel has closed.
+  /// Null where there is no such section: "that's not me" then says less.
+  final VoidCallback? onOpenDevices;
 
   @override
   State<VerifyPanel> createState() => _VerifyPanelState();
@@ -186,7 +192,15 @@ class _VerifyPanelState extends State<VerifyPanel> {
       onTryAgain: _c.purpose == VerifyPurpose.verify ? _c.tryAgain : null,
       onClose: _close,
     ),
-    VerifyStep.notMe => NotMeStep(onClose: _close),
+    VerifyStep.notMe => NotMeStep(
+      onClose: _close,
+      onOpenDevices: widget.onOpenDevices == null
+          ? null
+          : () {
+              _close();
+              widget.onOpenDevices!();
+            },
+    ),
     VerifyStep.recoveryKey => RecoveryStep(
       controller: _key,
       checking: s.checking,
