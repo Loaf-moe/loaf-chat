@@ -12,3 +12,7 @@ PRODUCT_BUNDLE_IDENTIFIER = moe.loaf.native
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 moe.loaf. All rights reserved.
+
+// Sparkle verifies every download against this. Its private half signs
+// releases in CI; see tool/release/keygen.sh.
+SPARKLE_PUBLIC_KEY = AZsDMSaJFmZAhJBNrJwYMbDC/fyecRs1VojnE6vp1XI=

@@ -2,12 +2,16 @@ import Cocoa
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
+  private var updaterBridge: UpdaterBridge?
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     self.contentViewController = flutterViewController
     self.setFrame(Self.initialFrame(around: self.frame), display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    updaterBridge = UpdaterBridge(
+      messenger: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }
