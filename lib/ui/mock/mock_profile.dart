@@ -37,6 +37,10 @@ class MockProfile extends ChangeNotifier implements Profile {
   @override
   (Presence, String?)? presenceOf(String userId) => null;
 
+  /// Nothing on the wire to change.
+  @override
+  void away(bool away) {}
+
   @override
   Future<void> choose(PresenceChoice choice) {
     if (choice != _choice) {

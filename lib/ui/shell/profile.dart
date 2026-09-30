@@ -8,6 +8,16 @@ import 'package:flutter/foundation.dart';
 import '../members/presence.dart';
 import '../model/models.dart';
 
+/// Do not disturb is two writes (presence and the push rule) and one landed
+/// without the other. The profile has settled on what stuck; the shell asks
+/// whether to try again.
+class HalfApplied implements Exception {
+  const HalfApplied();
+
+  @override
+  String toString() => 'HalfApplied: do not disturb only half-applied';
+}
+
 abstract interface class Profile implements Listenable {
   PresenceChoice get choice;
   String get status;
@@ -29,6 +39,11 @@ abstract interface class Profile implements Listenable {
 
   /// Empty clears it.
   Future<void> setStatus(String status);
+
+  /// Automatic idle: nobody is at the device (backgrounded, or no input for
+  /// a while). Only shows while the choice is online; never changes
+  /// [choice], never throws, and a server that refuses it is not reported.
+  void away(bool away);
 
   void dispose();
 }

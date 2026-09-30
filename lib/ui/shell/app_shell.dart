@@ -44,6 +44,8 @@ import '../widgets/toast.dart';
 import '../settings/settings_page.dart';
 import 'app_notice.dart';
 import 'channel_actions.dart';
+import 'idle_watcher.dart';
+import 'profile.dart';
 import 'profile_controller.dart';
 import 'shell_faces.dart';
 import 'space_actions.dart';
@@ -106,10 +108,16 @@ class _AppShellState extends State<AppShell> {
   /// put things back, so a toast says to try again.
   void _profileFailed(ProfileCall call, Object error) {
     if (!mounted) return;
-    showToast(context, switch (call) {
-      ProfileCall.presence => "couldn't change your presence. try again?",
-      ProfileCall.status => "couldn't save your status. try again?",
-    });
+    showToast(
+      context,
+      error is HalfApplied
+          ? 'do not disturb only half-applied. try again?'
+          : switch (call) {
+              ProfileCall.presence =>
+                "couldn't change your presence. try again?",
+              ProfileCall.status => "couldn't save your status. try again?",
+            },
+    );
   }
 
   @override
@@ -1051,7 +1059,7 @@ class _AppShellState extends State<AppShell> {
     );
 
     final ring = _calls.incoming;
-    return AvatarImagesScope(
+    final scoped = AvatarImagesScope(
       images: _rooms.avatarImages,
       child: PresenceScope(
         shared: _profile.presenceShared,
@@ -1077,6 +1085,10 @@ class _AppShellState extends State<AppShell> {
         ),
       ),
     );
+    // Only where there is a profile to be away from.
+    return _can(RoomAbility.editProfile)
+        ? IdleWatcher(onAway: _profile.away, child: scoped)
+        : scoped;
   }
 
   /// Who is in [channel]: a DM's people and you, a Home room's own

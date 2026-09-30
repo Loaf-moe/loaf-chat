@@ -52,6 +52,9 @@ class ProfileController extends ChangeNotifier {
   void choose(PresenceChoice choice) =>
       _report(ProfileCall.presence, _profile.choose(choice));
 
+  /// Automatic idle, from the shell's watcher.
+  void away(bool away) => _profile.away(away);
+
   /// Empty clears the status. No expiry: Matrix has none.
   void setStatus(String status) =>
       _report(ProfileCall.status, _profile.setStatus(status.trim()));

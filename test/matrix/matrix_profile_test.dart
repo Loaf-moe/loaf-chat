@@ -8,6 +8,7 @@ import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_profile.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/ui/members/presence.dart' as loaf;
+import 'package:loaf_native/ui/shell/profile.dart' show HalfApplied;
 import 'package:matrix/matrix.dart' hide Presence;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -22,12 +23,63 @@ class _Api extends FakeMatrixApi {
   ({String errcode, int status})? refuseWith;
   var socketFailure = false;
 
+  /// Everything that changes do not disturb, in the order it arrived:
+  /// `mute:true`, `presence:busy`, `account:{...}`.
+  final log = <String>[];
+  Client? client;
+  var refuseBusy = false;
+  var refuseMute = false;
+
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
+    final path = request.url.path;
+    if (request.method == 'PUT' &&
+        path.endsWith('/pushrules/global/override/.m.rule.master/enabled')) {
+      final enabled =
+          (jsonDecode(request.body) as Map<String, Object?>)['enabled'];
+      log.add('mute:$enabled');
+      if (refuseMute) return _refused('M_UNKNOWN', 500);
+      // A real server echoes the rule on the next sync.
+      await client!.handleSync(
+        SyncUpdate.fromJson({
+          'next_batch': 'r${_batches++}',
+          'account_data': {
+            'events': [
+              {
+                'type': 'm.push_rules',
+                'content': {
+                  'global': {
+                    'override': [
+                      {
+                        'rule_id': '.m.rule.master',
+                        'default': true,
+                        'enabled': enabled,
+                        'conditions': <Object?>[],
+                        'actions': ['dont_notify'],
+                      },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        }),
+      );
+      return http.Response(jsonEncode({}), 200);
+    }
+    if (request.method == 'PUT' &&
+        path.endsWith('/account_data/moe.loaf.presence')) {
+      log.add('account:${request.body}');
+    }
     if (request.method == 'PUT' &&
         request.url.path.contains('/presence/') &&
         request.url.path.endsWith('/status')) {
-      bodies.add(jsonDecode(request.body) as Map<String, Object?>);
+      final body = jsonDecode(request.body) as Map<String, Object?>;
+      bodies.add(body);
+      log.add('presence:${body['presence']}');
+      if (refuseBusy && body['presence'] == 'busy') {
+        return _refused('M_INVALID_PARAM', 400);
+      }
       final mine = gate;
       gate = null;
       if (mine != null && !await mine.future) return _refused('M_UNKNOWN', 500);
@@ -49,6 +101,7 @@ Future<Client> _client(_Api api) async {
     databasePath: inMemoryDatabasePath,
   );
   FakeMatrixApi.client = client;
+  api.client = client;
   // No sync loop: the fake's own presence events would answer the questions
   // these tests ask. Each test pushes exactly the sync it means.
   client.backgroundSync = false;
@@ -86,6 +139,45 @@ Future<void> _presence(
     }),
   );
   // The SDK's streams deliver a beat later.
+  await _settle();
+}
+
+/// Account data as a sync brings it, master rule included.
+Future<void> _remote(
+  Client client, {
+  String? choice,
+  required bool muted,
+}) async {
+  await client.handleSync(
+    SyncUpdate.fromJson({
+      'next_batch': 'a${_batches++}',
+      'account_data': {
+        'events': [
+          if (choice != null)
+            {
+              'type': 'moe.loaf.presence',
+              'content': {'choice': choice},
+            },
+          {
+            'type': 'm.push_rules',
+            'content': {
+              'global': {
+                'override': [
+                  {
+                    'rule_id': '.m.rule.master',
+                    'default': true,
+                    'enabled': muted,
+                    'conditions': <Object?>[],
+                    'actions': ['dont_notify'],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    }),
+  );
   await _settle();
 }
 
@@ -288,5 +380,157 @@ void main() {
     await saving;
     await _settle();
     expect(heard, 1);
+  });
+
+  group('do not disturb', () {
+    test('dnd sends busy and mutes every device', () async {
+      final (api, client, profile) = await _profile();
+      api.log.clear();
+      await profile.choose(loaf.PresenceChoice.dnd);
+      await _settle();
+      expect(api.bodies.last['presence'], 'busy');
+      expect(api.log, contains('mute:true'));
+      expect(api.log, contains('account:{"choice":"dnd"}'));
+      expect(client.syncPresence, PresenceType.unavailable);
+      expect(profile.choice, loaf.PresenceChoice.dnd);
+    });
+
+    test('a server that refuses busy gets unavailable', () async {
+      final (api, _, profile) = await _profile();
+      api.refuseBusy = true;
+      api.log.clear();
+      await profile.choose(loaf.PresenceChoice.dnd);
+      await _settle();
+      expect(api.log.where((e) => e.startsWith('presence:')), [
+        'presence:busy',
+        'presence:unavailable',
+      ]);
+      expect(api.log, contains('mute:true'));
+      expect(profile.choice, loaf.PresenceChoice.dnd);
+    });
+
+    test('leaving dnd unmutes first', () async {
+      final (api, _, profile) = await _profile();
+      await profile.choose(loaf.PresenceChoice.dnd);
+      await _settle();
+      api.log.clear();
+      await profile.choose(loaf.PresenceChoice.online);
+      await _settle();
+      expect(api.log.take(2), ['mute:false', 'presence:online']);
+      expect(api.log, contains('account:{"choice":"online"}'));
+      expect(profile.choice, loaf.PresenceChoice.online);
+    });
+
+    test('a refused mute is half-applied', () async {
+      final (api, _, profile) = await _profile();
+      api.refuseMute = true;
+      await expectLater(
+        profile.choose(loaf.PresenceChoice.dnd),
+        throwsA(isA<HalfApplied>()),
+      );
+      expect(profile.choice, loaf.PresenceChoice.online);
+    });
+
+    test(
+      'a refused busy with a landed mute is half-applied, and muted',
+      () async {
+        final (api, _, profile) = await _profile();
+        api.refuseWith = (errcode: 'M_UNKNOWN', status: 500);
+        await expectLater(
+          profile.choose(loaf.PresenceChoice.dnd),
+          throwsA(isA<HalfApplied>()),
+        );
+        // The devices are silenced, so that is what the choice says.
+        expect(profile.choice, loaf.PresenceChoice.dnd);
+      },
+    );
+
+    test('every other choice is remembered too', () async {
+      final (api, _, profile) = await _profile();
+      api.log.clear();
+      await profile.choose(loaf.PresenceChoice.idle);
+      expect(api.log, contains('account:{"choice":"idle"}'));
+    });
+
+    test('dnd survives a restart', () async {
+      final api = _Api();
+      final client = await _client(api);
+      await _remote(client, choice: 'dnd', muted: true);
+      api.log.clear();
+      final profile = MatrixProfile(client);
+      addTearDown(profile.dispose);
+      await _settle();
+      expect(profile.choice, loaf.PresenceChoice.dnd);
+      expect(api.log.where((e) => e.startsWith('mute:')), isEmpty);
+      expect(api.log.where((e) => e.startsWith('account:')), isEmpty);
+    });
+
+    test('the push rule wins over account data', () async {
+      final api = _Api();
+      final client = await _client(api);
+      await _remote(client, choice: 'dnd', muted: false);
+      api.log.clear();
+      final profile = MatrixProfile(client);
+      addTearDown(profile.dispose);
+      await _settle();
+      expect(profile.choice, loaf.PresenceChoice.online);
+      expect(api.log.where((e) => !e.startsWith('presence:')), isEmpty);
+
+      await _remote(client, choice: 'idle', muted: true);
+      expect(profile.choice, loaf.PresenceChoice.dnd);
+      expect(api.log.where((e) => !e.startsWith('presence:')), isEmpty);
+    });
+  });
+
+  group('away', () {
+    test('away sends unavailable only while online', () async {
+      final (api, client, profile) = await _profile();
+      profile.away(true);
+      await _settle();
+      expect(api.bodies.last['presence'], 'unavailable');
+      expect(client.syncPresence, PresenceType.unavailable);
+      expect(profile.choice, loaf.PresenceChoice.online);
+
+      await profile.choose(loaf.PresenceChoice.invisible);
+      final sent = api.bodies.length;
+      profile.away(false);
+      await _settle();
+      expect(api.bodies.length, sent + 1);
+      expect(api.bodies.last['presence'], 'offline');
+
+      profile.away(true);
+      await _settle();
+      expect(api.bodies, hasLength(sent + 1));
+    });
+
+    test('back restores the choice', () async {
+      final (api, client, profile) = await _profile();
+      profile.away(true);
+      await _settle();
+      profile.away(false);
+      await _settle();
+      expect(api.bodies.last['presence'], 'online');
+      expect(client.syncPresence, PresenceType.online);
+    });
+
+    test('a refused away says nothing and changes nothing', () async {
+      final (api, _, profile) = await _profile();
+      api.refuseWith = (errcode: 'M_UNKNOWN', status: 500);
+      var heard = 0;
+      profile.addListener(() => heard++);
+      profile.away(true);
+      await _settle();
+      expect(profile.choice, loaf.PresenceChoice.online);
+      expect(heard, 0);
+    });
+
+    test('away after dispose does nothing', () async {
+      final (api, _, profile) = await _profile();
+      profile.dispose();
+      final sent = api.bodies.length;
+      profile.away(true);
+      await _settle();
+      expect(api.bodies, hasLength(sent));
+    });
   });
 }

@@ -22,6 +22,9 @@ class MatrixProfile extends ChangeNotifier implements Profile {
       client.onSync.stream.listen(_onSync),
       client.onSyncStatus.stream.listen(_onSyncStatus),
     ];
+    // What was chosen, on this or another device; nothing is sent for it.
+    _choice = _reconcile(_stored, client.allPushNotificationsMuted);
+    client.syncPresence = _syncWire(_choice);
     _ownStatus = _loadOwnStatus();
     // The status stream does not replay, and a sync may already be done.
     final status = client.onSyncStatus.value;
@@ -48,6 +51,15 @@ class MatrixProfile extends ChangeNotifier implements Profile {
   var _statusTurn = 0;
 
   var _published = false;
+
+  /// Automatic idle is on: nobody is at this device.
+  var _away = false;
+
+  /// Choices in flight. The account data and push rule they write come back
+  /// on the sync half-finished, and must not be mistaken for someone else's.
+  var _choosing = 0;
+
+  static const _accountType = 'moe.loaf.presence';
 
   /// The stored own status, read at start. The publish waits on it so it
   /// never sends an empty status over the one the server has.
@@ -106,9 +118,43 @@ class MatrixProfile extends ChangeNotifier implements Profile {
     }
   }
 
+  String? get _stored {
+    final choice = client.accountData[_accountType]?.content['choice'];
+    return choice is String ? choice : null;
+  }
+
+  /// The push rule is account-wide and does the silencing, so it decides:
+  /// muted is do not disturb whatever was stored, and a stored do not
+  /// disturb with the rule off (someone unmuted elsewhere) is online. Never
+  /// leaves your devices silently muted behind a choice that says otherwise.
+  static PresenceChoice _reconcile(String? stored, bool muted) {
+    if (muted) return PresenceChoice.dnd;
+    if (stored == PresenceChoice.dnd.name) return PresenceChoice.online;
+    return PresenceChoice.values.asNameMap()[stored] ?? PresenceChoice.online;
+  }
+
+  /// Follows a change made elsewhere. Sends nothing: a remote change is
+  /// followed, not fought, and a reconcile never mutes on its own.
+  void _follow() {
+    final next = _reconcile(_stored, client.allPushNotificationsMuted);
+    client.syncPresence = _syncWire(next);
+    if (next == _choice) return;
+    _choice = next;
+    _notify();
+  }
+
   void _onSync(SyncUpdate update) {
+    if (_disposed) return;
+    final account = update.accountData;
+    if (_choosing == 0 &&
+        account != null &&
+        account.any(
+          (e) => e.type == _accountType || e.type == EventTypes.PushRules,
+        )) {
+      _follow();
+    }
     final events = update.presence;
-    if (_disposed || events == null || events.isEmpty) return;
+    if (events == null || events.isEmpty) return;
     for (final event in events) {
       // Raw, because the SDK's own enum has no busy and reads it as offline.
       final content = event.content;
@@ -142,11 +188,7 @@ class MatrixProfile extends ChangeNotifier implements Profile {
     await _ownStatus;
     if (_disposed) return;
     try {
-      await client.setPresence(
-        client.userID!,
-        _wire(_choice),
-        statusMsg: _status,
-      );
+      await _put(_choice);
     } on MatrixException catch (e) {
       final code = e.errcode;
       final http = e.response?.statusCode;
@@ -163,34 +205,131 @@ class MatrixProfile extends ChangeNotifier implements Profile {
     }
   }
 
-  // DND is unavailable until it has its own wire form.
+  /// What the sync carries. Do not disturb rides as unavailable there and
+  /// gets its busy from [_put]; automatic idle only softens online.
+  PresenceType _syncWire(PresenceChoice c) =>
+      _away && c == PresenceChoice.online ? PresenceType.unavailable : _wire(c);
+
   static PresenceType _wire(PresenceChoice c) => switch (c) {
     PresenceChoice.online => PresenceType.online,
     PresenceChoice.idle || PresenceChoice.dnd => PresenceType.unavailable,
     PresenceChoice.invisible => PresenceType.offline,
   };
 
+  /// One presence write for [c], with the status. The SDK's enum has no
+  /// busy, so do not disturb is a raw PUT.
+  Future<void> _put(PresenceChoice c) async {
+    final me = client.userID!;
+    if (c == PresenceChoice.dnd) {
+      try {
+        await client.request(
+          RequestType.PUT,
+          '/client/v3/presence/${Uri.encodeComponent(me)}/status',
+          data: {'presence': 'busy', 'status_msg': _status},
+        );
+        return;
+      } on MatrixException {
+        // A server with no busy: others see idle, and the devices are still
+        // silenced by the push rule.
+      }
+    }
+    await client.setPresence(me, _syncWire(c), statusMsg: _status);
+  }
+
+  /// Both halves of do not disturb, tried independently so that what stuck
+  /// is known. Throws [HalfApplied] when only one did, and the first error
+  /// when neither did.
+  Future<void> _silence() async {
+    Object? refused;
+    try {
+      await _put(PresenceChoice.dnd);
+    } catch (e) {
+      refused = e;
+    }
+    Object? unmuted;
+    try {
+      await client.setMuteAllPushNotifications(true);
+    } catch (e) {
+      unmuted = e;
+    }
+    if (refused == null && unmuted == null) return;
+    if (refused != null && unmuted != null) throw refused;
+    _muteLanded = unmuted == null;
+    throw const HalfApplied();
+  }
+
+  var _muteLanded = false;
+
   @override
   Future<void> choose(PresenceChoice choice) async {
     final previous = _choice;
     final turn = ++_choiceTurn;
     _choice = choice;
-    client.syncPresence = _wire(choice);
+    client.syncPresence = _syncWire(choice);
+    _choosing++;
     _notify();
+    var unmuted = false;
     try {
-      await client.setPresence(
-        client.userID!,
-        _wire(choice),
-        statusMsg: _status,
-      );
-    } catch (_) {
+      // Leaving do not disturb unmutes before anything else goes out.
+      if (previous == PresenceChoice.dnd && choice != PresenceChoice.dnd) {
+        await client.setMuteAllPushNotifications(false);
+        unmuted = true;
+      }
+      if (choice == PresenceChoice.dnd) {
+        await _silence();
+      } else {
+        await _put(choice);
+      }
+      await _remember(choice);
+    } catch (e) {
       // Back only if nobody has chosen since: that wish stands.
       if (!_disposed && turn == _choiceTurn) {
-        _choice = previous;
-        client.syncPresence = _wire(previous);
+        // Where things really are: a half-applied dnd is what the rule says,
+        // and once unmuted there is no going back to dnd.
+        _choice = e is HalfApplied
+            ? _reconcile(_stored, _muteLanded)
+            : unmuted
+            ? _reconcile(_stored, false)
+            : previous;
+        client.syncPresence = _syncWire(_choice);
         _notify();
       }
       rethrow;
+    } finally {
+      _choosing--;
+    }
+  }
+
+  /// So your other devices, and the next launch, know what was chosen: the
+  /// server cannot tell "chose idle" from "went idle". Best effort; the push
+  /// rule still says whether you are silenced.
+  Future<void> _remember(PresenceChoice choice) async {
+    try {
+      await client.setAccountData(client.userID!, _accountType, {
+        'choice': choice.name,
+      });
+    } catch (e) {
+      Logs().v('could not store the presence choice', e);
+    }
+  }
+
+  @override
+  void away(bool away) {
+    if (_disposed || away == _away) return;
+    _away = away;
+    // Only online is softened; going away from anything else is nothing.
+    if (away && _choice != PresenceChoice.online) return;
+    unawaited(_sendAway());
+  }
+
+  Future<void> _sendAway() async {
+    final choice = _choice;
+    client.syncPresence = _syncWire(choice);
+    try {
+      await _put(choice);
+    } catch (e) {
+      // Idle is a courtesy: no toast, and the next sync carries it anyway.
+      Logs().v('could not send automatic idle', e);
     }
   }
 
@@ -202,11 +341,7 @@ class MatrixProfile extends ChangeNotifier implements Profile {
     _status = trimmed;
     _notify();
     try {
-      await client.setPresence(
-        client.userID!,
-        _wire(_choice),
-        statusMsg: trimmed,
-      );
+      await _put(_choice);
     } catch (_) {
       if (!_disposed && turn == _statusTurn) {
         _status = previous;
