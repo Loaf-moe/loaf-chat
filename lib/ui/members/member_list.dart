@@ -127,49 +127,45 @@ class _MemberRow extends StatelessWidget {
     // Offline people fade back rather than disappearing: still findable,
     // clearly not around.
     final status = member.statusMessage;
+    //
+    // Not a button: there is no profile to open yet, and a row that ripples
+    // and then does nothing promises what it cannot keep.
     return Opacity(
       key: ValueKey('member-${member.id}'),
       opacity: member.presence == Presence.offline ? 0.5 : 1,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(LoafRadius.md),
-          onTap: () {},
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            child: Row(
-              children: [
-                _PresenceAvatar(member: member, tokens: tokens),
-                const SizedBox(width: LoafSpace.x3),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        member.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: loafBody(
-                          15,
-                          500,
-                        ).copyWith(color: tokens.nameColor(member.role)),
-                      ),
-                      if (status != null)
-                        Text(
-                          status,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: loafBody(
-                            12,
-                            400,
-                          ).copyWith(color: tokens.textMuted),
-                        ),
-                    ],
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        child: Row(
+          children: [
+            _PresenceAvatar(member: member, tokens: tokens),
+            const SizedBox(width: LoafSpace.x3),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    member.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: loafBody(
+                      15,
+                      500,
+                    ).copyWith(color: tokens.nameColor(member.role)),
                   ),
-                ),
-              ],
+                  if (status != null)
+                    Text(
+                      status,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: loafBody(
+                        12,
+                        400,
+                      ).copyWith(color: tokens.textMuted),
+                    ),
+                ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
