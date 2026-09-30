@@ -48,6 +48,7 @@ dependencies:
   file_selector: ^1.1.0
   share_plus: ^13.3.0
   image_picker: ^1.2.3
+  dbus: ^0.8.0
 
 dev_dependencies:
   flutter_test:
