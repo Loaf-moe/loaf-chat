@@ -14,7 +14,11 @@ import 'package:loaf_native/ui/verify/verifier.dart';
 /// A server that can't be reached the first time, and reads as [_devices]
 /// after. Signing out asks for a password and then waits on [release].
 class _HandDevices extends ChangeNotifier implements Devices {
-  _HandDevices({this.failLoads = 0});
+  _HandDevices({this.failLoads = 0, this.holdBeforeAsking = false});
+
+  /// signOut waits on [asking] without ever calling onAuth.
+  final bool holdBeforeAsking;
+  final asking = Completer<bool>();
 
   int failLoads;
   var loads = 0;
@@ -48,6 +52,7 @@ class _HandDevices extends ChangeNotifier implements Devices {
     String id, {
     required void Function(AuthChallenge) onAuth,
   }) async {
+    if (holdBeforeAsking) return asking.future;
     final done = Completer<bool>();
     onAuth(_Held(this, done));
     return done.future;
@@ -242,6 +247,30 @@ void main() {
     devices.release.complete();
     await tester.pumpAndSettle();
     expect(find.text('checking…'), findsNothing);
+  });
+
+  testWidgets('no cancel in the signing out step itself', (tester) async {
+    final devices = _HandDevices(holdBeforeAsking: true);
+    await _pump(tester, devices, size: const Size(400, 900));
+    await tester.tap(find.text('sign out'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('sign out').last);
+    await tester.pump();
+
+    expect(find.text('signing out…'), findsOneWidget);
+    expect(find.text('keep it'), findsNothing);
+    expect(find.byType(IconButton), findsNothing);
+    // Neither the barrier nor back puts it away.
+    await tester.tapAt(const Offset(200, 20));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('signing out…'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('signing out…'), findsOneWidget);
+
+    devices.asking.complete(true);
+    await tester.pumpAndSettle();
+    expect(find.text('signing out…'), findsNothing);
   });
 
   testWidgets('settings opens on the devices section', (tester) async {
