@@ -1,6 +1,6 @@
 # SDK Wiring Roadmap
 
-> **Status:** phases 1–5 have landed, each from its own rehearsed plan (`2026-09-26-real-sign-in.md`, `2026-09-26-rooms-from-sync.md`, `2026-09-27-timeline.md`, `2026-09-27-e2ee.md`, `2026-09-27-channel-space-actions.md`). The app now talks to a real homeserver by default. Every later phase gets its own plan when it comes up.
+> **Status:** phases 1–6 have landed, each from its own rehearsed plan (`2026-09-26-real-sign-in.md`, `2026-09-26-rooms-from-sync.md`, `2026-09-27-timeline.md`, `2026-09-27-e2ee.md`, `2026-09-27-channel-space-actions.md`, `2026-09-29-presence-profile-devices.md`). The app now talks to a real homeserver by default. Every later phase gets its own plan when it comes up.
 
 **Goal:** Replace the mock source behind the finished UI with matrix-dart-sdk. Phases are ordered by what gets the app to "daily-drivable on loaf.moe" soonest for the least work.
 
@@ -27,7 +27,7 @@
 | 3 | **Timeline:** read, send text, reply, react, edit, delete, read markers, pagination | Makes it usable for unencrypted rooms. `TimelineController`'s API already matches (`send`, `toggleReaction`, `saveEdit`, `delete`) **Plan: `2026-09-27-timeline.md`** | M |
 | 4 | **E2EE:** verify by emoji, recovery key, set up recovery, key backup restore, the incoming "is this you?" | Without it encrypted DMs are unreadable. vodozemac is already initialised by phase 1; the UI and `VerificationController` exist, so swap timers for `KeyVerification` and `Bootstrap` **Plan: `2026-09-27-e2ee.md`** | M–L |
 | 5 | **Channel and space actions:** join, leave, mute (push rule), DMs without duplicates, invites, `/hierarchy` browse, create space, tags and favourites | Every flow is already designed, and each is a thin call **Plan: `2026-09-27-channel-space-actions.md`** | M |
-| 6 | **Presence and status, profile, settings** | Cheap polish | S |
+| 6 | **Presence and status, profile, settings** | Cheap polish **Plan: `2026-09-29-presence-profile-devices.md`** | S |
 | 7 | **Voice channels** (MatrixRTC + `livekit_client`), connected-call bar, occupancy avatars | High delight, but heavy and needs a device | L |
 | 8 | **APNs push via Sygnal, DM ringing** (CallKit/PushKit, MSC4075) | Mac-only work, scheduled around Mac access | L |
 | 9 | Images and files, media viewer | Part of the v1 messaging scope, and independent of the phases above | M |
@@ -49,8 +49,8 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 
 - ~~**Unjoined channels from `/hierarchy`**, and joining a space's category subspaces and suggested channels (phase 5, with joining).~~ Done in phase 5.
 - **Voice occupancy avatars** need a `VoIP` instance to read MatrixRTC memberships (phase 7).
-- **Avatar images** (`mxc` thumbnails) for spaces, rooms and people (phase 6 or 9). Initials on a colour until then.
-- **Presence of others** is `Presence.unknown` until phase 6.
+- ~~**Avatar images** (`mxc` thumbnails) for spaces, rooms and people (phase 6 or 9). Initials on a colour until then.~~ Done in phase 6.
+- ~~**Presence of others** is `Presence.unknown` until phase 6.~~ Done in phase 6.
 - **Marking read on opening** waits for read markers (phase 3); until then a real room's unread count stays after reading it elsewhere only until the next sync.
 - **Rail order** is alphabetical. Element orders spaces by the `org.matrix.msc3230.space_order` account data; adopt it if it matters.
 - **Member lists of very large rooms** load whole into memory when shown (`requestParticipants` with `cache: true`). Fine for loaf.moe; page them if a 10k-member room appears.
@@ -82,10 +82,10 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **Encryption tests need the macOS build first** (`flutter build macos --debug`); a fresh clone fails them with that instruction. A test-only build of vodozemac would lift it.
 - **A restore does not resume after a quit.** Rooms fetch missing keys from backup as they open, so nothing is lost, only the count.
 - **Key backup without cross-signing is not healed by the key.** Such an account is offered setting up, which refuses and offers reset, since healing needs a re-auth inside unlocking.
-- **Minor leftovers from the task reviews:** the restore count counts keys attempted, not stored; making an identity takes every re-auth request on the client, not only its own; a re-auth "retry" also shows after a passed stage of a multi-stage flow; the panel's composer choice listens to the timeline, but a trust flip really arrives through the shell's rebuild on the session changing.
+- **Minor leftovers from the task reviews:** the restore count counts keys attempted, not stored; ~~making an identity takes every re-auth request on the client, not only its own~~ (done in phase 6: device sign-out owns its own re-auth request); a re-auth "retry" also shows after a passed stage of a multi-stage flow; the panel's composer choice listens to the timeline, but a trust flip really arrives through the shell's rebuild on the session changing.
 - **A server that refuses a re-auth stage reads "couldn't reach".** A set-up or reset the server turned down (not a wrong password) says it couldn't reach the server, which is not the whole story.
 - **No test signs out during a restore, and `Verifier` has no `dispose`.** A restore running unseen when the session ends is left to the SDK's own teardown.
-- **A device list in settings, where a sign-in can be signed out.** "that's not me" says to sign the device out from another app, since settings can't yet; point it there once it can.
+- ~~**A device list in settings, where a sign-in can be signed out.** "that's not me" says to sign the device out from another app, since settings can't yet; point it there once it can.~~ Done in phase 6.
 - **A backup-only account hears "that didn't unlock anything".** Key backup without cross-signing isn't healed by the key (above), and the key panel's answer doesn't say why.
 
 ## Deferred from phase 5, to place later
@@ -101,6 +101,15 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **`createDirect` can throw a bare StateError** if a reused DM is not yet in Home after sync; it should say so plainly.
 - **The explore panel's server list** is a fixed `loaf.moe` and `matrix.org`, plus whatever you type.
 - **`test/matrix/matrix_timeline_test.dart` flakes on most full-suite runs on `main` too** (checked 2026-09-28: 3 of 4 runs had one or two failures, a different test each time). It passes alone. This joins the phase 3 note about it.
+
+## Deferred from phase 6, to place later
+
+- **By hand on loaf.moe, pending:** whether tuwunel shares presence, accepts `busy`, and keeps `busy` across a `set_presence=unavailable` sync; do not disturb silencing the phone and surviving a relaunch; the native pickers (PHPicker on iOS, NSOpenPanel on macOS); and a real SSO device sign-out.
+- **Other people's `busy` doesn't survive a relaunch.** The SDK's database stores it as offline.
+- **The SDK now keeps downloaded media on disk for 30 days** (`fileStorageLocation`), and signing out doesn't clear it.
+- **The other settings sections** (appearance, notifications, voice & video, stickers, developer, about), **verifying another of your devices from settings,** and **cropping a picked picture.**
+- **A remote account-data or push-rule change that lands while you're choosing a presence** isn't re-read until the next one.
+- **`lib/ui/settings/devices_section.dart` holds the section, its rows, the rename sheet and the sign-out flow** in one 600-line file.
 
 ## Global constraints (all phases)
 
