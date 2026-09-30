@@ -59,4 +59,63 @@ void main() {
     expect(dart, contains("Emoji('🥖', 'baguette bread')"));
     expect(dart, contains('GENERATED'));
   });
+
+  group('shortcodes', () {
+    List<ParsedGroup> attached(Map<String, String> github) {
+      final fresh = parseEmojiTest(_sample, maxVersion: 17.0);
+      attachShortcodes(fresh, github);
+      return fresh;
+    }
+
+    List<String> codesOf(List<ParsedGroup> groups, String char) => groups
+        .expand((g) => g.emoji)
+        .firstWhere((e) => e.char == char)
+        .shortcodes;
+
+    test("GitHub's names first, then one from the CLDR name", () {
+      final groups = attached({'grinning': '😀', 'wave': '👋'});
+      expect(codesOf(groups, '😀'), ['grinning', 'grinning_face']);
+      expect(codesOf(groups, '👋'), ['wave', 'waving_hand']);
+      expect(codesOf(groups, '🥖'), ['baguette_bread']);
+    });
+
+    test('matches GitHub emoji written without the variation selector', () {
+      final groups = attached({'relaxed': '☺'});
+      expect(codesOf(groups, '☺️'), ['relaxed', 'smiling_face']);
+    });
+
+    test('drops GitHub names for emoji the picker does not have', () {
+      final groups = attached({'future': '🫩'});
+      expect(
+        groups.expand((g) => g.emoji).expand((e) => e.shortcodes),
+        isNot(contains('future')),
+      );
+    });
+
+    test('a CLDR code GitHub already uses, or two names share, is left '
+        'out', () {
+      // GitHub gives "grinning_face" to the wave: the grin keeps only its
+      // own GitHub name.
+      final groups = attached({'grin': '😀', 'grinning_face': '👋'});
+      expect(codesOf(groups, '😀'), ['grin']);
+      expect(cldrShortcode('keycap: *'), cldrShortcode('keycap: #'));
+    });
+
+    test('CLDR names become lower snake case', () {
+      expect(cldrShortcode('flag: Japan'), 'flag_japan');
+      expect(
+        cldrShortcode('smiling face with heart-eyes'),
+        'smiling_face_with_heart_eyes',
+      );
+      expect(cldrShortcode("man’s shoe"), 'mans_shoe');
+    });
+
+    test('are written into the table', () {
+      final dart = renderEmojiTable(attached({'grinning': '😀'}));
+      expect(
+        dart,
+        contains("Emoji('😀', 'grinning face', ['grinning', 'grinning_face'])"),
+      );
+    });
+  });
 }

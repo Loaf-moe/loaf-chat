@@ -1,18 +1,24 @@
-/// Emoji as the picker knows them: Unicode's groups and names, generated
-/// into emoji_data.dart by tool/gen_emoji.dart.
+/// Emoji as the picker knows them: Unicode's groups and names, and the
+/// `:shortcodes:` the composer knows them by, generated into emoji_data.dart
+/// by tool/gen_emoji.dart.
 library;
 
 import 'package:flutter/foundation.dart';
 
 @immutable
 class Emoji {
-  const Emoji(this.char, this.name);
+  const Emoji(this.char, this.name, [this.shortcodes = const []]);
 
   final String char;
 
   /// Unicode's CLDR short name, such as "baguette bread". What search
   /// matches.
   final String name;
+
+  /// What `:this:` in the composer becomes this emoji for, such as
+  /// "baguette_bread". GitHub's names come first, so the first is the one
+  /// people from other chat apps already know.
+  final List<String> shortcodes;
 }
 
 @immutable
