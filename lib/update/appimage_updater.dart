@@ -22,6 +22,7 @@ class AppImageUpdater extends StateUpdater {
     required this.build,
     required this.feed,
     required this.verify,
+    this.idleTimeout = const Duration(minutes: 2),
     http.Client? httpClient,
     Future<void> Function(String path)? launch,
     void Function()? quit,
@@ -38,6 +39,9 @@ class AppImageUpdater extends StateUpdater {
   final int build;
   final Uri feed;
   final SignatureCheck verify;
+
+  /// How long a download may go without a byte before it is given up on.
+  final Duration idleTimeout;
   final http.Client _http;
   final Future<void> Function(String path) _launch;
   final void Function() _quit;
@@ -72,7 +76,11 @@ class AppImageUpdater extends StateUpdater {
       // $APPIMAGE may be a link into ~/bin: replace what it points at.
       final target = File(await _appImage.resolveSymbolicLinks());
       part = File('${target.path}.part');
-      final response = await _http.send(http.Request('GET', asset.url));
+      // Idle timeouts, not total: a slow link may take as long as it needs,
+      // a dead one must not hold _checking until the next launch.
+      final response = await _http
+          .send(http.Request('GET', asset.url))
+          .timeout(idleTimeout);
       if (response.statusCode != 200) {
         throw HttpException('${response.statusCode}', uri: asset.url);
       }
@@ -86,7 +94,7 @@ class AppImageUpdater extends StateUpdater {
       var bytesWritten = 0;
       final sink = part.openWrite();
       try {
-        await response.stream.forEach((bytes) {
+        await response.stream.timeout(idleTimeout).forEach((bytes) {
           bytesWritten += bytes.length;
           if (bytesWritten > asset.size) {
             throw StateError('download exceeded ${asset.size} bytes');

@@ -17,6 +17,7 @@ class _Server {
   String feed = '';
   List<int> download = utf8.encode(_new);
   bool cutDownloadShort = false;
+  bool stallDownload = false;
   int downloadRequestCount = 0;
 
   Uri get feedUri => Uri.parse('http://localhost:${_http.port}/latest.json');
@@ -30,6 +31,13 @@ class _Server {
         response.write(server.feed);
       } else {
         server.downloadRequestCount++;
+        if (server.stallDownload) {
+          // Headers and a little body, then silence with the socket open.
+          response.contentLength = server.download.length;
+          response.add(server.download.sublist(0, 4));
+          await response.flush();
+          return;
+        }
         if (server.cutDownloadShort) {
           // Promises more than it sends, so the connection drops part-way.
           response.contentLength = server.download.length;
@@ -71,8 +79,9 @@ void main() {
   final launched = <String>[];
   var quits = 0;
 
-  AppImageUpdater updater({File? at}) {
+  AppImageUpdater updater({File? at, Duration? idleTimeout}) {
     final u = AppImageUpdater(
+      idleTimeout: idleTimeout ?? const Duration(minutes: 2),
       appImage: at ?? appImage,
       build: 1,
       feed: server.feedUri,
@@ -178,6 +187,21 @@ void main() {
       expect(leftovers(), isFalse);
     });
   }
+
+  test('a download that stalls ends idle, the file alone', () async {
+    server
+      ..offer()
+      ..stallDownload = true;
+    final u = updater(idleTimeout: const Duration(milliseconds: 300));
+    await u.check();
+    expect(u.state, isA<UpdateIdle>());
+    expect(appImage.readAsStringSync(), _old);
+    expect(leftovers(), isFalse);
+    // Free to check again, not stuck "checking" until the next launch.
+    server.stallDownload = false;
+    await u.check();
+    expect(u.state, isA<UpdateReady>());
+  }, timeout: const Timeout(Duration(seconds: 10)));
 
   test('a feed nobody answers leaves the file alone', () async {
     final u = updater();
