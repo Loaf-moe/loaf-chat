@@ -126,9 +126,10 @@ List<TileInfo> callTiles(CallController calls, CallSession session) => [
   for (final p in session.participants) TileInfo.of(p),
 ];
 
-enum _TileAction { pin, unpin, profile }
+enum _TileAction { pin, unpin }
 
-/// Pin, volume and profile — a sheet on a phone, a menu on a computer.
+/// Pin and volume — a sheet on a phone, a menu on a computer. No profile
+/// entry: there is no profile view to open yet.
 Future<void> showTileActions(
   BuildContext context,
   CallController calls,
@@ -141,11 +142,6 @@ Future<void> showTileActions(
       value: pinned ? _TileAction.unpin : _TileAction.pin,
       icon: pinned ? LucideIcons.pinOff : LucideIcons.pin,
       label: pinned ? 'Unpin' : 'Pin',
-    ),
-    const ActionItem(
-      value: _TileAction.profile,
-      icon: LucideIcons.user,
-      label: 'View profile',
     ),
   ];
   final _TileAction? action;
@@ -171,8 +167,6 @@ Future<void> showTileActions(
       calls.pin(info.id);
     case _TileAction.unpin:
       calls.pin(null);
-    case _TileAction.profile:
-      showToast(context, 'profiles are on their way');
     case null:
   }
 }
@@ -335,12 +329,6 @@ class CallTopBar extends StatelessWidget {
             ),
             const SizedBox(width: LoafSpace.x2),
           ],
-          if (isDesktop && !compact)
-            TopBarButton(
-              icon: LucideIcons.externalLink,
-              tooltip: 'Pop out',
-              onTap: () => showToast(context, 'popping out comes later'),
-            ),
           ...trailing,
         ],
       ),

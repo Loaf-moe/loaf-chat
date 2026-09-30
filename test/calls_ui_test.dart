@@ -270,7 +270,8 @@ void main() {
     );
 
     testWidgets(
-      'right-clicking a tile offers pin, volume and profile',
+      'right-clicking a tile offers pin and volume, and nothing that '
+      'goes nowhere',
       variant: _desktop,
       (tester) async {
         await _pumpShell(tester, _wide);
@@ -281,7 +282,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Pin'), findsOneWidget);
-        expect(find.text('View profile'), findsOneWidget);
+        expect(find.text('View profile'), findsNothing);
         expect(find.byType(Slider), findsOneWidget);
       },
     );
