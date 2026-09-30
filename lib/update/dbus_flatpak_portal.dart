@@ -70,12 +70,19 @@ class DbusFlatpakPortal implements FlatpakPortal {
     // Status: 0 running, 1 nothing to do, 2 done, 3 failed.
     final finished = _signals(monitor, 'Progress')
         .firstWhere((progress) => (progress['status']?.asUint32() ?? 0) != 0);
-    await monitor.callMethod(
-      _monitorInterface,
-      'Update',
-      [const DBusString(''), DBusDict.stringVariant(const {})],
-      replySignature: DBusSignature(''),
-    );
+    try {
+      await monitor.callMethod(
+        _monitorInterface,
+        'Update',
+        [const DBusString(''), DBusDict.stringVariant(const {})],
+        replySignature: DBusSignature(''),
+      );
+    } catch (_) {
+      // Nobody will await `finished` now; an error on it later would be
+      // unhandled.
+      finished.ignore();
+      rethrow;
+    }
     final last = await finished;
     if (last['status']?.asUint32() != 2) {
       throw StateError(
