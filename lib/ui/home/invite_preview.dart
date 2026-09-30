@@ -90,6 +90,8 @@ class InvitePreview extends StatelessWidget {
                                 id: invite.id,
                                 size: 72,
                                 color: invite.color,
+                                image:
+                                    invite.space?.avatar ?? invite.room?.avatar,
                               ),
                         const SizedBox(height: LoafSpace.x4),
                         Text(
@@ -185,6 +187,7 @@ class _PersonAvatar extends StatelessWidget {
     label: member.initials,
     color: member.color,
     size: 72,
+    image: member.avatar,
     textStyle: loafBody(26, 600),
   );
 }

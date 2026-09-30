@@ -196,6 +196,7 @@ class _PresenceAvatar extends StatelessWidget {
             label: member.initials,
             color: member.color,
             size: _size,
+            image: member.avatar,
             textStyle: loafBody(12, 600),
           ),
           Positioned(

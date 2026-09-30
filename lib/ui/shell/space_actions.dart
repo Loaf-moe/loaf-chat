@@ -102,6 +102,7 @@ class _SheetHeader extends StatelessWidget {
           color: space.color,
           size: 22,
           radius: 7,
+          image: space.avatar,
           textStyle: loafBody(11, 600),
         ),
         const SizedBox(width: LoafSpace.x2),

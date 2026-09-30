@@ -17,6 +17,7 @@ import 'package:loaf_native/ui/spaces/add_space.dart';
 import 'package:loaf_native/ui/spaces/space_directory.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/verifier.dart';
+import 'package:loaf_native/ui/widgets/avatar_images.dart';
 
 // Widget-level tests for the space menu, leave-space confirmation and the
 // invite entry on a channel's own menu — all wired through the full
@@ -55,6 +56,8 @@ Space _bakery() => const Space(
 class _FakeRooms extends ChangeNotifier implements Rooms {
   _FakeRooms({this.spaces = const []});
 
+  @override
+  AvatarImages get avatarImages => const NoAvatarImages();
   @override
   Set<RoomAbility> abilities = {
     RoomAbility.answerInvites,

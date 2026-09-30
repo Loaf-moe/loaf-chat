@@ -316,6 +316,7 @@ class _SpaceItem extends StatelessWidget {
                       color: space.color,
                       size: 48,
                       radius: 16,
+                      image: space.avatar,
                       textStyle: loafBody(17, 600),
                     ),
                     if (showBadge)

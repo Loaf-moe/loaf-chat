@@ -44,7 +44,12 @@ class MatrixSpaceDirectory implements SpaceDirectory {
     if (_via[id]?.isEmpty ?? true) _via[id] = [server];
     return SpacePreview(
       alias: chunk.canonicalAlias ?? id,
-      space: Space(id: id, name: name, color: spaceColorFor(name)),
+      space: Space(
+        id: id,
+        name: name,
+        color: spaceColorFor(name),
+        avatar: AvatarRef.maybe(chunk.avatarUrl?.toString()),
+      ),
       topic: chunk.topic,
       memberCount: chunk.numJoinedMembers,
       inviteOnly: chunk.joinRule == 'invite',
@@ -99,6 +104,7 @@ class MatrixSpaceDirectory implements SpaceDirectory {
           id: id,
           name: name,
           color: spaceColorFor(name),
+          avatar: AvatarRef.maybe(head.avatarUrl?.toString()),
           categories: [if (channels.isNotEmpty) ChannelCategory('', channels)],
         ),
         topic: head.topic,
@@ -119,6 +125,7 @@ class MatrixSpaceDirectory implements SpaceDirectory {
         : ChannelKind.text,
     joined: false,
     topic: chunk.topic,
+    avatar: AvatarRef.maybe(chunk.avatarUrl?.toString()),
     private: const {'invite', 'knock'}.contains(chunk.joinRule),
   );
 

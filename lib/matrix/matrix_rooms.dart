@@ -16,6 +16,8 @@ import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
+import '../ui/widgets/avatar_images.dart';
+import 'matrix_avatar_images.dart';
 import 'matrix_hierarchy.dart';
 import 'matrix_space_directory.dart';
 import 'matrix_timeline.dart';
@@ -146,6 +148,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   @override
   double? get syncProgress => _progress;
+
+  @override
+  late final AvatarImages avatarImages = MatrixAvatarImages(client);
 
   @override
   Member get me {
@@ -354,6 +359,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       id: space.id,
       name: name,
       color: spaceColorFor(name),
+      avatar: AvatarRef.maybe(space.avatar?.toString()),
       categories: [if (top.isNotEmpty) ChannelCategory('', top), ...categories],
       members: _members(space),
     );
@@ -395,6 +401,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
           : ChannelKind.text,
       joined: false,
       topic: chunk.topic,
+      avatar: AvatarRef.maybe(chunk.avatarUrl?.toString()),
     );
     final wish = _wishes[chunk.roomId];
     if (wish?.joined != true) return channel;
@@ -457,6 +464,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final channel = Channel(
       id: room.id,
       name: room.getLocalizedDisplayname(),
+      avatar: AvatarRef.maybe(room.avatar?.toString()),
       kind: kind,
       unread: room.notificationCount,
       mentions: room.highlightCount,
@@ -506,13 +514,17 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     ];
   }
 
-  Member _member(Room room, String userId) => Member(
-    userId,
-    room.unsafeGetUserFromMemoryOrFallback(userId).calcDisplayname(),
-    spaceColorFor(userId),
-    presence: Presence.unknown,
-    powerLevel: room.getPowerLevelByUserId(userId).level,
-  );
+  Member _member(Room room, String userId) {
+    final user = room.unsafeGetUserFromMemoryOrFallback(userId);
+    return Member(
+      userId,
+      user.calcDisplayname(),
+      spaceColorFor(userId),
+      presence: Presence.unknown,
+      powerLevel: room.getPowerLevelByUserId(userId).level,
+      avatar: AvatarRef.maybe(user.avatarUrl?.toString()),
+    );
+  }
 
   Invite _invite(Room room) {
     final myId = client.userID ?? '';
@@ -528,6 +540,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         : InviteKind.room;
     final topic = room.topic;
     final count = room.summary.mJoinedMemberCount;
+    final avatar = AvatarRef.maybe(room.avatar?.toString());
     return Invite(
       id: room.id,
       kind: kind,
@@ -537,6 +550,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         inviter?.calcDisplayname() ?? inviterId?.localpart ?? 'someone',
         spaceColorFor(inviterId ?? ''),
         presence: Presence.unknown,
+        avatar: AvatarRef.maybe(inviter?.avatarUrl?.toString()),
       ),
       color: spaceColorFor(name),
       topic: topic.isEmpty ? null : topic,
@@ -548,12 +562,18 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
           : Channel(
               id: room.id,
               name: name,
+              avatar: avatar,
               kind: kind == InviteKind.direct
                   ? ChannelKind.direct
                   : ChannelKind.room,
             ),
       space: kind == InviteKind.space
-          ? Space(id: room.id, name: name, color: spaceColorFor(name))
+          ? Space(
+              id: room.id,
+              name: name,
+              color: spaceColorFor(name),
+              avatar: avatar,
+            )
           : null,
     );
   }

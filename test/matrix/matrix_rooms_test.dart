@@ -1487,4 +1487,36 @@ void main() {
       );
     });
   });
+
+  test("a member's avatar maps from their member event", () async {
+    final client = await _client();
+    final rooms = await _rooms(client);
+    await _sync(client, {
+      'join': {
+        '!avatars:example.com': _room(
+          'avatars',
+          type: 'm.space',
+          extra: [
+            _state(
+              'm.room.member',
+              {
+                'membership': 'join',
+                'displayname': 'Alice',
+                'avatar_url': 'mxc://x/a',
+              },
+              key: '@alice:x',
+              sender: '@alice:x',
+            ),
+          ],
+        ),
+      },
+    });
+    await _settle();
+    // Only a room list's state is in memory until a member list is wanted.
+    rooms.loadMembers('!avatars:example.com');
+    await _settle();
+    final members = {for (final m in rooms.spaces.last.members) m.id: m};
+    expect(members['@alice:x']!.avatar, const AvatarRef('mxc://x/a'));
+    expect(members[_me]!.avatar, isNull);
+  });
 }

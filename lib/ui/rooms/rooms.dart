@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import '../channel/timeline.dart';
 import '../model/models.dart';
 import '../spaces/space_directory.dart';
+import '../widgets/avatar_images.dart';
 
 /// What a backend can do to your rooms yet. The shell draws no control for
 /// anything missing: a control that only pretends would lie about your real
@@ -76,6 +77,10 @@ abstract interface class Rooms implements Listenable {
 
   /// You, as the rooms know you.
   Member get me;
+
+  /// Turns the avatar refs on this account's people, rooms and spaces into
+  /// images.
+  AvatarImages get avatarImages;
 
   /// The rail, in order.
   List<Space> get spaces;

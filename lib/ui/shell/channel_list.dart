@@ -570,7 +570,12 @@ class _ChannelEntry extends StatelessWidget {
                       if (direct)
                         _DirectAvatar(channel: channel, tokens: tokens)
                       else if (room)
-                        RoomAvatar(name: channel.name, id: channel.id, size: 22)
+                        RoomAvatar(
+                          name: channel.name,
+                          id: channel.id,
+                          size: 22,
+                          image: channel.avatar,
+                        )
                       else
                         Icon(iconData, size: 16, color: fg),
                       SizedBox(width: direct || room ? 8 : 6),
@@ -663,11 +668,15 @@ class RoomAvatar extends StatelessWidget {
     required this.id,
     this.size = 22,
     this.color,
+    this.image,
   });
 
   final String name;
   final String id;
   final double size;
+
+  /// Null draws the initial.
+  final AvatarRef? image;
 
   /// Defaults to a colour picked from the room's id, as real clients do.
   final Color? color;
@@ -691,6 +700,7 @@ class RoomAvatar extends StatelessWidget {
       color: fill,
       size: size,
       radius: size * 0.3,
+      image: image,
       textStyle: loafBody(size * 0.5, 700),
     );
   }
@@ -720,6 +730,7 @@ class _InviteEntry extends StatelessWidget {
             id: invite.id,
             size: 30,
             color: invite.color,
+            image: invite.space?.avatar ?? invite.room?.avatar,
           );
     return Padding(
       key: ValueKey('invite-${invite.id}'),
@@ -895,6 +906,7 @@ class _MemberAvatar extends StatelessWidget {
       label: size < 18 ? member.initials.characters.first : member.initials,
       color: member.color,
       size: size,
+      image: member.avatar,
       // Scales with the circle: a group DM's overlapping pair is smaller
       // than a voice occupant's avatar.
       textStyle: loafBody(size * 0.42, 600),

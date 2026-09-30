@@ -1,6 +1,11 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/ui/widgets/avatar_images.dart';
 import 'package:loaf_native/ui/widgets/loaf_avatar.dart';
 
 Widget _host(Widget child) => MaterialApp(
@@ -17,6 +22,31 @@ BoxDecoration _decoration(WidgetTester tester) =>
             )
             .decoration!
         as BoxDecoration;
+
+/// A 1x1 transparent PNG.
+final _png = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+);
+
+class _Fixed implements AvatarImages {
+  const _Fixed(this.provider);
+  final ImageProvider provider;
+  @override
+  ImageProvider? resolve(AvatarRef ref, double physicalSize) => provider;
+}
+
+Widget _withImage(ImageProvider provider) => AvatarImagesScope(
+  images: _Fixed(provider),
+  child: _host(
+    LoafAvatar(
+      label: 'AB',
+      color: Colors.red,
+      size: 36,
+      textStyle: loafBody(13, 600),
+      image: const AvatarRef('mxc://x/y'),
+    ),
+  ),
+);
 
 void main() {
   testWidgets('draws its label on its colour', (tester) async {
@@ -65,5 +95,61 @@ void main() {
       ),
     );
     expect(tester.getSize(find.byType(LoafAvatar)), const Size(36, 36));
+  });
+
+  testWidgets('no scope draws initials only', (tester) async {
+    await tester.pumpWidget(
+      _host(
+        LoafAvatar(
+          label: 'AB',
+          color: Colors.red,
+          size: 36,
+          textStyle: loafBody(13, 600),
+          image: const AvatarRef('mxc://x/y'),
+        ),
+      ),
+    );
+    expect(find.byType(Image), findsNothing);
+    expect(find.text('AB'), findsOneWidget);
+  });
+
+  testWidgets('a resolved image draws over the initials', (tester) async {
+    await tester.runAsync(() async {
+      await tester.pumpWidget(_withImage(MemoryImage(_png)));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsOneWidget);
+    expect(find.text('AB'), findsOneWidget);
+    expect(tester.getSize(find.byType(LoafAvatar)), const Size(36, 36));
+  });
+
+  testWidgets('a failing image keeps the initials', (tester) async {
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        _withImage(MemoryImage(Uint8List.fromList([1, 2, 3]))),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('AB'), findsOneWidget);
+    expect(find.byType(SizedBox), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a border is drawn on the same decoration', (tester) async {
+    final border = Border.all(color: Colors.blue, width: 2);
+    await tester.pumpWidget(
+      _host(
+        LoafAvatar(
+          label: 'AB',
+          color: Colors.red,
+          size: 36,
+          textStyle: loafBody(13, 600),
+          border: border,
+        ),
+      ),
+    );
+    expect(_decoration(tester).border, border);
   });
 }

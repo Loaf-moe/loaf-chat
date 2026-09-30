@@ -180,6 +180,7 @@ class _AvatarRow extends StatelessWidget {
               label: me.initials,
               color: me.color,
               size: 88,
+              image: me.avatar,
               textStyle: loafBody(30, 600),
             ),
             if (editable)

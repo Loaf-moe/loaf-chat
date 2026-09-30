@@ -606,6 +606,7 @@ class _Avatar extends StatelessWidget {
         label: member.initials,
         color: member.color,
         size: 64,
+        image: member.avatar,
         boxShadow: tokens.shadowMd,
         textStyle: loafBody(24, 600),
       ),

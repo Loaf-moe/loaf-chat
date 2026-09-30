@@ -10,6 +10,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_avatar.dart';
 
 class ConnectedCallBar extends StatelessWidget {
   const ConnectedCallBar({
@@ -138,13 +139,13 @@ class _OccupantStack extends StatelessWidget {
           for (var i = 0; i < shown.length; i++)
             Positioned(
               left: i * (_size - _overlap),
-              child: _Bubble(
-                background: shown[i].color,
-                ring: tokens.card,
-                child: Text(
-                  shown[i].initials,
-                  style: loafBody(10, 600).copyWith(color: Colors.white),
-                ),
+              child: LoafAvatar(
+                label: shown[i].initials,
+                color: shown[i].color,
+                size: _size,
+                border: Border.all(color: tokens.card, width: 2),
+                image: shown[i].avatar,
+                textStyle: loafBody(10, 600),
               ),
             ),
           if (extra > 0)

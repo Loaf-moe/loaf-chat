@@ -172,6 +172,7 @@ class _Avatar extends StatelessWidget {
                 label: me.initials,
                 color: me.color,
                 size: 36,
+                image: me.avatar,
                 textStyle: loafBody(13, 600),
               ),
               Positioned(

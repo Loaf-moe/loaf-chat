@@ -12,9 +12,14 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 /// [databasePath] defaults to a file in the app's support directory; tests
 /// pass `inMemoryDatabasePath`. [httpClient] is for tests too.
+///
+/// [mediaPath] is where downloaded pictures are kept between launches. The
+/// SDK stores none without it, so it defaults beside the database and, when
+/// a test names only a database, to nowhere.
 Future<Client> openClient({
   http.Client? httpClient,
   String? databasePath,
+  String? mediaPath,
 }) async {
   // The sqlite3 package bundles sqlite through build hooks on every
   // platform, so one ffi factory serves iOS, macOS and Linux alike.
@@ -22,6 +27,12 @@ Future<Client> openClient({
   final path =
       databasePath ??
       '${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}loaf.sqlite';
+  final media =
+      mediaPath ??
+      (databasePath == null
+          ? '${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}media'
+          : null);
+  if (media != null) await Directory(media).create(recursive: true);
   final database = await MatrixSdkDatabase.init(
     'loaf',
     database: await databaseFactoryFfi.openDatabase(
@@ -30,6 +41,9 @@ Future<Client> openClient({
       options: OpenDatabaseOptions(singleInstance: false),
     ),
     sqfliteFactory: databaseFactoryFfi,
+    fileStorageLocation: media == null ? null : Directory(media).uri,
+    // Avatars come back from the server if they are wanted again.
+    deleteFilesAfterDuration: const Duration(days: 30),
   );
   return Client(
     'loaf',

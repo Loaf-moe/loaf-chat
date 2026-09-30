@@ -301,6 +301,7 @@ class _PersonRow extends StatelessWidget {
                         label: person.initials.characters.first,
                         color: person.color,
                         size: 32,
+                        image: person.avatar,
                         textStyle: loafBody(13, 600),
                       ),
                       Positioned(

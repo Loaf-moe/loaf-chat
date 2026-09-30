@@ -22,6 +22,7 @@ import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/verifier.dart';
+import 'package:loaf_native/ui/widgets/avatar_images.dart';
 
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
 final _desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
@@ -78,6 +79,8 @@ final _invite = Invite(
 class _FakeRooms extends ChangeNotifier implements Rooms {
   _FakeRooms({this.spaces = const [], this.homeRooms = const []});
 
+  @override
+  AvatarImages get avatarImages => const NoAvatarImages();
   @override
   Set<RoomAbility> abilities = {RoomAbility.answerInvites};
   @override

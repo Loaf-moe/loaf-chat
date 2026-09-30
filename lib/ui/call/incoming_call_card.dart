@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
 import 'call_controller.dart';
 import 'call_tile.dart';
@@ -53,19 +54,13 @@ class IncomingCallCard extends StatelessWidget {
               Row(
                 children: [
                   Pulse(
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: caller.color,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: tokens.online, width: 2),
-                      ),
-                      child: Text(
-                        caller.initials,
-                        style: loafBody(15, 600).copyWith(color: Colors.white),
-                      ),
+                    child: LoafAvatar(
+                      label: caller.initials,
+                      color: caller.color,
+                      size: 44,
+                      border: Border.all(color: tokens.online, width: 2),
+                      image: caller.avatar,
+                      textStyle: loafBody(15, 600),
                     ),
                   ),
                   const SizedBox(width: LoafSpace.x3),

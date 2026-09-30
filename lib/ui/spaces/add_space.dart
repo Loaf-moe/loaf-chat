@@ -537,11 +537,15 @@ class SpaceAvatar extends StatelessWidget {
     required this.name,
     required this.color,
     this.size = 48,
+    this.image,
   });
 
   final String name;
   final Color color;
   final double size;
+
+  /// Null draws the initials.
+  final AvatarRef? image;
 
   @override
   Widget build(BuildContext context) => LoafAvatar(
@@ -549,6 +553,7 @@ class SpaceAvatar extends StatelessWidget {
     color: color,
     size: size,
     radius: size / 3,
+    image: image,
     textStyle: loafBody(size * 0.36, 600),
   );
 }
@@ -790,6 +795,7 @@ class _DirectoryRow extends StatelessWidget {
               name: entry.space.name,
               color: entry.space.color,
               size: 40,
+              image: entry.space.avatar,
             ),
             const SizedBox(width: LoafSpace.x3),
             Expanded(
@@ -880,6 +886,7 @@ class _PreviewCard extends StatelessWidget {
                 name: entry.space.name,
                 color: entry.space.color,
                 size: 52,
+                image: entry.space.avatar,
               ),
               const SizedBox(width: LoafSpace.x3),
               Expanded(

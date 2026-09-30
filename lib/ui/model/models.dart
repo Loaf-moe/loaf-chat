@@ -20,6 +20,24 @@ enum ChannelKind { text, voice, direct, room }
 /// Drives name colour everywhere — see "Name colour" in the design spec.
 enum Role { admin, moderator, member }
 
+/// Where someone's or something's picture lives. Opaque to the UI: only
+/// the backend that made it can turn it into an image.
+@immutable
+class AvatarRef {
+  const AvatarRef(this.value);
+
+  final String value;
+
+  static AvatarRef? maybe(String? v) =>
+      v == null || v.isEmpty ? null : AvatarRef(v);
+
+  @override
+  bool operator ==(Object other) => other is AvatarRef && other.value == value;
+
+  @override
+  int get hashCode => value.hashCode;
+}
+
 class Member {
   const Member(
     this.id,
@@ -28,10 +46,14 @@ class Member {
     this.presence = Presence.online,
     this.statusMessage,
     this.powerLevel = 0,
+    this.avatar,
   });
 
   final String id;
   final String name;
+
+  /// Null draws the initials.
+  final AvatarRef? avatar;
 
   /// Avatar fallback background only — never a name colour. Matrix has no
   /// user-chosen colour; real clients derive this from a hash of the MXID,
@@ -64,10 +86,15 @@ class Member {
         .toUpperCase();
   }
 
-  Member copyWith({Presence? presence, String? statusMessage}) => Member(
+  Member copyWith({
+    Presence? presence,
+    String? statusMessage,
+    AvatarRef? avatar,
+  }) => Member(
     id,
     name,
     color,
+    avatar: avatar ?? this.avatar,
     presence: presence ?? this.presence,
     // Empty clears it; null keeps it.
     statusMessage: statusMessage == null
@@ -184,11 +211,15 @@ class Channel {
     this.lastActivity,
     this.earlier = const [],
     this.waitingFor = const [],
+    this.avatar,
   });
 
   final String id;
   final String name;
   final ChannelKind kind;
+
+  /// Null draws the initials.
+  final AvatarRef? avatar;
   final int unread;
   final int mentions;
   final bool private;
@@ -250,6 +281,7 @@ class Channel {
   }) => Channel(
     id: id,
     name: name,
+    avatar: avatar,
     kind: kind,
     unread: unread ?? this.unread,
     mentions: mentions ?? this.mentions,
@@ -283,11 +315,15 @@ class Space {
     required this.color,
     this.categories = const [],
     this.members = const [],
+    this.avatar,
   });
 
   final String id;
   final String name;
   final Color color;
+
+  /// Null draws the initials.
+  final AvatarRef? avatar;
   final List<ChannelCategory> categories;
   final List<Member> members;
 
@@ -330,6 +366,7 @@ class Space {
     id: id,
     name: name,
     color: color,
+    avatar: avatar,
     members: members,
     categories: [
       for (final category in categories)

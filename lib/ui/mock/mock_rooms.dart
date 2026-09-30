@@ -10,6 +10,7 @@ import '../channel/timeline_controller.dart';
 import '../rooms/rooms.dart';
 import '../spaces/add_space.dart' show spaceColorFor;
 import '../spaces/space_directory.dart';
+import '../widgets/avatar_images.dart';
 import 'fixtures.dart';
 import 'mock_space_directory.dart';
 
@@ -47,6 +48,9 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   @override
   final SpaceDirectory directory = MockSpaceDirectory();
+
+  @override
+  AvatarImages get avatarImages => const NoAvatarImages();
 
   @override
   Set<RoomAbility> get abilities => RoomAbility.values.toSet();

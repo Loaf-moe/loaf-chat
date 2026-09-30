@@ -204,6 +204,7 @@ class _CallTileState extends State<CallTile> {
         label: member.initials,
         color: member.color,
         size: size,
+        image: member.avatar,
         textStyle: loafBody(size * 0.36, 600),
       );
     },
