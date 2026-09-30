@@ -284,27 +284,41 @@ class _DeviceRowState extends State<_DeviceRow> {
         child: SelectableText(name, style: style, onTap: _edit),
       );
     }
-    return Focus(
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            event.logicalKey == LogicalKeyboardKey.escape &&
-            !_saving) {
-          _revert();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
+    // Escape has two ways in. Windows and Linux deliver it as a key event.
+    // macOS also hands the text field's own `cancelOperation:` to the focused
+    // field as a DismissIntent (EditableText.performSelector), which the
+    // field passes up, so a key handler alone never hears it there.
+    return Actions(
+      actions: {
+        DismissIntent: CallbackAction<DismissIntent>(
+          onInvoke: (_) {
+            if (!_saving) _revert();
+            return null;
+          },
+        ),
       },
-      child: TextField(
-        controller: _name,
-        focusNode: _focus,
-        autofocus: true,
-        readOnly: _saving,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _save(),
-        style: style,
-        decoration: const InputDecoration(
-          isDense: true,
-          contentPadding: EdgeInsets.symmetric(vertical: LoafSpace.x2),
+      child: Focus(
+        onKeyEvent: (_, event) {
+          if (event is KeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.escape &&
+              !_saving) {
+            _revert();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: TextField(
+          controller: _name,
+          focusNode: _focus,
+          autofocus: true,
+          readOnly: _saving,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _save(),
+          style: style,
+          decoration: const InputDecoration(
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(vertical: LoafSpace.x2),
+          ),
         ),
       ),
     );
