@@ -30,17 +30,24 @@ class AppNotice {
 
   /// An update is ready to install. Desktop only — on a phone the App Store
   /// or TestFlight owns updates, so the shell never creates this there.
+  /// [applying] is the restart under way: it cannot be stopped, so it
+  /// offers no dismiss and its action is dead.
   factory AppNotice.update({
-    required String version,
+    String? version,
+    bool applying = false,
     VoidCallback? onAction,
     VoidCallback? onDismiss,
   }) => AppNotice(
     icon: LucideIcons.arrowDownToLine,
-    title: 'loaf $version is ready',
-    body: 'restart to pick up the new version',
-    actionLabel: 'restart',
-    onAction: onAction,
-    onDismiss: onDismiss,
+    title: version == null
+        ? 'a new loaf chat is ready'
+        : 'loaf chat $version is ready',
+    body: applying
+        ? 'restarting into the new version'
+        : 'restart to pick up the new version',
+    actionLabel: applying ? 'restarting…' : 'restart',
+    onAction: applying ? null : onAction,
+    onDismiss: applying ? null : onDismiss,
   );
 
   /// This session is not verified, so it cannot read encrypted history.
@@ -284,7 +291,9 @@ class _NoticeDetails extends StatelessWidget {
           children: [
             LoafButton(
               label: notice.actionLabel,
-              onTap: () => Navigator.pop(context, _Choice.act),
+              onTap: notice.onAction == null
+                  ? null
+                  : () => Navigator.pop(context, _Choice.act),
               emphasis: loud
                   ? LoafButtonEmphasis.filled
                   : LoafButtonEmphasis.outlined,

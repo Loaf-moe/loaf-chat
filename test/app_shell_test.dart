@@ -163,7 +163,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byTooltip('verify this session'), findsOneWidget);
-      expect(find.byTooltip('loaf 0.3.0 is ready'), findsNothing);
+      expect(find.byTooltip('loaf chat 0.3.0 is ready'), findsNothing);
     },
   );
 
@@ -172,7 +172,7 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.macOS),
     (tester) async {
       await _pumpShell(tester, const Size(1440, 900));
-      expect(find.byTooltip('loaf 0.3.0 is ready'), findsOneWidget);
+      expect(find.byTooltip('loaf chat 0.3.0 is ready'), findsOneWidget);
     },
   );
 

@@ -29,6 +29,7 @@ import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
 import '../mock/mock_rooms.dart';
+import '../model/updater.dart';
 import '../platform.dart';
 import '../rooms/rooms.dart';
 import '../theme/loaf_theme.dart';
@@ -57,7 +58,7 @@ import 'user_bar.dart';
 const _wideBreakpoint = 900.0;
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, this.session, this.rooms});
+  const AppShell({super.key, this.session, this.rooms, this.updater});
 
   /// Who is signed in, and how far this device is trusted. The app passes
   /// its one session; left out (tests, previews), the shell makes its own.
@@ -67,6 +68,11 @@ class AppShell extends StatefulWidget {
   /// disposes them when it closes. Left out, the rooms are the mock's.
   final Rooms Function()? rooms;
 
+  /// What replaces this copy of the app with a newer one. The app passes
+  /// its one updater, which outlives the shell. Left out, the mock plays an
+  /// update that is ready and a real session has none.
+  final Updater? updater;
+
   @override
   State<AppShell> createState() => _AppShellState();
 }
@@ -75,6 +81,11 @@ class _AppShellState extends State<AppShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   late final LoafSession _session = widget.session ?? MockSession();
   late final Rooms _rooms = widget.rooms?.call() ?? MockRooms();
+  late final Updater _updater =
+      widget.updater ??
+      (_session is MockSession
+          ? FakeUpdater(const UpdateReady('0.3.0'))
+          : const NoUpdater());
   // The rooms own the profile and dispose it; the controller only views it.
   late final _profile = ProfileController(
     profile: _rooms.profile,
@@ -100,6 +111,7 @@ class _AppShellState extends State<AppShell> {
     _profile.addListener(_onChange);
     _calls.addListener(_onChange);
     _session.addListener(_onSessionChange);
+    _updater.addListener(_onChange);
   }
 
   void _onChange() => setState(() {});
@@ -123,6 +135,8 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     _session.removeListener(_onSessionChange);
+    _updater.removeListener(_onChange);
+    if (widget.updater == null) _updater.dispose();
     _rooms
       ..removeListener(_onChange)
       ..dispose();
@@ -145,8 +159,23 @@ class _AppShellState extends State<AppShell> {
   /// you in the first channel again.
   final _channelBySpace = <String, String>{};
 
-  /// Mockup state: whether the update notice is showing.
-  var _showUpdate = true;
+  /// The update put off with "later", until the next launch. The empty
+  /// string stands for one that came without a version.
+  String? _laterUpdate;
+
+  AppNotice? get _updateNotice => switch (_updater.state) {
+    UpdateReady(:final version) when _laterUpdate != (version ?? '') =>
+      AppNotice.update(
+        version: version,
+        onAction: () => unawaited(_updater.restart()),
+        onDismiss: () => setState(() => _laterUpdate = version ?? ''),
+      ),
+    UpdateApplying(:final version) => AppNotice.update(
+      version: version,
+      applying: true,
+    ),
+    _ => null,
+  };
 
   /// Only consulted on wide layouts, where the member list is a column you
   /// can put away. On a phone it is a drawer and opens on demand.
@@ -824,14 +853,8 @@ class _AppShellState extends State<AppShell> {
       AppNotice.setUpRecovery(
         onAction: () => _openVerification(VerifyPurpose.setUp),
       ),
-    // Phones update through the App Store or TestFlight, never in-app. The
-    // mock's notice only: there is no updater behind it yet.
-    if (_showUpdate && isDesktop && _session is MockSession)
-      AppNotice.update(
-        version: '0.3.0',
-        onAction: () {},
-        onDismiss: () => setState(() => _showUpdate = false),
-      ),
+    // Phones update through the App Store or TestFlight, never in-app.
+    if (isDesktop) ?_updateNotice,
   ];
 
   /// Whether the call's own page or panel is what you are looking at, in

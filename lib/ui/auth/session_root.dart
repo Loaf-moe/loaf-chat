@@ -4,6 +4,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../model/updater.dart';
 import '../rooms/rooms.dart';
 import '../shell/app_shell.dart';
 import 'loaf_session.dart';
@@ -11,13 +12,21 @@ import 'login_page.dart';
 import 'sign_in_controller.dart';
 
 class SessionRoot extends StatefulWidget {
-  const SessionRoot({super.key, required this.session, this.rooms});
+  const SessionRoot({
+    super.key,
+    required this.session,
+    this.rooms,
+    this.updater,
+  });
 
   final LoafSession session;
 
   /// Makes the account's rooms each time the app opens onto them. Left
   /// out, the shell plays the mock's.
   final Rooms Function()? rooms;
+
+  /// The app's one updater. Left out, the shell decides.
+  final Updater? updater;
 
   @override
   State<SessionRoot> createState() => _SessionRootState();
@@ -82,7 +91,13 @@ class _SessionRootState extends State<SessionRoot> {
   @override
   Widget build(BuildContext context) {
     final signIn = _signIn;
-    if (signIn == null) return AppShell(session: _session, rooms: widget.rooms);
+    if (signIn == null) {
+      return AppShell(
+        session: _session,
+        rooms: widget.rooms,
+        updater: widget.updater,
+      );
+    }
     return LoginPage(
       key: ObjectKey(signIn),
       controller: signIn,

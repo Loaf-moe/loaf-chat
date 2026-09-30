@@ -156,7 +156,7 @@ void main() {
       ),
     ]);
 
-    await tester.tap(find.byTooltip('loaf 0.3.0 is ready'));
+    await tester.tap(find.byTooltip('loaf chat 0.3.0 is ready'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('later'));
     await tester.pumpAndSettle();
