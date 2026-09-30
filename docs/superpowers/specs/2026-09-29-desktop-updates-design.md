@@ -82,12 +82,14 @@ This is the first of three pieces. Testers get nothing until all three land.
 - **Names today disagree:** `loaf_native` (macOS product, Android label),
   "Loaf Native" (iOS), "Loaf" (Linux title, `MaterialApp`).
 
-**Not verified; each gets a throwaway probe as the plan's first tasks:**
+**Not verified. The design holds either way on each, so the plan settles
+them where that is cheapest: the vodozemac point when the macOS release
+build is first made, the rest in the release rehearsal:**
 
 - Whether the portal shows a permission dialog the first time an app calls
   `Update()`. If it does, quiet on Flatpak means one system prompt, once.
-- That Sparkle, with a user driver that shows nothing, reaches the staged
-  state without a reply this design does not give.
+- Which of Sparkle's two paths to a staged update it takes with a user
+  driver that shows nothing. The bridge answers both.
 - That `flutter build macos --release` yields a universal vodozemac library.
 - That SSO's loopback listener and browser hand-off work inside the Flatpak
   sandbox.
@@ -140,6 +142,7 @@ real backends elsewhere, and `lib/main.dart` choosing between them.
 | Environment | Backend |
 |---|---|
 | Debug or profile build, any platform | `NoUpdater` |
+| A release build with no build number (made by hand, not by the pipeline) | `NoUpdater` |
 | macOS release | `SparkleUpdater` |
 | Linux with `FLATPAK_ID` set | `FlatpakUpdater` |
 | Linux with `APPIMAGE` set | `AppImageUpdater` |
@@ -151,7 +154,8 @@ real backends elsewhere, and `lib/main.dart` choosing between them.
 - The notice appears only for an update already verified on disk.
 - A failure is never a notice. It is logged, the state returns to `idle`,
   and the next check tries again. A tester cannot act on "update failed".
-- The first check runs shortly after launch, then every six hours.
+- The first check runs shortly after launch, then every six hours. The
+  Flatpak portal keeps its own schedule instead.
 - An update nobody restarts into applies when the app next quits.
 
 **The shell:** `_showUpdate` and the `MockSession` test go. The notice shows
@@ -235,9 +239,11 @@ requests, in a `release` environment that only those tags may use.
 | `linux` | `ubuntu-latest` | One `flutter build linux --release`, packaged as a Flatpak commit and as a signed AppImage |
 | `publish` | `ubuntu-latest` | Only if both passed |
 
-**Publish order:** assets go to a draft GitHub Release; then the feeds and
-the OSTree repo go to Pages; then the Release leaves draft. A feed never
-names a file that is not there, and a half-failed release is invisible.
+**Publish order:** assets go to a draft GitHub Release, which is published
+once every asset is up; only then do the feeds and the OSTree repo go to
+Pages. A draft's files are not public, so the Release must leave draft
+before a feed names them. A feed never names a file that is not there, and
+a run that fails before the feeds move changes nothing a tester sees.
 
 **GitHub Release assets:** the DMG, the AppImage.
 
@@ -296,9 +302,11 @@ allows 1 GB a site and 100 MB a file.
   a good update swaps the file; a bad signature, a bad hash, a cut-off
   download, a read-only folder and an older build each leave the file
   untouched and the state `idle`.
-- **Flatpak updater** (`test()`, a fake portal object on a private bus):
-  both `UpdateAvailable` cases, a failed `Update()`, a refused one, a
-  missing `latest.json`, a portal below version 2.
+- **Flatpak updater** (`test()`, a fake behind a `FlatpakPortal`
+  interface, because the tests run on macOS where there is no session
+  bus): both `UpdateAvailable` cases, a failed `Update()`, a refused one,
+  a missing `latest.json`, a portal below version 2. The D-Bus client
+  behind that interface is thin and is proved in the rehearsal.
 - **Sparkle updater:** Dart tests fake the method channel. The Swift bridge
   is thin and checked by hand.
 - **`pickUpdater`:** one test per row of its table.
