@@ -484,7 +484,7 @@ void main() {
       expect(api.sent.single.$2['body'], 'fresh bread');
     });
 
-    test('text is sent as written: no commands, no markdown', () async {
+    test('a slash is not a command, and plain text goes plain', () async {
       final h = await _open([_text('hi')]);
       h.timeline.send('/leave');
       h.timeline.send('2 * 3 * 4');
@@ -492,6 +492,31 @@ void main() {
       expect(h.api.sent.map((s) => s.$2['body']), ['/leave', '2 * 3 * 4']);
       expect(h.api.sent.map((s) => s.$2['format']), [null, null]);
       expect(h.client.getRoomById(_roomId)!.membership, Membership.join);
+    });
+
+    test('markdown goes as HTML beside the text as typed', () async {
+      final h = await _open([_text('hi')]);
+      h.timeline.send('**fresh** bread, `hot` ~~cold~~');
+      h.timeline.send('> quoted\n\n- one\n- two');
+      h.timeline.send('see [the menu](https://loaf.moe/menu)');
+      await _settle();
+      final sent = h.api.sent.map((s) => s.$2).toList();
+      expect(sent.map((c) => c['body']), [
+        '**fresh** bread, `hot` ~~cold~~',
+        '> quoted\n\n- one\n- two',
+        'see [the menu](https://loaf.moe/menu)',
+      ]);
+      expect(sent.map((c) => c['format']).toSet(), {'org.matrix.custom.html'});
+      expect(
+        sent[0]['formatted_body'],
+        '<strong>fresh</strong> bread, <code>hot</code> <del>cold</del>',
+      );
+      expect(sent[1]['formatted_body'], contains('<blockquote>'));
+      expect(sent[1]['formatted_body'], contains('<li>one</li>'));
+      expect(
+        sent[2]['formatted_body'],
+        'see <a href="https://loaf.moe/menu">the menu</a>',
+      );
     });
 
     test('blank text never sends', () async {

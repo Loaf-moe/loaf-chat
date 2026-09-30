@@ -305,7 +305,10 @@ class MatrixTimeline extends ChangeNotifier
           body,
           txid: txid,
           inReplyTo: replyTo,
-          parseMarkdown: false,
+          // Markdown goes as formatted_body HTML beside the plain body, as
+          // Element sends it; the SDK leaves the format off when there is
+          // nothing to format. A leading slash is still just text.
+          parseMarkdown: true,
           parseCommands: false,
         ),
       ).then<void>((_) {}, onError: (Object _) {}),
@@ -355,7 +358,7 @@ class MatrixTimeline extends ChangeNotifier
             body,
             txid: txid,
             editEventId: messageId,
-            parseMarkdown: false,
+            parseMarkdown: true,
             parseCommands: false,
           ),
         ),
