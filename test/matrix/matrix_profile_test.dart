@@ -655,6 +655,17 @@ void main() {
       expect(profile.uploadingAvatar, isFalse);
     });
 
+    test(
+      'a second avatar while one uploads is refused, not swallowed',
+      () async {
+        final (_, _, profile) = await _profile();
+        final first = profile.setAvatar(png);
+        await expectLater(profile.setAvatar(png), throwsStateError);
+        await first;
+        expect(profile.uploadingAvatar, isFalse);
+      },
+    );
+
     test('disposing mid-save notifies nothing', () async {
       final (api, _, profile) = await _profile();
       final gate = api.nameGate = Completer<void>();

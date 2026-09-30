@@ -74,7 +74,11 @@ class _Profile extends ChangeNotifier implements Profile {
   void away(bool away) {}
 }
 
-Future<_Profile> _pump(WidgetTester tester, {_Profile? profile}) async {
+Future<_Profile> _pump(
+  WidgetTester tester, {
+  _Profile? profile,
+  Future<Uint8List?> Function()? pick,
+}) async {
   final fake = profile ?? _Profile();
   final controller = ProfileController(profile: fake);
   addTearDown(controller.dispose);
@@ -87,7 +91,7 @@ Future<_Profile> _pump(WidgetTester tester, {_Profile? profile}) async {
       home: Scaffold(
         body: AccountSection(
           profile: controller,
-          pickPicture: () async => Uint8List.fromList([1, 2, 3]),
+          pickPicture: pick ?? () async => Uint8List.fromList([1, 2, 3]),
         ),
       ),
     ),
@@ -203,6 +207,41 @@ void main() {
     // The spinner never settles.
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('choose a picture…'), findsNothing);
+  });
+
+  testWidgets('the badge can not be tapped while a picture is being read', (
+    tester,
+  ) async {
+    // Nothing is uploading yet: the picker (or the shrink) is still busy.
+    final gate = Completer<Uint8List?>();
+    await _pump(tester, pick: () => gate.future);
+    await tester.tap(find.byKey(const Key('change-picture')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('choose a picture…'));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await tester.tap(find.byKey(const Key('change-picture')));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('choose a picture…'), findsNothing);
+
+    // Cancelling the picker frees the badge again.
+    gate.complete(null);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('change-picture')));
+    await tester.pumpAndSettle();
+    expect(find.text('choose a picture…'), findsOneWidget);
+  });
+
+  testWidgets('save changes waits for a name', (tester) async {
+    await _pump(tester);
+    await tester.enterText(find.byType(TextField).first, '   ');
+    await tester.pump();
+    expect(_button(tester, 'save changes').onTap, isNull);
+
+    await tester.enterText(find.byType(TextField).first, 'Mochi 2');
+    await tester.pump();
+    expect(_button(tester, 'save changes').onTap, isNotNull);
   });
 
   testWidgets('on a computer, right-click opens the menu', (tester) async {

@@ -67,10 +67,26 @@ class _AccountSectionState extends State<AccountSection> {
   late var _seenName = _profile.displayName;
   late var _seenStatus = _profile.status;
 
+  /// A picture is being chosen, read, shrunk or uploaded. The profile only
+  /// knows about the upload, so without this the badge is live while the
+  /// file is still being read.
+  var _changing = false;
+
   @override
   void initState() {
     super.initState();
     _profile.addListener(_onProfile);
+    // Save is only honest while there is a name to save.
+    _name.addListener(_onName);
+  }
+
+  late var _hadName = _name.text.trim().isNotEmpty;
+
+  void _onName() {
+    final has = _name.text.trim().isNotEmpty;
+    if (has == _hadName) return;
+    _hadName = has;
+    setState(() {});
   }
 
   void _onProfile() {
@@ -129,6 +145,7 @@ class _AccountSectionState extends State<AccountSection> {
           )
         : await showActionSheet<_PictureAction>(context, items: items);
     if (action == null || !mounted) return;
+    setState(() => _changing = true);
     try {
       switch (action) {
         case _PictureAction.choose:
@@ -142,12 +159,15 @@ class _AccountSectionState extends State<AccountSection> {
       if (mounted) {
         showToast(context, "couldn't change your picture. try again?");
       }
+    } finally {
+      if (mounted) setState(() => _changing = false);
     }
   }
 
   @override
   void dispose() {
     _profile.removeListener(_onProfile);
+    _name.removeListener(_onName);
     _ownProfile?.dispose();
     _name.dispose();
     _status.dispose();
@@ -178,7 +198,7 @@ class _AccountSectionState extends State<AccountSection> {
                 tokens: tokens,
                 me: me,
                 editable: widget.editable,
-                uploading: _profile.uploadingAvatar,
+                uploading: _profile.uploadingAvatar || _changing,
                 onChange: _changePicture,
               ),
               const SizedBox(height: LoafSpace.x6),
@@ -237,8 +257,11 @@ class _AccountSectionState extends State<AccountSection> {
                         label: saving ? 'saving…' : 'save changes',
                         size: LoafButtonSize.small,
                         // A save can't be called back, so no cancel: the
-                        // button just waits, drawn as unavailable.
-                        onTap: saving ? null : _save,
+                        // button just waits, drawn as unavailable. It also
+                        // waits for a name: a blank one saves to nothing.
+                        onTap: saving || _name.text.trim().isEmpty
+                            ? null
+                            : _save,
                       ),
                       const SizedBox(width: LoafSpace.x2),
                       LoafButton(

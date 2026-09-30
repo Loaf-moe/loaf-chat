@@ -464,8 +464,9 @@ class MatrixProfile extends ChangeNotifier implements Profile {
 
   @override
   Future<void> setAvatar(Uint8List? png) async {
-    // The button is disabled meanwhile; this is the backstop.
-    if (_uploading) return;
+    // The button is disabled meanwhile; this is the backstop, and a loud
+    // one: returning quietly would look like the picture had been set.
+    if (_uploading) throw StateError('a picture is already being uploaded');
     _uploading = true;
     _notify();
     try {
