@@ -13,6 +13,8 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
 import 'message_actions.dart';
+import 'message_markup.dart';
+import 'message_text.dart';
 import 'timeline.dart';
 
 String _formatTime(DateTime time) {
@@ -81,6 +83,7 @@ class MessageGroupTile extends StatelessWidget {
       return _MessageBody(
         message: message,
         keyNeverCame: controller?.writable ?? false,
+        you: controller?.you.id,
       );
     }
     return isDesktop
@@ -115,9 +118,13 @@ class _MessageBody extends StatelessWidget {
     this.onRetry,
     this.onDiscard,
     this.keyNeverCame = false,
+    this.you,
   });
 
   final Message message;
+
+  /// Your user id, so mentions of you stand out.
+  final String? you;
 
   /// Locked on a verified device: no key for it reached this one.
   final bool keyNeverCame;
@@ -189,27 +196,29 @@ class _MessageBody extends StatelessWidget {
   }
 
   Widget _text(LoafTokens tokens) {
-    final span = TextSpan(
+    final text = MessageText(
+      blocks: parseMessage(formatted: message.formatted, body: message.body),
       style: loafBody(15, 400, height: 1.5).copyWith(color: tokens.textBody),
-      children: [
-        TextSpan(text: message.body),
-        if (message.edited)
-          TextSpan(
-            text: ' (edited)',
-            style: loafBody(11, 400).copyWith(color: tokens.textMuted),
-          ),
-      ],
+      you: you,
+      trailing: message.edited
+          ? TextSpan(
+              text: ' (edited)',
+              style: loafBody(11, 400).copyWith(color: tokens.textMuted),
+            )
+          : null,
     );
     final onSelectionChanged = this.onSelectionChanged;
-    if (onSelectionChanged == null) return Text.rich(span);
-    final plain = span.toPlainText();
-    return SelectableText.rich(
-      span,
+    if (onSelectionChanged == null) return text;
+    // One selection across every paragraph, quote and code block, as a
+    // browser gives; links inside it still open on a click.
+    return SelectionArea(
       // The message's own right-click menu replaces the stock one; it offers
-      // Copy selection whenever there is something selected.
-      contextMenuBuilder: null,
-      onSelectionChanged: (selection, _) =>
-          onSelectionChanged(selection.textInside(plain)),
+      // Copy selection whenever there is something selected. An empty
+      // builder rather than null, which SelectionArea does not survive.
+      contextMenuBuilder: (_, _) => const SizedBox.shrink(),
+      onSelectionChanged: (content) =>
+          onSelectionChanged(content?.plainText ?? ''),
+      child: text,
     );
   }
 }
@@ -252,7 +261,7 @@ class _ReplyContext extends StatelessWidget {
                           ? '  a message further up'
                           : replyTo.locked
                           ? '  an encrypted message'
-                          : '  ${replyTo.body}',
+                          : '  ${plainTextOf(parseMessage(formatted: replyTo.formatted, body: replyTo.body))}',
                       style: loafBody(11, 400).copyWith(
                         color: tokens.textMuted,
                         fontStyle: replyTo.stub || replyTo.locked
@@ -440,6 +449,7 @@ class _TouchMessageState extends State<_TouchMessage> {
       on: _active,
       child: _MessageBody(
         message: widget.message,
+        you: widget.controller.you.id,
         onReact: _canReact
             ? (emoji) =>
                   widget.controller.toggleReaction(widget.message.id, emoji)
@@ -577,6 +587,7 @@ class _PointerMessageState extends State<_PointerMessage> {
                 on: _active || _overMessage || _overToolbar,
                 child: _MessageBody(
                   message: widget.message,
+                  you: widget.controller.you.id,
                   onReact: _canReact
                       ? (emoji) => widget.controller.toggleReaction(
                           widget.message.id,

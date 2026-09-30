@@ -266,6 +266,37 @@ void main() {
       expect(first.locked, isFalse);
     });
 
+    test('a formatted message carries its HTML', () async {
+      final h = await _open([
+        _event('m.room.message', {
+          'msgtype': 'm.text',
+          'body': 'fresh bread',
+          'format': 'org.matrix.custom.html',
+          'formatted_body': '<b>fresh</b> bread',
+        }),
+        _text('plain'),
+      ]);
+      expect(h.messages.map((m) => m.formatted), ['<b>fresh</b> bread', null]);
+    });
+
+    test('an edit brings its own formatting', () async {
+      final h = await _open([
+        _text('helo', id: r'$m1'),
+        _event('m.room.message', {
+          'msgtype': 'm.text',
+          'body': '* hello',
+          'm.new_content': {
+            'msgtype': 'm.text',
+            'body': 'hello',
+            'format': 'org.matrix.custom.html',
+            'formatted_body': '<i>hello</i>',
+          },
+          'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$m1'},
+        }),
+      ]);
+      expect(h.messages.single.formatted, '<i>hello</i>');
+    });
+
     test('a file is a plain row until media is drawn', () async {
       final h = await _open([
         _event('m.room.message', {

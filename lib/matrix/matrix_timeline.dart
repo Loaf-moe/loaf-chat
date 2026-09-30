@@ -4,6 +4,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 // The SDK's own Timeline is the one wrapped here; the UI's is `ui.Timeline`.
@@ -169,11 +170,28 @@ class MatrixTimeline extends ChangeNotifier
       author: author,
       sentAt: event.originServerTs,
       body: body,
+      formatted: _formatted(display, author),
       edited: !identical(display, event),
       reactions: quoting ? const [] : _reactions(event, timeline),
       replyTo: quoting ? null : _replyTo(event, timeline),
       status: status,
     );
+  }
+
+  /// [event]'s HTML, for the kinds of message that are text. A file's is
+  /// a caption, which is not drawn yet.
+  static String? _formatted(Event event, ui.Member author) {
+    if (event.content case {
+      'format': 'org.matrix.custom.html',
+      'formatted_body': final String html,
+    }) {
+      return switch (event.messageType) {
+        MessageTypes.Text || MessageTypes.Notice => html,
+        MessageTypes.Emote => '${htmlEscape.convert(author.name)} $html',
+        _ => null,
+      };
+    }
+    return null;
   }
 
   /// [event] as its author last edited it. Only the author's own edits

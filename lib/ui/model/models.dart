@@ -126,6 +126,7 @@ class Message {
     required this.author,
     required this.sentAt,
     required this.body,
+    this.formatted,
     this.reactions = const [],
     this.edited = false,
     this.replyTo,
@@ -141,6 +142,7 @@ class Message {
   Message.stub({required this.id, required this.author})
     : sentAt = DateTime.utc(1970),
       body = '',
+      formatted = null,
       reactions = const [],
       edited = false,
       replyTo = null,
@@ -154,6 +156,12 @@ class Message {
   final Member author;
   final DateTime sentAt;
   final String body;
+
+  /// The Matrix `formatted_body`, when the message came with one: HTML,
+  /// unsanitised, drawn in place of [body]. [body] stays the plain text
+  /// that is copied, quoted and edited.
+  final String? formatted;
+
   final List<Reaction> reactions;
   final bool edited;
 
@@ -182,6 +190,8 @@ class Message {
         author: author,
         sentAt: sentAt,
         body: body ?? this.body,
+        // New words make the old formatting wrong.
+        formatted: body == null ? formatted : null,
         reactions: reactions ?? this.reactions,
         edited: edited ?? this.edited,
         replyTo: replyTo,

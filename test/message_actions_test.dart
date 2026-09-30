@@ -320,7 +320,7 @@ void main() {
       tester,
     ) async {
       await _pump(tester, _them);
-      expect(find.byType(SelectableText), findsOneWidget);
+      expect(find.byType(SelectionArea), findsOneWidget);
     });
 
     testWidgets(
@@ -374,7 +374,7 @@ void main() {
     variant: _mobile,
     (tester) async {
       await _pump(tester, _them);
-      expect(find.byType(SelectableText), findsNothing);
+      expect(find.byType(SelectionArea), findsNothing);
 
       final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       addTearDown(mouse.removePointer);

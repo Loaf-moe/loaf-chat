@@ -49,6 +49,10 @@ dependencies:
   share_plus: ^13.3.0
   image_picker: ^1.2.3
   dbus: ^0.8.0
+  # Both already come with the matrix SDK. html parses a message's
+  # formatted_body; markdown reads a plain body the way the SDK writes one.
+  html: ^0.15.6
+  markdown: ^7.3.1
 
 dev_dependencies:
   flutter_test:
