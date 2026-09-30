@@ -128,6 +128,10 @@ jobs:
               test -d pages-before/repo \
                 || { echo "::error::gh-pages has no repo/"; exit 1; }
               mv pages-before/repo repo
+              # Git does not keep empty directories, and ostree will not
+              # open a repo without them.
+              mkdir -p repo/tmp repo/refs/remotes repo/refs/mirrors \
+                repo/state repo/extensions
               ;;
             2) echo "no gh-pages yet: first release" ;;
             *) echo "::error::could not list gh-pages (exit $code)"; exit 1 ;;
