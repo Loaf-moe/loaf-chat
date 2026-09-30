@@ -1,8 +1,9 @@
 # Packages the Flutter bundle CI already built; nothing compiles in here.
 app-id: moe.loaf.chat
-runtime: org.freedesktop.Platform
-runtime-version: '25.08'
-sdk: org.freedesktop.Sdk
+# GNOME, not freedesktop: the Flutter Linux bundle links GTK 3.
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
 command: loaf-chat
 finish-args:
   - --share=network

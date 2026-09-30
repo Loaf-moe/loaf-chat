@@ -6,7 +6,7 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency: release
 
@@ -20,6 +20,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Public keys are committed
+        # Better to stop here than after three builds and a notarization.
+        run: |
+          for key in appimage.pub sparkle.pub flatpak.asc; do
+            test -s "tool/release/keys/$key" \
+              || { echo "::error::tool/release/keys/$key is missing or empty"; exit 1; }
+          done
       - id: version
         run: |
           git fetch origin main
@@ -92,7 +99,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      # GNOME, matching the manifest's runtime.
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
       options: --privileged
     steps:
       - uses: actions/checkout@v4
@@ -101,13 +109,26 @@ jobs:
           name: linux
           path: dist
       - run: |
+          # The image is Fedora-based; make sure the tools are there.
+          command -v git gpg tar >/dev/null || dnf install -y git gnupg2 tar
           mkdir -p build/linux/x64/release
           tar -xf dist/bundle.tar -C build/linux/x64/release
           # The repo so far, so this build lands on top of the last ones.
-          if git clone --depth 1 --branch gh-pages \
-              "https://github.com/${GITHUB_REPOSITORY}.git" pages-before; then
-            mv pages-before/repo repo
-          fi
+          # No branch yet (exit 2) is a first release; any other failure
+          # must not quietly drop the older builds.
+          url="https://github.com/${GITHUB_REPOSITORY}.git"
+          code=0
+          git ls-remote --exit-code --heads "$url" gh-pages >/dev/null || code=$?
+          case "$code" in
+            0)
+              git clone --depth 1 --branch gh-pages "$url" pages-before
+              test -d pages-before/repo \
+                || { echo "::error::gh-pages has no repo/"; exit 1; }
+              mv pages-before/repo repo
+              ;;
+            2) echo "no gh-pages yet: first release" ;;
+            *) echo "::error::could not list gh-pages (exit $code)"; exit 1 ;;
+          esac
       - run: tool/release/flatpak.sh "${{ needs.version.outputs.name }}" repo
         env:
           FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
@@ -121,6 +142,8 @@ jobs:
     needs: [version, macos, linux, flatpak]
     runs-on: ubuntu-latest
     environment: release
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.version.outputs.name }}
@@ -129,7 +152,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Release assets first
+      - name: Lay out the feeds
+        # Before the release goes public, so a bad layout fails while
+        # nothing points at it yet.
+        run: |
+          mkdir dist
+          tar -xf artifacts/flatpak/repo.tar -C dist
+          cp artifacts/macos/appcast.xml artifacts/linux/latest.json dist/
+          tool/release/pages.sh dist pages
+      - name: Release assets
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
             || gh release create "$GITHUB_REF_NAME" --draft \
@@ -139,12 +170,8 @@ jobs:
           # Public before any feed names them: a feed never points at a
           # file that is not there.
           gh release edit "$GITHUB_REF_NAME" --draft=false
-      - name: Feeds last
+      - name: Push the feeds
         run: |
-          mkdir dist
-          tar -xf artifacts/flatpak/repo.tar -C dist
-          cp artifacts/macos/appcast.xml artifacts/linux/latest.json dist/
-          tool/release/pages.sh dist pages
           cd pages
           # One commit, replaced each time: the branch keeps no history.
           git init -b gh-pages

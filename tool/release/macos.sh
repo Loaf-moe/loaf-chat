@@ -7,7 +7,7 @@ set -euo pipefail
 version="$1"; out="$2"
 app="build/macos/Build/Products/Release/Loaf Chat.app"
 identity="Developer ID Application: CHRISTOPHER ETIENNE THOMAS (6W2A5N37N3)"
-sparkle_version="${SPARKLE_VERSION:-2.8.0}"
+sparkle_version="2.8.0"
 work="$(mktemp -d)"
 mkdir -p "$out"
 
@@ -53,11 +53,20 @@ xcrun notarytool submit "$dmg" --key "$work/notary.p8" \
 xcrun stapler staple "$dmg"
 
 mkdir "$work/sparkle"
-curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/$sparkle_version/Sparkle-$sparkle_version.tar.xz" \
-  | tar -xJ -C "$work/sparkle"
+# Pinned to 2.8.0. To bump SPARKLE_VERSION, download the new tarball, run
+# `shasum -a 256` on it and update sparkle_sha.
+sparkle_sha="fd5681ee92bf238aaac2d08214ceaf0cc8976e452d7f882d80bac1e61581f3b1"
+curl -fsSL -o "$work/sparkle.tar.xz" \
+  "https://github.com/sparkle-project/Sparkle/releases/download/$sparkle_version/Sparkle-$sparkle_version.tar.xz"
+echo "$sparkle_sha  $work/sparkle.tar.xz" | shasum -a 256 -c -
+tar -xJf "$work/sparkle.tar.xz" -C "$work/sparkle"
 feed="$work/feed"; mkdir "$feed"
 cp "$dmg" "$feed/"
-echo "$SPARKLE_PRIVATE_KEY" | "$work/sparkle/bin/generate_appcast" \
+# Only the Sparkle key, on stdin: the signing and notary secrets stay out of
+# this downloaded tool's environment.
+echo "$SPARKLE_PRIVATE_KEY" | env -u MACOS_CERTIFICATE_P12 -u MACOS_CERTIFICATE_PASSWORD \
+  -u NOTARY_KEY_P8 -u NOTARY_KEY_ID -u NOTARY_ISSUER_ID \
+  "$work/sparkle/bin/generate_appcast" \
   --ed-key-file - \
   --download-url-prefix "https://github.com/Loaf-moe/loaf-chat/releases/download/v$version/" \
   -o "$out/appcast.xml" "$feed"
