@@ -2,7 +2,7 @@
 app-id: moe.loaf.chat
 # GNOME, not freedesktop: the Flutter Linux bundle links GTK 3.
 runtime: org.gnome.Platform
-runtime-version: '49'
+runtime-version: '51'
 sdk: org.gnome.Sdk
 command: loaf-chat
 finish-args:

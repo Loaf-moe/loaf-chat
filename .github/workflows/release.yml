@@ -103,7 +103,7 @@ jobs:
     environment: release
     container:
       # GNOME, matching the manifest's runtime.
-      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
       options: --privileged
     steps:
       - uses: actions/checkout@v4
