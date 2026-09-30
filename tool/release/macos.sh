@@ -19,12 +19,17 @@ security unlock-keychain -p "" "$keychain"
 echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$work/certificate.p12"
 security import "$work/certificate.p12" -k "$keychain" \
   -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+# Imported; the decoded file has no more work to do on disk.
+rm -f "$work/certificate.p12"
 security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain" >/dev/null
 security list-keychains -d user -s "$keychain" login.keychain-db
 
 # The entitlements as Xcode expanded them: the file in the repo still has
 # $(PRODUCT_BUNDLE_IDENTIFIER) in it, which codesign would take literally.
 codesign -d --entitlements "$work/app.entitlements" --xml "$app"
+# The ad-hoc Release build carries get-task-allow. Notarization rejects it,
+# and it would let a debugger attach to the shipped app.
+/usr/libexec/PlistBuddy -c 'Delete :com.apple.security.get-task-allow' "$work/app.entitlements" 2>/dev/null || true
 
 sign() { codesign --force --timestamp --options runtime --sign "$identity" "$@"; }
 
@@ -47,9 +52,22 @@ hdiutil create -volname "Loaf Chat" -srcfolder "$stage" -ov -format UDZO "$dmg"
 codesign --force --timestamp --sign "$identity" "$dmg"
 
 echo "$NOTARY_KEY_P8" | base64 --decode > "$work/notary.p8"
-xcrun notarytool submit "$dmg" --key "$work/notary.p8" \
-  --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
-# Fails unless the notary accepted it, which is the check we want.
+# A nonzero exit is judged by the status below, so the log can be fetched first.
+submission="$(xcrun notarytool submit "$dmg" --key "$work/notary.p8" \
+  --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait \
+  --output-format json)" || true
+echo "$submission"
+status="$(echo "$submission" | jq -r '.status // empty')"
+if [ "$status" != "Accepted" ]; then
+  id="$(echo "$submission" | jq -r '.id // empty')"
+  # The log says why; without it a rejection is a dead end.
+  [ -n "$id" ] && xcrun notarytool log "$id" --key "$work/notary.p8" \
+    --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" || true
+  rm -f "$work/notary.p8"
+  echo "notarization did not end Accepted (status: ${status:-none})" >&2
+  exit 1
+fi
+rm -f "$work/notary.p8"
 xcrun stapler staple "$dmg"
 
 mkdir "$work/sparkle"
