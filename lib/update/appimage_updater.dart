@@ -2,7 +2,6 @@
 /// the file exists. Fetches the feed, downloads beside the running file,
 /// checks the signature and the hash, and renames over it. The rename is
 /// atomic, so a crash leaves the old file or the new one, never a mix.
-// ignore_for_file: prefer_initializing_formals (public name is appImage, field stays private)
 library;
 
 import 'dart:async';
@@ -26,7 +25,9 @@ class AppImageUpdater extends StateUpdater {
     http.Client? httpClient,
     Future<void> Function(String path)? launch,
     void Function()? quit,
-  }) : _appImage = appImage,
+  }) :
+    // ignore: prefer_initializing_formals (public name is appImage, field stays private)
+    _appImage = appImage,
        _http = httpClient ?? http.Client(),
        _launch = launch ?? _launchDetached,
        _quit = quit ?? _exit;
@@ -95,9 +96,13 @@ class AppImageUpdater extends StateUpdater {
       } finally {
         try {
           await sink.flush();
+        } catch (e) {
+          updateLog('could not finish writing the download', e);
+        }
+        try {
           await sink.close();
-        } catch (_) {
-          // Ignore cleanup errors to avoid masking the real exception.
+        } catch (e) {
+          updateLog('could not finish writing the download', e);
         }
       }
 
