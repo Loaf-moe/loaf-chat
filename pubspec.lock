@@ -106,7 +106,7 @@ packages:
     source: hosted
     version: "0.3.5+5"
   crypto:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: crypto
       sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf
@@ -894,7 +894,7 @@ packages:
     source: hosted
     version: "15.3.0"
   vodozemac:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: vodozemac
       sha256: efce261575f7de97ebd052b16775cd57f940e8212af47d288050c166b9f9a167
