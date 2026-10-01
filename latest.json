@@ -1,0 +1,10 @@
+{
+  "version": "0.1.7",
+  "build": 241,
+  "appimage": {
+    "url": "https://github.com/Loaf-moe/loaf-chat/releases/download/v0.1.7/Loaf-Chat-0.1.7-x86_64.AppImage",
+    "sha256": "3fa6313e1d88f494f813d04e38ad0695060d4dd4fe6f09aea1dc8c3a8167a5c1",
+    "size": 15948280,
+    "signature": "OD8/UwJEr8uRzuUGJPBCg2cQvfJr5+RwjnMBcWqvl17SH0mIMcL/+edGY+11+DpjgkctFiYOg5/FWVS7xUneCQ=="
+  }
+}
