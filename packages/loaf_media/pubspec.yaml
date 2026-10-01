@@ -1,0 +1,10 @@
+name: loaf_media
+description: "Media files that may still be arriving, and the players that read them."
+publish_to: none
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  flutter:
+    sdk: flutter

@@ -114,7 +114,7 @@ void main() {
       await tester.pumpAndSettle();
 
       final sent = timeline.messages.skip(1).toList();
-      expect(sent.map((m) => m.body), ['📎 crumb.jpg', '📎 crust.jpg']);
+      expect(sent.map((m) => m.media?.name), ['crumb.jpg', 'crust.jpg']);
       // The reply goes with the first, as it would with text.
       expect(sent.first.replyTo?.id, 'q');
       expect(sent.last.replyTo, isNull);

@@ -12,6 +12,7 @@ import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
+import 'media_row.dart';
 import 'message_actions.dart';
 import 'message_markup.dart';
 import 'message_text.dart';
@@ -166,10 +167,12 @@ class _MessageBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (replyTo != null) _ReplyContext(replyTo: replyTo),
-        _text(tokens),
-        if (message.imageAspect != null) ...[
-          const SizedBox(height: LoafSpace.x2),
-          _ImagePlaceholder(aspect: message.imageAspect!),
+        if (message.media != null)
+          MediaRow(media: message.media!, uploaded: message.uploaded),
+        // Only media goes without words; a text message always draws its text.
+        if (message.media == null || message.body.isNotEmpty) ...[
+          if (message.media != null) const SizedBox(height: LoafSpace.x2),
+          _text(tokens),
         ],
         if (message.reactions.isNotEmpty) ...[
           const SizedBox(height: LoafSpace.x2),
@@ -261,6 +264,8 @@ class _ReplyContext extends StatelessWidget {
                           ? '  a message further up'
                           : replyTo.locked
                           ? '  an encrypted message'
+                          : replyTo.media != null
+                          ? '  ${quoteOf(replyTo)}'
                           : '  ${plainTextOf(parseMessage(formatted: replyTo.formatted, body: replyTo.body))}',
                       style: loafBody(11, 400).copyWith(
                         color: tokens.textMuted,
@@ -316,34 +321,6 @@ class _FailedLine extends StatelessWidget {
           Text(' · ', style: quiet),
           action('discard', onDiscard),
         ],
-      ),
-    );
-  }
-}
-
-class _ImagePlaceholder extends StatelessWidget {
-  const _ImagePlaceholder({required this.aspect});
-
-  final double aspect;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = LoafTokens.of(context);
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: AspectRatio(
-          aspectRatio: aspect,
-          child: Container(
-            decoration: BoxDecoration(
-              color: tokens.sunken,
-              border: Border.all(color: tokens.border),
-              borderRadius: BorderRadius.circular(LoafRadius.lg),
-            ),
-            child: Icon(LucideIcons.image, color: tokens.textMuted),
-          ),
-        ),
       ),
     );
   }

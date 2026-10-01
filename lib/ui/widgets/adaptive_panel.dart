@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import '../members/presence_dot.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../model/media_source.dart';
 import 'avatar_images.dart';
 
 Future<T?> showAdaptivePanel<T>(
@@ -27,6 +28,7 @@ Future<T?> showAdaptivePanel<T>(
   // way themes are carried: the panel's avatars follow it too.
   child = PresenceScope(shared: PresenceScope.sharedOf(context), child: child);
   child = AvatarImagesScope.carry(context, child: child);
+  child = MediaSourceScope.carry(context, child: child);
   if (isDesktop) {
     return showDialog<T>(
       context: context,

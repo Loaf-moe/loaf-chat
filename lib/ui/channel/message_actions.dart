@@ -37,9 +37,9 @@ List<MessageAction> actionsFor(
     MessageAction.copy
   else ...[
     MessageAction.reply,
-    MessageAction.copy,
+    if (message.body.isNotEmpty) MessageAction.copy,
     if (message.author.id == you.id) ...[
-      MessageAction.edit,
+      if (message.media == null && message.callLine == null) MessageAction.edit,
       MessageAction.delete,
     ],
   ],

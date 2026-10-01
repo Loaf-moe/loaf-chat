@@ -10,6 +10,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../members/role_colors.dart';
 import '../widgets/toast.dart';
 import 'attach.dart';
+import 'media_row.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'message_actions.dart';
@@ -608,7 +609,7 @@ class _TargetChip extends StatelessWidget {
                     title,
                     const SizedBox(height: 2),
                     Text(
-                      target.message.body,
+                      quoteOf(target.message),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: loafBody(

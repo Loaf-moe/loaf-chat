@@ -10,6 +10,7 @@ import '../model/models.dart';
 import '../settings/devices.dart';
 import '../shell/profile.dart';
 import '../spaces/space_directory.dart';
+import '../model/media_source.dart';
 import '../widgets/avatar_images.dart';
 
 /// What a backend can do to your rooms yet. The shell draws no control for
@@ -86,6 +87,10 @@ abstract interface class Rooms implements Listenable {
   /// Turns the avatar refs on this account's people, rooms and spaces into
   /// images.
   AvatarImages get avatarImages;
+
+  /// Turns the media on this account's messages into pictures and files on
+  /// disk, the way [avatarImages] does for avatars.
+  MediaSource get media;
 
   /// Your presence and status, and everyone else's. The rooms own it and
   /// dispose of it with themselves.

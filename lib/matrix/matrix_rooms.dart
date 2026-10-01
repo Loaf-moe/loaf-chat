@@ -12,6 +12,7 @@ import 'package:matrix/matrix.dart' hide Presence, Profile, Timeline;
 
 import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
+import '../ui/model/media_source.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/settings/devices.dart';
@@ -157,6 +158,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   @override
   late final AvatarImages avatarImages = MatrixAvatarImages(client);
+
+  // Until the Matrix media source lands, rows keep their placeholders.
+  @override
+  MediaSource get media => const NoMediaSource();
 
   @override
   Profile get profile => _madeProfile;

@@ -4,9 +4,12 @@
 /// app.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 import '../channel/timeline_controller.dart';
+import '../model/media_source.dart';
 import '../rooms/rooms.dart';
 import '../settings/devices.dart';
 import '../shell/profile.dart';
@@ -15,6 +18,7 @@ import '../spaces/space_directory.dart';
 import '../widgets/avatar_images.dart';
 import 'fixtures.dart';
 import 'mock_devices.dart';
+import 'mock_media_source.dart';
 import 'mock_profile.dart';
 import 'mock_space_directory.dart';
 
@@ -55,6 +59,14 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   @override
   AvatarImages get avatarImages => const NoAvatarImages();
+
+  /// Made on first use, so a session with no media never touches the disk.
+  Directory? _mediaDir;
+
+  @override
+  late final MediaSource media = MockMediaSource(
+    _mediaDir = Directory.systemTemp.createTempSync('loaf-mock-media'),
+  );
 
   @override
   final Profile profile = MockProfile();
@@ -320,6 +332,7 @@ class MockRooms extends ChangeNotifier implements Rooms {
     profile.dispose();
     devices.dispose();
     _shared.dispose();
+    _mediaDir?.deleteSync(recursive: true);
     for (final t in _timelines.values) {
       t.dispose();
     }

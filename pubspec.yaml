@@ -53,6 +53,8 @@ dependencies:
   # formatted_body; markdown reads a plain body the way the SDK writes one.
   html: ^0.15.6
   markdown: ^7.3.1
+  loaf_media:
+    path: packages/loaf_media
 
 dev_dependencies:
   flutter_test:
@@ -64,6 +66,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  fake_async: ^1.3.3
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -71,6 +74,9 @@ dev_dependencies:
 # The following section is specific to Flutter packages.
 flutter:
   uses-material-design: true
+
+  assets:
+    - assets/mock/media/
 
   fonts:
     # Lora and Outfit are variable fonts: pubspec weights do not instance a

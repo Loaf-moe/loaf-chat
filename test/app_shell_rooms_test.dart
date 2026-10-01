@@ -26,6 +26,7 @@ import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/verifier.dart';
 import 'package:loaf_native/ui/settings/devices.dart';
 import 'package:loaf_native/ui/shell/profile.dart';
+import 'package:loaf_native/ui/model/media_source.dart';
 import 'package:loaf_native/ui/widgets/avatar_images.dart';
 
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
@@ -85,6 +86,8 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
 
   @override
   AvatarImages get avatarImages => const NoAvatarImages();
+  @override
+  MediaSource get media => const NoMediaSource();
   @override
   Profile get profile => MockProfile();
   @override

@@ -120,6 +120,35 @@ enum CallLine { ended, missed }
 /// messages, and yours once the server has them, are [sent].
 enum MessageStatus { sent, sending, failed }
 
+enum MediaKind { image, video, audio, file }
+
+@immutable
+class Media {
+  const Media({
+    required this.kind,
+    required this.name,
+    required this.ref,
+    this.size,
+    this.mimeType,
+    this.dimensions,
+    this.duration,
+    this.hasPreview = false,
+  });
+
+  final MediaKind kind;
+  final String name;
+  final int? size;
+  final String? mimeType;
+  final Size? dimensions;
+  final Duration? duration;
+  final bool hasPreview;
+
+  /// Opaque: only the backend that made it reads it.
+  final Object ref;
+
+  bool get animated => mimeType == 'image/gif';
+}
+
 class Message {
   const Message({
     required this.id,
@@ -130,7 +159,8 @@ class Message {
     this.reactions = const [],
     this.edited = false,
     this.replyTo,
-    this.imageAspect,
+    this.media,
+    this.uploaded,
     this.callLine,
     this.status = MessageStatus.sent,
     this.locked = false,
@@ -146,7 +176,8 @@ class Message {
       reactions = const [],
       edited = false,
       replyTo = null,
-      imageAspect = null,
+      media = null,
+      uploaded = null,
       callLine = null,
       status = MessageStatus.sent,
       locked = false,
@@ -168,9 +199,12 @@ class Message {
   /// The message this one replies to, if any.
   final Message? replyTo;
 
-  /// Set when the message is an image; the mockups draw a placeholder of this
-  /// aspect ratio rather than loading anything.
-  final double? imageAspect;
+  /// Set when the message is a file, picture, video or sound. [body] is then
+  /// its caption, and empty when there is none.
+  final Media? media;
+
+  /// How much of an outgoing file has gone up, 0 to 1. Set only while sending.
+  final double? uploaded;
 
   /// Set when this is a line a call left behind rather than something
   /// anyone said; [body] is then its label, such as "call · 12m".
@@ -195,7 +229,8 @@ class Message {
         reactions: reactions ?? this.reactions,
         edited: edited ?? this.edited,
         replyTo: replyTo,
-        imageAspect: imageAspect,
+        media: media,
+        uploaded: uploaded,
         callLine: callLine,
         status: status,
         locked: locked,

@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:loaf_native/ui/channel/message_actions.dart';
 import 'package:loaf_native/ui/channel/message_group_tile.dart';
 import 'package:loaf_native/ui/channel/timeline_controller.dart';
 import 'package:loaf_native/ui/mock/fixtures.dart';
@@ -384,4 +385,31 @@ void main() {
       expect(find.byTooltip('More'), findsNothing);
     },
   );
+
+  group('on media', () {
+    final photo = Message(
+      id: 'p',
+      author: _you,
+      sentAt: DateTime(2026, 9, 24, 10),
+      body: '',
+      media: const Media(kind: MediaKind.image, name: 'oven.jpg', ref: 'x'),
+    );
+
+    test('edit is not offered on media', () {
+      expect(actionsFor(photo, _you), isNot(contains(MessageAction.edit)));
+      expect(actionsFor(photo, _you), contains(MessageAction.delete));
+    });
+
+    test('copy is offered only when there are words', () {
+      expect(actionsFor(photo, _you), isNot(contains(MessageAction.copy)));
+      final captioned = Message(
+        id: 'c',
+        author: _you,
+        sentAt: photo.sentAt,
+        body: 'first bake',
+        media: photo.media,
+      );
+      expect(actionsFor(captioned, _you), contains(MessageAction.copy));
+    });
+  });
 }
