@@ -1,6 +1,6 @@
 /// The verify panels' work on the SDK: unlocking secret storage with the
-/// recovery key, pulling in key backup, and making a new identity behind
-/// the server's check of who you are.
+/// recovery key, pulling in key backup, making a new identity behind the
+/// server's check of who you are, and reading and verifying other people.
 library;
 
 import 'dart:async';
@@ -46,6 +46,17 @@ class MatrixVerifier implements Verifier {
   @override
   DeviceVerification verifyWithDevice() =>
       MatrixDeviceVerification.request(client);
+
+  @override
+  PersonTrust personTrust(String userId) {
+    final master = client.userDeviceKeys[userId]?.masterKey;
+    if (master == null) return PersonTrust.noIdentity;
+    return master.verified ? PersonTrust.verified : PersonTrust.unverified;
+  }
+
+  @override
+  DeviceVerification verifyPerson(String userId) =>
+      MatrixDeviceVerification.person(client, userId);
 
   @override
   Future<UnlockResult> unlock(String keyOrPassphrase) async {

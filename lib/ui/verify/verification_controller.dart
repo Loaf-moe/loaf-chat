@@ -18,15 +18,29 @@ class VerificationController extends ChangeNotifier {
     required this.onTrusted,
     this.incoming,
     this.incomingDevice,
+    this.personId,
+    this.personName,
     this.server = 'your server',
-  }) : _state = VerifyState(
+  }) : assert(
+         purpose != VerifyPurpose.person ||
+             incoming != null ||
+             personId != null,
+         'verifying someone needs their request or their id',
+       ),
+       _state = VerifyState(
          step: switch (purpose) {
            VerifyPurpose.verify => VerifyStep.choose,
            VerifyPurpose.setUp => VerifyStep.setUpIntro,
            VerifyPurpose.incoming => VerifyStep.incomingPrompt,
+           VerifyPurpose.person =>
+             incoming != null
+                 ? VerifyStep.incomingPrompt
+                 : VerifyStep.waitingForDevice,
          },
        ) {
     _follow(incoming);
+    // Asking someone is what opening the panel for them means.
+    if (purpose == VerifyPurpose.person && incoming == null) _askPerson();
   }
 
   /// Starts in [state] with nothing in flight, so a test can pin any step.
@@ -38,6 +52,8 @@ class VerificationController extends ChangeNotifier {
     VoidCallback? onTrusted,
     this.incoming,
     this.incomingDevice,
+    this.personId,
+    this.personName,
     this.server = 'your server',
   }) : onTrusted = onTrusted ?? _nothing,
        _state = state {
@@ -52,13 +68,25 @@ class VerificationController extends ChangeNotifier {
   final Verifier verifier;
 
   /// Called once this device is trusted: signed by a verified identity, or
-  /// owner of a new one. Never for [VerifyPurpose.incoming], which vouches
-  /// for another device instead.
+  /// owner of a new one. Never for [VerifyPurpose.incoming] or
+  /// [VerifyPurpose.person], which vouch for someone else instead.
   final VoidCallback onTrusted;
 
   /// Incoming only: the request, and the device asking to be verified.
+  /// Someone else's request carries a [personName] instead of a device.
   final DeviceVerification? incoming;
   final String? incomingDevice;
+
+  /// [VerifyPurpose.person]: who is being verified. The id is what an
+  /// outgoing request is sent to; an incoming one already knows.
+  final String? personId;
+  final String? personName;
+
+  /// Someone else, whichever of you asked.
+  bool get aboutPerson => purpose == VerifyPurpose.person;
+
+  /// The name the panel calls them by.
+  String get person => personName ?? 'them';
 
   /// The homeserver's name, for saying it did not answer.
   final String server;
@@ -83,6 +111,7 @@ class VerificationController extends ChangeNotifier {
       _newKey != null ? 'you have a new identity' : 'this session is verified',
     VerifyPurpose.setUp => 'recovery is set up',
     VerifyPurpose.incoming => '${incomingDevice ?? 'that device'} is verified',
+    VerifyPurpose.person => '$person is verified',
   };
 
   VerifyState _state;
@@ -187,7 +216,21 @@ class VerificationController extends ChangeNotifier {
     _follow(verifier.verifyWithDevice());
   }
 
-  void tryAgain() => useAnotherDevice();
+  void tryAgain() {
+    switch (purpose) {
+      case VerifyPurpose.verify:
+        useAnotherDevice();
+      // Only the one who asked can ask again; their request is theirs.
+      case VerifyPurpose.person when incoming == null:
+        _dropDevice(cancel: true);
+        _go(VerifyStep.waitingForDevice);
+        _askPerson();
+      default:
+        break;
+    }
+  }
+
+  void _askPerson() => _follow(verifier.verifyPerson(personId!));
 
   void _follow(DeviceVerification? device) {
     if (device == null) return;
@@ -224,7 +267,7 @@ class VerificationController extends ChangeNotifier {
       case DevicePhase.cancelled:
         if (_state.step != VerifyStep.notMe) _go(VerifyStep.cancelled);
       case DevicePhase.done:
-        if (purpose == VerifyPurpose.incoming) {
+        if (purpose == VerifyPurpose.incoming || aboutPerson) {
           _done();
         } else {
           // Signed by the other device; its secrets follow, and with them,
@@ -257,9 +300,11 @@ class VerificationController extends ChangeNotifier {
     incoming?.accept();
   }
 
+  /// "That's not me" for your own device. For someone else it is "not
+  /// now": nothing suspicious, so the panel just goes.
   void rejectIncoming() {
     if (_state.step != VerifyStep.incomingPrompt) return;
-    _go(VerifyStep.notMe);
+    _go(aboutPerson ? VerifyStep.cancelled : VerifyStep.notMe);
     incoming?.cancel();
   }
 

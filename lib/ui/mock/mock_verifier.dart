@@ -18,7 +18,9 @@ class MockVerifier implements Verifier {
     this.identityExists = _yes,
     this.reauthByPassword = false,
     this.consumeFailure = _never,
-  });
+    Set<String>? verifiedPeople,
+    this.peopleWithoutIdentity = const {},
+  }) : verifiedPeople = verifiedPeople ?? {};
 
   static bool _yes() => true;
   static bool _never() => false;
@@ -42,9 +44,29 @@ class MockVerifier implements Verifier {
   /// The debug "fail the next connection" lever.
   final bool Function() consumeFailure;
 
+  /// The people your identity has signed: grows as verifications finish.
+  final Set<String> verifiedPeople;
+
+  /// The people who never set up encryption.
+  final Set<String> peopleWithoutIdentity;
+
   @override
   DeviceVerification verifyWithDevice() =>
       MockDeviceVerification(consumeFailure: consumeFailure).._request();
+
+  @override
+  PersonTrust personTrust(String userId) {
+    if (peopleWithoutIdentity.contains(userId)) return PersonTrust.noIdentity;
+    return verifiedPeople.contains(userId)
+        ? PersonTrust.verified
+        : PersonTrust.unverified;
+  }
+
+  @override
+  DeviceVerification verifyPerson(String userId) => MockDeviceVerification(
+    consumeFailure: consumeFailure,
+    onDone: () => verifiedPeople.add(userId),
+  ).._request();
 
   @override
   Future<UnlockResult> unlock(String keyOrPassphrase) async {
@@ -153,9 +175,15 @@ class _MockChallenge implements AuthChallenge {
 /// [MockVerifier.acceptDelay]; incoming ones wait for [accept].
 class MockDeviceVerification extends ChangeNotifier
     implements DeviceVerification {
-  MockDeviceVerification({this.consumeFailure = MockVerifier._never});
+  MockDeviceVerification({
+    this.consumeFailure = MockVerifier._never,
+    this.onDone,
+  });
 
   final bool Function() consumeFailure;
+
+  /// Called as it finishes, before listeners hear it.
+  final VoidCallback? onDone;
 
   DevicePhase _phase = DevicePhase.waiting;
   Timer? _work;
@@ -189,7 +217,10 @@ class MockDeviceVerification extends ChangeNotifier
   void match() {
     if (_phase != DevicePhase.emoji) return;
     _go(DevicePhase.waitingForOther);
-    _work = Timer(MockVerifier.confirmDelay, () => _go(DevicePhase.done));
+    _work = Timer(MockVerifier.confirmDelay, () {
+      onDone?.call();
+      _go(DevicePhase.done);
+    });
   }
 
   @override

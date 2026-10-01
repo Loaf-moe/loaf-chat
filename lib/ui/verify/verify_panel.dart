@@ -118,6 +118,13 @@ class _VerifyPanelState extends State<VerifyPanel> {
   }
 
   String _title(VerifyStep step) {
+    if (_c.aboutPerson) {
+      return switch (step) {
+        VerifyStep.incomingPrompt => 'verification request',
+        VerifyStep.done => '',
+        _ => 'verify ${_c.person}',
+      };
+    }
     final incoming = _c.purpose == VerifyPurpose.incoming;
     final settingUp = _c.purpose == VerifyPurpose.setUp;
     return switch (step) {
@@ -167,29 +174,58 @@ class _VerifyPanelState extends State<VerifyPanel> {
       onNeither: _c.cantDoEither,
     ),
     VerifyStep.waitingForDevice => WaitingStep(
-      label: _c.purpose == VerifyPurpose.incoming
-          ? 'waiting for the new sign-in to start'
-          : 'accept the request on your other device',
-      onCancel: _c.canGoBack ? _c.back : null,
+      label: switch (_c.purpose) {
+        VerifyPurpose.incoming => 'waiting for the new sign-in to start',
+        VerifyPurpose.person when _c.incoming != null =>
+          'waiting for ${_c.person} to start',
+        VerifyPurpose.person =>
+          'waiting for ${_c.person} to accept · the request is in your DM',
+        _ => 'accept the request on your other device',
+      },
+      // Putting the panel away withdraws a request you sent someone.
+      onCancel: _c.canGoBack
+          ? _c.back
+          : _c.aboutPerson && _c.incoming == null
+          ? _close
+          : null,
     ),
-    VerifyStep.incomingPrompt => IncomingPromptStep(
-      device: _c.incomingDevice ?? 'a device',
-      onYes: _c.acceptIncoming,
-      onNotMe: _c.rejectIncoming,
-    ),
+    VerifyStep.incomingPrompt =>
+      _c.aboutPerson
+          ? PersonPromptStep(
+              person: _c.person,
+              onVerify: _c.acceptIncoming,
+              onNotNow: () {
+                _c.rejectIncoming();
+                _close();
+              },
+            )
+          : IncomingPromptStep(
+              device: _c.incomingDevice ?? 'a device',
+              onYes: _c.acceptIncoming,
+              onNotMe: _c.rejectIncoming,
+            ),
     VerifyStep.compareEmoji => CompareStep(
       emoji: _c.emoji,
-      prompt: _c.purpose == VerifyPurpose.incoming
-          ? "do these match what's on the new device?"
-          : "do these match what's on your other device?",
+      prompt: switch (_c.purpose) {
+        VerifyPurpose.incoming => "do these match what's on the new device?",
+        VerifyPurpose.person =>
+          "do these match what's on ${_c.person}'s screen?",
+        _ => "do these match what's on your other device?",
+      },
       onMatch: _c.emojiMatch,
       onMismatch: _c.emojiMismatch,
     ),
-    VerifyStep.waitingForOther => const WaitingStep(
-      label: 'waiting for the other device to confirm',
+    VerifyStep.waitingForOther => WaitingStep(
+      label: _c.aboutPerson
+          ? 'waiting for ${_c.person} to confirm'
+          : 'waiting for the other device to confirm',
     ),
     VerifyStep.cancelled => CancelledStep(
-      onTryAgain: _c.purpose == VerifyPurpose.verify ? _c.tryAgain : null,
+      onTryAgain:
+          _c.purpose == VerifyPurpose.verify ||
+              (_c.aboutPerson && _c.incoming == null)
+          ? _c.tryAgain
+          : null,
       onClose: _close,
     ),
     VerifyStep.notMe => NotMeStep(
@@ -206,9 +242,14 @@ class _VerifyPanelState extends State<VerifyPanel> {
       checking: s.checking,
       rejected: s.rejected,
       failure: _unreachable,
-      lead: _c.purpose == VerifyPurpose.incoming
-          ? 'to vouch for it, this device needs your recovery key or passphrase.'
-          : 'enter your recovery key, or the passphrase that protects it.',
+      lead: switch (_c.purpose) {
+        VerifyPurpose.incoming =>
+          'to vouch for it, this device needs your recovery key or passphrase.',
+        VerifyPurpose.person =>
+          'to vouch for ${_c.person}, this device needs your recovery key or '
+              'passphrase.',
+        _ => 'enter your recovery key, or the passphrase that protects it.',
+      },
       onSubmit: () => _c.submitKey(_key.text),
     ),
     VerifyStep.restoring => RestoringStep(

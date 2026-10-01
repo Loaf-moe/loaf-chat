@@ -76,7 +76,8 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 
 ## Deferred from phase 4, to place later
 
-- **QR verification,** and **verifying other people.** Another person's request is left to time out: there is no panel for it.
+- **QR verification.**
+- ~~**Verifying other people.**~~ Done 2026-10-01: a member's card offers verify, and their requests open the same emoji panel. See "Verifying other people" in the E2EE spec. Still to come: a verified badge on member rows, a warning when someone you verified changes identity, and verifying someone whose keys aren't tracked here (no shared encrypted room).
 - **An account whose secret storage holds no cross-signing keys** hears that its key "unlocks nothing", which is true but not the whole story. It needs another device, or a reset.
 - **Reset's SSO re-authentication is tested offline only.** The live run used a password account.
 - **Encryption tests need the macOS build first** (`flutter build macos --debug`); a fresh clone fails them with that instruction. A test-only build of vodozemac would lift it.

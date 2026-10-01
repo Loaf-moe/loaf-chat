@@ -1,4 +1,5 @@
-/// The other end: a verified device asked to vouch for a new sign-in.
+/// The other end: a verified device asked to vouch for a new sign-in, or
+/// you, asked by someone else to verify each other.
 library;
 
 import 'package:flutter/material.dart';
@@ -82,6 +83,48 @@ class NotMeStep extends StatelessWidget {
         label: 'close',
         emphasis: LoafButtonEmphasis.outlined,
         onTap: onClose,
+      ),
+    ],
+  );
+}
+
+/// Someone else asks to verify you. Unlike a new sign-in of yours, there is
+/// nothing suspicious in it: saying no just puts it away.
+class PersonPromptStep extends StatelessWidget {
+  const PersonPromptStep({
+    super.key,
+    required this.person,
+    required this.onVerify,
+    required this.onNotNow,
+  });
+
+  final String person;
+  final VoidCallback onVerify;
+  final VoidCallback onNotNow;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const StepIcon(LucideIcons.userCheck),
+      const SizedBox(height: LoafSpace.x3),
+      StepLead('$person wants to verify you', center: true),
+      const SizedBox(height: LoafSpace.x1),
+      // Emoji read over the same chat prove nothing: whoever sits in the
+      // middle would relay them too.
+      const StepNote(
+        'compare emoji together, in person or on a call you trust.',
+        center: true,
+      ),
+      const SizedBox(height: LoafSpace.x5),
+      LoafButton(label: 'verify', onTap: onVerify),
+      const SizedBox(height: LoafSpace.x2),
+      LoafButton(
+        label: 'not now',
+        onTap: onNotNow,
+        emphasis: LoafButtonEmphasis.quiet,
+        size: LoafButtonSize.small,
       ),
     ],
   );

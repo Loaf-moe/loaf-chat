@@ -25,6 +25,7 @@ import '../spaces/add_space.dart';
 import '../home/invite_preview.dart';
 import '../members/invite_panel.dart';
 import '../members/member_list.dart';
+import '../members/person_card.dart';
 import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
@@ -755,6 +756,8 @@ class _AppShellState extends State<AppShell> {
         if (_session case final MockSession mock) mock.useFreshAccount();
       case MockDebug.newSignIn:
         if (_session case final MockSession mock) mock.receiveRequest();
+      case MockDebug.personAsks:
+        if (_session case final MockSession mock) mock.receivePersonRequest();
     }
   }
 
@@ -847,11 +850,13 @@ class _AppShellState extends State<AppShell> {
 
   /// Made fresh for each request and ended with its panel.
   Future<void> _answerIncoming(IncomingRequest request) async {
+    final person = request.person;
     final v = VerificationController(
-      purpose: VerifyPurpose.incoming,
+      purpose: person == null ? VerifyPurpose.incoming : VerifyPurpose.person,
       verifier: _session.verifier,
       incoming: request.verification,
       incomingDevice: request.device,
+      personName: person,
       server: _session.homeserverName,
       onTrusted: () {},
     );
@@ -860,7 +865,9 @@ class _AppShellState extends State<AppShell> {
       context,
       v,
       // "that's not me" points at the sessions, where a stranger's signs out.
-      onOpenDevices: _can(RoomAbility.devices) ? _openDevices : null,
+      onOpenDevices: person == null && _can(RoomAbility.devices)
+          ? _openDevices
+          : null,
     );
     // Already ended if the shell went while the panel was up.
     if (identical(_incomingFlow, v)) {
@@ -1199,7 +1206,33 @@ class _AppShellState extends State<AppShell> {
         _rooms.loadMembers(space.id);
         members = [for (final m in space.members) you(m)];
     }
-    return MemberList(members: members);
+    return MemberList(members: members, onOpen: _openPerson);
+  }
+
+  /// Someone's card, and verifying them if that is what it was opened for.
+  Future<void> _openPerson(Member member) async {
+    final verifier = _session.verifier;
+    final verify = await showPersonCard(
+      context,
+      member: member,
+      trust: verifier.personTrust(member.id),
+      isYou: member.id == _me.id,
+      canVerify: _session.trust == DeviceTrust.verified,
+    );
+    if (verify != true || !mounted) return;
+    final v = VerificationController(
+      purpose: VerifyPurpose.person,
+      verifier: verifier,
+      personId: member.id,
+      personName: member.name,
+      server: _session.homeserverName,
+      onTrusted: () {},
+    );
+    final finished = await showVerifyPanel(context, v);
+    final done = v.doneMessage;
+    // Ends a request still waiting on them: closing the panel withdraws it.
+    v.dispose();
+    if (mounted && finished == true) showToast(context, done);
   }
 
   /// Everything in a DM is addressed to you, so a DM's unreads count; a

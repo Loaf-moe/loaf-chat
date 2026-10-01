@@ -42,9 +42,13 @@ import 'role_colors.dart';
 }
 
 class MemberList extends StatelessWidget {
-  const MemberList({super.key, required this.members});
+  const MemberList({super.key, required this.members, this.onOpen});
 
   final List<Member> members;
+
+  /// Opens someone's card. Null leaves the rows plain: a row that ripples
+  /// and does nothing promises what it cannot keep.
+  final ValueChanged<Member>? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -66,12 +70,18 @@ class MemberList extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: LoafSpace.x4),
           children: [
             if (groups.admins.isNotEmpty)
-              _Section(title: 'Admins', members: groups.admins, tokens: tokens),
+              _Section(
+                title: 'Admins',
+                members: groups.admins,
+                tokens: tokens,
+                onOpen: onOpen,
+              ),
             if (groups.members.isNotEmpty)
               _Section(
                 title: 'Members',
                 members: groups.members,
                 tokens: tokens,
+                onOpen: onOpen,
               ),
           ],
         ),
@@ -85,11 +95,13 @@ class _Section extends StatelessWidget {
     required this.title,
     required this.members,
     required this.tokens,
+    this.onOpen,
   });
 
   final String title;
   final List<Member> members;
   final LoafTokens tokens;
+  final ValueChanged<Member>? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -110,64 +122,66 @@ class _Section extends StatelessWidget {
           ),
         ),
         for (final member in members)
-          _MemberRow(member: member, tokens: tokens),
+          _MemberRow(member: member, tokens: tokens, onOpen: onOpen),
       ],
     );
   }
 }
 
 class _MemberRow extends StatelessWidget {
-  const _MemberRow({required this.member, required this.tokens});
+  const _MemberRow({required this.member, required this.tokens, this.onOpen});
 
   final Member member;
   final LoafTokens tokens;
+  final ValueChanged<Member>? onOpen;
 
   @override
   Widget build(BuildContext context) {
+    final status = member.statusMessage;
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+      child: Row(
+        children: [
+          _PresenceAvatar(member: member, tokens: tokens),
+          const SizedBox(width: LoafSpace.x3),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  member.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: loafBody(
+                    15,
+                    500,
+                  ).copyWith(color: tokens.nameColor(member.role)),
+                ),
+                if (status != null)
+                  Text(
+                    status,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: loafBody(12, 400).copyWith(color: tokens.textMuted),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    final open = onOpen;
     // Offline people fade back rather than disappearing: still findable,
     // clearly not around.
-    final status = member.statusMessage;
-    //
-    // Not a button: there is no profile to open yet, and a row that ripples
-    // and then does nothing promises what it cannot keep.
     return Opacity(
       key: ValueKey('member-${member.id}'),
       opacity: member.presence == Presence.offline ? 0.5 : 1,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-        child: Row(
-          children: [
-            _PresenceAvatar(member: member, tokens: tokens),
-            const SizedBox(width: LoafSpace.x3),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    member.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: loafBody(
-                      15,
-                      500,
-                    ).copyWith(color: tokens.nameColor(member.role)),
-                  ),
-                  if (status != null)
-                    Text(
-                      status,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: loafBody(
-                        12,
-                        400,
-                      ).copyWith(color: tokens.textMuted),
-                    ),
-                ],
-              ),
+      child: open == null
+          ? row
+          : Material(
+              type: MaterialType.transparency,
+              child: InkWell(onTap: () => open(member), child: row),
             ),
-          ],
-        ),
-      ),
     );
   }
 }

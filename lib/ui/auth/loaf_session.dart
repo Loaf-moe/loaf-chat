@@ -23,17 +23,24 @@ enum DeviceTrust {
   verified,
 }
 
-/// Another of your devices asking this one to vouch for it.
+/// Another of your devices asking this one to vouch for it, or someone
+/// else asking to verify you.
 @immutable
 class IncomingRequest {
   const IncomingRequest({
     required this.device,
     required this.at,
     required this.verification,
+    this.person,
   });
 
+  /// Your own device's name. For someone else's request, theirs is not
+  /// shown: it is them you verify, not one of their devices.
   final String device;
   final DateTime at;
+
+  /// Someone else's request: their name. Null for one of your own devices.
+  final String? person;
 
   /// The request itself, which the panel answers.
   final DeviceVerification verification;

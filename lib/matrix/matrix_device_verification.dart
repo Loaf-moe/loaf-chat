@@ -1,6 +1,6 @@
-/// One emoji verification with another of your devices, on the SDK's
-/// `KeyVerification`: a request this device sent to all your others, or one
-/// that arrived from a new sign-in.
+/// One emoji verification on the SDK's `KeyVerification`: with another of
+/// your devices (a request this device sent to all your others, or one that
+/// arrived from a new sign-in), or with someone else, in your DM with them.
 library;
 
 import 'dart:async';
@@ -16,8 +16,16 @@ import 'unlock_failure.dart';
 class MatrixDeviceVerification extends ChangeNotifier
     implements DeviceVerification {
   /// Asks every other device of yours; the first to accept answers.
-  MatrixDeviceVerification.request(Client client) {
-    unawaited(_request(client));
+  MatrixDeviceVerification.request(Client client)
+    : this._starting(() => _keysOf(client, client.userID));
+
+  /// Asks [userId], in your DM with them; the SDK makes one if there is
+  /// none.
+  MatrixDeviceVerification.person(Client client, String userId)
+    : this._starting(() => _keysOf(client, userId));
+
+  MatrixDeviceVerification._starting(Future<KeyVerification> Function() start) {
+    unawaited(_request(start));
   }
 
   /// One the SDK already has: a request another of your devices sent.
@@ -36,11 +44,15 @@ class MatrixDeviceVerification extends ChangeNotifier
   /// first is in flight (the phase moves only once it lands) sends nothing.
   final _answered = <_Answer>{};
 
-  Future<void> _request(Client client) async {
+  static Future<KeyVerification> _keysOf(Client client, String? userId) {
+    final keys = client.userDeviceKeys[userId];
+    if (keys == null) throw StateError('no device keys known for $userId');
+    return keys.startVerification();
+  }
+
+  Future<void> _request(Future<KeyVerification> Function() start) async {
     try {
-      final keys = client.userDeviceKeys[client.userID];
-      if (keys == null) throw StateError('this account has no device keys');
-      final verification = await keys.startVerification();
+      final verification = await start();
       if (_disposed) {
         // Put away while the request was going out: withdraw it.
         await verification.cancel('m.user');

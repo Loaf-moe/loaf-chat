@@ -169,11 +169,24 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
     notifyListeners();
   }
 
-  /// Another of your devices asks this one to verify it. Other people's
-  /// requests have no panel yet, so they are left to time out, as is one
-  /// that arrives while another is being answered: its panel is open.
+  /// Another of your devices asks this one to verify it, or someone else
+  /// asks to verify you. One that arrives while another is being answered
+  /// is left to time out: its panel is open.
   void _onRequest(KeyVerification request) {
-    if (request.userId != client.userID || _incoming != null) return;
+    if (_incoming != null) return;
+    if (request.userId != client.userID) {
+      final name = request.room
+          ?.unsafeGetUserFromMemoryOrFallback(request.userId)
+          .calcDisplayname();
+      _incoming = IncomingRequest(
+        device: request.deviceId ?? 'their device',
+        at: DateTime.now(),
+        verification: MatrixDeviceVerification(request),
+        person: name ?? request.userId.localpart ?? request.userId,
+      );
+      notifyListeners();
+      return;
+    }
     final device = request.deviceId == null
         ? null
         : client.userDeviceKeys[client.userID]?.deviceKeys[request.deviceId];

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/matrix/matrix_device_verification.dart';
+import 'package:loaf_native/matrix/matrix_verifier.dart';
 import 'package:loaf_native/ui/verify/verifier.dart';
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
@@ -222,6 +223,45 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(a.phase, DevicePhase.cancelled);
     });
+  });
+
+  group('asking someone else', () {
+    test('goes into your DM with them, and waits', () async {
+      FakeMatrixApi.calledEndpoints.clear();
+      final a = MatrixDeviceVerification.person(mine, other);
+      addTearDown(a.dispose);
+      expect(a.phase, DevicePhase.waiting);
+      await sentTo('${room}m.room.message');
+      expect(a.phase, DevicePhase.waiting);
+    });
+
+    test('someone whose keys are not known cannot be asked', () async {
+      final a = MatrixDeviceVerification.person(mine, '@nobody:elsewhere');
+      addTearDown(a.dispose);
+      await Future<void>.delayed(Duration.zero);
+      expect(a.phase, DevicePhase.cancelled);
+    });
+  });
+
+  group('how far you trust them', () {
+    test('no keys known is nothing to verify', () {
+      expect(
+        MatrixVerifier(mine).personTrust('@nobody:elsewhere'),
+        PersonTrust.noIdentity,
+      );
+    });
+
+    test(
+      'an unchecked identity is unverified, until your identity signs it',
+      () {
+        final verifier = MatrixVerifier(mine);
+        final master = mine.userDeviceKeys[other]!.masterKey!;
+        master.setDirectVerified(false);
+        expect(verifier.personTrust(other), PersonTrust.unverified);
+        master.setDirectVerified(true);
+        expect(verifier.personTrust(other), PersonTrust.verified);
+      },
+    );
   });
 }
 

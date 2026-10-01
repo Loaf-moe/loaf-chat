@@ -202,6 +202,136 @@ void main() {
     });
   });
 
+  group('someone else', () {
+    VerificationController person(
+      _Verifier v, {
+      DeviceVerification? incoming,
+    }) => VerificationController(
+      purpose: VerifyPurpose.person,
+      verifier: v,
+      onTrusted: () => trusted++,
+      incoming: incoming,
+      personId: incoming == null ? '@mika:loaf.moe' : null,
+      personName: 'Mika Rye',
+    );
+
+    test('opening for them asks them at once; closing withdraws it', () {
+      final v = _Verifier();
+      final c = person(v);
+      expect(v.asked, ['@mika:loaf.moe']);
+      expect(c.state.step, VerifyStep.waitingForDevice);
+      expect(c.canGoBack, isFalse);
+      c.dispose();
+      expect(v.device.cancelled, isTrue);
+      expect(v.device.disposed, isTrue);
+    });
+
+    test('a match vouches for them, never for this device', () {
+      final v = _Verifier();
+      final c = person(v);
+      v.device.go(DevicePhase.emoji);
+      expect(c.state.step, VerifyStep.compareEmoji);
+      c.emojiMatch();
+      expect(v.device.matched, 1);
+      v.device.go(DevicePhase.done);
+      expect(c.state.step, VerifyStep.done);
+      expect(trusted, 0);
+      expect(c.doneMessage, 'Mika Rye is verified');
+      c.dispose();
+    });
+
+    test('a refusal can be asked again, as a new request', () {
+      final v = _Verifier();
+      final c = person(v);
+      v.device.go(DevicePhase.cancelled);
+      expect(c.state.step, VerifyStep.cancelled);
+      c.tryAgain();
+      expect(v.asked, ['@mika:loaf.moe', '@mika:loaf.moe']);
+      expect(c.state.step, VerifyStep.waitingForDevice);
+      c.dispose();
+    });
+
+    test(
+      'vouching for them asks for the recovery key when it needs one',
+      () async {
+        final v = _Verifier();
+        final c = person(v);
+        v.device.go(DevicePhase.needsKey);
+        expect(c.state.step, VerifyStep.recoveryKey);
+        c.submitKey(mockRecoveryKey);
+        await pumpEventQueue();
+        expect(v.device.keys, [mockRecoveryKey]);
+        v.device.go(DevicePhase.done);
+        expect(c.state.step, VerifyStep.done);
+        expect(trusted, 0);
+        c.dispose();
+      },
+    );
+
+    test('their request: verify accepts once and waits for them', () {
+      final device = _Device();
+      final v = _Verifier();
+      final c = person(v, incoming: device);
+      expect(c.state.step, VerifyStep.incomingPrompt);
+      expect(v.asked, isEmpty, reason: 'they asked; nobody is asked back');
+      c
+        ..acceptIncoming()
+        ..acceptIncoming();
+      expect(device.accepted, 1);
+      expect(c.state.step, VerifyStep.waitingForDevice);
+      device.go(DevicePhase.emoji);
+      expect(c.state.step, VerifyStep.compareEmoji);
+      c.dispose();
+      expect(device.disposed, isFalse, reason: 'the session owns it');
+    });
+
+    test('their request: "not now" is no alarm, and no try again', () {
+      final device = _Device();
+      final v = _Verifier();
+      final c = person(v, incoming: device)..rejectIncoming();
+      expect(device.cancelled, isTrue);
+      expect(c.state.step, VerifyStep.cancelled);
+      c.tryAgain();
+      expect(v.asked, isEmpty);
+      c.dispose();
+    });
+
+    Future<void> panel(WidgetTester tester, VerificationController c) =>
+        tester.pumpWidget(
+          MaterialApp(
+            theme: loafDarkTheme(),
+            home: Scaffold(body: VerifyPanel(controller: c)),
+          ),
+        );
+
+    testWidgets('their request names them, and asks for a trusted channel', (
+      tester,
+    ) async {
+      final c = person(_Verifier(), incoming: _Device());
+      await panel(tester, c);
+      expect(find.text('verification request'), findsOneWidget);
+      expect(find.text('Mika Rye wants to verify you'), findsOneWidget);
+      expect(find.textContaining('a call you trust'), findsOneWidget);
+      expect(find.text("that's not me"), findsNothing);
+      c.dispose();
+    });
+
+    testWidgets('comparing speaks of their screen, not your device', (
+      tester,
+    ) async {
+      final v = _Verifier();
+      final c = person(v);
+      v.device.go(DevicePhase.emoji);
+      await panel(tester, c);
+      expect(find.text('verify Mika Rye'), findsOneWidget);
+      expect(
+        find.text("do these match what's on Mika Rye's screen?"),
+        findsOneWidget,
+      );
+      c.dispose();
+    });
+  });
+
   group('a new identity', () {
     test('no going back while a reset starts', () {
       final v = _Verifier();
@@ -471,7 +601,7 @@ void main() {
 }
 
 class _Verifier implements Verifier {
-  final device = _Device();
+  var device = _Device();
   final restore = StreamController<RestoreProgress>();
   var unlockAs = UnlockResult.wrongKey;
   var made = Completer<String?>();
@@ -484,6 +614,20 @@ class _Verifier implements Verifier {
 
   @override
   DeviceVerification verifyWithDevice() => device;
+
+  /// Who was asked, in order.
+  final asked = <String>[];
+
+  @override
+  PersonTrust personTrust(String userId) => PersonTrust.unverified;
+
+  @override
+  DeviceVerification verifyPerson(String userId) {
+    // Each request is its own: asking again never reuses a withdrawn one.
+    if (asked.isNotEmpty) device = _Device();
+    asked.add(userId);
+    return device;
+  }
 
   @override
   Future<UnlockResult> unlock(String keyOrPassphrase) async => unlockAs;
@@ -513,6 +657,12 @@ class _RecoveryExistsVerifier implements Verifier {
 
   @override
   DeviceVerification verifyWithDevice() => throw UnimplementedError();
+
+  @override
+  PersonTrust personTrust(String userId) => PersonTrust.noIdentity;
+
+  @override
+  DeviceVerification verifyPerson(String userId) => throw UnimplementedError();
 
   @override
   Future<UnlockResult> unlock(String keyOrPassphrase) async =>

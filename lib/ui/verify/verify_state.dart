@@ -5,8 +5,9 @@ library;
 import 'package:flutter/foundation.dart';
 
 /// Why the panel is open: to verify this session, to give a fresh account an
-/// identity, or to vouch for another device of yours.
-enum VerifyPurpose { verify, setUp, incoming }
+/// identity, to vouch for another device of yours, or to verify someone
+/// else (asked by you, or by them).
+enum VerifyPurpose { verify, setUp, incoming, person }
 
 enum VerifyStep {
   choose,
@@ -14,7 +15,8 @@ enum VerifyStep {
   /// `m.key.verification.request` is out; nobody has accepted yet.
   waitingForDevice,
 
-  /// Another device asks this one to vouch for it.
+  /// Another device asks this one to vouch for it, or someone else asks to
+  /// verify you.
   incomingPrompt,
 
   /// SAS: the 7 emoji both ends show.

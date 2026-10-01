@@ -58,6 +58,9 @@ class MockSession extends ChangeNotifier implements LoafSession {
     otherSessions: mockOtherSessions(),
     identityExists: () => _trust != DeviceTrust.noIdentity,
     consumeFailure: consumeFailure,
+    // Sam is already verified; the server's bot never set up encryption.
+    verifiedPeople: {'@sam'},
+    peopleWithoutIdentity: const {'@tuwunel'},
   );
 
   /// The debug "fail the next connection" lever.
@@ -124,6 +127,21 @@ class MockSession extends ChangeNotifier implements LoafSession {
       device: mockNewDevice(),
       at: DateTime.now(),
       verification: MockDeviceVerification(),
+    );
+    notifyListeners();
+  }
+
+  /// Mika asks to verify you, as someone you share a DM with would. Mika
+  /// is verified once it finishes, as the real identity would sign hers.
+  void receivePersonRequest() {
+    if (_incoming != null) return;
+    _incoming = IncomingRequest(
+      device: 'loaf on Pixel',
+      at: DateTime.now(),
+      verification: MockDeviceVerification(
+        onDone: () => (verifier as MockVerifier).verifiedPeople.add('@mika'),
+      ),
+      person: 'Mika Rye',
     );
     notifyListeners();
   }

@@ -23,6 +23,7 @@ enum MockDebug {
   expireSession,
   freshAccount,
   newSignIn,
+  personAsks,
 }
 
 /// [presenceShared] words the presence lever for the state it would change.
@@ -64,6 +65,11 @@ Future<MockDebug?> showMockDebug(
       MockDebug.newSignIn,
       LucideIcons.monitorSmartphone,
       'a new sign-in asks to verify',
+    ),
+    item(
+      MockDebug.personAsks,
+      LucideIcons.userCheck,
+      'Mika asks to verify you',
     ),
   ];
   if (isDesktop) {

@@ -1,5 +1,6 @@
 /// What a verification panel asks of the account's encryption: another
-/// device's emoji, the recovery key, key backup and a new identity.
+/// device's emoji, the recovery key, key backup, a new identity, and
+/// someone else's emoji.
 /// `MockVerifier` plays it on timers; `MatrixVerifier` runs it on the SDK.
 /// See "Verifying a session" in the design spec.
 library;
@@ -73,6 +74,19 @@ abstract interface class DeviceVerification implements Listenable {
   void dispose();
 }
 
+/// How far you trust someone else's identity, as this device knows it.
+enum PersonTrust {
+  /// No identity of theirs is known here: they have none, or you share no
+  /// encrypted room for their keys to arrive through. Nothing to verify.
+  noIdentity,
+
+  /// They have an identity you have not checked.
+  unverified,
+
+  /// Your identity has signed theirs.
+  verified,
+}
+
 enum AuthKind { password, sso }
 
 /// The server asked who you are before new cross-signing keys go up.
@@ -122,6 +136,14 @@ abstract interface class Verifier {
 
   /// Asks your other devices to verify this one.
   DeviceVerification verifyWithDevice();
+
+  /// How far you trust [userId], read fresh on each call.
+  PersonTrust personTrust(String userId);
+
+  /// Asks [userId] to compare emoji, in your DM with them; one is made if
+  /// there is none. The same handle as your own devices', so the same steps
+  /// run, ending in your identity signing theirs.
+  DeviceVerification verifyPerson(String userId);
 
   Future<UnlockResult> unlock(String keyOrPassphrase);
 
