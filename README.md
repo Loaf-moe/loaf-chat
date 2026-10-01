@@ -18,6 +18,7 @@ installed from there updates itself. Phones get Loaf Chat through TestFlight.
 Push a tag like `v0.1.0` that sits on `main`. `.github/workflows/release.yml`
 does the rest: it builds, signs and notarizes, publishes a GitHub Release, and
 rewrites get.loaf.moe, including the download page in `tool/release/site/`.
+The same tag sends iOS to TestFlight, where the Testing group picks it up.
 Preview that page with `tool/release/site.sh <latest.json> <out dir>`.
 The signing keys were made once by `tool/release/keygen.sh`.
 

@@ -64,6 +64,26 @@ jobs:
           name: macos
           path: dist/
 
+  # Straight to TestFlight; nothing iOS goes in the GitHub Release. publish
+  # does not need this job, so a slow App Store Connect never holds back the
+  # desktop release.
+  ios:
+    needs: version
+    runs-on: macos-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: >
+          tool/release/ios.sh "${{ needs.version.outputs.name }}"
+          "${{ needs.version.outputs.build }}"
+        env:
+          # One App Store Connect API key notarizes macOS and, through cloud
+          # signing, signs and uploads iOS. The names predate iOS.
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+
   linux:
     needs: version
     # The oldest runner, for the oldest glibc: the AppImage runs on whatever
