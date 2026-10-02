@@ -331,6 +331,17 @@ class _Timeline extends StatefulWidget {
   State<_Timeline> createState() => _TimelineState();
 }
 
+/// The "older messages" line at the top of the list.
+const _olderKey = ValueKey('older');
+
+/// Stable as the list grows: a group only ever gains messages at its end,
+/// so its first message names it.
+Key _keyOf(TimelineEntry entry) => switch (entry) {
+  DaySeparator() => ValueKey(('day', entry.day)),
+  CallEntry() => ValueKey(('call', entry.message.id)),
+  MessageGroup() => ValueKey(('group', entry.messages.first.id)),
+};
+
 class _TimelineState extends State<_Timeline> {
   final _scroll = ScrollController();
 
@@ -437,6 +448,13 @@ class _TimelineState extends State<_Timeline> {
         : controller.loadOlderFailed
         ? _OlderLine(failed: true, onRetry: controller.loadOlder)
         : null;
+    // The list matches its children by key, not by place: a new message
+    // shifts every entry along one, and each must keep its own State (a
+    // video playing in it) rather than take its neighbour's.
+    final indexOf = <Key, int>{
+      for (var i = 0; i < entries.length; i++) _keyOf(entries[i]): i,
+      if (top != null) _olderKey: entries.length,
+    };
     return ListView.builder(
       controller: _scroll,
       reverse: true,
@@ -445,17 +463,23 @@ class _TimelineState extends State<_Timeline> {
         vertical: LoafSpace.x2,
       ),
       itemCount: entries.length + (top == null ? 0 : 1),
+      findChildIndexCallback: (key) => indexOf[key],
       itemBuilder: (context, index) {
-        if (index == entries.length) return top;
+        if (index == entries.length) {
+          return KeyedSubtree(key: _olderKey, child: top!);
+        }
         final entry = entries[index];
-        return switch (entry) {
-          DaySeparator() => _DaySeparatorTile(entry: entry),
-          CallEntry() => _CallLineTile(message: entry.message),
-          MessageGroup() => Padding(
-            padding: const EdgeInsets.only(bottom: LoafSpace.x4),
-            child: MessageGroupTile(group: entry, controller: controller),
-          ),
-        };
+        return KeyedSubtree(
+          key: _keyOf(entry),
+          child: switch (entry) {
+            DaySeparator() => _DaySeparatorTile(entry: entry),
+            CallEntry() => _CallLineTile(message: entry.message),
+            MessageGroup() => Padding(
+              padding: const EdgeInsets.only(bottom: LoafSpace.x4),
+              child: MessageGroupTile(group: entry, controller: controller),
+            ),
+          },
+        );
       },
     );
   }

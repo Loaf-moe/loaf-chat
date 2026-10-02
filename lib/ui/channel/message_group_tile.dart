@@ -84,14 +84,25 @@ class MessageGroupTile extends StatelessWidget {
     if (controller == null || message.locked) {
       // Where this device can write, it is verified: the key never came.
       return _MessageBody(
+        key: ValueKey(message.id),
         message: message,
         keyNeverCame: controller?.writable ?? false,
         you: controller?.you.id,
       );
     }
+    // Keyed, so a message keeps its own State (a video playing in it)
+    // when the list around it changes.
     return isDesktop
-        ? _PointerMessage(message: message, controller: controller)
-        : _TouchMessage(message: message, controller: controller);
+        ? _PointerMessage(
+            key: ValueKey(message.id),
+            message: message,
+            controller: controller,
+          )
+        : _TouchMessage(
+            key: ValueKey(message.id),
+            message: message,
+            controller: controller,
+          );
   }
 }
 
@@ -114,6 +125,7 @@ class _Avatar extends StatelessWidget {
 
 class _MessageBody extends StatelessWidget {
   const _MessageBody({
+    super.key,
     required this.message,
     this.onSelectionChanged,
     this.onReact,
@@ -171,6 +183,7 @@ class _MessageBody extends StatelessWidget {
         if (replyTo != null) _ReplyContext(replyTo: replyTo),
         if (message.media != null)
           MediaRow(
+            key: ValueKey(message.id),
             media: message.media!,
             uploaded: message.uploaded,
             // Only what the server has can be fetched whole. Where there
@@ -406,7 +419,11 @@ class _ReactionsWrap extends StatelessWidget {
 /// Mobile: long press, with a haptic, opens the action sheet. Nothing else —
 /// no hover, no selection to compete with the press.
 class _TouchMessage extends StatefulWidget {
-  const _TouchMessage({required this.message, required this.controller});
+  const _TouchMessage({
+    super.key,
+    required this.message,
+    required this.controller,
+  });
 
   final Message message;
   final Timeline controller;
@@ -455,7 +472,11 @@ class _TouchMessageState extends State<_TouchMessage> {
 /// top edge, and right-click opens the action menu — leading with Copy
 /// selection when there is one.
 class _PointerMessage extends StatefulWidget {
-  const _PointerMessage({required this.message, required this.controller});
+  const _PointerMessage({
+    super.key,
+    required this.message,
+    required this.controller,
+  });
 
   final Message message;
   final Timeline controller;

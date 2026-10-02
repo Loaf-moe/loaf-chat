@@ -127,6 +127,21 @@ class _MediaRowState extends State<MediaRow> {
   }
 
   @override
+  void didUpdateWidget(MediaRow old) {
+    super.didUpdateWidget(old);
+    // Another file under this State: nothing about the old one carries
+    // over. Its player goes, and with it its hold on the file.
+    if (old.media.ref != widget.media.ref) {
+      _failed = false;
+      _attempt++;
+      _playing = null;
+      _playable = false;
+      _unplayable = false;
+      _playAttempt++;
+    }
+  }
+
+  @override
   void dispose() {
     _focus.dispose();
     super.dispose();

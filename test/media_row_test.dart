@@ -258,6 +258,33 @@ void main() {
       });
     });
 
+    testWidgets('a row handed another video forgets the one it played', (
+      tester,
+    ) async {
+      await on(TargetPlatform.macOS, () async {
+        mockNative(tester);
+        const other = Media(
+          kind: MediaKind.video,
+          name: 'crumb.mp4',
+          mimeType: 'video/mp4',
+          dimensions: Size(640, 360),
+          ref: 'assets/mock/media/oven.jpg',
+        );
+        await _pump(tester, MediaRow(media: _video, onOpen: () {}));
+        await tester.tap(find.byType(MediaRow));
+        await tester.pump();
+        await tester.pump();
+        expect(find.byType(LoafVideo), findsOneWidget);
+
+        // The same State, a different file: it shows the new one's poster.
+        await _pump(tester, MediaRow(media: other, onOpen: () {}));
+        await tester.pump();
+        expect(find.byType(LoafVideo), findsNothing);
+        expect(find.byIcon(LucideIcons.play), findsOneWidget);
+        expect(mediaCalls.last.method, 'stream.end');
+      });
+    });
+
     testWidgets('playing a second video pauses the first', (tester) async {
       await on(TargetPlatform.macOS, () async {
         mockNative(tester);
