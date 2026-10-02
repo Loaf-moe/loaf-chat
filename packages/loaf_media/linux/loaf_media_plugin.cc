@@ -28,8 +28,15 @@ struct _LoafMediaPlugin {
 
   FlTextureRegistrar* textures;
 
-  // Whether GStreamer started; without it every video fails to Open.
+  // GStreamer starts with the first video rather than with the app: its
+  // registry scan would hold up every launch. Without it every video
+  // offers Open.
+  gboolean video_tried;
   gboolean video;
+
+  // Textures no view uses, for the next video. They are never finalized
+  // while the engine runs: see video_texture.h.
+  GPtrArray* idle;
 
   // view id → VideoView.
   GHashTable* views;
@@ -43,7 +50,7 @@ typedef struct {
   int64_t view;
   LoafMediaPlugin* plugin;  // Not owned: it outlives its views.
   LoafVideoTexture* texture;
-  void* player;  // Owned by the texture.
+  void* player;  // Owned by the texture while attached.
   // What Dart has been told, so each is said once.
   gboolean ready;
   gboolean failed;
@@ -51,12 +58,12 @@ typedef struct {
 
 static void video_view_free(gpointer data) {
   VideoView* view = static_cast<VideoView*>(data);
-  // Queued marks may still run; they must not reach a freed view.
-  loaf_video_texture_set_changed(view->texture, nullptr, nullptr);
   fl_texture_registrar_unregister_texture(view->plugin->textures,
                                           FL_TEXTURE(view->texture));
-  // Frees the player once nothing else holds the texture.
-  g_object_unref(view->texture);
+  // Stops the video now, and lets go of the view so queued marks don't
+  // reach it. The texture itself waits for the next video.
+  loaf_video_texture_detach(view->texture);
+  g_ptr_array_add(view->plugin->idle, view->texture);
   g_free(view);
 }
 
@@ -68,22 +75,21 @@ static void send(LoafMediaPlugin* self, const char* method, int64_t view) {
 }
 
 // The player had something new to show. Dart drops the download progress
-// over the row once the video can start, and offers Open if it can't.
+// over the row once the video can start, and offers Open if it can't. Runs
+// for every frame, so it only reads the player's flags.
 static void video_changed(LoafVideoTexture* texture, gpointer user) {
   VideoView* view = static_cast<VideoView*>(user);
   if (view->failed) {
     return;
   }
-  int64_t position = 0, duration = 0;
-  int32_t playing = 0, error = 0;
-  if (loaf_rs_player_state(view->player, &position, &duration, &playing,
-                           &error) != 0 ||
+  int32_t ready = 0, error = 0;
+  if (loaf_rs_player_status(view->player, &ready, &error) != 0 ||
       error != 0) {
     view->failed = TRUE;
     send(view->plugin, "video.failed", view->view);
     return;
   }
-  if (!view->ready) {
+  if (ready != 0 && !view->ready) {
     view->ready = TRUE;
     send(view->plugin, "video.ready", view->view);
   }
@@ -163,6 +169,13 @@ static FlMethodResponse* video_create(LoafMediaPlugin* self, FlValue* args) {
   if (id == nullptr) {
     return error_response("no file id");
   }
+  if (!self->video_tried) {
+    self->video_tried = TRUE;
+    self->video = loaf_rs_init() == 0;
+    if (!self->video) {
+      g_warning("[loaf media] GStreamer did not start; video will offer Open");
+    }
+  }
   if (!self->video) {
     return error_response("GStreamer did not start");
   }
@@ -170,16 +183,20 @@ static FlMethodResponse* video_create(LoafMediaPlugin* self, FlValue* args) {
   view->plugin = self;
   view->view = ++self->next_view;
   view->texture =
-      loaf_video_texture_new(self->textures, id, video_changed, view);
-  if (view->texture == nullptr) {
+      self->idle->len > 0
+          ? LOAF_VIDEO_TEXTURE(g_ptr_array_steal_index_fast(
+                self->idle, self->idle->len - 1))
+          : loaf_video_texture_new(self->textures);
+  if (!loaf_video_texture_attach(view->texture, id, video_changed, view)) {
+    g_ptr_array_add(self->idle, view->texture);
     g_free(view);
     return error_response("no player for this file");
   }
   view->player = loaf_video_texture_get_player(view->texture);
   if (!fl_texture_registrar_register_texture(self->textures,
                                              FL_TEXTURE(view->texture))) {
-    loaf_video_texture_set_changed(view->texture, nullptr, nullptr);
-    g_object_unref(view->texture);
+    loaf_video_texture_detach(view->texture);
+    g_ptr_array_add(self->idle, view->texture);
     g_free(view);
     return error_response("the texture was refused");
   }
@@ -273,8 +290,9 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
 
 static void loaf_media_plugin_dispose(GObject* object) {
   LoafMediaPlugin* self = LOAF_MEDIA_PLUGIN(object);
-  // Views first: freeing one unregisters its texture.
+  // Views first: freeing one unregisters its texture and makes it idle.
   g_clear_pointer(&self->views, g_hash_table_unref);
+  g_clear_pointer(&self->idle, g_ptr_array_unref);
   g_clear_object(&self->textures);
   g_clear_object(&self->channel);
   G_OBJECT_CLASS(loaf_media_plugin_parent_class)->dispose(object);
@@ -287,7 +305,9 @@ static void loaf_media_plugin_class_init(LoafMediaPluginClass* klass) {
 static void loaf_media_plugin_init(LoafMediaPlugin* self) {
   self->channel = nullptr;
   self->textures = nullptr;
+  self->video_tried = FALSE;
   self->video = FALSE;
+  self->idle = g_ptr_array_new_with_free_func(g_object_unref);
   self->views = g_hash_table_new_full(g_int64_hash, g_int64_equal, nullptr,
                                       video_view_free);
   self->next_view = 0;
@@ -297,10 +317,6 @@ void loaf_media_plugin_register_with_registrar(FlPluginRegistrar* registrar) {
   LoafMediaPlugin* plugin = LOAF_MEDIA_PLUGIN(
       g_object_new(loaf_media_plugin_get_type(), nullptr));
 
-  plugin->video = loaf_rs_init() == 0;
-  if (!plugin->video) {
-    g_warning("[loaf media] GStreamer did not start; video will offer Open");
-  }
   plugin->textures = FL_TEXTURE_REGISTRAR(
       g_object_ref(fl_plugin_registrar_get_texture_registrar(registrar)));
 

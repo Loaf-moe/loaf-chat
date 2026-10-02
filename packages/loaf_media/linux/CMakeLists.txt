@@ -86,3 +86,22 @@ set(loaf_media_bundled_libraries
   ""
   PARENT_SCOPE
 )
+
+# Native tests, opt-in: cmake -DLOAF_MEDIA_TESTS=ON on a configured app
+# build (see test/texture_race_test.cc).
+option(LOAF_MEDIA_TESTS "Build loaf_media's native tests" OFF)
+if(LOAF_MEDIA_TESTS)
+  add_executable(loaf_media_texture_race_test
+    "test/texture_race_test.cc"
+    "video_texture.cc"
+  )
+  apply_standard_settings(loaf_media_texture_race_test)
+  target_compile_options(loaf_media_texture_race_test PRIVATE
+    -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(loaf_media_texture_race_test PRIVATE -fsanitize=address)
+  add_dependencies(loaf_media_texture_race_test loaf_media_rs)
+  target_link_libraries(loaf_media_texture_race_test PRIVATE
+    flutter PkgConfig::GTK
+    "${LOAF_MEDIA_RS_LIB}" PkgConfig::GST PkgConfig::GIO
+    gcc_s util rt dl pthread m)
+endif()

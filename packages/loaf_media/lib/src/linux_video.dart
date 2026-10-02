@@ -338,7 +338,9 @@ class _SurfaceState extends State<_Surface> {
 
   KeyEventResult _key(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (event.logicalKey == LogicalKeyboardKey.space) {
+    // Space on a button inside (open it instead, the controls) presses
+    // that button, not play.
+    if (event.logicalKey == LogicalKeyboardKey.space && node.hasPrimaryFocus) {
       widget.player.toggle();
       _show();
       return KeyEventResult.handled;
@@ -354,10 +356,16 @@ class _SurfaceState extends State<_Surface> {
   }
 
   @override
-  Widget build(BuildContext context) => Focus(
-    focusNode: _focus,
-    autofocus: widget.fullWindow,
-    onKeyEvent: _key,
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.player,
+    builder: (context, child) => Focus(
+      focusNode: _focus,
+      autofocus: widget.fullWindow,
+      // Failed, it has nothing for the keyboard; Tab goes to the link.
+      skipTraversal: widget.player.error,
+      onKeyEvent: _key,
+      child: child!,
+    ),
     child: MouseRegion(
       onEnter: (_) => _show(),
       onHover: (_) => _show(),
@@ -502,9 +510,17 @@ class _Unplayable extends StatelessWidget {
               style: style,
             ),
             if (onOpen != null)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onOpen,
+              // A link, as on the desktop: the click cursor, and reached by
+              // the keyboard.
+              TextButton(
+                onPressed: onOpen,
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  foregroundColor: Colors.white,
+                  enabledMouseCursor: SystemMouseCursors.click,
+                ),
                 child: Text(
                   'open it instead',
                   style: style?.copyWith(

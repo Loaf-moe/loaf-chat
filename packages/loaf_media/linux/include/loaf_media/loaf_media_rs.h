@@ -43,10 +43,23 @@ int32_t loaf_rs_player_set_muted(void* p, int32_t muted);
 int32_t loaf_rs_player_state(void* p, int64_t* position_ms,
                              int64_t* duration_ms, int32_t* playing,
                              int32_t* error);
-/* Borrows the newest RGBA frame until the next call or free; 1 if there is
- * one. Calls must not overlap. */
-int32_t loaf_rs_player_frame(void* p, const uint8_t** rgba, uint32_t* width,
-                             uint32_t* height);
+// Whether the player can start (prerolled) and whether it failed. Flags
+// only, no pipeline queries: cheap enough for every frame.
+int32_t loaf_rs_player_status(void* p, int32_t* ready, int32_t* error);
+
+// A frame lent to C; opaque.
+typedef struct LoafRsFrame LoafRsFrame;
+
+// The newest RGBA frame as the caller's own reference, or NULL if there is
+// none yet. [rgba] points into it and stays valid until
+// loaf_rs_frame_release, independently of the player: the player may be
+// freed while the frame is still being drawn.
+const LoafRsFrame* loaf_rs_player_take_frame(void* p, const uint8_t** rgba,
+                                             uint32_t* width,
+                                             uint32_t* height);
+// NULL is ignored.
+void loaf_rs_frame_release(const LoafRsFrame* frame);
+
 void loaf_rs_player_free(void* p);
 
 #ifdef __cplusplus

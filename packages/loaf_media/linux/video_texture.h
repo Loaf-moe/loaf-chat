@@ -5,26 +5,37 @@
 
 G_BEGIN_DECLS
 
-// One inline video's frames: a pixel buffer texture owning the Rust player
-// that fills it.
+// The frames of one inline video at a time: a pixel buffer texture with a
+// Rust player attached.
+//
+// A texture is recycled, never finalized while the engine runs. The
+// embedder's raster thread finds a texture without taking a reference
+// (fl_texture_registrar.cc lookup_texture) and draws it outside any lock,
+// and unregistering only posts a task to the raster thread
+// (Shell::OnPlatformViewUnregisterTexture) with nothing to say when it ran.
+// No moment after unregistering is known safe for the last unref, so the
+// plugin keeps detached textures for the next video instead.
 G_DECLARE_FINAL_TYPE(LoafVideoTexture, loaf_video_texture, LOAF,
                      VIDEO_TEXTURE, FlPixelBufferTexture)
 
 // On the main loop, after the player had something new to show.
 typedef void (*LoafVideoChanged)(LoafVideoTexture* texture, gpointer user);
 
-// NULL if the player can't be made. [changed] runs until it is cleared with
-// loaf_video_texture_set_changed.
-LoafVideoTexture* loaf_video_texture_new(FlTextureRegistrar* registrar,
-                                         const char* id,
-                                         LoafVideoChanged changed,
-                                         gpointer user);
+LoafVideoTexture* loaf_video_texture_new(FlTextureRegistrar* registrar);
 
-// The Rust player, for as long as the texture lives.
+// Makes a player for the file [id] and shows its frames. FALSE if no player
+// could be made. Main thread; the texture must be detached.
+gboolean loaf_video_texture_attach(LoafVideoTexture* texture, const char* id,
+                                   LoafVideoChanged changed, gpointer user);
+
+// Stops and frees the player at once (sound stops, GStreamer's threads are
+// joined), safely against a frame being drawn on the raster thread. The
+// texture can then be attached again. Main thread.
+void loaf_video_texture_detach(LoafVideoTexture* texture);
+
+// The attached player, or NULL. Main thread only: the main thread is the
+// only one that attaches and detaches.
 void* loaf_video_texture_get_player(LoafVideoTexture* texture);
-
-void loaf_video_texture_set_changed(LoafVideoTexture* texture,
-                                    LoafVideoChanged changed, gpointer user);
 
 G_END_DECLS
 

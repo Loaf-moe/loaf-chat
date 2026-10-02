@@ -57,6 +57,9 @@ type Notify = Box<dyn Fn() + Send + Sync>;
 /// What the streaming and bus threads share with the player's owner.
 struct Shared {
     frame: Mutex<Option<Arc<Frame>>>,
+    /// Prerolled: a frame, or for a file without video, the pipeline
+    /// paused with data.
+    ready: AtomicBool,
     error: AtomicBool,
     ended: AtomicBool,
     /// Something new to show: a frame, the first preroll, an error or the
@@ -72,8 +75,14 @@ pub struct Player {
     playbin: gst::Element,
     shared: Arc<Shared>,
     bus_thread: Option<JoinHandle<()>>,
-    /// The frame last lent to C, kept alive until the next lend or drop.
-    last_lent: Mutex<Option<Arc<Frame>>>,
+}
+
+/// Whether the player can start, and whether it failed. Plain flags the
+/// streaming and bus threads set, cheap to ask on every frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Status {
+    pub ready: bool,
+    pub error: bool,
 }
 
 impl Player {
@@ -83,6 +92,7 @@ impl Player {
         crate::init().map_err(PlayerError)?;
         let shared = Arc::new(Shared {
             frame: Mutex::new(None),
+            ready: AtomicBool::new(false),
             error: AtomicBool::new(false),
             ended: AtomicBool::new(false),
             notify: Box::new(notify),
@@ -134,7 +144,6 @@ impl Player {
             playbin,
             shared,
             bus_thread: Some(bus_thread),
-            last_lent: Mutex::new(None),
         };
         // An unknown id fails here or on the bus; either way the bus
         // thread records it, so the player stays usable to ask.
@@ -194,17 +203,17 @@ impl Player {
         }
     }
 
-    /// The newest frame.
-    pub fn frame(&self) -> Option<Arc<Frame>> {
-        lock(&self.shared.frame).clone()
+    pub fn status(&self) -> Status {
+        Status {
+            ready: self.shared.ready.load(Ordering::SeqCst),
+            error: self.shared.error.load(Ordering::SeqCst),
+        }
     }
 
-    /// The newest frame, kept alive in the player until the next lend or
-    /// until the player goes, so C can borrow its bytes.
-    pub fn lend(&self) -> Option<Arc<Frame>> {
-        let frame = self.frame();
-        *lock(&self.last_lent) = frame.clone();
-        frame
+    /// The newest frame: a reference of the caller's own, which stays whole
+    /// whatever the player does next, including going away.
+    pub fn frame(&self) -> Option<Arc<Frame>> {
+        lock(&self.shared.frame).clone()
     }
 }
 
@@ -260,6 +269,7 @@ fn keep(shared: &Shared, sample: &gst::Sample) {
         height,
         rgba,
     }));
+    shared.ready.store(true, Ordering::SeqCst);
     (shared.notify)();
 }
 
@@ -281,7 +291,10 @@ fn watch(bus: &gst::Bus, shared: &Shared) {
                 (shared.notify)();
             }
             // Prerolled: an audio-only file has no frame to say so.
-            gst::MessageView::AsyncDone(_) => (shared.notify)(),
+            gst::MessageView::AsyncDone(_) => {
+                shared.ready.store(true, Ordering::SeqCst);
+                (shared.notify)();
+            }
             gst::MessageView::Application(a) if a.structure().is_some_and(|s| s.name() == STOP) => {
                 return;
             }

@@ -6,8 +6,9 @@ use std::ffi::{CStr, c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::ptr;
+use std::sync::Arc;
 
-use crate::player::Player;
+use crate::player::{Frame, Player};
 use crate::streams::{self, Progress};
 
 const OK: i32 = 0;
@@ -257,18 +258,17 @@ pub unsafe extern "C" fn loaf_rs_player_state(
     })
 }
 
-/// 1 and the newest frame, 0 if there is none yet, or an error.
+/// Whether the player can start, and whether it failed: flags only, with
+/// no pipeline queries, so it is cheap on every frame.
 ///
 /// # Safety
 /// [p] came from `loaf_rs_player_new` and is not yet freed; the out
-/// pointers are valid for writes. The bytes stay valid until the next call
-/// for this player or `loaf_rs_player_free`, so calls must not overlap.
+/// pointers are valid for writes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn loaf_rs_player_frame(
+pub unsafe extern "C" fn loaf_rs_player_status(
     p: *mut c_void,
-    rgba: *mut *const u8,
-    width: *mut u32,
-    height: *mut u32,
+    ready: *mut i32,
+    error: *mut i32,
 ) -> i32 {
     guard(|| {
         // SAFETY: forwarded from this function's contract.
@@ -276,21 +276,77 @@ pub unsafe extern "C" fn loaf_rs_player_frame(
             Ok(player) => player,
             Err(e) => return e,
         };
-        if rgba.is_null() || width.is_null() || height.is_null() {
+        if ready.is_null() || error.is_null() {
             return NULL;
         }
-        let Some(frame) = player.lend() else {
-            return 0;
+        let status = player.status();
+        // SAFETY: checked non-null above; valid for writes by contract.
+        unsafe {
+            *ready = i32::from(status.ready);
+            *error = i32::from(status.error);
+        }
+        OK
+    })
+}
+
+/// A frame lent to C. Opaque: only ever behind a pointer from
+/// `loaf_rs_player_take_frame`.
+#[repr(C)]
+pub struct LoafRsFrame {
+    _private: [u8; 0],
+}
+
+/// The newest frame as a reference of the caller's own, or null if there is
+/// none yet (or on an error). [rgba] points into it and stays valid until
+/// `loaf_rs_frame_release`, independently of the player: the player may be
+/// freed while the frame is still being drawn.
+///
+/// # Safety
+/// [p] came from `loaf_rs_player_new` and is not yet freed; the out
+/// pointers are valid for writes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn loaf_rs_player_take_frame(
+    p: *mut c_void,
+    rgba: *mut *const u8,
+    width: *mut u32,
+    height: *mut u32,
+) -> *const LoafRsFrame {
+    catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: forwarded from this function's contract.
+        let Ok(player) = (unsafe { player(p) }) else {
+            return ptr::null();
         };
-        // SAFETY: checked non-null above. The bytes live in the Arc the
-        // player keeps as last lent, until the next call or free.
+        if rgba.is_null() || width.is_null() || height.is_null() {
+            return ptr::null();
+        }
+        let Some(frame) = player.frame() else {
+            return ptr::null();
+        };
+        // SAFETY: checked non-null above; valid for writes by contract.
         unsafe {
             *rgba = frame.rgba.as_ptr();
             *width = frame.width;
             *height = frame.height;
         }
-        1
-    })
+        Arc::into_raw(frame).cast::<LoafRsFrame>()
+    }))
+    .unwrap_or(ptr::null())
+}
+
+/// Lets go of a frame from `loaf_rs_player_take_frame`. Null is ignored.
+///
+/// # Safety
+/// [frame] is null or came from `loaf_rs_player_take_frame` and is
+/// released once.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn loaf_rs_frame_release(frame: *const LoafRsFrame) {
+    if frame.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: from Arc::into_raw in loaf_rs_player_take_frame, once.
+        drop(unsafe { Arc::from_raw(frame.cast::<Frame>()) });
+    }));
 }
 
 /// # Safety
