@@ -1,3 +1,4 @@
 /build/
 /pubspec.lock
 .dart_tool/
+/linux/rust/target/

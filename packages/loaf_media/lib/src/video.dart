@@ -1,6 +1,8 @@
 /// Video played in place by the platform's own player, reading the file as
 /// it downloads. The Swift end is
-/// `darwin/loaf_media/Sources/loaf_media/VideoViewFactory.swift`.
+/// `darwin/loaf_media/Sources/loaf_media/VideoViewFactory.swift`; on Linux,
+/// GStreamer draws into a texture under Flutter controls
+/// (`linux_video.dart`).
 library;
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'growing_file.dart';
+import 'linux_video.dart';
 import 'streams.dart';
 
 /// The one playing video, by platform view id. Starting another pauses
@@ -104,6 +107,7 @@ class LoafVideo extends StatefulWidget {
     this.onFailed,
     this.onHold,
     this.onRelease,
+    this.onOpen,
   });
 
   final GrowingFile file;
@@ -123,10 +127,15 @@ class LoafVideo extends StatefulWidget {
   final VoidCallback? onHold;
   final VoidCallback? onRelease;
 
-  /// Where this platform has a player: iOS and macOS here, Linux from
-  /// Task 7. Asked of the target platform, as the player is chosen by it.
+  /// Linux: opens the file in another app when this player can't play it,
+  /// offered beside "couldn't play this". The platform players elsewhere
+  /// say so themselves.
+  final VoidCallback? onOpen;
+
+  /// Where this platform has a player: iOS, macOS and Linux. Asked of the
+  /// target platform, as the player is chosen by it.
   static bool get supported => switch (defaultTargetPlatform) {
-    TargetPlatform.iOS || TargetPlatform.macOS => true,
+    TargetPlatform.iOS || TargetPlatform.macOS || TargetPlatform.linux => true,
     _ => false,
   };
 
@@ -253,6 +262,14 @@ class _LoafVideoState extends State<LoafVideo> {
         creationParams: params,
         creationParamsCodec: const StandardMessageCodec(),
         onPlatformViewCreated: _created,
+      ),
+      TargetPlatform.linux => LinuxVideo(
+        key: key,
+        id: widget.file.id,
+        aspect: widget.aspect,
+        onCreated: _created,
+        onFailed: _failed,
+        onOpen: widget.onOpen,
       ),
       // [LoafVideo.supported] keeps this from being built elsewhere.
       final platform => ErrorWidget(

@@ -380,6 +380,7 @@ class _MediaRowState extends State<MediaRow> {
                   aspect: aspect,
                   onHold: file.hold,
                   onRelease: file.release,
+                  onOpen: onOpen,
                   onReady: () {
                     if (mounted) setState(() => _playable = true);
                   },
