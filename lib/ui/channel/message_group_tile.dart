@@ -173,8 +173,8 @@ class _MessageBody extends StatelessWidget {
           MediaRow(
             media: message.media!,
             uploaded: message.uploaded,
-            // Only what the server has can be fetched whole. Video opens
-            // like any file until it plays in place.
+            // Only what the server has can be fetched whole. Where there
+            // is a player, the row plays a video in place instead.
             onOpen: message.status == MessageStatus.sent
                 ? () => openMedia(context, message.media!)
                 : null,

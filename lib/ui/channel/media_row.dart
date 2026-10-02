@@ -4,6 +4,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:loaf_media/loaf_media.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
@@ -73,7 +74,8 @@ class MediaRow extends StatefulWidget {
   /// How much of an outgoing file has gone up, 0 to 1.
   final double? uploaded;
 
-  /// Null draws no affordance: the row is a picture, not a button.
+  /// Null draws no affordance: the row is a picture, not a button. Where
+  /// [LoafVideo.supported], a video plays in place instead.
   final VoidCallback? onOpen;
 
   /// Starts the preview's download again after it failed. Null draws no
@@ -98,8 +100,27 @@ class _MediaRowState extends State<MediaRow> {
   final _focus = FocusNode(debugLabel: 'media');
   var _focused = false;
 
+  /// The video playing in place, held through eviction while it plays.
+  MediaFile? _playing;
+
+  /// Bumped when a failed video is tried again: its player failed with the
+  /// download, so a new one is made.
+  var _playAttempt = 0;
+
+  /// Whether a tap plays the video here rather than opening it.
+  bool get _playsInPlace =>
+      media.kind == MediaKind.video &&
+      widget.onOpen != null &&
+      LoafVideo.supported;
+
+  void _play() {
+    if (_playing != null) return;
+    setState(() => _playing = MediaSourceScope.of(context).open(media)..hold());
+  }
+
   @override
   void dispose() {
+    _playing?.release();
     _focus.dispose();
     super.dispose();
   }
@@ -158,7 +179,7 @@ class _MediaRowState extends State<MediaRow> {
   /// Wraps [child] in a tap target, only when there is something to open,
   /// with a ring over it while its file comes for an open.
   Widget _tappable(Widget child, double radius) {
-    final onOpen = widget.onOpen;
+    final onOpen = _playsInPlace ? _play : widget.onOpen;
     // A failed picture's one control is "try again": nothing lies over it.
     if (onOpen == null || _failed) return child;
     final tokens = LoafTokens.of(context);
@@ -258,6 +279,16 @@ class _MediaRowState extends State<MediaRow> {
     // A big GIF shows the preview and a badge instead of playing.
     final bigGif = media.animated && (media.size ?? 0) > inlinePreviewCap;
 
+    final playing = _playing;
+    if (playing != null) {
+      return SizedBox(
+        key: MediaRow.pictureKey,
+        width: width,
+        height: height,
+        child: _player(playing, placeholder, width / height),
+      );
+    }
+
     final picture = SizedBox(
       key: MediaRow.pictureKey,
       width: width,
@@ -309,6 +340,39 @@ class _MediaRowState extends State<MediaRow> {
     );
     return _tappable(picture, LoafRadius.lg);
   }
+
+  /// The platform's player over the poster. Until the first bytes come the
+  /// row shows how far the download has got; after that the player shows
+  /// its own buffering.
+  Widget _player(MediaFile file, Widget placeholder, double aspect) =>
+      ClipRRect(
+        borderRadius: BorderRadius.circular(LoafRadius.lg),
+        child: ListenableBuilder(
+          listenable: file,
+          builder: (context, _) {
+            if (file.error != null) {
+              return _Failed(
+                onRetry: () {
+                  file.retry();
+                  setState(() => _playAttempt++);
+                },
+              );
+            }
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                LoafVideo(
+                  key: ValueKey(_playAttempt),
+                  file: file,
+                  mimeType: media.mimeType,
+                  aspect: aspect,
+                ),
+                if (file.received == 0) ...[placeholder, _Fetching(file: file)],
+              ],
+            );
+          },
+        ),
+      );
 
   Widget _card(BuildContext context, double width) {
     final tokens = LoafTokens.of(context);

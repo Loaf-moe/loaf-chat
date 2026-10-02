@@ -7,11 +7,18 @@
 #else
   #error("Unsupported platform.")
 #endif
+import LoafMediaCore
 
-/// The native half of `package:loaf_media`: Quick Look, and on macOS the
-/// default app. The other end is `lib/src/native.dart`.
+/// The native half of `package:loaf_media`: Quick Look, on macOS the
+/// default app, and the inline video player. The other ends are
+/// `lib/src/native.dart`, `lib/src/streams.dart` and `lib/src/video.dart`.
 public final class LoafMediaPlugin: NSObject, FlutterPlugin {
   private let quickLook = QuickLook()
+  private let videos: VideoViewFactory
+
+  private init(videos: VideoViewFactory) {
+    self.videos = videos
+  }
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     #if os(iOS)
@@ -21,12 +28,48 @@ public final class LoafMediaPlugin: NSObject, FlutterPlugin {
     #endif
     let channel = FlutterMethodChannel(
       name: "moe.loaf.chat/media", binaryMessenger: messenger)
-    registrar.addMethodCallDelegate(LoafMediaPlugin(), channel: channel)
+    #if os(iOS)
+      let videos = VideoViewFactory(channel: channel, registrar: registrar)
+    #else
+      let videos = VideoViewFactory(channel: channel)
+    #endif
+    registrar.addMethodCallDelegate(LoafMediaPlugin(videos: videos), channel: channel)
+    registrar.register(videos, withId: "moe.loaf.chat/video")
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     let arguments = call.arguments as? [String: Any]
     switch call.method {
+    case "stream.begin":
+      guard let id = arguments?["id"] as? String, let path = arguments?["path"] as? String,
+        let progress = Self.progress(arguments)
+      else {
+        result(Self.badArguments(call))
+        return
+      }
+      VideoStreams.shared.begin(id: id, path: path, progress: progress)
+      result(nil)
+    case "stream.progress":
+      guard let id = arguments?["id"] as? String, let progress = Self.progress(arguments) else {
+        result(Self.badArguments(call))
+        return
+      }
+      VideoStreams.shared.progress(id: id, progress: progress)
+      result(nil)
+    case "stream.end":
+      guard let id = arguments?["id"] as? String else {
+        result(Self.badArguments(call))
+        return
+      }
+      VideoStreams.shared.end(id: id)
+      result(nil)
+    case "video.pause":
+      guard let view = (arguments?["view"] as? NSNumber)?.int64Value else {
+        result(Self.badArguments(call))
+        return
+      }
+      videos.pause(view: view)
+      result(nil)
     case "quickLook":
       guard let path = arguments?["path"] as? String else {
         result(Self.failure("no path to look at"))
@@ -59,6 +102,20 @@ public final class LoafMediaPlugin: NSObject, FlutterPlugin {
     default:
       result(FlutterMethodNotImplemented)
     }
+  }
+
+  /// A download's progress as `stream.begin` and `stream.progress` carry it.
+  private static func progress(_ arguments: [String: Any]?) -> StreamProgress? {
+    guard let received = (arguments?["received"] as? NSNumber)?.int64Value,
+      let complete = arguments?["complete"] as? Bool,
+      let failed = arguments?["failed"] as? Bool
+    else { return nil }
+    let total = (arguments?["total"] as? NSNumber)?.int64Value
+    return StreamProgress(received: received, total: total, complete: complete, failed: failed)
+  }
+
+  private static func badArguments(_ call: FlutterMethodCall) -> FlutterError {
+    FlutterError(code: "bad-arguments", message: "\(call.method) without what it needs", details: nil)
   }
 
   private static func failure(_ message: String) -> FlutterError {

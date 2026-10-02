@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:loaf_media/loaf_media.dart';
 import 'package:loaf_native/ui/channel/media_row.dart';
 import 'package:loaf_native/ui/channel/message_group_tile.dart';
 import 'package:loaf_native/ui/channel/message_text.dart';
@@ -187,6 +188,168 @@ void main() {
         expect(opened, 1);
         await tester.sendKeyEvent(LogicalKeyboardKey.space);
         expect(opened, 2);
+      });
+    });
+  });
+
+  group('video in place', () {
+    const media = MethodChannel('moe.loaf.chat/media');
+    final mediaCalls = <MethodCall>[];
+    final created = <Map<Object?, Object?>>[];
+
+    // The native ends: the plugin's channel, and the platform views.
+    void mockNative(WidgetTester tester) {
+      mediaCalls.clear();
+      created.clear();
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(media, (call) async {
+        mediaCalls.add(call);
+        return null;
+      });
+      messenger.setMockMethodCallHandler(SystemChannels.platform_views, (
+        call,
+      ) async {
+        if (call.method == 'create') {
+          created.add(call.arguments as Map<Object?, Object?>);
+        }
+        return null;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(media, null);
+        messenger.setMockMethodCallHandler(SystemChannels.platform_views, null);
+      });
+    }
+
+    Map<Object?, Object?> paramsOf(Map<Object?, Object?> create) =>
+        const StandardMessageCodec().decodeMessage(
+          ByteData.sublistView(create['params']! as Uint8List),
+        ) as Map<Object?, Object?>;
+
+    testWidgets("tapping a video's play swaps in the player", (tester) async {
+      await on(TargetPlatform.macOS, () async {
+        mockNative(tester);
+        var opened = 0;
+        await _pump(tester, MediaRow(media: _video, onOpen: () => opened++));
+        expect(find.byType(LoafVideo), findsNothing);
+
+        await tester.tap(find.byType(MediaRow));
+        await tester.pump();
+        await tester.pump();
+        expect(opened, 0, reason: 'it plays here rather than opening');
+        expect(find.byType(LoafVideo), findsOneWidget);
+        expect(sizeOfRow(tester), const Size(400, 225));
+        expect(created, hasLength(1));
+        expect(created.single['viewType'], 'moe.loaf.chat/video');
+        expect(paramsOf(created.single), {
+          'id': 'proof.mp4',
+          'mime': 'video/mp4',
+        });
+        expect(mediaCalls.first.method, 'stream.begin');
+        // Nothing has arrived yet: the row says it is coming.
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+        await tester.pumpWidget(const SizedBox());
+        expect(mediaCalls.last.method, 'stream.end');
+      });
+    });
+
+    testWidgets('playing a second video pauses the first', (tester) async {
+      await on(TargetPlatform.macOS, () async {
+        mockNative(tester);
+        const other = Media(
+          kind: MediaKind.video,
+          name: 'crumb.mp4',
+          mimeType: 'video/mp4',
+          dimensions: Size(640, 360),
+          ref: 'assets/mock/media/oven.jpg',
+        );
+        await _pump(
+          tester,
+          Column(
+            children: [
+              MediaRow(media: _video, onOpen: () {}),
+              MediaRow(media: other, onOpen: () {}),
+            ],
+          ),
+        );
+        await tester.tap(find.byType(MediaRow).first);
+        await tester.tap(find.byType(MediaRow).last);
+        await tester.pump();
+        await tester.pump();
+        expect(created, hasLength(2));
+        final first = created[0]['id']! as int;
+        final second = created[1]['id']! as int;
+
+        Future<void> playing(int view) =>
+            tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+              media.name,
+              const StandardMethodCodec().encodeMethodCall(
+                MethodCall('video.playing', {'view': view}),
+              ),
+              (_) {},
+            );
+
+        await playing(first);
+        await tester.pump();
+        expect(videoFocus.value, first);
+        expect(mediaCalls.where((c) => c.method == 'video.pause'), isEmpty);
+
+        await playing(second);
+        await tester.pump();
+        expect(videoFocus.value, second);
+        final pauses = mediaCalls.where((c) => c.method == 'video.pause');
+        expect(pauses.map((c) => c.arguments), [
+          {'view': first},
+        ]);
+
+        await tester.pumpWidget(const SizedBox());
+        expect(videoFocus.value, isNull, reason: 'the player is gone');
+      });
+    });
+
+    testWidgets('scrolling a playing video away pauses it', (tester) async {
+      await on(TargetPlatform.macOS, () async {
+        mockNative(tester);
+        await _pump(
+          tester,
+          SizedBox(
+            height: 600,
+            child: ListView(
+              children: [
+                MediaRow(media: _video, onOpen: () {}),
+                const SizedBox(height: 2000),
+              ],
+            ),
+          ),
+        );
+        await tester.tap(find.byType(MediaRow));
+        await tester.pump();
+        await tester.pump();
+        final view = created.single['id']! as int;
+        await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          media.name,
+          const StandardMethodCodec().encodeMethodCall(
+            MethodCall('video.playing', {'view': view}),
+          ),
+          (_) {},
+        );
+
+        // Partly out of view still plays.
+        await tester.drag(find.byType(ListView), const Offset(0, -150));
+        await tester.pump();
+        expect(mediaCalls.where((c) => c.method == 'video.pause'), isEmpty);
+
+        await tester.drag(find.byType(ListView), const Offset(0, -200));
+        await tester.pump();
+        expect(
+          mediaCalls
+              .where((c) => c.method == 'video.pause')
+              .map((c) => c.arguments),
+          [
+            {'view': view},
+          ],
+        );
+        expect(videoFocus.value, isNull);
       });
     });
   });
