@@ -63,8 +63,9 @@ Future<Client> openClient({
     'loaf',
     database: database,
     httpClient: (wrap ?? LoafHttpClient.new)(httpClient ?? defaultHttpClient()),
-    // The SDK's default is 0: it retries a failed send for ever. 30 s is
-    // how long a dead network takes to read "didn't send".
+    // The SDK keeps retrying a failed send until this runs out, and marks
+    // an echo older than it failed on load; its default is a minute. 30 s
+    // is how long a dead network takes to read "didn't send".
     sendTimelineEventTimeout: sendTimeout ?? const Duration(seconds: 30),
     // The SDK keeps only a room list's state in memory for rooms not open.
     // These are what the channel list and member list read on top of that:

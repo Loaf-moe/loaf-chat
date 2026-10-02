@@ -149,7 +149,32 @@ class MediaStore {
     var s = name.split(RegExp(r'[/\\]')).last;
     s = s.replaceAll(RegExp(r'[:*?"<>|\x00-\x1f]'), '_').trim();
     if (s.isEmpty || s == '.' || s == '..') return 'file';
-    return s;
+    return _capped(s);
+  }
+
+  /// Most filesystems refuse a name over 255 bytes, and the download adds
+  /// `.part`: a name past this would fail every retry.
+  static const _maxNameBytes = 200;
+
+  /// [name] cut to [_maxNameBytes] of UTF-8 between characters, keeping a
+  /// short extension so the file still opens in the right app.
+  static String _capped(String name) {
+    if (utf8.encode(name).length <= _maxNameBytes) return name;
+    final dot = name.lastIndexOf('.');
+    final extension = dot > 0 ? name.substring(dot) : '';
+    final keep = utf8.encode(extension).length <= 16 ? extension : '';
+    final stem = keep.isEmpty ? name : name.substring(0, dot);
+    final budget = _maxNameBytes - utf8.encode(keep).length;
+    final out = StringBuffer();
+    var used = 0;
+    for (final rune in stem.runes) {
+      final char = String.fromCharCode(rune);
+      final bytes = utf8.encode(char).length;
+      if (used + bytes > budget) break;
+      out.write(char);
+      used += bytes;
+    }
+    return '$out$keep';
   }
 }
 

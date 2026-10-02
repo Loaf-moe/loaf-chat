@@ -268,40 +268,102 @@ void main() {
     expect(file.complete, isFalse);
   });
 
-  test('eviction drops the oldest first and spares held files', () async {
-    final store = storeOver(serving([List.filled(100, 1)]), capBytes: 200);
-    addTearDown(store.dispose);
-    final uris = [for (var i = 0; i < 3; i++) Uri.parse('mxc://loaf.moe/f$i')];
-    final files = <StoredFile>[];
-    for (final u in uris) {
-      files.add(store.open(MediaSpec(mxc: u, name: 'f.bin')));
-    }
-    for (final f in files) {
-      await f.path;
-    }
-    await settle(); // the unawaited evictions after each finish
-    // Start from all three on disk, oldest f0 and newest f2.
-    for (var i = 0; i < 3; i++) {
-      final dir = Directory('${root.path}/${_id(uris[i])}')
-        ..createSync(recursive: true);
-      final f = File('${dir.path}/f.bin');
-      if (!f.existsSync()) f.writeAsBytesSync(List.filled(100, 1));
-      f.setLastModifiedSync(DateTime(2026, 1, 1 + i));
-    }
-    Directory('${root.path}/${_id(uris[0])}').existsSync();
-    files[0].hold();
-    await store.evict();
-    expect(Directory('${root.path}/${_id(uris[0])}').existsSync(), isTrue);
-    expect(Directory('${root.path}/${_id(uris[1])}').existsSync(), isFalse);
-    expect(Directory('${root.path}/${_id(uris[2])}').existsSync(), isTrue);
+  test(
+    'eviction drops the oldest first and spares held and running files',
+    () async {
+      // f3 arrives only as the test feeds it: a download still running.
+      final gate = StreamController<List<int>>();
+      addTearDown(gate.close);
+      final client = MockClient.streaming((request, body) async {
+        requests.add(request);
+        if (request.url.path.endsWith('/f3')) {
+          return http.StreamedResponse(gate.stream, 200, contentLength: 200);
+        }
+        return http.StreamedResponse(
+          Stream.value(List.filled(100, 1)),
+          200,
+          contentLength: 100,
+        );
+      });
+      final store = storeOver(client, capBytes: 200);
+      addTearDown(store.dispose);
+      final uris = [
+        for (var i = 0; i < 4; i++) Uri.parse('mxc://loaf.moe/f$i'),
+      ];
+      Directory dirOf(int i) => Directory('${root.path}/${_id(uris[i])}');
+      final files = <StoredFile>[];
+      for (final u in uris.take(3)) {
+        files.add(store.open(MediaSpec(mxc: u, name: 'f.bin')));
+      }
+      for (final f in files) {
+        await f.path;
+      }
+      // Evictions run one after another, so this one waits out the passes
+      // each finished download started.
+      await store.evict();
+      // Start from all three on disk, oldest f0 and newest f2.
+      for (var i = 0; i < 3; i++) {
+        final dir = dirOf(i)..createSync(recursive: true);
+        final f = File('${dir.path}/f.bin');
+        if (!f.existsSync()) f.writeAsBytesSync(List.filled(100, 1));
+        f.setLastModifiedSync(DateTime(2026, 1, 1 + i));
+      }
 
-    files[0].release();
-    // Now over the cap again only if we add one back; shrink instead.
-    final tight = storeOver(serving([]), capBytes: 100);
-    addTearDown(tight.dispose);
-    await tight.evict();
-    expect(Directory('${root.path}/${_id(uris[0])}').existsSync(), isFalse);
-    expect(Directory('${root.path}/${_id(uris[2])}').existsSync(), isTrue);
+      files[0].hold();
+      await store.evict();
+      expect(dirOf(0).existsSync(), isTrue, reason: 'held');
+      expect(dirOf(1).existsSync(), isFalse);
+      expect(dirOf(2).existsSync(), isTrue);
+
+      // Over the cap again with a download half in, made the oldest of all.
+      final running = store.open(MediaSpec(mxc: uris[3], name: 'f.bin'));
+      final arrived = Completer<void>();
+      running.addListener(() {
+        if (running.received >= 100 && !arrived.isCompleted) arrived.complete();
+      });
+      gate.add(List.filled(100, 1));
+      await arrived.future;
+      File(running.partialPath).setLastModifiedSync(DateTime(2025));
+
+      files[0].release();
+      await store.evict();
+      expect(dirOf(3).existsSync(), isTrue, reason: 'still arriving');
+      expect(File(running.partialPath).existsSync(), isTrue);
+      expect(dirOf(0).existsSync(), isFalse, reason: 'released, then oldest');
+      expect(dirOf(2).existsSync(), isTrue);
+    },
+  );
+
+  test('a long name is cut short, keeping its extension', () {
+    final long = '${'a' * 300}.png';
+    final safe = MediaStore.safeName(long);
+    expect(utf8.encode(safe).length, lessThanOrEqualTo(200));
+    expect(safe, endsWith('.png'));
+    expect(safe, startsWith('aaaa'));
+
+    // Cut between characters, never inside one.
+    final wide = '${'🥖' * 100}.mp4';
+    final cut = MediaStore.safeName(wide);
+    expect(utf8.encode(cut).length, lessThanOrEqualTo(200));
+    expect(cut, endsWith('.mp4'));
+    expect(cut.replaceAll('🥖', ''), '.mp4');
+
+    // No extension to keep, or one too long to be one.
+    expect(utf8.encode(MediaStore.safeName('b' * 400)).length, 200);
+    expect(
+      utf8.encode(MediaStore.safeName('c.${'d' * 400}')).length,
+      lessThanOrEqualTo(200),
+    );
+    expect(MediaStore.safeName('short.png'), 'short.png');
+  });
+
+  test('a file with a very long name arrives on disk', () async {
+    final store = storeOver(serving([utf8.encode('hello')]));
+    addTearDown(store.dispose);
+    final file = store.open(MediaSpec(mxc: _mxc, name: '${'x' * 300}.pdf'));
+    final path = await file.path;
+    expect(File(path).readAsStringSync(), 'hello');
+    expect(path, endsWith('.pdf'));
   });
 
   test('file names are made safe', () {
