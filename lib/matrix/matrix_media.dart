@@ -44,6 +44,21 @@ class _Ref {
 
   /// Uploading: the SDK holds its bytes, and the server has none yet.
   bool get sending => txid != null && !encrypted && content['url'] is! String;
+
+  /// Where the bytes are: the mxc, plain or encrypted.
+  Object? get _mxc => content['url'] ?? file?['url'];
+
+  // The timeline maps every event afresh on each change. Equal refs let the
+  // UI recognise the same file across those rebuilds.
+  @override
+  bool operator ==(Object other) =>
+      other is _Ref &&
+      other.eventId == eventId &&
+      other.txid == txid &&
+      other._mxc == _mxc;
+
+  @override
+  int get hashCode => Object.hash(eventId, txid, _mxc);
 }
 
 Object? _copy(Object? value) => switch (value) {

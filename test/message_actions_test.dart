@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:loaf_native/ui/channel/media_row.dart';
 import 'package:loaf_native/ui/channel/message_actions.dart';
 import 'package:loaf_native/ui/channel/message_group_tile.dart';
 import 'package:loaf_native/ui/channel/timeline_controller.dart';
@@ -503,6 +505,89 @@ void main() {
         media: photo.media,
       );
       expect(actionsFor(captioned, _you), contains(MessageAction.copy));
+    });
+    final recipe = Message(
+      id: 'r',
+      author: _them,
+      sentAt: DateTime(2026, 9, 24, 10),
+      body: '',
+      media: const Media(
+        kind: MediaKind.file,
+        name: 'recipe.pdf',
+        mimeType: 'application/pdf',
+        ref: 'x',
+      ),
+    );
+
+    testWidgets(
+      'media on a computer offers open and save as',
+      variant: _desktop,
+      (tester) async {
+        expect(actionsFor(recipe, _you), [
+          MessageAction.open,
+          if (defaultTargetPlatform == TargetPlatform.macOS)
+            MessageAction.openWith,
+          MessageAction.saveAs,
+          MessageAction.reply,
+        ]);
+      },
+    );
+
+    testWidgets('media on a phone offers open and share', variant: _mobile, (
+      tester,
+    ) async {
+      expect(actionsFor(recipe, _you), [
+        MessageAction.open,
+        MessageAction.share,
+        MessageAction.reply,
+      ]);
+    });
+
+    testWidgets('open with names the default app on macOS', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      final asked = <Object?>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('moe.loaf.chat/media'),
+        (call) async {
+          asked.add(call.arguments);
+          return call.method == 'defaultAppName' ? 'Preview' : null;
+        },
+      );
+      try {
+        tester.view.physicalSize = const Size(800, 900);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        final controller = TimelineController([recipe], you: _you);
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: loafDarkTheme(),
+            home: Scaffold(
+              body: MessageGroupTile(
+                group: MessageGroup(controller.messages),
+                controller: controller,
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byType(MediaRow), buttons: kSecondaryButton);
+        await tester.pumpAndSettle();
+
+        // Asked when the row appeared, and again for the next menu.
+        expect(asked, isNotEmpty);
+        expect(asked, everyElement({'extension': 'pdf'}));
+        for (final label in ['Open', 'Open with Preview', 'Save as…']) {
+          expect(find.text(label), findsOneWidget, reason: label);
+        }
+        expect(find.text('Share'), findsNothing);
+      } finally {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          const MethodChannel('moe.loaf.chat/media'),
+          null,
+        );
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
   });
 }

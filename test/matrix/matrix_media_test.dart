@@ -70,6 +70,22 @@ void main() {
       expect(sticker?.kind, ui.MediaKind.image);
     });
 
+    test('the same event mapped twice has an equal ref', () {
+      // A row keeps showing an open's progress across timeline rebuilds,
+      // which map every event afresh.
+      Map<String, Object?> content(String url) => {
+        'msgtype': 'm.file',
+        'body': 'recipe.pdf',
+        'url': url,
+      };
+      final once = mediaOf(_event(content('mxc://example.com/a')))!.ref;
+      final again = mediaOf(_event(content('mxc://example.com/a')))!.ref;
+      final other = mediaOf(_event(content('mxc://example.com/b')))!.ref;
+      expect(again, once);
+      expect(again.hashCode, once.hashCode);
+      expect(other, isNot(once));
+    });
+
     test('info fills size, type, dimensions and duration', () {
       final media = mediaOf(
         _event({

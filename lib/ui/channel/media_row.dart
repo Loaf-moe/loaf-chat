@@ -3,12 +3,14 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../model/media_source.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import 'media_open.dart';
 
 const _maxWidth = 400.0;
 const _maxHeight = 360.0;
@@ -91,6 +93,17 @@ class _MediaRowState extends State<MediaRow> {
   /// Bumped on retry so the [Image] resolves afresh.
   var _attempt = 0;
 
+  /// On a computer the media takes focus when clicked, and Space then opens
+  /// it, as in Finder.
+  final _focus = FocusNode(debugLabel: 'media');
+  var _focused = false;
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
   /// Reported from a build, so it lands after the frame.
   void _fail() {
     if (_failed) return;
@@ -142,24 +155,72 @@ class _MediaRowState extends State<MediaRow> {
     );
   }
 
-  /// Wraps [child] in a tap target, only when there is something to open.
+  /// Wraps [child] in a tap target, only when there is something to open,
+  /// with a ring over it while its file comes for an open.
   Widget _tappable(Widget child, double radius) {
     final onOpen = widget.onOpen;
     // A failed picture's one control is "try again": nothing lies over it.
     if (onOpen == null || _failed) return child;
-    return Stack(
+    final tokens = LoafTokens.of(context);
+    final target = Stack(
       children: [
         child,
         Positioned.fill(
           child: Material(
             type: MaterialType.transparency,
             child: InkWell(
-              onTap: onOpen,
+              onTap: () {
+                if (isDesktop) _focus.requestFocus();
+                onOpen();
+              },
+              canRequestFocus: false,
               borderRadius: BorderRadius.circular(radius),
             ),
           ),
         ),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: ListenableBuilder(
+              listenable: fetchingMedia,
+              builder: (context, _) => fetchingMedia.contains(media)
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(radius),
+                      child: _Fetching(
+                        file: MediaSourceScope.of(context).open(media),
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ),
+        ),
+        if (_focused)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: tokens.accent, width: 2),
+                  borderRadius: BorderRadius.circular(radius),
+                ),
+              ),
+            ),
+          ),
       ],
+    );
+    if (!isDesktop) return target;
+    return Shortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.space): _OpenIntent(),
+      },
+      child: Actions(
+        actions: {
+          _OpenIntent: CallbackAction<_OpenIntent>(onInvoke: (_) => onOpen()),
+        },
+        child: Focus(
+          focusNode: _focus,
+          onFocusChange: (focused) => setState(() => _focused = focused),
+          child: target,
+        ),
+      ),
     );
   }
 
@@ -292,6 +353,38 @@ class _MediaRowState extends State<MediaRow> {
     );
     return _tappable(card, LoafRadius.lg);
   }
+}
+
+class _OpenIntent extends Intent {
+  const _OpenIntent();
+}
+
+/// How far a file being fetched to open has got. The download cannot be
+/// stopped once running, so this is only a ring, never a button.
+class _Fetching extends StatelessWidget {
+  const _Fetching({required this.file});
+
+  /// The same file the open is waiting on: opens are shared.
+  final MediaFile file;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    color: const Color(0x66000000),
+    child: Center(
+      child: ListenableBuilder(
+        listenable: file,
+        builder: (context, _) {
+          final total = file.total;
+          return CircularProgressIndicator(
+            value: total == null || total == 0
+                ? null
+                : (file.received / total).clamp(0.0, 1.0),
+            color: Colors.white,
+          );
+        },
+      ),
+    ),
+  );
 }
 
 /// What a picture that would not load says, with the way forward.

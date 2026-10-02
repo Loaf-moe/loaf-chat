@@ -13,6 +13,7 @@ import '../model/media_source.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
+import 'media_open.dart';
 import 'media_row.dart';
 import 'message_actions.dart';
 import 'message_markup.dart';
@@ -172,6 +173,11 @@ class _MessageBody extends StatelessWidget {
           MediaRow(
             media: message.media!,
             uploaded: message.uploaded,
+            // Only what the server has can be fetched whole. Video opens
+            // like any file until it plays in place.
+            onOpen: message.status == MessageStatus.sent
+                ? () => openMedia(context, message.media!)
+                : null,
             onRetry: () =>
                 MediaSourceScope.of(context).retryPreview(message.media!),
           ),
@@ -461,6 +467,24 @@ class _PointerMessage extends StatefulWidget {
 class _PointerMessageState extends State<_PointerMessage> {
   final _link = LayerLink();
   final _toolbar = OverlayPortalController();
+
+  // A file's menu names the app it opens in; ask early, so the answer is
+  // here before any right-click.
+  @override
+  void initState() {
+    super.initState();
+    final media = widget.message.media;
+    if (media != null) lookUpDefaultApp(media);
+  }
+
+  @override
+  void didUpdateWidget(_PointerMessage old) {
+    super.didUpdateWidget(old);
+    final media = widget.message.media;
+    if (media != null && media.name != old.message.media?.name) {
+      lookUpDefaultApp(media);
+    }
+  }
 
   // The toolbar lives in the overlay, so the pointer can leave the message
   // for the toolbar without the toolbar vanishing out from under it.

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/channel/media_row.dart';
 import 'package:loaf_native/ui/channel/message_group_tile.dart';
@@ -172,6 +173,21 @@ void main() {
       await _pump(tester, MediaRow(media: _pdf, onOpen: () => opened++));
       await tester.tap(find.byType(MediaRow));
       expect(opened, 1);
+    });
+
+    testWidgets('on a computer, space opens the clicked media', (tester) async {
+      await on(TargetPlatform.macOS, () async {
+        var opened = 0;
+        await _pump(tester, MediaRow(media: _pdf, onOpen: () => opened++));
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        expect(opened, 0, reason: 'nothing focused yet');
+
+        await tester.tap(find.byType(MediaRow));
+        await tester.pump();
+        expect(opened, 1);
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
+        expect(opened, 2);
+      });
     });
   });
 

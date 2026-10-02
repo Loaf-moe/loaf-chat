@@ -6,18 +6,21 @@
 /// laptop long-presses too, and a phone never hovers.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
+import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../emoji/emoji_picker.dart';
 import '../widgets/toast.dart';
 import '../widgets/action_menu.dart';
+import 'media_open.dart';
 import 'timeline.dart';
 
-enum MessageAction { reply, copy, edit, delete }
+enum MessageAction { open, openWith, saveAs, share, reply, copy, edit, delete }
 
 /// The reactions offered without opening a picker. Bread earns its place.
 const quickReactions = ['👍', '❤️', '😂', '😮', '🔥', '🥖'];
@@ -36,6 +39,7 @@ List<MessageAction> actionsFor(
   if (!writable || message.status != MessageStatus.sent) ...[
     if (message.body.isNotEmpty) MessageAction.copy,
   ] else ...[
+    if (message.media != null) ..._mediaActions,
     MessageAction.reply,
     if (message.body.isNotEmpty) MessageAction.copy,
     if (message.author.id == you.id) ...[
@@ -45,6 +49,18 @@ List<MessageAction> actionsFor(
   ],
 ];
 
+/// A file's own actions, ahead of the rest. A computer opens and saves
+/// (and, on a Mac, names the app it would open in); a phone opens and
+/// shares, the share sheet being where it saves from.
+List<MessageAction> get _mediaActions => isDesktop
+    ? [
+        MessageAction.open,
+        if (defaultTargetPlatform == TargetPlatform.macOS)
+          MessageAction.openWith,
+        MessageAction.saveAs,
+      ]
+    : const [MessageAction.open, MessageAction.share];
+
 /// Whether [message] can take a reaction yet: only once the server has it,
 /// and only where the timeline is [writable] — a reaction is sent into the
 /// room like any message.
@@ -53,6 +69,11 @@ bool canReactTo(Message message, {bool writable = true}) =>
 
 extension on MessageAction {
   String get label => switch (this) {
+    MessageAction.open => 'Open',
+    // Named for its app once that is known; see [_items].
+    MessageAction.openWith => 'Open with…',
+    MessageAction.saveAs => 'Save as…',
+    MessageAction.share => 'Share',
     MessageAction.reply => 'Reply',
     MessageAction.copy => 'Copy text',
     MessageAction.edit => 'Edit',
@@ -60,6 +81,10 @@ extension on MessageAction {
   };
 
   IconData get icon => switch (this) {
+    MessageAction.open => LucideIcons.eye,
+    MessageAction.openWith => LucideIcons.appWindow,
+    MessageAction.saveAs => LucideIcons.download,
+    MessageAction.share => LucideIcons.share,
     MessageAction.reply => LucideIcons.reply,
     MessageAction.copy => LucideIcons.copy,
     MessageAction.edit => LucideIcons.pencil,
@@ -93,19 +118,34 @@ class _CopySelection extends _Pick {
   final String text;
 }
 
-List<ActionItem<_Pick>> _items(Message message, Timeline controller) => [
-  for (final action in actionsFor(
+/// The action list for [message]. Open with names its app, from what the
+/// Mac last said; with no app to name yet, it is left out.
+List<ActionItem<_Pick>> _items(Message message, Timeline controller) {
+  final actions = actionsFor(
     message,
     controller.you,
     writable: controller.writable,
-  ))
-    ActionItem(
-      value: _Act(action),
-      icon: action.icon,
-      label: action.label,
-      destructive: action.destructive,
-    ),
-];
+  );
+  final media = message.media;
+  String? app;
+  if (media != null && actions.contains(MessageAction.openWith)) {
+    app = defaultAppFor(media);
+    // Asked again for next time, in case the default has changed.
+    lookUpDefaultApp(media);
+  }
+  return [
+    for (final action in actions)
+      if (action != MessageAction.openWith || app != null)
+        ActionItem(
+          value: _Act(action),
+          icon: action.icon,
+          label: action == MessageAction.openWith
+              ? 'Open with $app'
+              : action.label,
+          destructive: action.destructive,
+        ),
+  ];
+}
 
 /// Touch: long press. Rises from the bottom, reactions within thumb reach.
 Future<void> showMessageActionsSheet(
@@ -196,9 +236,32 @@ Future<void> _perform(
     case _CopySelection(:final text):
       await Clipboard.setData(ClipboardData(text: text));
       if (context.mounted) showToast(context, 'copied');
+    case _Act(action: MessageAction.open):
+      final media = message.media;
+      if (media != null) await openMedia(context, media);
+    case _Act(action: MessageAction.openWith):
+      final media = message.media;
+      if (media != null) await openMediaWithDefaultApp(context, media);
+    case _Act(action: MessageAction.saveAs):
+      final media = message.media;
+      if (media != null) await saveMediaAs(context, media);
+    case _Act(action: MessageAction.share):
+      final media = message.media;
+      if (media != null) {
+        await shareMedia(context, media, origin: _originOf(context, position));
+      }
     case _Act(action: MessageAction.delete):
       if (await confirmDeleteMessage(context)) controller.delete(message.id);
   }
+}
+
+/// Where the share sheet points from on an iPad: the pointer, or else the
+/// message itself.
+Rect? _originOf(BuildContext context, Offset? position) {
+  if (position != null) return position & const Size(1, 1);
+  final box = context.findRenderObject();
+  if (box is! RenderBox || !box.hasSize) return null;
+  return box.localToGlobal(Offset.zero) & box.size;
 }
 
 /// Redactions cannot be taken back, so this is the one action that asks.
