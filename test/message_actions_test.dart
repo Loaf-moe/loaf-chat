@@ -403,12 +403,42 @@ void main() {
       expect(actionsFor(captionless(MessageStatus.sending), _you), isEmpty);
     });
 
-    test('a caption-less media message in a read-only room offers nothing', () {
+    test('a media message in a read-only room still opens and saves', () {
+      final actions = actionsFor(
+        captionless(MessageStatus.sent),
+        _you,
+        writable: false,
+      );
+      expect(actions, contains(MessageAction.open));
       expect(
-        actionsFor(captionless(MessageStatus.sent), _you, writable: false),
-        isEmpty,
+        actions,
+        isNot(
+          anyOf(contains(MessageAction.reply), contains(MessageAction.delete)),
+        ),
       );
     });
+
+    testWidgets(
+      'in a read-only room, a phone opens and shares a picture',
+      variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+      (tester) async {
+        expect(
+          actionsFor(captionless(MessageStatus.sent), _you, writable: false),
+          [MessageAction.open, MessageAction.share],
+        );
+      },
+    );
+
+    testWidgets(
+      'in a read-only room, a Mac opens and saves a picture',
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      (tester) async {
+        expect(
+          actionsFor(captionless(MessageStatus.sent), _you, writable: false),
+          [MessageAction.open, MessageAction.openWith, MessageAction.saveAs],
+        );
+      },
+    );
 
     test('a failed captioned one can still be copied', () {
       final m = Message(

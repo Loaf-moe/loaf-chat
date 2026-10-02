@@ -30,13 +30,16 @@ const quickReactions = ['👍', '❤️', '😂', '😮', '🔥', '🥖'];
 /// message the server does not have yet can only be copied: replying,
 /// editing and deleting all point at an event it has not got. Nor can a
 /// message in a timeline that is not [writable]: a reply or an edit would
-/// have nowhere to be written.
+/// have nowhere to be written. Its file still opens and saves, as reading
+/// it writes nothing to the room.
 List<MessageAction> actionsFor(
   Message message,
   Member you, {
   bool writable = true,
 }) => [
   if (!writable || message.status != MessageStatus.sent) ...[
+    if (message.status == MessageStatus.sent && message.media != null)
+      ..._mediaActions,
     if (message.body.isNotEmpty) MessageAction.copy,
   ] else ...[
     if (message.media != null) ..._mediaActions,
