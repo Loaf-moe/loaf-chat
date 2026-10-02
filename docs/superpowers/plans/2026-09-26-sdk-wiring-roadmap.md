@@ -1,6 +1,6 @@
 # SDK Wiring Roadmap
 
-> **Status:** phases 1–6 have landed, each from its own rehearsed plan (`2026-09-26-real-sign-in.md`, `2026-09-26-rooms-from-sync.md`, `2026-09-27-timeline.md`, `2026-09-27-e2ee.md`, `2026-09-27-channel-space-actions.md`, `2026-09-29-presence-profile-devices.md`). The app now talks to a real homeserver by default. Every later phase gets its own plan when it comes up.
+> **Status:** phases 1–6 have landed, each from its own rehearsed plan (`2026-09-26-real-sign-in.md`, `2026-09-26-rooms-from-sync.md`, `2026-09-27-timeline.md`, `2026-09-27-e2ee.md`, `2026-09-27-channel-space-actions.md`, `2026-09-29-presence-profile-devices.md`). Phase 9 is built (`2026-09-30-media.md`) and awaiting checks by hand; see "Phase 9: to check by hand". The app now talks to a real homeserver by default. Every later phase gets its own plan when it comes up.
 
 **Goal:** Replace the mock source behind the finished UI with matrix-dart-sdk. Phases are ordered by what gets the app to "daily-drivable on loaf.moe" soonest for the least work.
 
@@ -30,7 +30,7 @@
 | 6 | **Presence and status, profile, settings** | Cheap polish **Plan: `2026-09-29-presence-profile-devices.md`** | S |
 | 7 | **Voice channels** (MatrixRTC + `livekit_client`), connected-call bar, occupancy avatars | High delight, but heavy and needs a device | L |
 | 8 | **APNs push via Sygnal, DM ringing** (CallKit/PushKit, MSC4075) | Mac-only work, scheduled around Mac access | L |
-| 9 | Images and files, media viewer | Part of the v1 messaging scope, and independent of the phases above | M |
+| 9 | Images and files, video, media viewer | Part of the v1 messaging scope, and independent of the phases above. **Built, awaiting checks by hand. Plan: `2026-09-30-media.md`** | M |
 
 Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel subagents. Phases 7 and 8 depend on 4 for call media keys. The default backend flipped from `mock` to `matrix` when phase 3 landed; `--dart-define=LOAF_BACKEND=mock` plays the mock.
 
@@ -38,7 +38,7 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 
 - **The soft-logout "welcome back" screen** (see the findings above). Until then an expired, unrefreshable token signs out.
 - **MSC3861 OIDC sign-in.** loaf.moe advertises it, but `m.login.sso` works today.
-- **Encrypting the sqlite database at rest** (sqlcipher, with a key in the Keychain) before anyone but Chris uses the app.
+- **Encrypting the sqlite database at rest** (sqlcipher, with a key in the Keychain) before anyone but Chris uses the app. Decrypted media on disk is the same class; see "Deferred from phase 9".
 - **Android's SSO callback activity** (best-effort platform).
 - **A widget-level test of `SessionRoot` over `MatrixSession`** (sign-in flips to the shell, and the post-frame dispose closes the homeserver). It needs a fake-backed session inside the widget tester's fake clock.
 - **Pressing Enter in the password field during the point of no return** reaches the submit handler, which is a no-op there. The fields could be read-only while signing in, to be fully honest.
@@ -60,14 +60,14 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 
 - **Typing indicators, read receipts under messages, the unread divider and a jump-to-newest pill.** Each is new UI the spec does not draw yet.
 - **State events as timeline lines** (joins, leaves, renames, topics). They are skipped until then.
-- **Rich formatting, both ways.** Messages display as plain text, and send as plain text with no markdown, so what you see is what went out.
+- ~~**Rich formatting, both ways.** Messages display as plain text, and send as plain text with no markdown, so what you see is what went out.~~ Done (`892e43b`, `8c3c7f5`).
 - **Fetching a reply's target that is not loaded.** The quote is a stub ("a message further up") until then.
 - **Evicting cached timelines.** Every room opened stays open until sign-out; fine at loaf.moe's size, like large member lists.
-- **The composer's + and paperclip buttons** do nothing on either backend. They belong to media (phase 9); until then they are controls with nothing behind them.
+- ~~**The composer's + and paperclip buttons** do nothing on either backend. They belong to media (phase 9); until then they are controls with nothing behind them.~~ Done in phase 9 (`0c77e3b`).
 - **A toast for a refused reaction, edit or delete only shows while its room is on screen.** The screen still snaps back to what the server has.
 - **Voice channels read "messages aren't wired up yet"**, which an existing test pins, until calls land in phase 7.
-- **"didn't send" takes minutes to appear offline** (found by hand, 2026-09-27). Two SDK defaults stack: `Client.sendTimelineEventTimeout` is 1 minute of retrying once a second, and the plain `http.Client` from `openClient` has no per-request timeout, so one attempt on a dead network hangs until the OS drops the TCP connection; the SDK checks its deadline only after an attempt fails. Candidate fix: a shorter window and a timeout on send requests only (sync long-polls for 30s by design). Chris's call: leave it until phase 9, since a send timeout would also bound image uploads.
-- **Edit is offered on file and emote rows**; saving turns a file into a text message. It should be text and notice rows only.
+- ~~**"didn't send" takes minutes to appear offline** (found by hand, 2026-09-27). Two SDK defaults stack: `Client.sendTimelineEventTimeout` is 1 minute of retrying once a second, and the plain `http.Client` from `openClient` has no per-request timeout, so one attempt on a dead network hangs until the OS drops the TCP connection; the SDK checks its deadline only after an attempt fails. Candidate fix: a shorter window and a timeout on send requests only (sync long-polls for 30s by design). Chris's call: leave it until phase 9, since a send timeout would also bound image uploads.~~ Done in phase 9: a per-request timeout on sends.
+- ~~**Edit is offered on file and emote rows**; saving turns a file into a text message. It should be text and notice rows only.~~ Done in phase 9.
 - **`MatrixRooms.markRead` can target the SDK's `refreshingLastEvent` placeholder or a discarded echo.** It fails silently and heals itself.
 - **A room that fails to open reads "couldn't load older messages · try again" over an empty room.** It works, but the copy misleads.
 - **The failed line's retry and discard, and the older row's "try again", are small tap targets on a phone.**
@@ -116,16 +116,45 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **A remote account-data or push-rule change that lands while you're choosing a presence** isn't re-read until the next one.
 - **`lib/ui/settings/devices_section.dart` holds the section, its rows, the rename sheet and the sign-out flow** in one 600-line file.
 
-## Phase 9 notes
+## Phase 9: to check by hand
 
-- **Linux video codecs in the GNOME 51 Flatpak runtime: from source, not observed with `gst-inspect-1.0`; Chris to confirm** (2026-10-02; read from the published build definitions, since the local Docker/Flatpak run was blocked by a full disk and then a wedged Docker). GNOME 51 builds on freedesktop-sdk 26.08.1 (`gnome-build-meta` branch `gnome-51`, `elements/freedesktop-sdk.bst`: `track: freedesktop-sdk-26.08*`, `ref: freedesktop-sdk-26.08.1-0-gb02b59ff...`).
-  - **H.264 is not in the runtime; `org.freedesktop.Platform.codecs-extra` supplies it.** The runtime's own ffmpeg (`elements/components/ffmpeg.bst`, "no patented codecs") ends with `--disable-decoder="h264,hevc,vc1,vvc"`. The extension's ffmpeg (`elements/extensions/codecs-extra/ffmpeg.bst`) passes `--enable-decoders` with no such disable, plus x264/x265. `gstreamer-libav` is in the runtime (`elements/platform.bst`), and the extension's libs sit on the loader path (`add-ld-path: lib`) and its plugin dir on `GST_PLUGIN_SYSTEM_PATH`, so `avdec_h264` should appear once the extension is installed. That last link is inference, not read directly.
-  - **Users get the extension automatically.** `gnome-build-meta` `elements/flatpak/platform/platform.bst` declares `Extension org.freedesktop.Platform.codecs-extra` with `directory`, `version: 26.08-extra`, `add-ld-path: lib` and `autodelete: 'true'`, and no `no-autodownload` (the GL extensions do set `no-autodownload: "true"`). Per `flatpak-metadata(5)`, `no-autodownload` is what stops download on install or update of a related app, so this one downloads by default. Caveat: it comes from the remote, so a sideloaded bundle with no remote carrying the extension may not fetch it. No `add-extensions` entry is needed for a Flathub install.
-  - **AAC: present without the extension.** The runtime ffmpeg's decoder list includes `aac`, so `avdec_aac` should exist.
-  - **VP9: present.** `gst-plugins-good` depends on `libvpx` (built with `--enable-vp9`) and the ffmpeg list has `vp9`, so `vp9dec` should exist.
-  - **AV1: present.** `gst-plugins-rs` builds with `-Ddav1d=enabled` (depends on `components/dav1d.bst`), so `dav1ddec` should exist.
-  - **`openh264dec`: not shipped.** Nothing in freedesktop-sdk 26.08.1 builds openh264 (the only mention is `-DWITH_OpenH264_DECODER=OFF` in `elements/include/libheif.yml`, and `gstreamer-plugins-bad` has no openh264 dependency). Flathub's separate `org.freedesktop.Platform.openh264` extension is outside this reading.
-  - Sources: `https://gitlab.gnome.org/GNOME/gnome-build-meta/-/raw/gnome-51/elements/{freedesktop-sdk.bst,flatpak/platform/platform.bst,sdk-platform.bst}` and `https://gitlab.com/freedesktop-sdk/freedesktop-sdk/-/raw/freedesktop-sdk-26.08.1/elements/{components/ffmpeg.bst,components/gstreamer-libav.bst,components/gstreamer-plugins-bad.bst,components/gstreamer-plugins-good.bst,components/gstreamer-plugins-rs.bst,components/dav1d.bst,platform.bst,flatpak-images/platform.bst,flatpak-images/platform-codecs-extra.bst,extensions/codecs-extra/ffmpeg.bst,extensions/codecs-extra/config.yml}`.
+Built and tested offline (`2026-09-30-media.md`); none of this has been run against loaf.moe or on a device yet. Chris's to-do, nothing here is checked:
+
+- [ ] In an encrypted DM, FluffyChat sends an image, a video and a PDF. All three draw; the image opens in Quick Look on macOS and iOS; the video plays in place and scrubs ahead while downloading; the PDF opens.
+- [ ] An iPhone camera original (`moov` at the end) waits with progress, then plays.
+- [ ] A 200 MB file downloads with progress, survives scrolling away and back, and opens.
+- [ ] A send with Wi-Fi off reads "didn't send" within about 30 s; turning Wi-Fi back on and retrying works.
+- [ ] Quick Look's share sheet on iOS saves to Photos. The PHPicker path of `image_picker` was untried in phase 6, so note it if this is the first time.
+- [ ] On Linux: video in the Flatpak build and the AppImage, opening a PDF through the portal in each, and Save as… through the GTK chooser.
+- [ ] Sign out with a video playing: nothing crashes, and `media/files/` is empty afterwards.
+- [ ] macOS: hover, clicks and scrubbing reach the inline video player inside the app (the top risk; not yet seen working).
+- [ ] iOS: picture in picture starts, keeps playing when the row scrolls away or the room closes, and stops cleanly; a PiP that fails to start leaves nothing stuck.
+- [ ] iOS/macOS: an iPhone camera original (index at the end) shows download progress until it can play.
+- [ ] Apple: a video that can't be decoded shows "couldn't play this · open it instead". We kept our own message over AVKit's because AVKit's failed state offers no way forward; confirm what AVKit actually shows.
+- [ ] Linux: video on a real screen with sound; leaving a room mid-playback doesn't crash.
+- [ ] Linux Flatpak: confirm H.264 decodes (`flatpak run --command=gst-inspect-1.0 org.gnome.Platform//51 avdec_h264`), since the codec finding below was read from source.
+- [ ] Quick Look on macOS when the panel is already open on another file.
+
+### Linux video codecs in the GNOME 51 runtime
+
+- **From source, not observed with `gst-inspect-1.0`; Chris to confirm** with `flatpak run --command=gst-inspect-1.0 org.gnome.Platform//51 avdec_h264` (2026-10-02; read from the published build definitions). GNOME 51 builds on freedesktop-sdk 26.08.1 (`gnome-build-meta` branch `gnome-51`, `elements/freedesktop-sdk.bst`: `track: freedesktop-sdk-26.08*`, `ref: freedesktop-sdk-26.08.1-0-gb02b59ff...`).
+- **H.264 is not in the runtime; `org.freedesktop.Platform.codecs-extra` supplies it.** The runtime's own ffmpeg (`elements/components/ffmpeg.bst`, "no patented codecs") ends with `--disable-decoder="h264,hevc,vc1,vvc"`. The extension's ffmpeg (`elements/extensions/codecs-extra/ffmpeg.bst`) passes `--enable-decoders` with no such disable, plus x264/x265. `gstreamer-libav` is in the runtime (`elements/platform.bst`), and the extension's libs sit on the loader path (`add-ld-path: lib`) and its plugin dir on `GST_PLUGIN_SYSTEM_PATH`, so `avdec_h264` should appear once the extension is installed. That last link is inference, not read directly.
+- **Users get the extension automatically.** `gnome-build-meta` `elements/flatpak/platform/platform.bst` declares `Extension org.freedesktop.Platform.codecs-extra` with `directory`, `version: 26.08-extra`, `add-ld-path: lib` and `autodelete: 'true'`, and no `no-autodownload` (the GL extensions do set `no-autodownload: "true"`). Per `flatpak-metadata(5)`, `no-autodownload` is what stops download on install or update of a related app, so this one downloads by default. Caveat: it comes from the remote, so a sideloaded bundle with no remote carrying the extension may not fetch it. No `add-extensions` entry is needed for a Flathub install.
+- **AAC: present without the extension.** The runtime ffmpeg's decoder list includes `aac`, so `avdec_aac` should exist.
+- **VP9: present.** `gst-plugins-good` depends on `libvpx` (built with `--enable-vp9`) and the ffmpeg list has `vp9`, so `vp9dec` should exist.
+- **AV1: present.** `gst-plugins-rs` builds with `-Ddav1d=enabled` (depends on `components/dav1d.bst`), so `dav1ddec` should exist.
+- **`openh264dec`: not shipped.** Nothing in freedesktop-sdk 26.08.1 builds openh264 (the only mention is `-DWITH_OpenH264_DECODER=OFF` in `elements/include/libheif.yml`, and `gstreamer-plugins-bad` has no openh264 dependency). Flathub's separate `org.freedesktop.Platform.openh264` extension is outside this reading.
+- Sources: `https://gitlab.gnome.org/GNOME/gnome-build-meta/-/raw/gnome-51/elements/{freedesktop-sdk.bst,flatpak/platform/platform.bst,sdk-platform.bst}` and `https://gitlab.com/freedesktop-sdk/freedesktop-sdk/-/raw/freedesktop-sdk-26.08.1/elements/{components/ffmpeg.bst,components/gstreamer-libav.bst,components/gstreamer-plugins-bad.bst,components/gstreamer-plugins-good.bst,components/gstreamer-plugins-rs.bst,components/dav1d.bst,platform.bst,flatpak-images/platform.bst,flatpak-images/platform-codecs-extra.bst,extensions/codecs-extra/ffmpeg.bst,extensions/codecs-extra/config.yml}`.
+
+## Deferred from phase 9, to place later
+
+- **Dragging a media row out to Finder or Files.** Save as… and Open cover it for now; it's `NSFilePromiseProvider` and a GTK drag source when it comes.
+- **Browsing a room's media from the viewer (next/previous).** It needs a media index per room, which the timeline doesn't keep.
+- **Audio playing inline (voice-message rows).** Audio opens in Quick Look or the default app.
+- **Checking an encrypted file against its SHA-256.** Chris's call: video plays as it arrives, and no half-measure is kept for saved files.
+- **Encrypting decrypted media at rest.** Same class as the deferred sqlcipher database (phase 1); both come before anyone but Chris uses the app.
+- **Resuming a download after a quit.** tuwunel serves no byte ranges to resume from.
+- **Your own sent videos have no poster.** `Client.customVideoThumbnailGenerator` is unset. On Apple it would be `AVAssetImageGenerator`; on Linux, a GStreamer snapshot.
 
 ## Global constraints (all phases)
 
