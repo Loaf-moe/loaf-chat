@@ -1,9 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/io_client.dart';
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
+  test('the default client gives up connecting after 10 s', () {
+    final io = ioHttpClient();
+    addTearDown(io.close);
+    expect(io.connectionTimeout, const Duration(seconds: 10));
+    final client = defaultHttpClient();
+    addTearDown(client.close);
+    expect(client, isA<IOClient>());
+  });
+
   test('the client sends for 30 s before giving up', () async {
     final client = await openClient(
       httpClient: FakeMatrixApi(),

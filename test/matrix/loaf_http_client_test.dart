@@ -180,4 +180,20 @@ void main() {
       expect(inner.aborted, hasLength(1));
     });
   });
+
+  test('an upload answered before its body is read is not aborted later', () {
+    fakeAsync((async) {
+      final inner = _Inner()..stopAfter = 1;
+      LoafHttpClient(inner).send(_upload(3 * chunk));
+      async.flushMicrotasks();
+      inner.respond();
+      async.flushMicrotasks();
+      // The server said 413 early; the body drains afterwards.
+      inner.stopAfter = null;
+      inner.body?.resume();
+      async.flushMicrotasks();
+      async.elapse(const Duration(seconds: 60));
+      expect(inner.aborted, isEmpty);
+    });
+  });
 }

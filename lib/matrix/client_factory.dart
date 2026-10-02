@@ -5,11 +5,20 @@ library;
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:loaf_native/matrix/loaf_http_client.dart';
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+/// The `dart:io` client behind the app's requests. Without a connect limit a
+/// dead network waits on the OS's own, which is minutes.
+HttpClient ioHttpClient() =>
+    HttpClient()..connectionTimeout = const Duration(seconds: 10);
+
+/// What [openClient] sends through when a test supplies none.
+http.Client defaultHttpClient() => IOClient(ioHttpClient());
 
 /// [databasePath] defaults to a file in the app's support directory; tests
 /// pass `inMemoryDatabasePath`. [httpClient] is for tests too.
@@ -49,7 +58,7 @@ Future<Client> openClient({
   return Client(
     'loaf',
     database: database,
-    httpClient: LoafHttpClient(httpClient ?? http.Client()),
+    httpClient: LoafHttpClient(httpClient ?? defaultHttpClient()),
     // The SDK's default is 0: it retries a failed send for ever. 30 s is
     // how long a dead network takes to read "didn't send".
     sendTimelineEventTimeout: const Duration(seconds: 30),

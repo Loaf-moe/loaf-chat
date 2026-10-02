@@ -47,7 +47,11 @@ class LoafHttpClient extends http.BaseClient {
         request.url.path.endsWith('/upload');
     final abort = Completer<void>();
     Timer? timer;
+    // The body may still be draining after the server has answered (a 413,
+    // say); a timer armed then would abort a request already answered.
+    var done = false;
     void arm(Duration within) {
+      if (done) return;
       timer?.cancel();
       timer = Timer(within, () {
         if (!abort.isCompleted) abort.complete();
@@ -77,6 +81,7 @@ class LoafHttpClient extends http.BaseClient {
     try {
       return await _inner.send(copy);
     } finally {
+      done = true;
       timer?.cancel();
     }
   }
