@@ -143,4 +143,34 @@ void main() {
     await tester.pump();
     expect(methods(), ['stream.begin', 'stream.progress', 'stream.end']);
   });
+
+  testWidgets('ending them all fails every reader, once', (tester) async {
+    final a = _FakeFile('a');
+    final b = _FakeFile('b');
+    VideoStreams.attach(a);
+    VideoStreams.attach(a);
+    VideoStreams.attach(b);
+    await tester.pump();
+    calls.clear();
+
+    VideoStreams.endAll();
+    await tester.pump();
+    expect(methods(), ['stream.end', 'stream.end']);
+    expect({for (final c in calls) (c.arguments as Map)['id']}, {'a', 'b'});
+
+    // What the players do as they go afterwards sends nothing more.
+    a.arrive(500);
+    VideoStreams.detach(a);
+    VideoStreams.detach(a);
+    VideoStreams.detach(b);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(methods(), ['stream.end', 'stream.end']);
+
+    // A new player afterwards starts afresh.
+    VideoStreams.attach(a);
+    await tester.pump();
+    expect(methods().last, 'stream.begin');
+    VideoStreams.detach(a);
+    await tester.pump();
+  });
 }

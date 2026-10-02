@@ -70,6 +70,9 @@ public final class LoafMediaPlugin: NSObject, FlutterPlugin {
       }
       videos.pause(view: view)
       result(nil)
+    case "video.stopAll":
+      videos.stopAll()
+      result(nil)
     case "video.floating":
       guard let view = (arguments?["view"] as? NSNumber)?.int64Value else {
         result(Self.badArguments(call))

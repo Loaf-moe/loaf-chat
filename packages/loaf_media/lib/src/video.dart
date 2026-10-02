@@ -5,6 +5,8 @@
 /// (`linux_video.dart`).
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -131,6 +133,28 @@ class LoafVideo extends StatefulWidget {
   /// offered beside "couldn't play this". The platform players elsewhere
   /// say so themselves.
   final VoidCallback? onOpen;
+
+  /// Signing out: every player stops, a floating one included, and lets go
+  /// of its file. The rows go with the account; a video floating in picture
+  /// in picture has no row to go with, and would play on.
+  static void endAll() {
+    final native = _floating.isNotEmpty || _players.isNotEmpty;
+    final floating = Map.of(_floating);
+    _floating.clear();
+    for (final MapEntry(key: view, value: player) in floating.entries) {
+      player.onRelease?.call();
+      if (videoFocus.value == view) videoFocus.value = null;
+    }
+    // Linux draws its player in Flutter, which goes with the rows.
+    if (native && defaultTargetPlatform != TargetPlatform.linux) {
+      unawaited(
+        _channel.invokeMethod<void>('video.stopAll').catchError((Object e) {
+          debugPrint('[loaf media] stopAll: $e');
+        }),
+      );
+    }
+    VideoStreams.endAll();
+  }
 
   /// Where this platform has a player: iOS, macOS and Linux. Asked of the
   /// target platform, as the player is chosen by it.

@@ -40,6 +40,17 @@ abstract final class VideoStreams {
     stream.end();
   }
 
+  /// Signing out: no file is read any more. Each native reader waiting on
+  /// bytes fails rather than waiting for a download that has stopped, and
+  /// players going afterwards have nothing left to detach.
+  static void endAll() {
+    final streams = _streams.values.toList();
+    _streams.clear();
+    for (final stream in streams) {
+      stream.end();
+    }
+  }
+
   static void _send(String method, Map<String, Object?> arguments) {
     unawaited(
       _channel.invokeMethod<void>(method, arguments).catchError((Object e) {

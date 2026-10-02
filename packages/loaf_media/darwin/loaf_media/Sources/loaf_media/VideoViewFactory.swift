@@ -106,6 +106,18 @@ final class VideoViewFactory: NSObject, FlutterPlatformViewFactory {
     videos.object(forKey: NSNumber(value: view))?.video.pause()
   }
 
+  /// Signing out: nothing of the account plays on. The rows go with it;
+  /// a player floating in picture in picture has no row, so it is ended
+  /// here.
+  func stopAll() {
+    for case let box as VideoBox in videos.objectEnumerator()?.allObjects ?? [] {
+      box.video.pause()
+    }
+    #if os(iOS)
+      InlineVideoView.stopFloating()
+    #endif
+  }
+
   // The two embedders disagree on whether a codec is optional.
   #if os(iOS)
     func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
@@ -175,6 +187,17 @@ final class VideoBox {
     /// picture, starting or started, so its file must stay readable.
     static func isFloating(view: Int64) -> Bool {
       floating[view] != nil
+    }
+
+    /// Ends every floating player: with no player left to show, picture
+    /// in picture closes, and the view is let go.
+    static func stopFloating() {
+      let views = Array(floating.values)
+      floating.removeAll()
+      for view in views {
+        view.box.video.tearDown()
+        view.controller.player = nil
+      }
     }
 
     init(video: InlineVideo, parent: UIViewController?) {

@@ -8,6 +8,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+import 'package:loaf_media/loaf_media.dart' show LoafVideo;
 import 'package:matrix/matrix.dart';
 
 import '../ui/model/media_source.dart' as ui;
@@ -256,7 +257,16 @@ class MatrixMediaSource implements ui.MediaSource {
   final Client client;
   final MediaStore? store;
 
-  void dispose() => store?.dispose();
+  /// Signing out. The rows go with the account, but a video floating in
+  /// picture in picture would play on, and a player waiting on bytes that
+  /// will never come would wait for ever: every player is stopped, and
+  /// every stream ended, failing its readers.
+  void dispose() {
+    final store = this.store;
+    if (store == null) return;
+    store.dispose();
+    LoafVideo.endAll();
+  }
 
   ui.MediaFile _open(MediaSpec? spec, String missing) {
     final store = this.store;
