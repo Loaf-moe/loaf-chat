@@ -31,6 +31,10 @@ abstract interface class MediaSource {
 
   /// The file on disk.
   MediaFile open(Media media);
+
+  /// Asks again for whatever [preview] needs, after it failed. Starts no
+  /// download that the preview did not.
+  void retryPreview(Media media);
 }
 
 /// Nothing to show: rows keep their placeholders.
@@ -46,6 +50,9 @@ class NoMediaSource implements MediaSource {
 
   @override
   MediaFile open(Media media) => throw UnsupportedError('no media source here');
+
+  @override
+  void retryPreview(Media media) {}
 }
 
 class MediaSourceScope extends InheritedWidget {

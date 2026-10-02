@@ -13,9 +13,14 @@ import '../ui/widgets/avatar_images.dart';
 
 /// 64, 128 and 320 physical px: the sizes servers pre-generate, so their
 /// thumbnails are reused rather than made per request.
-@visibleForTesting
-int bucketFor(double physical) =>
-    physical <= 64 ? 64 : (physical <= 128 ? 128 : 320);
+const avatarBuckets = [64, 128, 320];
+
+/// What a row's picture rounds up to: the server's thumbnail sizes.
+const timelineBuckets = [320, 640, 1280];
+
+/// The smallest of [buckets] that holds [physical] px, or the largest.
+int bucketFor(double physical, {List<int> buckets = avatarBuckets}) =>
+    buckets.firstWhere((b) => physical <= b, orElse: () => buckets.last);
 
 class MatrixAvatarImages implements AvatarImages {
   MatrixAvatarImages(this.client);

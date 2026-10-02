@@ -6,11 +6,12 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/client_factory.dart';
+import 'package:loaf_native/matrix/loaf_http_client.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/matrix/matrix_timeline.dart';
 import 'package:loaf_native/ui/channel/timeline.dart' show Attachment;
 import 'package:loaf_native/ui/model/models.dart' hide Role;
-import 'package:matrix/matrix.dart' hide Timeline;
+import 'package:matrix/matrix.dart' hide MediaKind, Timeline;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 const _me = '@test:fakeServer.notExisting';
@@ -25,6 +26,9 @@ class _Api extends FakeMatrixApi {
   final redacted = <String>[];
   final markers = <Map<String, Object?>>[];
   var refuseSend = false;
+
+  /// Takes an upload's request and never answers it.
+  var stallUpload = false;
 
   /// The largest upload the server says it takes.
   var uploadLimit = 50000000;
@@ -54,6 +58,21 @@ class _Api extends FakeMatrixApi {
     'errcode': 'M_UNKNOWN',
     'error': 'something broke',
   }, 500);
+
+  /// A stalled upload answers nothing, but still gives up when the client
+  /// aborts it, as a real connection does.
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final upload =
+        request.method == 'POST' &&
+        request.url.path.endsWith('/media/v3/upload');
+    if (stallUpload && upload) {
+      final abort = request is http.Abortable ? request.abortTrigger : null;
+      if (abort != null) await abort;
+      throw http.RequestAbortedException(request.url);
+    }
+    return super.send(request);
+  }
 
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
@@ -297,7 +316,7 @@ void main() {
       expect(h.messages.single.formatted, '<i>hello</i>');
     });
 
-    test('a file is a plain row until media is drawn', () async {
+    test('a file is a media row', () async {
       final h = await _open([
         _event('m.room.message', {
           'msgtype': 'm.file',
@@ -305,7 +324,47 @@ void main() {
           'url': 'mxc://example.com/abc',
         }),
       ]);
-      expect(h.messages.single.body, '📎 recipe.pdf');
+      final row = h.messages.single;
+      expect(row.media!.name, 'recipe.pdf');
+      expect(row.media!.kind, MediaKind.file);
+      expect(row.body, '');
+    });
+
+    test("a caption's HTML is drawn", () async {
+      final h = await _open([
+        _event('m.room.message', {
+          'msgtype': 'm.image',
+          'filename': 'loaf.png',
+          'body': 'fresh bread',
+          'format': 'org.matrix.custom.html',
+          'formatted_body': '<b>fresh</b> bread',
+          'url': 'mxc://example.com/loaf',
+        }),
+        _event('m.room.message', {
+          'msgtype': 'm.image',
+          'body': 'plain.png',
+          'format': 'org.matrix.custom.html',
+          'formatted_body': '<b>plain.png</b>',
+          'url': 'mxc://example.com/plain',
+        }),
+      ]);
+      final captioned = h.messages.first;
+      expect(captioned.body, 'fresh bread');
+      expect(captioned.formatted, '<b>fresh</b> bread');
+      expect(captioned.media!.name, 'loaf.png');
+      expect(h.messages.last.body, '');
+      expect(h.messages.last.formatted, isNull);
+    });
+
+    test('a sticker is an image row', () async {
+      final h = await _open([
+        _event('m.sticker', {
+          'body': 'wave',
+          'url': 'mxc://example.com/wave',
+          'info': {'w': 100, 'h': 100, 'mimetype': 'image/png'},
+        }),
+      ]);
+      expect(h.messages.single.media!.kind, MediaKind.image);
     });
 
     test('state events are not rows', () async {
@@ -552,7 +611,7 @@ void main() {
       expect(content['msgtype'], MessageTypes.File);
       expect(content['body'], 'notes.txt');
       expect(content['url'], startsWith('mxc://example.com/'));
-      expect(h.messages.last.body, '📎 notes.txt');
+      expect(h.messages.last.media!.name, 'notes.txt');
       expect(h.messages.last.status, MessageStatus.sent);
     });
 
@@ -585,7 +644,57 @@ void main() {
       expect(await said, 'big.bin is too big for this server');
       await _settle();
       expect(h.api.sent, isEmpty);
-      expect(h.byBody('📎 big.bin').status, MessageStatus.failed);
+      expect(
+        h.messages.firstWhere((m) => m.media?.name == 'big.bin').status,
+        MessageStatus.failed,
+      );
+    });
+
+    test('a stalled upload fails the row', () async {
+      // The SDK runs real timers and a real database, so this is real time
+      // with short limits rather than fake_async.
+      final api = _Api()..stallUpload = true;
+      final client = await openClient(
+        httpClient: api,
+        databasePath: inMemoryDatabasePath,
+        sendTimeout: const Duration(milliseconds: 300),
+        wrap: (inner) => LoafHttpClient(
+          inner,
+          uploadIdle: const Duration(milliseconds: 50),
+          headersWithin: const Duration(milliseconds: 50),
+        ),
+      );
+      FakeMatrixApi.client = client;
+      addTearDown(client.dispose);
+      await client.init(
+        newToken: 'abcd',
+        newHomeserver: Uri.parse('https://fakeServer.notExisting'),
+        newUserID: _me,
+        newDeviceID: 'GHTYAJCE',
+        newDeviceName: 'loaf on test',
+        waitForFirstSync: false,
+      );
+      await _sync(client, [_text('hi')]);
+      final rooms = MatrixRooms(client);
+      addTearDown(rooms.dispose);
+      final h = _Harness(api, client, rooms);
+      h.timeline;
+      await _settle();
+
+      h.timeline.sendFile(
+        Attachment(name: 'stuck.bin', bytes: Uint8List.fromList([1, 2, 3])),
+      );
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      MessageStatus? status;
+      while (DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+        status = h.messages
+            .where((m) => m.media?.name == 'stuck.bin')
+            .map((m) => m.status)
+            .firstOrNull;
+        if (status == MessageStatus.failed) break;
+      }
+      expect(status, MessageStatus.failed);
     });
 
     test('a refused message stays, failed, until retried', () async {

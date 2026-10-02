@@ -332,6 +332,8 @@ class StoredFile extends ChangeNotifier implements MediaFile {
       await _cleanUp(raf, response);
       raf = null;
       response = null;
+      // Signing out during the cleanup has already failed the file.
+      if (_dead) return;
       // Whatever cleanup managed, the file ends failed and says so.
       _error = e;
       _path.completeError(e);

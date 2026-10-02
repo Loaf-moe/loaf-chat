@@ -21,7 +21,9 @@ HttpClient ioHttpClient() =>
 http.Client defaultHttpClient() => IOClient(ioHttpClient());
 
 /// [databasePath] defaults to a file in the app's support directory; tests
-/// pass `inMemoryDatabasePath`. [httpClient] is for tests too.
+/// pass `inMemoryDatabasePath`. [httpClient] is for tests too, as are
+/// [sendTimeout] and [wrap], which let one shorten the limits that are 30 s
+/// for real.
 ///
 /// [mediaPath] is where downloaded pictures are kept between launches. The
 /// SDK stores none without it, so it defaults beside the database and, when
@@ -30,6 +32,8 @@ Future<Client> openClient({
   http.Client? httpClient,
   String? databasePath,
   String? mediaPath,
+  Duration? sendTimeout,
+  LoafHttpClient Function(http.Client inner)? wrap,
 }) async {
   // The sqlite3 package bundles sqlite through build hooks on every
   // platform, so one ffi factory serves iOS, macOS and Linux alike.
@@ -58,10 +62,10 @@ Future<Client> openClient({
   return Client(
     'loaf',
     database: database,
-    httpClient: LoafHttpClient(httpClient ?? defaultHttpClient()),
+    httpClient: (wrap ?? LoafHttpClient.new)(httpClient ?? defaultHttpClient()),
     // The SDK's default is 0: it retries a failed send for ever. 30 s is
     // how long a dead network takes to read "didn't send".
-    sendTimelineEventTimeout: const Duration(seconds: 30),
+    sendTimelineEventTimeout: sendTimeout ?? const Duration(seconds: 30),
     // The SDK keeps only a room list's state in memory for rooms not open.
     // These are what the channel list and member list read on top of that:
     // a channel's topic and lock, and who is an admin or moderator.

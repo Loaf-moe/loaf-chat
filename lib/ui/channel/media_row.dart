@@ -56,12 +56,18 @@ String _clock(Duration d) {
   return '${d.inMinutes}:$seconds';
 }
 
-class MediaRow extends StatelessWidget {
+class MediaRow extends StatefulWidget {
   /// The picture or video frame, for tests to measure.
   @visibleForTesting
   static const pictureKey = ValueKey('media-picture');
 
-  const MediaRow({super.key, required this.media, this.uploaded, this.onOpen});
+  const MediaRow({
+    super.key,
+    required this.media,
+    this.uploaded,
+    this.onOpen,
+    this.onRetry,
+  });
 
   final Media media;
 
@@ -71,10 +77,45 @@ class MediaRow extends StatelessWidget {
   /// Null draws no affordance: the row is a picture, not a button.
   final VoidCallback? onOpen;
 
+  /// Starts the preview's download again after it failed. Null draws no
+  /// "try again": there would be nothing behind it.
+  final VoidCallback? onRetry;
+
+  @override
+  State<MediaRow> createState() => _MediaRowState();
+}
+
+class _MediaRowState extends State<MediaRow> {
+  Media get media => widget.media;
+
+  /// The preview failed and has not been asked for again.
+  var _failed = false;
+
+  /// Bumped on retry so the [Image] resolves afresh.
+  var _attempt = 0;
+
+  /// Reported from a build, so it lands after the frame.
+  void _fail() {
+    if (_failed) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _failed = true);
+    });
+  }
+
+  void _retry(ImageProvider preview) {
+    widget.onRetry?.call();
+    // The failed load is not cached, but a pending one may be.
+    PaintingBinding.instance.imageCache.evict(preview);
+    setState(() {
+      _failed = false;
+      _attempt++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    final uploaded = widget.uploaded;
     final tokens = LoafTokens.of(context);
-    final uploaded = this.uploaded;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -106,8 +147,9 @@ class MediaRow extends StatelessWidget {
 
   /// Wraps [child] in a tap target, only when there is something to open.
   Widget _tappable(Widget child, double radius) {
-    final onOpen = this.onOpen;
-    if (onOpen == null) return child;
+    final onOpen = widget.onOpen;
+    // A failed picture's one control is "try again": nothing lies over it.
+    if (onOpen == null || _failed) return child;
     return Stack(
       children: [
         child,
@@ -159,7 +201,7 @@ class MediaRow extends StatelessWidget {
     final bigGif = media.animated && (media.size ?? 0) > _gifInlineCap;
 
     final picture = SizedBox(
-      key: pictureKey,
+      key: MediaRow.pictureKey,
       width: width,
       height: height,
       child: Stack(
@@ -170,6 +212,7 @@ class MediaRow extends StatelessWidget {
             ClipRRect(
               borderRadius: BorderRadius.circular(LoafRadius.lg),
               child: Image(
+                key: ValueKey(_attempt),
                 image: preview,
                 fit: BoxFit.cover,
                 // Nothing to draw yet: keep the placeholder, then fade in.
@@ -178,7 +221,14 @@ class MediaRow extends StatelessWidget {
                   duration: const Duration(milliseconds: 150),
                   child: child,
                 ),
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                errorBuilder: (_, _, _) {
+                  _fail();
+                  return _Failed(
+                    onRetry: widget.onRetry == null
+                        ? null
+                        : () => _retry(preview),
+                  );
+                },
               ),
             ),
           if (media.kind == MediaKind.video) ...[
@@ -244,6 +294,46 @@ class MediaRow extends StatelessWidget {
       ),
     );
     return _tappable(card, LoafRadius.lg);
+  }
+}
+
+/// What a picture that would not load says, with the way forward.
+class _Failed extends StatelessWidget {
+  const _Failed({this.onRetry});
+
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    final style = loafBody(12, 400).copyWith(color: tokens.textMuted);
+    return ColoredBox(
+      color: tokens.sunken,
+      child: Center(
+        child: Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              onRetry == null ? "couldn't load" : "couldn't load · ",
+              style: style,
+            ),
+            if (onRetry != null)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onRetry,
+                child: Text(
+                  'try again',
+                  style: style.copyWith(
+                    decoration: TextDecoration.underline,
+                    color: tokens.textStrong,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

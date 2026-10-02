@@ -16,6 +16,7 @@ import '../ui/model/models.dart' as ui;
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import 'device_trust.dart';
 import 'loaf_http_client.dart';
+import 'matrix_media.dart';
 
 /// How many events one page of history asks for.
 const historyPage = 50;
@@ -124,6 +125,7 @@ class MatrixTimeline extends ChangeNotifier
     MessageTypes.Image,
     MessageTypes.Audio,
     MessageTypes.Video,
+    MessageTypes.Sticker,
   };
 
   /// The row [event] draws as, or null for an event that draws none: state,
@@ -155,19 +157,22 @@ class MatrixTimeline extends ChangeNotifier
         status: status,
       );
     }
-    if (event.type != EventTypes.Message ||
+    if (!const {EventTypes.Message, EventTypes.Sticker}.contains(event.type) ||
         event.relationshipType == RelationshipTypes.edit) {
       return null;
     }
     final display = _display(event, timeline);
+    final media = _fileTypes.contains(display.messageType)
+        ? mediaOf(display)
+        : null;
     final text = display.calcUnlocalizedBody(
       hideReply: true,
       hideEdit: true,
       plaintextBody: true,
     );
     final body = switch (display.messageType) {
+      _ when media != null => captionOf(display.content) ?? '',
       MessageTypes.Emote => '${author.name} $text',
-      final type when _fileTypes.contains(type) => '📎 $text',
       _ => text,
     };
     return ui.Message(
@@ -175,7 +180,8 @@ class MatrixTimeline extends ChangeNotifier
       author: author,
       sentAt: event.originServerTs,
       body: body,
-      formatted: _formatted(display, author),
+      media: media,
+      formatted: _formatted(display, author, caption: media != null),
       edited: !identical(display, event),
       reactions: quoting ? const [] : _reactions(event, timeline),
       replyTo: quoting ? null : _replyTo(event, timeline),
@@ -197,9 +203,13 @@ class MatrixTimeline extends ChangeNotifier
     }
   }
 
-  /// [event]'s HTML, for the kinds of message that are text. A file's is
-  /// a caption, which is not drawn yet.
-  static String? _formatted(Event event, ui.Member author) {
+  /// [event]'s HTML, for the kinds of message that are text, and for a
+  /// file's caption ([caption]): without one, a file has no words to format.
+  static String? _formatted(
+    Event event,
+    ui.Member author, {
+    required bool caption,
+  }) {
     if (event.content case {
       'format': 'org.matrix.custom.html',
       'formatted_body': final String html,
@@ -207,6 +217,7 @@ class MatrixTimeline extends ChangeNotifier
       return switch (event.messageType) {
         MessageTypes.Text || MessageTypes.Notice => html,
         MessageTypes.Emote => '${htmlEscape.convert(author.name)} $html',
+        _ when caption && captionOf(event.content) != null => html,
         _ => null,
       };
     }

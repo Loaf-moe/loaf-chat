@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../members/role_colors.dart';
 import '../mock/fixtures.dart';
+import '../model/media_source.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
@@ -168,7 +169,12 @@ class _MessageBody extends StatelessWidget {
       children: [
         if (replyTo != null) _ReplyContext(replyTo: replyTo),
         if (message.media != null)
-          MediaRow(media: message.media!, uploaded: message.uploaded),
+          MediaRow(
+            media: message.media!,
+            uploaded: message.uploaded,
+            onRetry: () =>
+                MediaSourceScope.of(context).retryPreview(message.media!),
+          ),
         // Only media goes without words; a text message always draws its text.
         if (message.media == null || message.body.isNotEmpty) ...[
           if (message.media != null) const SizedBox(height: LoafSpace.x2),

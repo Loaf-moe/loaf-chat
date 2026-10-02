@@ -4,6 +4,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 // The SDK has a Presence and a Timeline of its own; loaf's are the ones the
@@ -12,7 +13,6 @@ import 'package:matrix/matrix.dart' hide Presence, Profile, Timeline;
 
 import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
-import '../ui/model/media_source.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/settings/devices.dart';
@@ -23,9 +23,11 @@ import '../ui/widgets/avatar_images.dart';
 import 'matrix_avatar_images.dart';
 import 'matrix_hierarchy.dart';
 import 'matrix_devices.dart';
+import 'matrix_media.dart';
 import 'matrix_profile.dart';
 import 'matrix_space_directory.dart';
 import 'matrix_timeline.dart';
+import 'media_store.dart';
 
 /// `m.room.create` types that make a room a voice channel: Element's video
 /// rooms, stable and unstable.
@@ -48,7 +50,7 @@ class _Wish {
 }
 
 class MatrixRooms extends ChangeNotifier implements Rooms {
-  MatrixRooms(this.client) {
+  MatrixRooms(this.client, {this._mediaRoot}) {
     _hierarchy = MatrixHierarchy(
       client,
       onChange: () {
@@ -87,6 +89,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   late final List<StreamSubscription<Object?>> _subscriptions;
   var _disposed = false;
+  final Directory? _mediaRoot;
 
   var _synced = false;
   double? _progress;
@@ -159,9 +162,37 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   @override
   late final AvatarImages avatarImages = MatrixAvatarImages(client);
 
-  // Until the Matrix media source lands, rows keep their placeholders.
   @override
-  MediaSource get media => const NoMediaSource();
+  MatrixMediaSource get media => _media ??= _openMedia();
+
+  MatrixMediaSource? _media;
+
+  /// Files are kept in the SDK's own storage folder, which sign-out already
+  /// clears. With none (some tests), every file fails with "no media folder".
+  MatrixMediaSource _openMedia() {
+    final root = _mediaRoot ?? _storageRoot();
+    final store = root == null
+        ? null
+        : MediaStore(
+            root: root,
+            client: client.httpClient,
+            downloadUri: (mxc) => mxc.getDownloadUri(client),
+            accessToken: () => client.accessToken,
+          );
+    // The cap holds at launch too, for what the last run left behind.
+    if (store != null) unawaited(store.evict());
+    return MatrixMediaSource(client, store);
+  }
+
+  Directory? _storageRoot() {
+    final database = client.database;
+    final location = database is MatrixSdkDatabase
+        ? database.fileStorageLocation
+        : null;
+    return location == null
+        ? null
+        : Directory('${location.toFilePath()}${Platform.pathSeparator}files');
+  }
 
   @override
   Profile get profile => _madeProfile;
@@ -1177,6 +1208,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _hierarchy.dispose();
     _profile?.dispose();
     _devices?.dispose();
+    _media?.dispose();
     super.dispose();
   }
 }

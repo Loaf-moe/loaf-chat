@@ -175,6 +175,47 @@ void main() {
     });
   });
 
+  group('a preview that will not load', () {
+    // Counts the loads, and fails every one.
+    final loads = <int>[];
+
+    Future<void> pumpFailing(
+      WidgetTester tester, {
+      VoidCallback? onRetry,
+    }) async {
+      loads.clear();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: MediaSourceScope(
+            source: _FailingSource(loads),
+            child: Scaffold(
+              body: MediaRow(media: _oven, onOpen: () {}, onRetry: onRetry),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('says so, and offers to try again', (tester) async {
+      var retried = 0;
+      await pumpFailing(tester, onRetry: () => retried++);
+      expect(find.textContaining("couldn't load"), findsOneWidget);
+      expect(loads, hasLength(1));
+      await tester.tap(find.text('try again'));
+      await tester.pumpAndSettle();
+      expect(retried, 1);
+      expect(loads, hasLength(2));
+    });
+
+    testWidgets('with nothing to retry, draws no "try again"', (tester) async {
+      await pumpFailing(tester);
+      expect(find.text("couldn't load"), findsOneWidget);
+      expect(find.text('try again'), findsNothing);
+    });
+  });
+
   group('quoteOf', () {
     Message of(Media media, {String body = ''}) => Message(
       id: '1',
@@ -216,4 +257,38 @@ void main() {
       expect(quoteOf(of(_pdf)), 'recipe.pdf');
     });
   });
+}
+
+class _FailingSource extends NoMediaSource {
+  const _FailingSource(this.loads);
+  final List<int> loads;
+
+  @override
+  ImageProvider? preview(Media media, double physicalWidth) =>
+      _FailingImage(loads);
+}
+
+class _FailingImage extends ImageProvider<_FailingImage> {
+  _FailingImage(this.loads);
+  final List<int> loads;
+
+  @override
+  Future<_FailingImage> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+    _FailingImage key,
+    ImageDecoderCallback decode,
+  ) {
+    loads.add(loads.length);
+    return OneFrameImageStreamCompleter(Future.error(StateError('no')));
+  }
+
+  // One key, so a retry has to evict it to load again.
+  @override
+  bool operator ==(Object other) => other is _FailingImage;
+
+  @override
+  int get hashCode => 1;
 }

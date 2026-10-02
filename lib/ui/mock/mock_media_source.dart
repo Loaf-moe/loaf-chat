@@ -21,6 +21,10 @@ class MockMediaSource implements MediaSource {
 
   final _open = <Object, _MockFile>{};
 
+  // Bundled samples and memory images never fail to load.
+  @override
+  void retryPreview(Media media) {}
+
   @override
   ImageProvider? preview(Media media, double physicalWidth) {
     final image = this.image(media);
