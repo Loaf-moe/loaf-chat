@@ -100,8 +100,16 @@ class _MediaRowState extends State<MediaRow> {
   final _focus = FocusNode(debugLabel: 'media');
   var _focused = false;
 
-  /// The video playing in place, held through eviction while it plays.
+  /// The video playing in place. Its player holds it through eviction
+  /// for as long as it reads it.
   MediaFile? _playing;
+
+  /// The player can start. Until it can, the row shows the download: a
+  /// file with its index at the end can't start before that arrives.
+  var _playable = false;
+
+  /// The player can't play this file; Open is the way forward.
+  var _unplayable = false;
 
   /// Bumped when a failed video is tried again: its player failed with the
   /// download, so a new one is made.
@@ -115,12 +123,11 @@ class _MediaRowState extends State<MediaRow> {
 
   void _play() {
     if (_playing != null) return;
-    setState(() => _playing = MediaSourceScope.of(context).open(media)..hold());
+    setState(() => _playing = MediaSourceScope.of(context).open(media));
   }
 
   @override
   void dispose() {
-    _playing?.release();
     _focus.dispose();
     super.dispose();
   }
@@ -354,10 +361,15 @@ class _MediaRowState extends State<MediaRow> {
               return _Failed(
                 onRetry: () {
                   file.retry();
-                  setState(() => _playAttempt++);
+                  setState(() {
+                    _playAttempt++;
+                    _playable = false;
+                    _unplayable = false;
+                  });
                 },
               );
             }
+            final onOpen = widget.onOpen;
             return Stack(
               fit: StackFit.expand,
               children: [
@@ -366,8 +378,29 @@ class _MediaRowState extends State<MediaRow> {
                   file: file,
                   mimeType: media.mimeType,
                   aspect: aspect,
+                  onHold: file.hold,
+                  onRelease: file.release,
+                  onReady: () {
+                    if (mounted) setState(() => _playable = true);
+                  },
+                  onFailed: () {
+                    if (mounted) setState(() => _unplayable = true);
+                  },
                 ),
-                if (file.received == 0) ...[placeholder, _Fetching(file: file)],
+                if (_unplayable)
+                  _Unplayable(onOpen: onOpen)
+                else if (!_playable)
+                  // Only ever over a player that can't start yet: nothing
+                  // under it to tap.
+                  IgnorePointer(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        placeholder,
+                        _Fetching(file: file),
+                      ],
+                    ),
+                  ),
               ],
             );
           },
@@ -449,6 +482,48 @@ class _Fetching extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// What a video the player can't play says, with the way forward: the
+/// file is whole on disk or on its way, so another app may well play it.
+class _Unplayable extends StatelessWidget {
+  const _Unplayable({this.onOpen});
+
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    final style = loafBody(12, 400).copyWith(color: tokens.textMuted);
+    final onOpen = this.onOpen;
+    return ColoredBox(
+      color: tokens.sunken,
+      child: Center(
+        child: Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              onOpen == null ? "couldn't play this" : "couldn't play this · ",
+              style: style,
+            ),
+            if (onOpen != null)
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onOpen,
+                child: Text(
+                  'open it instead',
+                  style: style.copyWith(
+                    decoration: TextDecoration.underline,
+                    color: tokens.textStrong,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// What a picture that would not load says, with the way forward.

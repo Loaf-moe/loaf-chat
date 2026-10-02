@@ -10,29 +10,60 @@ import AVKit
 #endif
 
 /// One inline player: the asset reading the growing file, and the player
-/// Dart can pause. Says over the channel when it starts playing, so Dart
-/// can pause whichever was playing before.
+/// Dart can pause. Tells Dart over the channel when its item can play (or
+/// never will), and when it starts playing, so Dart can drop its download
+/// progress and pause whichever video was playing before.
 final class InlineVideo {
+  let view: Int64
   let player: AVPlayer
+  private let channel: FlutterMethodChannel
   private let loader: ResourceLoader?
-  private var status: NSKeyValueObservation?
+  private var playing: NSKeyValueObservation?
+  private var readiness: NSKeyValueObservation?
 
   init(view: Int64, id: String, mimeType: String?, channel: FlutterMethodChannel) {
+    self.view = view
+    self.channel = channel
+    let item: AVPlayerItem?
     do {
       let (asset, loader) = try ResourceLoader.asset(id: id, mimeType: mimeType)
       self.loader = loader
-      player = AVPlayer(playerItem: AVPlayerItem(asset: asset))
+      item = AVPlayerItem(asset: asset)
     } catch {
-      // A view must be returned whatever happens; this one plays nothing.
       NSLog("[loaf media] no player for \(id): \(error)")
       loader = nil
-      player = AVPlayer()
+      item = nil
     }
-    status = player.observe(\.timeControlStatus) { [weak channel] player, _ in
+    player = AVPlayer(playerItem: item)
+    playing = player.observe(\.timeControlStatus) { [weak self] player, _ in
       guard player.timeControlStatus == .playing else { return }
-      DispatchQueue.main.async {
-        channel?.invokeMethod("video.playing", arguments: ["view": view])
+      self?.send("video.playing")
+    }
+    guard let item else {
+      // A view must be returned whatever happens; Dart offers Open instead.
+      send("video.failed")
+      return
+    }
+    // An index at the end of the file (an iPhone original) keeps the item
+    // from being ready until the download reaches it; Dart shows the
+    // download until then.
+    readiness = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+      switch item.status {
+      case .readyToPlay: self?.send("video.ready")
+      case .failed:
+        NSLog("[loaf media] can't play: \(item.error.map { "\($0)" } ?? "no reason given")")
+        self?.send("video.failed")
+      default: break
       }
+    }
+  }
+
+  /// Sent on the main thread, as the channel requires, and after the view's
+  /// creation has been answered, so Dart already knows the view.
+  func send(_ method: String, _ extra: [String: Any] = [:]) {
+    let arguments = extra.merging(["view": view]) { mine, _ in mine }
+    DispatchQueue.main.async { [channel] in
+      channel.invokeMethod(method, arguments: arguments)
     }
   }
 
@@ -43,8 +74,10 @@ final class InlineVideo {
   /// When the view goes: nothing keeps playing or reading behind it.
   func tearDown() {
     player.pause()
-    status?.invalidate()
-    status = nil
+    playing?.invalidate()
+    playing = nil
+    readiness?.invalidate()
+    readiness = nil
     player.replaceCurrentItem(with: nil)
   }
 }
@@ -126,14 +159,20 @@ final class VideoBox {
   /// picture in picture and AirPlay. It sits in the view controller
   /// hierarchy as a child of Flutter's, as UIKit expects of an embedded
   /// controller, while Flutter places its view.
-  final class InlineVideoView: NSObject, FlutterPlatformView {
+  final class InlineVideoView: NSObject, FlutterPlatformView, AVPlayerViewControllerDelegate {
     let box: VideoBox
     private let controller = AVPlayerViewController()
+
+    /// Players in picture in picture keep themselves alive: the row may
+    /// scroll away and be disposed while the video floats on, and letting
+    /// go of the view then would end it. Released when it stops.
+    private static var floating: [ObjectIdentifier: InlineVideoView] = [:]
 
     init(video: InlineVideo, parent: UIViewController?) {
       box = VideoBox(video)
       super.init()
       controller.player = video.player
+      controller.delegate = self
       controller.entersFullScreenWhenPlaybackBegins = false
       controller.allowsPictureInPicturePlayback = true
       controller.canStartPictureInPictureAutomaticallyFromInline = false
@@ -145,6 +184,31 @@ final class VideoBox {
 
     func view() -> UIView {
       controller.view
+    }
+
+    func playerViewControllerWillStartPictureInPicture(
+      _ playerViewController: AVPlayerViewController
+    ) {
+      Self.floating[ObjectIdentifier(self)] = self
+      box.video.send("video.pip", ["active": true])
+    }
+
+    /// Back to the row if it is still on screen; if it has gone, there is
+    /// nothing to restore into, and the video ends with the window.
+    func playerViewController(
+      _ playerViewController: AVPlayerViewController,
+      restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler:
+        @escaping (Bool) -> Void
+    ) {
+      completionHandler(controller.view.window != nil)
+    }
+
+    func playerViewControllerDidStopPictureInPicture(
+      _ playerViewController: AVPlayerViewController
+    ) {
+      box.video.send("video.pip", ["active": false])
+      // Last: if Flutter has let go of the view, this lets the player go.
+      Self.floating[ObjectIdentifier(self)] = nil
     }
 
     deinit {

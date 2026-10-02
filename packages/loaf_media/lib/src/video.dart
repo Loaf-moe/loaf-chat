@@ -18,17 +18,49 @@ final videoFocus = ValueNotifier<int?>(null);
 const _channel = MethodChannel('moe.loaf.chat/media');
 const _viewType = 'moe.loaf.chat/video';
 
-/// The native players say when they start; nothing else comes this way.
+/// The players on screen, by platform view id, for what the native side
+/// says about each.
+final _players = <int, _LoafVideoState>{};
+
+/// Players whose widget has gone while picture in picture keeps them
+/// playing. They still read their file until it closes.
+final _floating = <int, ({GrowingFile file, VoidCallback? onRelease})>{};
+
+/// What the native players say: ready, failed, playing, and picture in
+/// picture starting or stopping.
 var _listening = false;
 void _listen() {
   if (_listening) return;
   _listening = true;
   _channel.setMethodCallHandler((call) async {
-    if (call.method != 'video.playing') {
-      throw MissingPluginException('no ${call.method} here');
+    final arguments = call.arguments as Map<Object?, Object?>;
+    final view = arguments['view'];
+    if (view is! int) return;
+    switch (call.method) {
+      case 'video.playing':
+        final before = videoFocus.value;
+        // A floating player has no widget left to pause itself.
+        if (before != null && before != view && _floating.containsKey(before)) {
+          _pause(before);
+        }
+        videoFocus.value = view;
+      case 'video.ready':
+        _players[view]?._ready();
+      case 'video.failed':
+        _players[view]?._failed();
+      case 'video.pip':
+        final active = arguments['active'] == true;
+        _players[view]?._pip = active;
+        if (!active) {
+          final floating = _floating.remove(view);
+          if (floating == null) return;
+          VideoStreams.detach(floating.file);
+          floating.onRelease?.call();
+          if (videoFocus.value == view) videoFocus.value = null;
+        }
+      default:
+        throw MissingPluginException('no ${call.method} here');
     }
-    final view = (call.arguments as Map<Object?, Object?>)['view'];
-    if (view is int) videoFocus.value = view;
   });
 }
 
@@ -47,11 +79,28 @@ class LoafVideo extends StatefulWidget {
     required this.file,
     required this.mimeType,
     required this.aspect,
+    this.onReady,
+    this.onFailed,
+    this.onHold,
+    this.onRelease,
   });
 
   final GrowingFile file;
   final String? mimeType;
   final double aspect;
+
+  /// The player can start: an index at the end of the file has arrived.
+  /// Until then the caller shows how far the download has got.
+  final VoidCallback? onReady;
+
+  /// The player can't play this file.
+  final VoidCallback? onFailed;
+
+  /// Called when this player starts reading [file], and [onRelease] once
+  /// it no longer does: when the widget goes, or, if it went while in
+  /// picture in picture, when that closes.
+  final VoidCallback? onHold;
+  final VoidCallback? onRelease;
 
   /// Where this platform has a player: iOS and macOS here, Linux from
   /// Task 7. Asked of the target platform, as the player is chosen by it.
@@ -69,11 +118,15 @@ class _LoafVideoState extends State<LoafVideo> {
   int? _view;
   ScrollPosition? _position;
 
+  /// In picture in picture: scrolling the row away leaves it playing.
+  var _pip = false;
+
   @override
   void initState() {
     super.initState();
     _listen();
     VideoStreams.attach(widget.file);
+    widget.onHold?.call();
     videoFocus.addListener(_focusMoved);
   }
 
@@ -82,9 +135,14 @@ class _LoafVideoState extends State<LoafVideo> {
     super.didUpdateWidget(old);
     if (old.file.id != widget.file.id) {
       VideoStreams.attach(widget.file);
+      widget.onHold?.call();
       VideoStreams.detach(old.file);
+      old.onRelease?.call();
     }
   }
+
+  void _ready() => widget.onReady?.call();
+  void _failed() => widget.onFailed?.call();
 
   @override
   void didChangeDependencies() {
@@ -99,8 +157,16 @@ class _LoafVideoState extends State<LoafVideo> {
   void dispose() {
     _position?.removeListener(_scrolled);
     videoFocus.removeListener(_focusMoved);
-    if (_view != null && videoFocus.value == _view) videoFocus.value = null;
-    VideoStreams.detach(widget.file);
+    final view = _view;
+    if (view != null) _players.remove(view);
+    if (view != null && _pip) {
+      // Still floating: it keeps reading until picture in picture closes.
+      _floating[view] = (file: widget.file, onRelease: widget.onRelease);
+    } else {
+      if (view != null && videoFocus.value == view) videoFocus.value = null;
+      VideoStreams.detach(widget.file);
+      widget.onRelease?.call();
+    }
     super.dispose();
   }
 
@@ -121,6 +187,7 @@ class _LoafVideoState extends State<LoafVideo> {
   void _scrolled() {
     final view = _view, position = _position;
     if (view == null || position == null || videoFocus.value != view) return;
+    if (_pip) return;
     final box = context.findRenderObject();
     if (box is! RenderBox || !box.attached || !box.hasSize) return;
     final viewport = RenderAbstractViewport.maybeOf(box);
@@ -139,7 +206,10 @@ class _LoafVideoState extends State<LoafVideo> {
     _pause(view);
   }
 
-  void _created(int view) => _view = view;
+  void _created(int view) {
+    _view = view;
+    _players[view] = this;
+  }
 
   @override
   Widget build(BuildContext context) {

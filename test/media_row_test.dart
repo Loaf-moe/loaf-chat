@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -352,6 +353,133 @@ void main() {
         expect(videoFocus.value, isNull);
       });
     });
+
+    Future<void> nativeSays(
+      WidgetTester tester,
+      String method,
+      Map<String, Object?> arguments,
+    ) => tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+      media.name,
+      const StandardMethodCodec().encodeMethodCall(
+        MethodCall(method, arguments),
+      ),
+      (_) {},
+    );
+
+    Future<_ManualFile> pumpManual(
+      WidgetTester tester, {
+      VoidCallback? onOpen,
+      double height = 600,
+    }) async {
+      final source = _ManualSource();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: MediaSourceScope(
+            source: source,
+            child: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 400,
+                  height: height,
+                  child: ListView(
+                    children: [
+                      MediaRow(media: _video, onOpen: onOpen ?? () {}),
+                      const SizedBox(height: 2000),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byType(MediaRow));
+      await tester.pump();
+      await tester.pump();
+      return source.file;
+    }
+
+    double? ring(WidgetTester tester) => tester
+        .widget<CircularProgressIndicator>(
+          find.byType(CircularProgressIndicator),
+        )
+        .value;
+
+    testWidgets('the download shows until the player is ready', (tester) async {
+      await on(TargetPlatform.macOS, () async {
+        mockNative(tester);
+        final file = await pumpManual(tester);
+        expect(file.held, 1, reason: 'the player holds what it reads');
+        expect(ring(tester), 0);
+
+        // Past the first bytes, still not playable (an index at the end).
+        file.arrive(250);
+        await tester.pump();
+        expect(ring(tester), 0.25);
+        expect(
+          find.ancestor(
+            of: find.byType(CircularProgressIndicator),
+            matching: find.byType(IgnorePointer),
+          ),
+          findsWidgets,
+        );
+
+        await nativeSays(tester, 'video.ready', {'view': created.single['id']});
+        await tester.pump();
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        expect(find.byType(LoafVideo), findsOneWidget);
+
+        await tester.pumpWidget(const SizedBox());
+        expect(file.held, 0);
+      });
+    });
+
+    testWidgets("a video the player can't play offers to open it", (
+      tester,
+    ) async {
+      await on(TargetPlatform.macOS, () async {
+        mockNative(tester);
+        var opened = 0;
+        await pumpManual(tester, onOpen: () => opened++);
+        await nativeSays(tester, 'video.failed', {
+          'view': created.single['id'],
+        });
+        await tester.pump();
+        expect(find.textContaining("couldn't play this"), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        await tester.tap(find.text('open it instead'));
+        expect(opened, 1);
+      });
+    });
+
+    testWidgets('in picture in picture, scrolling away leaves it playing', (
+      tester,
+    ) async {
+      await on(TargetPlatform.macOS, () async {
+        mockNative(tester);
+        final file = await pumpManual(tester);
+        final view = created.single['id']! as int;
+        await nativeSays(tester, 'video.ready', {'view': view});
+        await nativeSays(tester, 'video.playing', {'view': view});
+        await nativeSays(tester, 'video.pip', {'view': view, 'active': true});
+
+        await tester.drag(find.byType(ListView), const Offset(0, -400));
+        await tester.pump();
+        expect(mediaCalls.where((c) => c.method == 'video.pause'), isEmpty);
+
+        // The row goes; the floating player still reads its file.
+        await tester.pumpWidget(const SizedBox());
+        expect(mediaCalls.where((c) => c.method == 'stream.end'), isEmpty);
+        expect(file.held, 1);
+
+        await nativeSays(tester, 'video.pip', {'view': view, 'active': false});
+        expect(mediaCalls.last.method, 'stream.end');
+        expect(file.held, 0);
+        expect(videoFocus.value, isNull);
+      });
+    });
   });
 
   group('a preview that will not load', () {
@@ -436,6 +564,45 @@ void main() {
       expect(quoteOf(of(_pdf)), 'recipe.pdf');
     });
   });
+}
+
+/// A video whose download the test drives.
+class _ManualFile extends ChangeNotifier implements MediaFile {
+  var held = 0;
+  var _received = 0;
+
+  void arrive(int bytes) {
+    _received = bytes;
+    notifyListeners();
+  }
+
+  @override
+  String get id => 'manual.mp4';
+  @override
+  String get partialPath => '/nowhere/manual.mp4.part';
+  @override
+  int get received => _received;
+  @override
+  int? get total => 1000;
+  @override
+  bool get complete => false;
+  @override
+  Object? get error => null;
+  @override
+  Future<String> get path => Completer<String>().future;
+  @override
+  void retry() {}
+  @override
+  void hold() => held++;
+  @override
+  void release() => held--;
+}
+
+class _ManualSource extends NoMediaSource {
+  final file = _ManualFile();
+
+  @override
+  MediaFile open(Media media) => file;
 }
 
 class _FailingSource extends NoMediaSource {
