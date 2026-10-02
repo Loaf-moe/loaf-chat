@@ -70,6 +70,16 @@ public final class LoafMediaPlugin: NSObject, FlutterPlugin {
       }
       videos.pause(view: view)
       result(nil)
+    case "video.floating":
+      guard let view = (arguments?["view"] as? NSNumber)?.int64Value else {
+        result(Self.badArguments(call))
+        return
+      }
+      #if os(iOS)
+        result(InlineVideoView.isFloating(view: view))
+      #else
+        result(false)
+      #endif
     case "quickLook":
       guard let path = arguments?["path"] as? String else {
         result(Self.failure("no path to look at"))

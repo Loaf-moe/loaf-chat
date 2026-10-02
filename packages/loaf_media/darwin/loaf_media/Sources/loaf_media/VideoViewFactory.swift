@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import LoafMediaCore
 
 #if os(iOS)
   import Flutter
@@ -163,10 +164,18 @@ final class VideoBox {
     let box: VideoBox
     private let controller = AVPlayerViewController()
 
-    /// Players in picture in picture keep themselves alive: the row may
-    /// scroll away and be disposed while the video floats on, and letting
-    /// go of the view then would end it. Released when it stops.
-    private static var floating: [ObjectIdentifier: InlineVideoView] = [:]
+    /// Players in picture in picture keep themselves alive, by view id:
+    /// the row may scroll away and be disposed while the video floats on,
+    /// and letting go of the view then would end it. Released when it stops
+    /// or fails to start.
+    private static var floating: [Int64: InlineVideoView] = [:]
+    private var pip = PictureInPicture()
+
+    /// For Dart, as a row goes: whether this player lives on in picture in
+    /// picture, starting or started, so its file must stay readable.
+    static func isFloating(view: Int64) -> Bool {
+      floating[view] != nil
+    }
 
     init(video: InlineVideo, parent: UIViewController?) {
       box = VideoBox(video)
@@ -189,8 +198,21 @@ final class VideoBox {
     func playerViewControllerWillStartPictureInPicture(
       _ playerViewController: AVPlayerViewController
     ) {
-      Self.floating[ObjectIdentifier(self)] = self
-      box.video.send("video.pip", ["active": true])
+      move(.willStart)
+    }
+
+    func playerViewControllerDidStartPictureInPicture(
+      _ playerViewController: AVPlayerViewController
+    ) {
+      move(.didStart)
+    }
+
+    func playerViewController(
+      _ playerViewController: AVPlayerViewController,
+      failedToStartPictureInPictureWithError error: Error
+    ) {
+      NSLog("[loaf media] picture in picture didn't start: \(error)")
+      move(.failedToStart)
     }
 
     /// Back to the row if it is still on screen; if it has gone, there is
@@ -206,9 +228,18 @@ final class VideoBox {
     func playerViewControllerDidStopPictureInPicture(
       _ playerViewController: AVPlayerViewController
     ) {
-      box.video.send("video.pip", ["active": false])
-      // Last: if Flutter has let go of the view, this lets the player go.
-      Self.floating[ObjectIdentifier(self)] = nil
+      move(.didStop)
+    }
+
+    private func move(_ event: PictureInPicture.Event) {
+      let report = pip.handle(event)
+      let view = box.video.view
+      if let report {
+        box.video.send("video.pip", ["active": report])
+      }
+      // Last: when Flutter has already let go of the view, this lets the
+      // player go too.
+      Self.floating[view] = pip.keepsPlayer ? self : nil
     }
 
     deinit {

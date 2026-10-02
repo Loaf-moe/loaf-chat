@@ -198,14 +198,18 @@ void main() {
     final mediaCalls = <MethodCall>[];
     final created = <Map<Object?, Object?>>[];
 
+    /// What the native side says when asked whether a player floats.
+    var floating = false;
+
     // The native ends: the plugin's channel, and the platform views.
     void mockNative(WidgetTester tester) {
       mediaCalls.clear();
       created.clear();
+      floating = false;
       final messenger = tester.binding.defaultBinaryMessenger;
       messenger.setMockMethodCallHandler(media, (call) async {
         mediaCalls.add(call);
-        return null;
+        return call.method == 'video.floating' ? floating : null;
       });
       messenger.setMockMethodCallHandler(SystemChannels.platform_views, (
         call,
@@ -478,6 +482,92 @@ void main() {
         expect(mediaCalls.last.method, 'stream.end');
         expect(file.held, 0);
         expect(videoFocus.value, isNull);
+      });
+    });
+
+    Iterable<MethodCall> callsOf(String method) =>
+        mediaCalls.where((c) => c.method == method);
+
+    testWidgets('a picture in picture end with no start is harmless', (
+      tester,
+    ) async {
+      await on(TargetPlatform.macOS, () async {
+        mockNative(tester);
+        final file = await pumpManual(tester);
+        final view = created.single['id']! as int;
+        await nativeSays(tester, 'video.pip', {'view': view, 'active': false});
+        await tester.pump();
+        expect(find.byType(LoafVideo), findsOneWidget);
+        expect(callsOf('stream.end'), isEmpty);
+        expect(file.held, 1);
+
+        await nativeSays(tester, 'video.playing', {'view': view});
+        await tester.drag(find.byType(ListView), const Offset(0, -400));
+        await tester.pump();
+        expect(callsOf('video.pause'), hasLength(1));
+      });
+    });
+
+    testWidgets('picture in picture that fails to start leaves nothing', (
+      tester,
+    ) async {
+      await on(TargetPlatform.macOS, () async {
+        mockNative(tester);
+        final file = await pumpManual(tester);
+        final view = created.single['id']! as int;
+        await nativeSays(tester, 'video.playing', {'view': view});
+        // The native side reports a failed start as over.
+        await nativeSays(tester, 'video.pip', {'view': view, 'active': true});
+        await nativeSays(tester, 'video.pip', {'view': view, 'active': false});
+
+        await tester.drag(find.byType(ListView), const Offset(0, -400));
+        await tester.pump();
+        expect(callsOf('video.pause').map((c) => c.arguments), [
+          {'view': view},
+        ], reason: 'scrolling away pauses again');
+
+        await tester.pumpWidget(const SizedBox());
+        expect(callsOf('stream.end'), hasLength(1));
+        expect(file.held, 0);
+      });
+    });
+
+    testWidgets(
+      'on iOS, a row gone as picture in picture starts reads on until it ends',
+      (tester) async {
+        await on(TargetPlatform.iOS, () async {
+          mockNative(tester);
+          final file = await pumpManual(tester);
+          final view = created.single['id']! as int;
+          // Started natively; Dart hasn't heard yet.
+          floating = true;
+          await tester.pumpWidget(const SizedBox());
+          await tester.pump();
+          expect(callsOf('video.floating').single.arguments, {'view': view});
+          expect(callsOf('stream.end'), isEmpty);
+          expect(file.held, 1);
+
+          await nativeSays(tester, 'video.pip', {'view': view, 'active': true});
+          await nativeSays(tester, 'video.pip', {
+            'view': view,
+            'active': false,
+          });
+          expect(callsOf('stream.end'), hasLength(1));
+          expect(file.held, 0);
+        });
+      },
+    );
+
+    testWidgets('on iOS, a row gone with no picture in picture lets go', (
+      tester,
+    ) async {
+      await on(TargetPlatform.iOS, () async {
+        mockNative(tester);
+        final file = await pumpManual(tester);
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump();
+        expect(callsOf('stream.end'), hasLength(1));
+        expect(file.held, 0);
       });
     });
   });

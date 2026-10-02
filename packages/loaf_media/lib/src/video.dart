@@ -51,17 +51,38 @@ void _listen() {
       case 'video.pip':
         final active = arguments['active'] == true;
         _players[view]?._pip = active;
-        if (!active) {
-          final floating = _floating.remove(view);
-          if (floating == null) return;
-          VideoStreams.detach(floating.file);
-          floating.onRelease?.call();
-          if (videoFocus.value == view) videoFocus.value = null;
-        }
+        // Over, or never started: harmless when nothing was floating.
+        if (!active) _letGo(view);
       default:
         throw MissingPluginException('no ${call.method} here');
     }
   });
+}
+
+/// A floating player whose picture in picture is over: it stops reading.
+void _letGo(int view) {
+  final floating = _floating.remove(view);
+  if (floating == null) return;
+  VideoStreams.detach(floating.file);
+  floating.onRelease?.call();
+  if (videoFocus.value == view) videoFocus.value = null;
+}
+
+/// iOS: picture in picture may have started natively without Dart having
+/// heard yet. The player is kept as floating until the native side answers;
+/// if it isn't floating it is let go then, and if it is, when
+/// picture in picture says it is over.
+Future<void> _askFloating(int view) async {
+  bool floating;
+  try {
+    floating =
+        await _channel.invokeMethod<bool>('video.floating', {'view': view}) ??
+        false;
+  } on Exception catch (e) {
+    debugPrint('[loaf media] floating $view: $e');
+    floating = false;
+  }
+  if (!floating) _letGo(view);
 }
 
 Future<void> _pause(int view) async {
@@ -159,9 +180,11 @@ class _LoafVideoState extends State<LoafVideo> {
     videoFocus.removeListener(_focusMoved);
     final view = _view;
     if (view != null) _players.remove(view);
-    if (view != null && _pip) {
-      // Still floating: it keeps reading until picture in picture closes.
+    if (view != null && (_pip || defaultTargetPlatform == TargetPlatform.iOS)) {
+      // Floating, or maybe just starting to: it keeps reading until
+      // picture in picture closes. Only iOS has it here.
       _floating[view] = (file: widget.file, onRelease: widget.onRelease);
+      if (!_pip) _askFloating(view);
     } else {
       if (view != null && videoFocus.value == view) videoFocus.value = null;
       VideoStreams.detach(widget.file);
