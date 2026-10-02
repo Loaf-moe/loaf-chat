@@ -21,6 +21,10 @@ abstract interface class MediaFile implements GrowingFile {
   void release();
 }
 
+/// The largest image drawn from its own file in a row: a GIF this small
+/// animates there, and an encrypted image this small is its own preview.
+const inlinePreviewCap = 2000000;
+
 abstract interface class MediaSource {
   /// The row's picture: a thumbnail, or the image itself when it is small.
   /// Null when the row should offer "load" rather than fetch on its own.

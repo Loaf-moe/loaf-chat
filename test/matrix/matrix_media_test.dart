@@ -2,12 +2,14 @@ import 'dart:io';
 import 'dart:ui' show Size;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_avatar_images.dart';
 import 'package:loaf_native/matrix/matrix_media.dart';
 import 'package:loaf_native/matrix/media_images.dart';
 import 'package:loaf_native/matrix/media_store.dart';
+import 'package:loaf_native/ui/model/media_source.dart' show inlinePreviewCap;
 import 'package:loaf_native/ui/model/models.dart' as ui;
 import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -233,7 +235,21 @@ void main() {
           unsigned: {'transaction_id': 'tx2'},
         ),
       )!;
-      expect((source.preview(video, 300) as FileStoreImage).fallback, isNull);
+      // Nothing of a video is cached until it has a thumbnail: no preview,
+      // and the row says so up front rather than failing to draw one.
+      expect(video.hasPreview, isFalse);
+      expect(source.preview(video, 300), isNull);
+      final thumbed = mediaOf(
+        _event(
+          {
+            'msgtype': 'm.video',
+            'body': 'v.mp4',
+            'info': {'thumbnail_url': 'mxc://example.com/t'},
+          },
+          unsigned: {'transaction_id': 'tx4'},
+        ),
+      )!;
+      expect((source.preview(thumbed, 300) as FileStoreImage).fallback, isNull);
     });
 
     test('a sent file with its echo\'s txid still reads from the server', () {
@@ -251,8 +267,71 @@ void main() {
     });
   });
 
+  group('GIFs', () {
+    ui.Media gif({bool encrypted = false, int? size = 1000}) => mediaOf(
+      _event({
+        'msgtype': 'm.image',
+        'body': 'a.gif',
+        if (encrypted)
+          'file': {..._encrypted(), 'url': 'mxc://example.com/g'}
+        else
+          'url': 'mxc://example.com/g',
+        'info': {'mimetype': 'image/gif', 'size': ?size},
+      }),
+    )!;
+
+    test('a small plain GIF is drawn whole, to animate', () {
+      final media = gif();
+      expect(media.hasPreview, isTrue);
+      expect(source.preview(media, 300), isA<StoredFileImage>());
+    });
+
+    test('a small encrypted GIF is drawn whole too', () {
+      final media = gif(encrypted: true);
+      expect(media.hasPreview, isTrue);
+      expect(source.preview(media, 300), isA<StoredFileImage>());
+    });
+
+    test('a GIF over the cap, or of unknown size, keeps a still', () {
+      expect(
+        source.preview(gif(size: inlinePreviewCap + 1), 300),
+        isA<MxcThumbnail>(),
+      );
+      expect(source.preview(gif(size: null), 300), isA<MxcThumbnail>());
+      expect(
+        gif(encrypted: true, size: inlinePreviewCap + 1).hasPreview,
+        isFalse,
+      );
+    });
+
+    test('retrying a small GIF retries its own file', () async {
+      final media = gif();
+      final file = source.open(media);
+      await expectLater(file.path, throwsA(anything));
+      source.retryPreview(media);
+      expect(file.error, isNull);
+    });
+  });
+
+  test('an image with nowhere to fetch from has no preview to offer', () {
+    final media = mediaOf(_event({'msgtype': 'm.image', 'body': 'a.png'}))!;
+    expect(media.hasPreview, isFalse);
+    expect(source.preview(media, 300), isNull);
+  });
+
   group('files', () {
     test('a broken file map fails the download, not the mapping', () async {
+      // A server that would answer 200: only the empty key can fail this.
+      final answering = MatrixMediaSource(
+        _client,
+        MediaStore(
+          root: root,
+          client: MockClient((_) async => http.Response('bytes', 200)),
+          downloadUri: (mxc) async => Uri.https('example.com', '/dl'),
+          accessToken: () => 'tok',
+        ),
+      );
+      addTearDown(answering.dispose);
       final media = mediaOf(
         _event({
           'msgtype': 'm.file',
@@ -260,9 +339,9 @@ void main() {
           'file': {'url': 'mxc://example.com/x'},
         }),
       )!;
-      final file = source.open(media);
-      await expectLater(file.path, throwsA(anything));
-      expect(file.error, isNotNull);
+      final file = answering.open(media);
+      await expectLater(file.path, throwsA(isA<ArgumentError>()));
+      expect(file.error, isA<ArgumentError>());
     });
 
     test('a file with nowhere to fetch from has already failed', () async {

@@ -11,7 +11,7 @@ import 'package:loaf_native/ui/members/presence.dart' as loaf;
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
 // The SDK has a Role of its own; the one under test is loaf's.
-import 'package:matrix/matrix.dart' hide Role;
+import 'package:matrix/matrix.dart' hide MediaKind, Role;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 const _me = '@test:fakeServer.notExisting';
@@ -1520,5 +1520,20 @@ void main() {
     final members = {for (final m in rooms.spaces.last.members) m.id: m};
     expect(members['@alice:x']!.avatar, const AvatarRef('mxc://x/a'));
     expect(members[_me]!.avatar, isNull);
+  });
+
+  test('media after dispose is a closed source, not a fresh store', () async {
+    final client = await _client();
+    final dir = Directory.systemTemp.createTempSync('rooms_media_test');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final live = MatrixRooms(client, mediaRoot: dir);
+    expect(live.media.store, isNotNull);
+    live.dispose();
+
+    final late = MatrixRooms(client, mediaRoot: dir)..dispose();
+    // A rebuild after sign-out asks again: nothing is opened for it.
+    expect(late.media.store, isNull);
+    const media = Media(kind: MediaKind.image, name: 'a.png', ref: 'x');
+    expect(late.media.preview(media, 300), isNull);
   });
 }

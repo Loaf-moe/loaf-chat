@@ -10,9 +10,6 @@ import '../model/media_source.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 
-/// A GIF this small animates in the row; a larger one waits for a tap.
-const _gifInlineCap = 2000000;
-
 const _maxWidth = 400.0;
 const _maxHeight = 360.0;
 
@@ -198,7 +195,7 @@ class _MediaRowState extends State<MediaRow> {
         ? source.preview(media, width * MediaQuery.devicePixelRatioOf(context))
         : null;
     // A big GIF shows the preview and a badge instead of playing.
-    final bigGif = media.animated && (media.size ?? 0) > _gifInlineCap;
+    final bigGif = media.animated && (media.size ?? 0) > inlinePreviewCap;
 
     final picture = SizedBox(
       key: MediaRow.pictureKey,

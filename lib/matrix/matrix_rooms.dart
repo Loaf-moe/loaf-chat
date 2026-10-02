@@ -163,7 +163,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   late final AvatarImages avatarImages = MatrixAvatarImages(client);
 
   @override
-  MatrixMediaSource get media => _media ??= _openMedia();
+  MatrixMediaSource get media =>
+      _media ??= _disposed ? MatrixMediaSource.closed(client) : _openMedia();
 
   MatrixMediaSource? _media;
 

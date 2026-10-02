@@ -19,10 +19,6 @@ import 'media_store.dart';
 export 'matrix_avatar_images.dart'
     show avatarBuckets, bucketFor, timelineBuckets;
 
-/// Past this, an encrypted image with no thumbnail is not fetched for a
-/// preview: the whole thing would be downloaded to draw a small row.
-const _smallImage = 2 * 1000 * 1000;
-
 /// What a [ui.Media] from [mediaOf] carries. A copy of the content, so the
 /// event itself can go away.
 class _Ref {
@@ -101,19 +97,18 @@ ui.Media? mediaOf(Event event) {
     final ms = _int(info['duration']);
     final size = _int(info['size']);
     final mime = info.tryGet<String>('mimetype', TryGet.silent);
+    final mimeType = mime == null || mime.isEmpty ? null : mime.toLowerCase();
+    final plan = _planOf(ref, kind, size, mimeType);
     return ui.Media(
       kind: kind,
       name: ref.name,
       size: size,
-      mimeType: mime == null || mime.isEmpty ? null : mime.toLowerCase(),
+      mimeType: mimeType,
       dimensions: w != null && h != null && w > 0 && h > 0
           ? Size(w.toDouble(), h.toDouble())
           : null,
       duration: ms == null ? null : Duration(milliseconds: ms),
-      hasPreview:
-          event.hasThumbnail ||
-          (kind == ui.MediaKind.image &&
-              (!ref.encrypted || (size != null && size <= _smallImage))),
+      hasPreview: plan != _Preview.none,
       ref: ref,
     );
   } on Object catch (e) {
@@ -125,6 +120,81 @@ ui.Media? mediaOf(Event event) {
       ref: _Ref(event.eventId, null, const {}),
     );
   }
+}
+
+/// The file itself. A `file` map missing its key or iv gets empty ones,
+/// which the store refuses: the download fails, the timeline doesn't.
+MediaSpec? _fullSpec(_Ref ref) =>
+    _spec(ref.file, ref.content['url'], ref.name, _int(ref.info['size']));
+
+MediaSpec? _thumbnailSpec(_Ref ref) => _spec(
+  ref.thumbnailFile,
+  ref.info['thumbnail_url'],
+  '${ref.name}.thumbnail',
+  _int(ref.info.tryGetMap<String, Object?>('thumbnail_info')?['size']),
+);
+
+MediaSpec? _spec(
+  Map<String, Object?>? file,
+  Object? plainUrl,
+  String name,
+  int? size,
+) {
+  final url = file != null ? file['url'] : plainUrl;
+  final mxc = url is String ? Uri.tryParse(url) : null;
+  if (mxc == null || !mxc.isScheme('mxc')) return null;
+  return MediaSpec(
+    mxc: mxc,
+    name: name,
+    size: size,
+    key: file == null
+        ? null
+        : file.tryGetMap<String, Object?>('key')?.tryGet<String>('k') ?? '',
+    iv: file == null ? null : file.tryGet<String>('iv') ?? '',
+  );
+}
+
+/// What a row's preview is made of. Decided once, so that a row only offers
+/// a preview that [MatrixMediaSource.preview] can really draw.
+enum _Preview {
+  none,
+
+  /// The SDK's own copy of a file still going up.
+  sending,
+
+  /// A GIF within the cap, whole, so that it animates in the row.
+  gif,
+
+  /// The sender's thumbnail, through the store.
+  thumbnail,
+
+  /// The server's thumbnail of a plain image.
+  server,
+
+  /// A small encrypted image, itself.
+  file,
+}
+
+_Preview _planOf(_Ref ref, ui.MediaKind kind, int? size, String? mime) {
+  final image = kind == ui.MediaKind.image;
+  final thumbnail = _thumbnailSpec(ref) != null;
+  if (ref.sending) {
+    return image || thumbnail ? _Preview.sending : _Preview.none;
+  }
+  final full = _fullSpec(ref);
+  if (image &&
+      full != null &&
+      mime == 'image/gif' &&
+      size != null &&
+      size <= ui.inlinePreviewCap) {
+    return _Preview.gif;
+  }
+  if (thumbnail) return _Preview.thumbnail;
+  if (!image || full == null) return _Preview.none;
+  if (!ref.encrypted) return _Preview.server;
+  return size != null && size <= ui.inlinePreviewCap
+      ? _Preview.file
+      : _Preview.none;
 }
 
 /// A file that has already failed, for a ref with nowhere to fetch from.
@@ -159,50 +229,27 @@ class _FailedFile extends ChangeNotifier implements ui.MediaFile {
 class MatrixMediaSource implements ui.MediaSource {
   /// A null [store] is a client with nowhere to keep files: every file it
   /// is asked for has already failed.
-  MatrixMediaSource(this.client, this.store);
+  MatrixMediaSource(this.client, this.store) : _closed = false;
+
+  /// What [MatrixRooms.media] gives after it is disposed: no store, no
+  /// previews, and every file already failed, so a late rebuild after
+  /// sign-out opens nothing.
+  MatrixMediaSource.closed(this.client) : store = null, _closed = true;
+
+  final bool _closed;
 
   final Client client;
   final MediaStore? store;
 
   void dispose() => store?.dispose();
 
-  // ── What a ref names ───────────────────────────────────────────────────
-
-  /// The file itself. A `file` map missing its key or iv gets empty ones,
-  /// which the store refuses: the download fails, the timeline doesn't.
-  MediaSpec? _fullSpec(_Ref ref) =>
-      _spec(ref.file, ref.content['url'], ref.name, _int(ref.info['size']));
-
-  MediaSpec? _thumbnailSpec(_Ref ref) => _spec(
-    ref.thumbnailFile,
-    ref.info['thumbnail_url'],
-    '${ref.name}.thumbnail',
-    _int(ref.info.tryGetMap<String, Object?>('thumbnail_info')?['size']),
-  );
-
-  MediaSpec? _spec(
-    Map<String, Object?>? file,
-    Object? plainUrl,
-    String name,
-    int? size,
-  ) {
-    final url = file != null ? file['url'] : plainUrl;
-    final mxc = url is String ? Uri.tryParse(url) : null;
-    if (mxc == null || !mxc.isScheme('mxc')) return null;
-    return MediaSpec(
-      mxc: mxc,
-      name: name,
-      size: size,
-      key: file == null
-          ? null
-          : file.tryGetMap<String, Object?>('key')?.tryGet<String>('k') ?? '',
-      iv: file == null ? null : file.tryGet<String>('iv') ?? '',
-    );
-  }
-
   ui.MediaFile _open(MediaSpec? spec, String missing) {
     final store = this.store;
-    if (store == null) return _FailedFile(StateError('no media folder'));
+    if (store == null) {
+      return _FailedFile(
+        StateError(_closed ? 'signed out' : 'no media folder'),
+      );
+    }
     if (spec == null) return _FailedFile(StateError(missing));
     return store.open(spec);
   }
@@ -212,36 +259,33 @@ class MatrixMediaSource implements ui.MediaSource {
   @override
   ImageProvider? preview(ui.Media media, double physicalWidth) {
     final ref = media.ref;
-    if (ref is! _Ref) return null;
+    if (ref is! _Ref || _closed) return null;
     final txid = ref.txid;
-    if (ref.sending && txid != null) {
-      return FileStoreImage(
-        client,
-        Uri(scheme: 'cache', host: 'thumbnail', path: txid),
-        fallback: media.kind == ui.MediaKind.image
-            ? Uri(scheme: 'cache', host: 'file', path: txid)
-            : null,
-      );
+    switch (_planOf(ref, media.kind, media.size, media.mimeType)) {
+      case _Preview.none:
+        return null;
+      case _Preview.sending:
+        if (txid == null) return null;
+        return FileStoreImage(
+          client,
+          Uri(scheme: 'cache', host: 'thumbnail', path: txid),
+          fallback: media.kind == ui.MediaKind.image
+              ? Uri(scheme: 'cache', host: 'file', path: txid)
+              : null,
+        );
+      case _Preview.gif || _Preview.file:
+        return StoredFileImage(_open(_fullSpec(ref), ''), physicalWidth);
+      case _Preview.thumbnail:
+        return StoredFileImage(_open(_thumbnailSpec(ref), ''), physicalWidth);
+      case _Preview.server:
+        final mxc = _fullSpec(ref)?.mxc;
+        if (mxc == null) return null;
+        return MxcThumbnail(
+          client,
+          mxc,
+          bucketFor(physicalWidth, buckets: timelineBuckets),
+        );
     }
-    final thumbnail = _thumbnailSpec(ref);
-    if (thumbnail != null) {
-      return StoredFileImage(_open(thumbnail, ''), physicalWidth);
-    }
-    if (media.kind != ui.MediaKind.image) return null;
-    final full = _fullSpec(ref);
-    if (full == null) return null;
-    if (!ref.encrypted) {
-      return MxcThumbnail(
-        client,
-        full.mxc,
-        bucketFor(physicalWidth, buckets: timelineBuckets),
-      );
-    }
-    final size = media.size;
-    if (size != null && size <= _smallImage) {
-      return StoredFileImage(_open(full, ''), physicalWidth);
-    }
-    return null;
   }
 
   @override
@@ -268,15 +312,11 @@ class MatrixMediaSource implements ui.MediaSource {
     // Only the file the preview itself reads: a plain image's preview is a
     // server thumbnail with nothing on disk, and opening the full file here
     // would download it.
-    final size = media.size;
-    final spec =
-        _thumbnailSpec(ref) ??
-        (media.kind == ui.MediaKind.image &&
-                ref.encrypted &&
-                size != null &&
-                size <= _smallImage
-            ? _fullSpec(ref)
-            : null);
+    final spec = switch (_planOf(ref, media.kind, media.size, media.mimeType)) {
+      _Preview.gif || _Preview.file => _fullSpec(ref),
+      _Preview.thumbnail => _thumbnailSpec(ref),
+      _ => null,
+    };
     if (spec != null) store.open(spec).retry();
   }
 }
