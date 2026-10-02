@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:matrix/matrix.dart' show Logs;
 
 import '../ui/model/media_source.dart';
 import 'ctr_decryptor.dart';
@@ -59,12 +60,16 @@ class MediaStore {
       file._failQuietly(StateError('signed out'));
       return file;
     }
-    final done = File(file._finalPath);
-    if (done.existsSync()) {
-      // Touched so that what was just opened outlives eviction.
-      done.setLastModifiedSync(DateTime.now());
-      file._finishFromDisk(done.lengthSync());
-      return file;
+    try {
+      final done = File(file._finalPath);
+      if (done.existsSync()) {
+        // Touched so that what was just opened outlives eviction.
+        done.setLastModifiedSync(DateTime.now());
+        file._finishFromDisk(done.lengthSync());
+        return file;
+      }
+    } on FileSystemException {
+      // Eviction took the folder between the checks: download it again.
     }
     _running[spec.mxc] = file;
     file._start();
@@ -79,6 +84,10 @@ class MediaStore {
     } on PathNotFoundException {
       // Signing out removes the folder under a pass in flight; with nothing
       // left on disk there is nothing left to trim.
+    } on Object catch (e, st) {
+      // Logged, and the chain stays usable: one bad pass must not stop the
+      // cap from ever being enforced again.
+      Logs().w("[loaf] couldn't trim the media cache", e, st);
     }
   });
 
@@ -257,6 +266,7 @@ class StoredFile extends ChangeNotifier implements MediaFile {
 
   Future<void> _download(int gen) async {
     RandomAccessFile? raf;
+    http.StreamedResponse? response;
     try {
       final key = _spec.key, iv = _spec.iv;
       CtrDecryptor? decryptor;
@@ -278,13 +288,9 @@ class StoredFile extends ChangeNotifier implements MediaFile {
       final request = http.Request('GET', uri);
       final token = _store.accessToken();
       if (token != null) request.headers['authorization'] = 'Bearer $token';
-      final response = await _store.client.send(request);
-      if (_dead) {
-        unawaited(response.stream.listen(null).cancel());
-        return;
-      }
+      response = await _store.client.send(request);
+      if (_dead) return;
       if (response.statusCode != 200) {
-        unawaited(response.stream.listen(null).cancel());
         throw http.ClientException(
           'the server answered ${response.statusCode}',
           uri,
@@ -293,23 +299,19 @@ class StoredFile extends ChangeNotifier implements MediaFile {
       _total = response.contentLength ?? _spec.size;
 
       raf = await part.open(mode: FileMode.write);
+      if (_dead) return;
       final it = _iterator = StreamIterator(response.stream);
       while (await it.moveNext()) {
-        if (_dead) break;
+        if (_dead) return;
         final bytes = decryptor == null
             ? Uint8List.fromList(it.current)
             : decryptor.add(it.current);
         await raf.writeFrom(bytes);
-        if (_dead) break;
+        if (_dead) return;
         _received += bytes.length;
         _notify();
       }
-      if (_dead) {
-        await raf.close();
-        raf = null;
-        await _deleteQuietly(part);
-        return;
-      }
+      if (_dead) return;
       if (decryptor != null) {
         final tail = decryptor.close();
         await raf.writeFrom(tail);
@@ -318,6 +320,7 @@ class StoredFile extends ChangeNotifier implements MediaFile {
       await raf.close();
       raf = null;
       await part.rename(_finalPath);
+      response = null;
       _total ??= _received;
       _complete = true;
       _store._running.remove(_spec.mxc);
@@ -326,11 +329,39 @@ class StoredFile extends ChangeNotifier implements MediaFile {
       if (!_store._disposed) unawaited(_store.evict());
     } on Object catch (e) {
       if (_dead || gen != _generation) return;
-      await raf?.close();
-      await _deleteQuietly(File(partialPath));
+      await _cleanUp(raf, response);
+      raf = null;
+      response = null;
+      // Whatever cleanup managed, the file ends failed and says so.
       _error = e;
       _path.completeError(e);
       _notify();
+    } finally {
+      // Every other exit (success, sign-out) still lets go of the connection
+      // and the file; a no-op when the catch above already did.
+      if (raf != null || response != null) await _cleanUp(raf, response);
+    }
+  }
+
+  /// Stops the response, closes the file and removes the .part, whichever
+  /// of them exist; a failure here is logged, never allowed to hide the
+  /// download's own outcome. A finished file has no .part to remove.
+  Future<void> _cleanUp(
+    RandomAccessFile? raf,
+    http.StreamedResponse? response,
+  ) async {
+    try {
+      final it = _iterator;
+      _iterator = null;
+      if (it != null) {
+        await it.cancel();
+      } else if (response != null) {
+        await response.stream.listen(null).cancel();
+      }
+      await raf?.close();
+      await _deleteQuietly(File(partialPath));
+    } on Object catch (e, st) {
+      Logs().w("[loaf] couldn't clean up a media download", e, st);
     }
   }
 

@@ -10,6 +10,9 @@ class CtrDecryptor {
   CtrDecryptor({required List<int> key, required List<int> iv})
     : _key = Uint8List.fromList(key),
       _iv = Uint8List.fromList(iv) {
+    if (_key.length != 32) {
+      throw ArgumentError.value(key.length, 'key', 'must be 32 bytes');
+    }
     if (_iv.length != 16) {
       throw ArgumentError.value(iv.length, 'iv', 'must be 16 bytes');
     }

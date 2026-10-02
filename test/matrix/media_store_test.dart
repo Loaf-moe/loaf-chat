@@ -169,12 +169,83 @@ void main() {
   test('a .part left by a quit starts over', () async {
     final dir = Directory('${root.path}/${_id(_mxc)}')
       ..createSync(recursive: true);
-    File('${dir.path}/a.txt.part').writeAsStringSync('stale stale stale');
-    final store = storeOver(serving([utf8.encode('fresh')]));
+    final stale = File('${dir.path}/a.txt.part')
+      ..writeAsStringSync('stale stale stale');
+    // Opening for write would truncate it anyway; what only a delete does is
+    // clear it before the server has even answered.
+    var staleAtRequest = true;
+    final client = MockClient.streaming((request, body) async {
+      staleAtRequest = stale.existsSync();
+      return http.StreamedResponse(
+        Stream.value(utf8.encode('fresh')),
+        200,
+        contentLength: 5,
+      );
+    });
+    final store = storeOver(client);
     addTearDown(store.dispose);
     final file = store.open(MediaSpec(mxc: _mxc, name: 'a.txt'));
     expect(File(await file.path).readAsStringSync(), 'fresh');
-    expect(File('${dir.path}/a.txt.part').existsSync(), isFalse);
+    expect(staleAtRequest, isFalse);
+    expect(stale.existsSync(), isFalse);
+  });
+
+  test('a wrong-length key fails the download cleanly', () async {
+    final store = storeOver(serving([utf8.encode('x')]));
+    addTearDown(store.dispose);
+    final file = store.open(
+      MediaSpec(
+        mxc: _mxc,
+        name: 'a',
+        key: base64Url.encode(List.filled(16, 1)).replaceAll('=', ''),
+        iv: base64.encode(List.filled(16, 1)).replaceAll('=', ''),
+      ),
+    );
+    await expectLater(file.path, throwsA(isA<ArgumentError>()));
+    expect(file.error, isA<ArgumentError>());
+    expect(requests, isEmpty);
+  });
+
+  test('a failure while writing lets go of the connection', () async {
+    final gate = StreamController<List<int>>();
+    var cancelled = false;
+    gate.onCancel = () => cancelled = true;
+    final client = MockClient.streaming((request, body) async {
+      return http.StreamedResponse(gate.stream, 200, contentLength: 5);
+    });
+    // A directory where the .part goes: opening it for writing fails after
+    // the response has arrived.
+    Directory('${root.path}/${_id(_mxc)}/a.txt.part')
+        .createSync(recursive: true);
+    final store = storeOver(client);
+    addTearDown(store.dispose);
+    final file = store.open(MediaSpec(mxc: _mxc, name: 'a.txt'));
+    await expectLater(file.path, throwsA(isA<FileSystemException>()));
+    expect(file.error, isNotNull);
+    expect(cancelled, isTrue);
+  });
+
+  test('one failed eviction does not stop the next', () async {
+    final uris = [for (var i = 0; i < 2; i++) Uri.parse('mxc://loaf.moe/g$i')];
+    for (var i = 0; i < 2; i++) {
+      final dir = Directory('${root.path}/${_id(uris[i])}')
+        ..createSync(recursive: true);
+      File('${dir.path}/f.bin')
+        ..writeAsBytesSync(List.filled(100, 1))
+        ..setLastModifiedSync(DateTime(2026, 1, 1 + i));
+    }
+    final store = storeOver(serving([]), capBytes: 100);
+    addTearDown(store.dispose);
+    // A folder that cannot be written to refuses to give up its file.
+    final locked = '${root.path}/${_id(uris[0])}';
+    Process.runSync('chmod', ['555', locked]);
+    addTearDown(() => Process.runSync('chmod', ['755', locked]));
+    await store.evict();
+    expect(File('$locked/f.bin').existsSync(), isTrue);
+    Process.runSync('chmod', ['755', locked]);
+    await store.evict();
+    expect(Directory('${root.path}/${_id(uris[0])}').existsSync(), isFalse);
+    expect(Directory('${root.path}/${_id(uris[1])}').existsSync(), isTrue);
   });
 
   test('disposing mid-download fails it and notifies nothing', () async {
