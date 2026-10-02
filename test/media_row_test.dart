@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_media/loaf_media.dart';
@@ -485,6 +487,89 @@ void main() {
       });
     });
 
+    testWidgets(
+      'a link is a link: the click cursor, and the keyboard reaches it',
+      (tester) async {
+        await on(TargetPlatform.macOS, () async {
+          mockNative(tester);
+          var opened = 0;
+          await pumpManual(tester, onOpen: () => opened++);
+          await nativeSays(tester, 'video.failed', {
+            'view': created.single['id'],
+          });
+          await tester.pump();
+
+          final mouse = await tester.createGesture(
+            kind: PointerDeviceKind.mouse,
+          );
+          addTearDown(mouse.removePointer);
+          await mouse.addPointer(location: Offset.zero);
+          await mouse.moveTo(tester.getCenter(find.text('open it instead')));
+          await tester.pump();
+          expect(
+            RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1),
+            SystemMouseCursors.click,
+          );
+
+          Focus.of(tester.element(find.text('open it instead'))).requestFocus();
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.pump();
+          expect(opened, 1);
+        });
+      },
+    );
+
+    testWidgets(
+      "on Linux, the player's own \"couldn't play this\" is the only one",
+      (tester) async {
+        await on(TargetPlatform.linux, () async {
+          mockNative(tester);
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            media,
+            (call) async {
+              mediaCalls.add(call);
+              return switch (call.method) {
+                'video.create' => {'texture': 7, 'view': 1},
+                'video.state' => {
+                  'position': 0,
+                  'duration': 4000,
+                  'playing': false,
+                  'error': true,
+                },
+                _ => null,
+              };
+            },
+          );
+          var opened = 0;
+          await pumpManual(tester, onOpen: () => opened++);
+          await tester.pump(const Duration(milliseconds: 300));
+          await nativeSays(tester, 'video.failed', {'view': 1});
+          await tester.pump();
+          expect(find.textContaining("couldn't play this"), findsOneWidget);
+          expect(find.byType(CircularProgressIndicator), findsNothing);
+          await tester.tap(find.text('open it instead'));
+          expect(opened, 1);
+
+          // Lets the player go, so its poll stops before the test ends.
+          await tester.pumpWidget(const SizedBox());
+          await tester.pump();
+        });
+      },
+    );
+
+    testWidgets('a chunk arriving does not rebuild the player', (tester) async {
+      await on(TargetPlatform.macOS, () async {
+        mockNative(tester);
+        final file = await pumpManual(tester);
+        final before = tester.widget(find.byType(LoafVideo));
+        file.arrive(100);
+        await tester.pump();
+        expect(ring(tester), 0.1, reason: 'the ring still moves');
+        expect(tester.widget(find.byType(LoafVideo)), same(before));
+      });
+    });
+
     testWidgets('in picture in picture, scrolling away leaves it playing', (
       tester,
     ) async {
@@ -631,6 +716,27 @@ void main() {
       await tester.pumpAndSettle();
       expect(retried, 1);
       expect(loads, hasLength(2));
+    });
+
+    testWidgets('"try again" is a link the keyboard reaches', (tester) async {
+      await on(TargetPlatform.macOS, () async {
+        var retried = 0;
+        await pumpFailing(tester, onRetry: () => retried++);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        addTearDown(mouse.removePointer);
+        await mouse.addPointer(location: Offset.zero);
+        await mouse.moveTo(tester.getCenter(find.text('try again')));
+        await tester.pump();
+        expect(
+          RendererBinding.instance.mouseTracker.debugDeviceActiveCursor(1),
+          SystemMouseCursors.click,
+        );
+        Focus.of(tester.element(find.text('try again'))).requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(retried, 1);
+      });
     });
 
     testWidgets('with nothing to retry, draws no "try again"', (tester) async {

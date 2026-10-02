@@ -2,6 +2,7 @@
 /// its words. Which bytes go in it is the [MediaSource]'s business.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:loaf_media/loaf_media.dart';
@@ -369,10 +370,10 @@ class _MediaRowState extends State<MediaRow> {
   Widget _player(MediaFile file, Widget placeholder, double aspect) =>
       ClipRRect(
         borderRadius: BorderRadius.circular(LoafRadius.lg),
-        child: ListenableBuilder(
-          listenable: file,
-          builder: (context, _) {
-            if (file.error != null) {
+        child: _OnFailure(
+          file: file,
+          builder: (context, failed) {
+            if (failed) {
               return _Failed(
                 onRetry: () {
                   file.retry();
@@ -403,9 +404,12 @@ class _MediaRowState extends State<MediaRow> {
                     if (mounted) setState(() => _unplayable = true);
                   },
                 ),
-                if (_unplayable)
+                // Linux's player draws its own "couldn't play this", with
+                // the same way forward; one is enough.
+                if (_unplayable &&
+                    defaultTargetPlatform != TargetPlatform.linux)
                   _Unplayable(onOpen: onOpen)
-                else if (!_playable)
+                else if (!_playable && !_unplayable)
                   // Only ever over a player that can't start yet: nothing
                   // under it to tap.
                   IgnorePointer(
@@ -524,17 +528,7 @@ class _Unplayable extends StatelessWidget {
               style: style,
             ),
             if (onOpen != null)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onOpen,
-                child: Text(
-                  'open it instead',
-                  style: style.copyWith(
-                    decoration: TextDecoration.underline,
-                    color: tokens.textStrong,
-                  ),
-                ),
-              ),
+              _Link('open it instead', style: style, onPressed: onOpen),
           ],
         ),
       ),
@@ -564,22 +558,91 @@ class _Failed extends StatelessWidget {
               style: style,
             ),
             if (onRetry != null)
-              GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: onRetry,
-                child: Text(
-                  'try again',
-                  style: style.copyWith(
-                    decoration: TextDecoration.underline,
-                    color: tokens.textStrong,
-                  ),
-                ),
-              ),
+              _Link('try again', style: style, onPressed: onRetry!),
           ],
         ),
       ),
     );
   }
+}
+
+/// A way forward inside a line of text: underlined, the click cursor
+/// over it, and reached by the keyboard like any button.
+class _Link extends StatelessWidget {
+  const _Link(this.label, {required this.style, required this.onPressed});
+
+  final String label;
+  final TextStyle style;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        padding: EdgeInsets.zero,
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        foregroundColor: tokens.textStrong,
+        enabledMouseCursor: SystemMouseCursors.click,
+      ),
+      child: Text(
+        label,
+        style: style.copyWith(
+          decoration: TextDecoration.underline,
+          color: tokens.textStrong,
+        ),
+      ),
+    );
+  }
+}
+
+/// Builds with whether [file] has failed, and again only when that changes:
+/// a download notifies per chunk, and the player under it must not be
+/// rebuilt for each one.
+class _OnFailure extends StatefulWidget {
+  const _OnFailure({required this.file, required this.builder});
+
+  final MediaFile file;
+  final Widget Function(BuildContext context, bool failed) builder;
+
+  @override
+  State<_OnFailure> createState() => _OnFailureState();
+}
+
+class _OnFailureState extends State<_OnFailure> {
+  late bool _failed = widget.file.error != null;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.file.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(_OnFailure old) {
+    super.didUpdateWidget(old);
+    if (old.file != widget.file) {
+      old.file.removeListener(_changed);
+      widget.file.addListener(_changed);
+      _failed = widget.file.error != null;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.file.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    final failed = widget.file.error != null;
+    if (failed != _failed) setState(() => _failed = failed);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context, _failed);
 }
 
 class _PlayBadge extends StatelessWidget {
