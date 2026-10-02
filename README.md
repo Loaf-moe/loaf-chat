@@ -8,6 +8,19 @@ Build the macOS app once with `mise exec -- flutter build macos --debug`,
 then run `mise exec -- flutter test`. Encryption tests load vodozemac's
 native library from that build, and fail saying so without it.
 
+## Building on Linux
+
+Video plays through GStreamer, and the player is a Rust crate that CMake
+builds with cargo. Install the development packages, then Rust:
+
+```nu
+sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+mise install
+```
+
+`mise install` brings Rust (pinned in `mise.toml`) along with Flutter. Run the
+build as `mise exec -- flutter build linux` so cargo is on the path.
+
 ## Installing
 
 Download Loaf Chat for macOS or Linux from <https://get.loaf.moe>. Every copy
