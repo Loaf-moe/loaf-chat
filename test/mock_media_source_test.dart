@@ -31,7 +31,10 @@ void main() {
     expect(file.received, File(path).lengthSync());
   });
 
-  test('opening twice is one file', () {
-    expect(identical(source.open(oven), source.open(oven)), isTrue);
+  test('opening twice is one file', () async {
+    final file = source.open(oven);
+    expect(identical(file, source.open(oven)), isTrue);
+    // Let the copy finish before the folder goes.
+    await file.path;
   });
 }

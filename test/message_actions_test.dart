@@ -387,6 +387,99 @@ void main() {
   );
 
   group('on media', () {
+    Message captionless(MessageStatus status) => Message(
+      id: 'q',
+      author: _you,
+      sentAt: DateTime(2026, 9, 24, 10),
+      body: '',
+      status: status,
+      media: const Media(kind: MediaKind.image, name: 'oven.jpg', ref: 'x'),
+    );
+
+    test('a failed caption-less media message offers nothing to copy', () {
+      expect(actionsFor(captionless(MessageStatus.failed), _you), isEmpty);
+      expect(actionsFor(captionless(MessageStatus.sending), _you), isEmpty);
+    });
+
+    test('a caption-less media message in a read-only room offers nothing', () {
+      expect(
+        actionsFor(captionless(MessageStatus.sent), _you, writable: false),
+        isEmpty,
+      );
+    });
+
+    test('a failed captioned one can still be copied', () {
+      final m = Message(
+        id: 'c',
+        author: _you,
+        sentAt: DateTime(2026, 9, 24, 10),
+        body: 'first bake',
+        status: MessageStatus.failed,
+        media: captionless(MessageStatus.failed).media,
+      );
+      expect(actionsFor(m, _you), [MessageAction.copy]);
+    });
+
+    testWidgets('long-pressing a sending caption-less picture opens no sheet', (
+      tester,
+    ) async {
+      final controller = TimelineController([
+        captionless(MessageStatus.sending),
+      ], you: _you);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showMessageActionsSheet(
+                  context,
+                  controller,
+                  controller.messages.first,
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.byType(BottomSheet), findsNothing);
+    });
+
+    testWidgets('the pointer menu does not open with nothing in it', (
+      tester,
+    ) async {
+      final controller = TimelineController([
+        captionless(MessageStatus.sending),
+      ], you: _you);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showMessageContextMenu(
+                  context,
+                  controller,
+                  controller.messages.first,
+                  const Offset(100, 100),
+                ),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      final before = find.byType(ModalBarrier).evaluate().length;
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ModalBarrier).evaluate().length, before);
+    });
+
     final photo = Message(
       id: 'p',
       author: _you,

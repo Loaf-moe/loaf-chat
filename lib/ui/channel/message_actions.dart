@@ -33,9 +33,9 @@ List<MessageAction> actionsFor(
   Member you, {
   bool writable = true,
 }) => [
-  if (!writable || message.status != MessageStatus.sent)
-    MessageAction.copy
-  else ...[
+  if (!writable || message.status != MessageStatus.sent) ...[
+    if (message.body.isNotEmpty) MessageAction.copy,
+  ] else ...[
     MessageAction.reply,
     if (message.body.isNotEmpty) MessageAction.copy,
     if (message.author.id == you.id) ...[
@@ -113,15 +113,20 @@ Future<void> showMessageActionsSheet(
   Timeline controller,
   Message message,
 ) async {
+  // A caption-less picture that is still sending offers nothing: no empty
+  // sheet.
+  final items = _items(message, controller);
+  final canReact = canReactTo(message, writable: controller.writable);
+  if (items.isEmpty && !canReact) return;
   final pick = await showActionSheet<_Pick>(
     context,
-    header: canReactTo(message, writable: controller.writable)
+    header: canReact
         ? (context) => _ReactionRow(
             size: 44,
             onPick: (pick) => Navigator.pop(context, pick),
           )
         : null,
-    items: _items(message, controller),
+    items: items,
   );
   if (pick != null && context.mounted) {
     await _perform(context, controller, message, pick);
@@ -138,22 +143,23 @@ Future<void> showMessageContextMenu(
   Offset position, {
   String selection = '',
 }) async {
+  final canReact = canReactTo(message, writable: controller.writable);
+  final items = [
+    if (selection.isNotEmpty)
+      ActionItem<_Pick>(
+        value: _CopySelection(selection),
+        icon: LucideIcons.textCursorInput,
+        label: 'Copy selection',
+      ),
+    ..._items(message, controller),
+  ];
+  // Nothing to offer: no empty menu.
+  if (items.isEmpty && !canReact) return;
   final pick = await showActionMenu<_Pick>(
     context,
     position: position,
-    leading: [
-      if (canReactTo(message, writable: controller.writable))
-        _ReactionMenuEntry(),
-    ],
-    items: [
-      if (selection.isNotEmpty)
-        ActionItem(
-          value: _CopySelection(selection),
-          icon: LucideIcons.textCursorInput,
-          label: 'Copy selection',
-        ),
-      ..._items(message, controller),
-    ],
+    leading: [if (canReact) _ReactionMenuEntry()],
+    items: items,
   );
   if (pick != null && context.mounted) {
     await _perform(context, controller, message, pick, position: position);
