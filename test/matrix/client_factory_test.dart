@@ -4,6 +4,15 @@ import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
+  test('the client sends for 30 s before giving up', () async {
+    final client = await openClient(
+      httpClient: FakeMatrixApi(),
+      databasePath: inMemoryDatabasePath,
+    );
+    addTearDown(client.dispose);
+    expect(client.sendTimelineEventTimeout, const Duration(seconds: 30));
+  });
+
   test('a new database opens signed out', () async {
     final client = await openClient(
       httpClient: FakeMatrixApi(),

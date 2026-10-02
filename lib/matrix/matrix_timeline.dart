@@ -15,6 +15,7 @@ import '../ui/channel/timeline.dart' as ui;
 import '../ui/model/models.dart' as ui;
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import 'device_trust.dart';
+import 'loaf_http_client.dart';
 
 /// How many events one page of history asks for.
 const historyPage = 50;
@@ -49,6 +50,10 @@ class MatrixTimeline extends ChangeNotifier
   /// a sending echo that is not one of these reads as failed, so it can be
   /// retried or discarded rather than dimmed for ever.
   final _inFlight = <String>{};
+
+  /// How much of each file upload has gone, 0 to 1, by transaction id. The
+  /// SDK keeps no such figure, so it comes from [LoafHttpClient].
+  final _uploads = <String, double>{};
 
   /// Reactions being added or taken back, by message and emoji. A second
   /// tap while one is on its way would otherwise add it twice: its echo is
@@ -175,7 +180,21 @@ class MatrixTimeline extends ChangeNotifier
       reactions: quoting ? const [] : _reactions(event, timeline),
       replyTo: quoting ? null : _replyTo(event, timeline),
       status: status,
+      uploaded: event.status.isSending ? _uploads[event.eventId] : null,
     );
+  }
+
+  /// Records an upload's progress, and redraws only when the whole percent
+  /// moves: a chunk is 64 KB, and a row doesn't need to repaint for each.
+  void _uploaded(String txid, int sent, int? total, int fallbackTotal) {
+    final whole = total ?? fallbackTotal;
+    if (whole <= 0) return;
+    final fraction = (sent / whole).clamp(0.0, 1.0);
+    final before = _uploads[txid];
+    _uploads[txid] = fraction;
+    if (before == null || (before * 100).floor() != (fraction * 100).floor()) {
+      _changed();
+    }
   }
 
   /// [event]'s HTML, for the kinds of message that are text. A file's is
@@ -271,6 +290,7 @@ class MatrixTimeline extends ChangeNotifier
         .then((id) => id ?? (throw StateError('not sent: $txid')))
         .whenComplete(() {
           _inFlight.remove(txid);
+          _uploads.remove(txid);
           _changed();
         });
   }
@@ -333,8 +353,10 @@ class MatrixTimeline extends ChangeNotifier
     // retry — except one the server will never take, which says why.
     unawaited(
       _send(
-        (txid) =>
-            room.sendFileEvent(matrixFile, txid: txid, inReplyTo: replyTo),
+        (txid) => LoafHttpClient.reportingUploads(
+          (sent, total) => _uploaded(txid, sent, total, file.bytes.length),
+          () => room.sendFileEvent(matrixFile, txid: txid, inReplyTo: replyTo),
+        ),
       ).then<void>(
         (_) {},
         onError: (Object error) {

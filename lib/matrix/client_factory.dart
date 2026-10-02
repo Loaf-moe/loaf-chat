@@ -5,6 +5,7 @@ library;
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:loaf_native/matrix/loaf_http_client.dart';
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path_provider/path_provider.dart';
@@ -48,7 +49,10 @@ Future<Client> openClient({
   return Client(
     'loaf',
     database: database,
-    httpClient: httpClient,
+    httpClient: LoafHttpClient(httpClient ?? http.Client()),
+    // The SDK's default is 0: it retries a failed send for ever. 30 s is
+    // how long a dead network takes to read "didn't send".
+    sendTimelineEventTimeout: const Duration(seconds: 30),
     // The SDK keeps only a room list's state in memory for rooms not open.
     // These are what the channel list and member list read on top of that:
     // a channel's topic and lock, and who is an admin or moderator.
