@@ -446,14 +446,24 @@ class MatrixTimeline extends ChangeNotifier
     // The SDK resends only what it has marked failed; one left sending by
     // a quit app is failed in all but name.
     event.status = EventStatus.error;
-    _inFlight.add(event.eventId);
+    final txid = event.eventId;
+    _inFlight.add(txid);
+    // A file goes up again whole, under the same transaction id: its row
+    // says how far, as on the first try.
+    final size =
+        event.content
+            .tryGetMap<String, Object?>('info')
+            ?.tryGet<int>('size', TryGet.silent) ??
+        0;
     unawaited(
-      event.sendAgain().then<void>((_) {}, onError: (Object _) {}).whenComplete(
-        () {
-          _inFlight.remove(event.eventId);
-          _changed();
-        },
-      ),
+      LoafHttpClient.reportingUploads(
+        (sent, total) => _uploaded(txid, sent, total, size),
+        event.sendAgain,
+      ).then<void>((_) {}, onError: (Object _) {}).whenComplete(() {
+        _inFlight.remove(txid);
+        _uploads.remove(txid);
+        _changed();
+      }),
     );
   }
 

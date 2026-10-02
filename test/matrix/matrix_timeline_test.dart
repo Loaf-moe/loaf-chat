@@ -881,6 +881,63 @@ void main() {
       expect(h.api.sent.map((s) => s.$2['body']), ['rejected']);
       expect(h.byBody('rejected').status, MessageStatus.sent);
     });
+
+    test(
+      'a failed file says how far it has gone up as it is retried',
+      () async {
+        // The SDK resends a file from its own file cache, so this client has
+        // a folder for one.
+        final media = Directory.systemTemp.createTempSync('loaf-timeline-test');
+        addTearDown(() => media.deleteSync(recursive: true));
+        final api = _Api();
+        final client = await openClient(
+          httpClient: api,
+          databasePath: inMemoryDatabasePath,
+          mediaPath: media.path,
+        );
+        FakeMatrixApi.client = client;
+        addTearDown(client.dispose);
+        await client.init(
+          newToken: 'abcd',
+          newHomeserver: Uri.parse('https://fakeServer.notExisting'),
+          newUserID: _me,
+          newDeviceID: 'GHTYAJCE',
+          newDeviceName: 'loaf on test',
+          waitForFirstSync: false,
+        );
+        await _sync(client, [_text('hi')]);
+        final rooms = MatrixRooms(client);
+        addTearDown(rooms.dispose);
+        final h = _Harness(api, client, rooms);
+        h.timeline;
+        await _settle();
+
+        Message notes() =>
+            h.messages.firstWhere((m) => m.media?.name == 'notes.txt');
+
+        h.api.refuseSend = true;
+        h.timeline.sendFile(
+          Attachment(name: 'notes.txt', bytes: Uint8List.fromList([1, 2, 3])),
+        );
+        await _settle();
+        expect(notes().status, MessageStatus.failed);
+        expect(notes().uploaded, isNull);
+
+        // The upload goes again; the message itself is held at the server.
+        h.api
+          ..refuseSend = false
+          ..holdSend = Completer<void>();
+        h.timeline.retry(notes().id);
+        await _settle();
+        expect(notes().status, MessageStatus.sending);
+        expect(notes().uploaded, 1.0);
+
+        h.api.holdSend!.complete();
+        await _settle();
+        expect(notes().status, MessageStatus.sent);
+        expect(notes().uploaded, isNull);
+      },
+    );
   });
 
   group('deleting', () {
