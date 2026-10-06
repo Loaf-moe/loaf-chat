@@ -283,6 +283,12 @@ class _LoafVideoState extends State<LoafVideo> {
       TargetPlatform.iOS => UiKitView(
         key: key,
         viewType: _viewType,
+        // The default policy gates the player's own recognizers on Flutter's
+        // gesture arena, and on iOS 26 they get stuck: after a pause the
+        // play button lights up but never acts (flutter/flutter#175099).
+        // Here Flutter's hit test alone decides: a touch goes to the
+        // player unless a Flutter widget lies over it ("open it instead").
+        gestureBlockingPolicy: UiKitViewGestureBlockingPolicy.doNotBlockGesture,
         creationParams: params,
         creationParamsCodec: const StandardMessageCodec(),
         onPlatformViewCreated: _created,

@@ -115,6 +115,45 @@ void main() {
   );
 
   testWidgets(
+    "on iOS the player's own controls are never held back by Flutter's arena",
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    (tester) async {
+      final creations = <Map<Object?, Object?>>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform_views,
+        (call) async {
+          if (call.method == 'create') {
+            creations.add(call.arguments as Map<Object?, Object?>);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform_views,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: LoafVideo(
+            file: _FakeFile('v'),
+            mimeType: 'video/mp4',
+            aspect: 16 / 9,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // The default blocks AVKit's recognizers through the arena, and on
+      // iOS 26 they stick: play after a pause lights up and does nothing.
+      expect(creations.single['gestureBlockingPolicy'], 'doNotBlockGesture');
+      LoafVideo.endAll();
+    },
+  );
+
+  testWidgets(
     'with nothing playing, ending them all asks nothing of the native side',
     (tester) async {
       mockNative(tester);
