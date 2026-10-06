@@ -99,8 +99,8 @@ void main() {
           _adaMention,
           _kitchenMention,
         ]),
-        'hey [@Ada Lovelace](https://matrix.to/#/@ada:loaf.moe), see '
-        '[#kitchen](https://matrix.to/#/!kitchen:loaf.moe)',
+        'hey [\\@Ada Lovelace](https://matrix.to/#/@ada:loaf.moe), see '
+        '[\\#kitchen](https://matrix.to/#/!kitchen:loaf.moe)',
       );
     });
 
@@ -119,7 +119,7 @@ void main() {
       );
       expect(
         linkMentions('@[x]', [odd]),
-        r'[@\[x\]](https://matrix.to/#/@x:loaf.moe)',
+        r'[\@\[x\]](https://matrix.to/#/@x:loaf.moe)',
       );
     });
   });

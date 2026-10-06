@@ -172,9 +172,11 @@ List<Mention> mentionsIn(String text, Iterable<Mention> picked) {
 }
 
 /// [text] with each of [mentions] made a markdown link to its permalink, for
-/// the formatted body. Code is left as written, as are labels that run on
-/// into more of a word (`@Ada` inside `@Adam`). Where two mentions share a
-/// label, the one picked last wins.
+/// the formatted body. The label's `@` and `#` are escaped, or the SDK's own
+/// `@name` and pill syntaxes would eat the link text and leave the markdown
+/// showing. Code is left as written, as are labels that run on into more of
+/// a word (`@Ada` inside `@Adam`). Where two mentions share a label, the one
+/// picked last wins.
 String linkMentions(String text, List<Mention> mentions) {
   if (mentions.isEmpty) return text;
   final byLabel = {for (final m in mentions) m.label: m};
@@ -241,7 +243,7 @@ bool _boundaryAfter(String text, int i) =>
 final _wordChar = RegExp(r'[\p{L}\p{N}_]', unicode: true);
 
 String _escapeLinkText(String label) =>
-    label.replaceAllMapped(RegExp(r'[\[\]\\]'), (m) => '\\${m[0]}');
+    label.replaceAllMapped(RegExp(r'[\[\]\\@#]'), (m) => '\\${m[0]}');
 
 /// [text] cut into code (fenced, closed or running to the end, and inline)
 /// and everything else, in order.
