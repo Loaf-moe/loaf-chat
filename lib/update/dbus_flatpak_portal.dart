@@ -65,7 +65,7 @@ class DbusFlatpakPortal implements FlatpakPortal {
   }
 
   @override
-  Future<void> update() async {
+  Future<bool> update() async {
     final monitor = _monitor ?? await _open();
     // Status: 0 running, 1 nothing to do, 2 done, 3 failed.
     final finished = _signals(
@@ -84,11 +84,13 @@ class DbusFlatpakPortal implements FlatpakPortal {
       rethrow;
     }
     final last = await finished;
-    if (last['status']?.asUint32() != 2) {
-      throw StateError(
+    return switch (last['status']?.asUint32()) {
+      2 => true,
+      1 => false,
+      _ => throw StateError(
         last['error_message']?.asString() ?? 'the portal did not update',
-      );
-    }
+      ),
+    };
   }
 
   @override

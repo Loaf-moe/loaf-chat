@@ -40,6 +40,31 @@ class FlatpakUpdater extends StateUpdater {
       _onCommits,
       onError: (Object e, StackTrace s) => updateLog('the portal', e, s),
     );
+    // The about section's button can mean something now.
+    notifyListeners();
+  }
+
+  @override
+  bool get canCheck => _watching != null;
+
+  /// The portal keeps its own schedule; asking it to update is how to look
+  /// sooner. It says when there is nothing to install.
+  @override
+  Future<UpdateCheck> check() async {
+    if (state is! UpdateIdle) return settled();
+    move(const UpdatePreparing());
+    try {
+      if (!await portal.update()) {
+        move(const UpdateIdle());
+        return UpdateCheck.upToDate;
+      }
+      move(UpdateReady(await _version()));
+      return UpdateCheck.ready;
+    } catch (e, s) {
+      updateLog('the Flatpak was not updated', e, s);
+      move(const UpdateIdle());
+      return UpdateCheck.failed;
+    }
   }
 
   Future<void> _onCommits(UpdateCommits commits) async {
@@ -52,8 +77,11 @@ class FlatpakUpdater extends StateUpdater {
     } else if (commits.remote != commits.local) {
       move(const UpdatePreparing());
       try {
-        await portal.update();
-        move(UpdateReady(await _version()));
+        move(
+          await portal.update()
+              ? UpdateReady(await _version())
+              : const UpdateIdle(),
+        );
       } catch (e, s) {
         updateLog('the Flatpak was not updated', e, s);
         move(const UpdateIdle());

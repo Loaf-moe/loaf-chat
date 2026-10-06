@@ -22,12 +22,42 @@ class SparkleUpdater extends StateUpdater {
   }
 
   final MethodChannel _channel;
+  var _started = false;
 
   Future<void> _start() async {
     try {
       await _channel.invokeMethod<void>('start');
+      _started = true;
+      notifyListeners();
     } catch (e) {
       updateLog('Sparkle did not start', e);
+    }
+  }
+
+  @override
+  bool get canCheck => _started;
+
+  /// Sparkle answers as soon as it knows whether there is anything newer;
+  /// what it found is then fetched, and the answer here waits for that too.
+  @override
+  Future<UpdateCheck> check() async {
+    if (state is! UpdateIdle) return settled();
+    final String? answer;
+    try {
+      answer = await _channel.invokeMethod<String>('check');
+    } catch (e, s) {
+      updateLog('Sparkle did not check', e, s);
+      return UpdateCheck.failed;
+    }
+    switch (answer) {
+      case 'upToDate':
+        return UpdateCheck.upToDate;
+      case 'found':
+        // Sparkle says preparing too, but don't hang on which lands first.
+        if (state is UpdateIdle) move(const UpdatePreparing());
+        return settled();
+      default:
+        return UpdateCheck.failed;
     }
   }
 

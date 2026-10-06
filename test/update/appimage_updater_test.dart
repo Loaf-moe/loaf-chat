@@ -259,4 +259,32 @@ void main() {
     await u.check();
     expect(u.state, isA<UpdateReady>());
   });
+
+  group('a check by hand says how it went', () {
+    test('a newer build is ready', () async {
+      server.offer();
+      final u = updater();
+      expect(u.canCheck, isTrue);
+      expect(await u.check(), UpdateCheck.ready);
+    });
+
+    test('the same build is up to date', () async {
+      server.offer(build: 1);
+      expect(await updater().check(), UpdateCheck.upToDate);
+    });
+
+    test('a bad signature is a failure', () async {
+      server.offer(signature: 'forged');
+      expect(await updater().check(), UpdateCheck.failed);
+    });
+
+    test('two at once get the one answer', () async {
+      server.offer();
+      final u = updater();
+      expect(await Future.wait([u.check(), u.check()]), [
+        UpdateCheck.ready,
+        UpdateCheck.ready,
+      ]);
+    });
+  });
 }

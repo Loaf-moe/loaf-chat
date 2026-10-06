@@ -34,8 +34,20 @@ final class UpdateApplying extends UpdateState {
   final String? version;
 }
 
+/// How a check asked for by hand came out.
+enum UpdateCheck { upToDate, ready, failed }
+
 abstract class Updater implements Listenable {
   UpdateState get state;
+
+  /// Whether [check] means anything. False where nothing updates this copy,
+  /// so the about section offers no button that would do nothing.
+  bool get canCheck;
+
+  /// Looks now rather than on the schedule, and fetches whatever it finds.
+  /// Completes once there is an answer: [UpdateCheck.ready] means
+  /// [state] is [UpdateReady].
+  Future<UpdateCheck> check();
 
   /// Restarts into the staged build. Only means anything in [UpdateReady].
   Future<void> restart();
@@ -50,6 +62,12 @@ class NoUpdater implements Updater {
 
   @override
   UpdateState get state => const UpdateIdle();
+
+  @override
+  bool get canCheck => false;
+
+  @override
+  Future<UpdateCheck> check() async => UpdateCheck.upToDate;
 
   @override
   Future<void> restart() async {}
@@ -70,6 +88,29 @@ class FakeUpdater extends ChangeNotifier implements Updater {
 
   UpdateState _state;
   int restarts = 0;
+  int checks = 0;
+
+  /// What the next [check] answers. Ready moves [state] to [UpdateReady].
+  UpdateCheck nextCheck = UpdateCheck.upToDate;
+  String? nextVersion = '0.3.0';
+
+  /// How long a check takes. The mock waits, so "checking…" is seen.
+  Duration checkTakes = Duration.zero;
+
+  @override
+  bool get canCheck => true;
+
+  @override
+  Future<UpdateCheck> check() async {
+    checks++;
+    if (checkTakes > Duration.zero) {
+      state = const UpdatePreparing();
+      await Future<void>.delayed(checkTakes);
+      if (nextCheck != UpdateCheck.ready) state = const UpdateIdle();
+    }
+    if (nextCheck == UpdateCheck.ready) state = UpdateReady(nextVersion);
+    return nextCheck;
+  }
 
   @override
   UpdateState get state => _state;

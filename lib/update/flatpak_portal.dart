@@ -26,9 +26,10 @@ abstract class FlatpakPortal {
   /// Each update the portal notices. Listening starts its monitor.
   Stream<UpdateCommits> watch();
 
-  /// Installs the remote build. Completes when it is installed; throws when
-  /// the portal fails, or refuses because the build wants a new permission.
-  Future<void> update();
+  /// Installs the remote build. True once it is installed, false when there
+  /// was nothing newer to install; throws when the portal fails, or refuses
+  /// because the build wants a new permission.
+  Future<bool> update();
 
   /// Starts the newest installed build.
   Future<void> spawnLatest();

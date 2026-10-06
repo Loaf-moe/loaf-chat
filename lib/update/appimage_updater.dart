@@ -44,7 +44,9 @@ class AppImageUpdater extends StateUpdater {
   final void Function() _quit;
 
   final _timers = <Timer>[];
-  bool _checking = false;
+
+  /// The check under way, which a second caller waits on rather than racing.
+  Future<UpdateCheck>? _checking;
 
   /// Nothing sane is this big; refuse before filling the disk.
   static const _largest = 500 * 1024 * 1024;
@@ -56,14 +58,23 @@ class AppImageUpdater extends StateUpdater {
       ..add(Timer.periodic(const Duration(hours: 6), (_) => check()));
   }
 
-  Future<void> check() async {
-    if (_checking || state is! UpdateIdle) return;
-    _checking = true;
+  @override
+  bool get canCheck => true;
+
+  @override
+  Future<UpdateCheck> check() {
+    if (state is UpdateReady || state is UpdateApplying) {
+      return Future.value(UpdateCheck.ready);
+    }
+    return _checking ??= _check().whenComplete(() => _checking = null);
+  }
+
+  Future<UpdateCheck> _check() async {
     File? part;
     try {
       final release = await fetchRelease(_http, feed);
       final asset = release.appImage;
-      if (asset == null || release.build <= build) return;
+      if (asset == null || release.build <= build) return UpdateCheck.upToDate;
       if (!verify(release.signedText, asset.signature)) {
         throw StateError('the feed is not signed by the release key');
       }
@@ -131,14 +142,15 @@ class AppImageUpdater extends StateUpdater {
       await part.rename(target.path);
       part = null;
       move(UpdateReady(release.version));
+      return UpdateCheck.ready;
     } catch (e, s) {
       updateLog('the AppImage was not updated', e, s);
       move(const UpdateIdle());
+      return UpdateCheck.failed;
     } finally {
       try {
         if (part != null && part.existsSync()) part.deleteSync();
       } catch (_) {}
-      _checking = false;
     }
   }
 

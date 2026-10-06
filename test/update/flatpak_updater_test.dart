@@ -11,7 +11,7 @@ class _Portal implements FlatpakPortal {
   final commits = StreamController<UpdateCommits>();
   int updates = 0;
   int spawns = 0;
-  Completer<void> installing = Completer();
+  Completer<bool> installing = Completer();
   Object? spawnFails;
 
   @override
@@ -22,7 +22,7 @@ class _Portal implements FlatpakPortal {
   Stream<UpdateCommits> watch() => commits.stream;
 
   @override
-  Future<void> update() {
+  Future<bool> update() {
     updates++;
     return installing.future;
   }
@@ -79,7 +79,7 @@ void main() {
     await _turn();
     expect(u.state, isA<UpdatePreparing>());
     expect(portal.updates, 1);
-    portal.installing.complete();
+    portal.installing.complete(true);
     await _turn();
     expect((u.state as UpdateReady).version, '0.1.2');
   });
@@ -93,7 +93,7 @@ void main() {
     portal.commits.add(_onTheRemote);
     await _turn();
     expect(portal.updates, 1);
-    portal.installing.complete();
+    portal.installing.complete(true);
     await _turn();
     portal.commits.add(_installedAlready);
     await _turn();
@@ -170,5 +170,64 @@ void main() {
     await u.restart();
     expect(quits, 0);
     expect(u.state, isA<UpdateReady>());
+  });
+
+  group('a check by hand', () {
+    test('is offered only once the portal is watched', () async {
+      final u = FlatpakUpdater(portal: portal, version: () async => null);
+      addTearDown(u.dispose);
+      expect(u.canCheck, isFalse);
+      await u.start();
+      expect(u.canCheck, isTrue);
+    });
+
+    test('is not offered without a portal', () async {
+      portal.missing = true;
+      expect((await started()).canCheck, isFalse);
+    });
+
+    test('asks the portal to update, and is ready once it has', () async {
+      final u = await started();
+      final result = u.check();
+      expect(u.state, isA<UpdatePreparing>());
+      portal.installing.complete(true);
+      expect(await result, UpdateCheck.ready);
+      expect((u.state as UpdateReady).version, '0.1.2');
+    });
+
+    test('nothing to install is up to date', () async {
+      final u = await started();
+      final result = u.check();
+      portal.installing.complete(false);
+      expect(await result, UpdateCheck.upToDate);
+      expect(u.state, isA<UpdateIdle>());
+    });
+
+    test('a refusal is a failure, back to idle', () async {
+      final u = await started();
+      final result = u.check();
+      portal.installing.completeError(StateError('NotSupported'));
+      expect(await result, UpdateCheck.failed);
+      expect(u.state, isA<UpdateIdle>());
+    });
+
+    test('while the portal is already installing, waits on that', () async {
+      final u = await started();
+      portal.commits.add(_onTheRemote);
+      await _turn();
+      final result = u.check();
+      portal.installing.complete(true);
+      expect(await result, UpdateCheck.ready);
+      expect(portal.updates, 1);
+    });
+
+    test('a portal saying nothing new is idle, not ready', () async {
+      final u = await started();
+      portal.commits.add(_onTheRemote);
+      await _turn();
+      portal.installing.complete(false);
+      await _turn();
+      expect(u.state, isA<UpdateIdle>());
+    });
   });
 }

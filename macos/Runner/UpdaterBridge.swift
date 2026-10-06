@@ -14,6 +14,10 @@ final class UpdaterBridge: NSObject, SPUUpdaterDelegate, SPUUserDriver {
   /// path, or its ready-to-relaunch prompt. Calling it installs and relaunches.
   private var install: (() -> Void)?
 
+  /// Checks asked for by hand, answered together by whatever ends the
+  /// session: "found", "upToDate" or "failed".
+  private var checks: [FlutterResult] = []
+
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(
       name: "moe.loaf.chat/updater", binaryMessenger: messenger)
@@ -23,6 +27,12 @@ final class UpdaterBridge: NSObject, SPUUpdaterDelegate, SPUUserDriver {
       case "start":
         self?.start()
         result(nil)
+      case "check":
+        guard let self else {
+          result("failed")
+          return
+        }
+        self.check(result)
       case "restart":
         guard let install = self?.install else {
           result(FlutterError(code: "not-ready", message: nil, details: nil))
@@ -49,6 +59,27 @@ final class UpdaterBridge: NSObject, SPUUpdaterDelegate, SPUUserDriver {
     }
   }
 
+  /// A session already under way, a background check included, answers
+  /// this one too: starting a second is not allowed while it runs.
+  private func check(_ result: @escaping FlutterResult) {
+    guard let updater else {
+      result("failed")
+      return
+    }
+    if install != nil {
+      result("found")
+      return
+    }
+    checks.append(result)
+    if !updater.sessionInProgress { updater.checkForUpdates() }
+  }
+
+  private func answer(_ outcome: String) {
+    let waiting = checks
+    checks = []
+    waiting.forEach { $0(outcome) }
+  }
+
   private func send(_ state: String, version: String? = nil) {
     channel.invokeMethod("state", arguments: ["state": state, "version": version])
   }
@@ -65,10 +96,12 @@ final class UpdaterBridge: NSObject, SPUUpdaterDelegate, SPUUserDriver {
   func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
     found = item
     if install == nil { send("preparing") }
+    answer("found")
   }
 
   func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
     if install == nil { send("idle") }
+    answer("upToDate")
   }
 
   func updater(
@@ -78,8 +111,17 @@ final class UpdaterBridge: NSObject, SPUUpdaterDelegate, SPUUserDriver {
     if install == nil { send("idle") }
   }
 
+  /// Also follows not-found, which has answered already by then.
   func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
     if install == nil { send("idle") }
+    answer("failed")
+  }
+
+  /// The backstop: a session that ended without saying how still answers.
+  func updater(
+    _ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?
+  ) {
+    answer(install != nil ? "found" : "failed")
   }
 
   /// The quiet path: downloaded and verified, waiting for the app to quit.
