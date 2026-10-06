@@ -1,5 +1,6 @@
-/// Each platform's own way of showing a file. The Swift end is
-/// `darwin/loaf_media/Sources/loaf_media/LoafMediaPlugin.swift`.
+/// Each platform's own way of showing a file. The native ends are
+/// `darwin/loaf_media/Sources/loaf_media/LoafMediaPlugin.swift` and
+/// `windows/loaf_media_plugin.cpp`.
 library;
 
 import 'package:dbus/dbus.dart';
@@ -15,13 +16,36 @@ abstract final class LoafMedia {
   static Future<void> quickLook(String path) =>
       _channel.invokeMethod<void>('quickLook', {'path': path});
 
-  /// macOS: the app that opens files of [extension] by default, or null.
+  /// macOS and Windows: the app that opens files of [extension] by default,
+  /// or null.
   static Future<String?> defaultAppName(String extension) =>
       _channel.invokeMethod<String>('defaultAppName', {'extension': extension});
 
-  /// macOS: opens [path] in its default app.
+  /// macOS and Windows: opens [path] in its default app. On Windows, a file
+  /// with none set asks which app to use, as Explorer does.
   static Future<void> openWithDefaultApp(String path) =>
       _channel.invokeMethod<void>('openWithDefaultApp', {'path': path});
+
+  /// Windows: decodes a picture Flutter's own codecs refuse (HEIC, AVIF)
+  /// with WIC, at most [maxWidth] wide. Premultiplied RGBA, as
+  /// `decodeImageFromPixels` takes it. Throws if WIC can't either.
+  static Future<DecodedImage> decodeImage(
+    Uint8List bytes, {
+    int? maxWidth,
+  }) async {
+    final decoded = await _channel.invokeMapMethod<String, Object?>(
+      'image.decode',
+      {'bytes': bytes, 'maxWidth': ?maxWidth},
+    );
+    if (decoded case {
+      'width': final int width,
+      'height': final int height,
+      'pixels': final Uint8List pixels,
+    }) {
+      return DecodedImage(width, height, pixels);
+    }
+    throw PlatformException(code: 'image', message: 'nothing decoded');
+  }
 
   /// Linux: org.freedesktop.portal.OpenURI.OpenFile.
   static Future<void> openWithPortal(String path) async {
@@ -36,4 +60,12 @@ abstract final class LoafMedia {
   /// The bus the portal is on. Tests point it at a private one.
   @visibleForTesting
   static DBusClient Function() sessionBus = DBusClient.session;
+}
+
+/// A picture as pixels: [pixels] is [width] × [height] premultiplied RGBA.
+class DecodedImage {
+  const DecodedImage(this.width, this.height, this.pixels);
+  final int width;
+  final int height;
+  final Uint8List pixels;
 }

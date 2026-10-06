@@ -282,6 +282,31 @@ void main() {
     // The private bus listens on a Unix socket, which Windows' Dart lacks.
   }, skip: Platform.isWindows);
 
+  testWidgets('on Windows an image opens in the viewer, and a pdf in its '
+      'default app', (tester) async {
+    await on(TargetPlatform.windows, () async {
+      final calls = mockChannel(tester);
+      final context = await pump(tester, MockMediaSource(tempRoot()), _oven);
+
+      await tester.runAsync(() => openMedia(context, _oven));
+      await tester.pumpAndSettle();
+      expect(find.byType(ImageViewer), findsOneWidget);
+      expect(calls, isEmpty);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+
+      await tester.runAsync(() => openMedia(context, _pdf));
+      await tester.pumpAndSettle();
+      expect(calls.map((c) => c.method), ['openWithDefaultApp']);
+      expect(
+        (calls.single.arguments as Map)['path'] as String,
+        endsWith('recipe.pdf'),
+      );
+      expect(find.byType(ImageViewer), findsNothing);
+    });
+  });
+
   group('save as', () {
     late FileSelectorPlatform original;
     setUp(() => original = FileSelectorPlatform.instance);

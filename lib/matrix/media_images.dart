@@ -8,6 +8,7 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
+import 'package:loaf_media/loaf_media.dart';
 import 'package:matrix/matrix.dart';
 
 import '../ui/model/media_source.dart';
@@ -43,16 +44,10 @@ class StoredFileImage extends ImageProvider<StoredFileImage> {
     file.hold();
     try {
       final path = await file.path;
-      final buffer = await ImmutableBuffer.fromUint8List(
+      return await decodeWithFallback(
         await File(path).readAsBytes(),
-      );
-      final target = bucket;
-      return await decode(
-        buffer,
-        getTargetSize: target == null
-            ? null
-            // Never up: a small picture keeps its own size.
-            : (w, h) => TargetImageSize(width: math.min(target, w)),
+        decode,
+        width: bucket,
       );
     } finally {
       file.release();
@@ -96,7 +91,7 @@ class FileStoreImage extends ImageProvider<FileStoreImage> {
         await client.database.getFile(uri) ??
         (fallback == null ? null : await client.database.getFile(fallback!));
     if (bytes == null) throw StateError('nothing stored for $uri');
-    return decode(await ImmutableBuffer.fromUint8List(bytes));
+    return decodeWithFallback(bytes, decode);
   }
 
   @override
@@ -105,4 +100,49 @@ class FileStoreImage extends ImageProvider<FileStoreImage> {
 
   @override
   int get hashCode => Object.hash(uri, fallback);
+}
+
+typedef WicDecode = Future<DecodedImage> Function(
+  Uint8List bytes, {
+  int? maxWidth,
+});
+
+/// Decodes [bytes] with Flutter's codecs, no wider than [width] (never up:
+/// a small picture keeps its own size). On Windows, a picture they refuse
+/// (an iPhone's HEIC, an AVIF) goes to WIC, which reads whatever the machine
+/// has codecs for. Elsewhere, and when WIC can't either, Flutter's error
+/// stands and the row says it couldn't load.
+Future<Codec> decodeWithFallback(
+  Uint8List bytes,
+  ImageDecoderCallback decode, {
+  int? width,
+  @visibleForTesting bool? windows,
+  @visibleForTesting WicDecode? wic,
+}) async {
+  try {
+    return await decode(
+      await ImmutableBuffer.fromUint8List(bytes),
+      getTargetSize: width == null
+          ? null
+          : (w, h) => TargetImageSize(width: math.min(width, w)),
+    );
+  } catch (e) {
+    if (!(windows ?? defaultTargetPlatform == TargetPlatform.windows)) {
+      rethrow;
+    }
+    final DecodedImage decoded;
+    try {
+      decoded = await (wic ?? LoafMedia.decodeImage)(bytes, maxWidth: width);
+    } catch (wicError) {
+      debugPrint('[loaf media] WIC: $wicError');
+      rethrow;
+    }
+    final descriptor = ImageDescriptor.raw(
+      await ImmutableBuffer.fromUint8List(decoded.pixels),
+      width: decoded.width,
+      height: decoded.height,
+      pixelFormat: PixelFormat.rgba8888,
+    );
+    return descriptor.instantiateCodec();
+  }
 }

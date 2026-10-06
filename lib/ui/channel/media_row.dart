@@ -2,7 +2,6 @@
 /// its words. Which bytes go in it is the [MediaSource]'s business.
 library;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:loaf_media/loaf_media.dart';
@@ -393,10 +392,10 @@ class _MediaRowState extends State<MediaRow> {
                     if (mounted) setState(() => _unplayable = true);
                   },
                 ),
-                // Linux's player draws its own "couldn't play this", with
-                // the same way forward; one is enough.
-                if (_unplayable &&
-                    defaultTargetPlatform != TargetPlatform.linux)
+                // A player drawn in Flutter (Linux, Windows) draws its own
+                // "couldn't play this", with the same way forward; one is
+                // enough.
+                if (_unplayable && !LoafVideo.drawsOwnControls)
                   _Unplayable(onOpen: onOpen)
                 else if (!_playable && !_unplayable)
                   // Only ever over a player that can't start yet: nothing

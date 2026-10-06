@@ -4,7 +4,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_media/loaf_media.dart';
-import 'package:loaf_media/src/linux_video.dart' show LinuxVideo;
+import 'package:loaf_media/src/texture_video.dart' show TextureVideo;
 
 /// A download that has fully arrived.
 class _FakeFile extends ChangeNotifier implements GrowingFile {
@@ -87,15 +87,22 @@ void main() {
     return mouse;
   }
 
-  final controls = find.byKey(LinuxVideo.controlsKey);
-  final linux = TargetPlatformVariant.only(TargetPlatform.linux);
+  final controls = find.byKey(TextureVideo.controlsKey);
+  // Both draw the player in Flutter, over the same channel.
+  final textured = TargetPlatformVariant({
+    TargetPlatform.linux,
+    TargetPlatform.windows,
+  });
 
   testWidgets('it plays once created, and lets the player go with the row', (
     tester,
   ) async {
     await pumpVideo(tester);
     expect(methods().take(3), ['stream.begin', 'video.create', 'video.play']);
-    expect(named('video.create').single.arguments, {'id': 'proof.mp4'});
+    expect(named('video.create').single.arguments, {
+      'id': 'proof.mp4',
+      'mime': 'video/mp4',
+    });
     expect(named('video.play').single.arguments, {'view': 1});
     expect(videoFocus.value, 1, reason: 'one video plays at a time');
     final texture = tester.widget<Texture>(find.byType(Texture));
@@ -105,7 +112,7 @@ void main() {
     expect(named('video.dispose').single.arguments, {'view': 1});
     expect(methods().last, 'stream.end');
     expect(videoFocus.value, isNull);
-  }, variant: linux);
+  }, variant: textured);
 
   testWidgets('the controls show on hover and hide after two seconds', (
     tester,
@@ -128,7 +135,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(controls, findsNothing);
     await leave(tester);
-  }, variant: linux);
+  }, variant: textured);
 
   testWidgets('dragging the scrubber seeks once, on release', (tester) async {
     await pumpVideo(tester);
@@ -150,7 +157,7 @@ void main() {
     expect(ms, greaterThan(2000), reason: 'past the middle of 4 s');
     expect(ms, lessThanOrEqualTo(4000));
     await leave(tester);
-  }, variant: linux);
+  }, variant: textured);
 
   testWidgets('an error offers open instead', (tester) async {
     var opened = 0;
@@ -178,7 +185,7 @@ void main() {
     await tester.pump();
     expect(opened, 2);
     await leave(tester);
-  }, variant: linux);
+  }, variant: textured);
 
   testWidgets('space toggles play when the video has focus', (tester) async {
     await pumpVideo(tester);
@@ -190,7 +197,7 @@ void main() {
     await tester.pump();
     expect(named('video.pause').length, before + 1);
     await leave(tester);
-  }, variant: linux);
+  }, variant: textured);
 
   testWidgets('the full window keeps time, and escape leaves it', (
     tester,
@@ -211,5 +218,5 @@ void main() {
     await tester.pump();
     expect(find.byIcon(Icons.fullscreen_exit), findsNothing);
     await leave(tester);
-  }, variant: linux);
+  }, variant: textured);
 }
