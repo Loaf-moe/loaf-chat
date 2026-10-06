@@ -38,5 +38,21 @@ jobs:
           rustup default ${{ steps.pins.outputs.rust }}
       - run: flutter pub get
       - run: flutter test
-      - run: cd packages/loaf_media && flutter test
-      - run: flutter build windows --release --dart-define=LOAF_BUILD=0
+      - if: ${{ !cancelled() }}
+        run: cd packages/loaf_media && flutter test
+      # The build and the package run even when a test fails: both answers
+      # are worth having from one slow run.
+      - if: ${{ !cancelled() }}
+        run: flutter build windows --release --dart-define=LOAF_BUILD=0
+      # Packs as a release would, with a key made for this run only.
+      - if: ${{ !cancelled() }}
+        run: |
+          export APPIMAGE_PRIVATE_KEY="$(openssl genpkey -algorithm ed25519)"
+          tool/release/windows.sh 0.0.0 1 dist
+      - if: ${{ !cancelled() }}
+        run: tool/release/windows-smoke.sh dist/Loaf-Chat-0.0.0-Setup.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-check
+          path: dist/

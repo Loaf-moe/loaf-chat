@@ -9,7 +9,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Loaf Chat</title>
-  <meta name="description" content="Loaf Chat {{VERSION}}, an early build for testers, for macOS and Linux.">
+  <meta name="description" content="Loaf Chat {{VERSION}}, an early build for testers, for macOS, Windows and Linux.">
   <meta name="color-scheme" content="light dark">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='10' fill='%23003049'/%3E%3Ctext x='11' y='24' font-family='Georgia,serif' font-size='22' font-weight='600' fill='%23FFF7ED'%3El%3C/text%3E%3Ccircle cx='21' cy='22' r='2.4' fill='%23d62828'/%3E%3C/svg%3E">
   <style>
@@ -83,7 +83,8 @@
 
     .downloads { display: flex; flex-direction: column; gap: 16px; }
     /* Your own computer goes first; the script below sets data-os. */
-    [data-os="linux"] .platform-linux { order: -1; }
+    [data-os="linux"] .platform-linux,
+    [data-os="windows"] .platform-windows { order: -1; }
 
     .platform { background: var(--card); border: 1px solid var(--border); border-radius: 16px;
                 padding: 24px; box-shadow: var(--shadow-sm); }
@@ -129,12 +130,15 @@
     }
   </style>
   <script>
-    // Put this computer's download first. Without script, macOS then Linux.
+    // Put this computer's download first. Without script, macOS, Windows,
+    // then Linux.
     (function () {
       var p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
       var ua = navigator.userAgent || '';
       if (/linux/i.test(p + ' ' + ua) && !/android/i.test(ua)) {
         document.documentElement.setAttribute('data-os', 'linux');
+      } else if (/win/i.test(p + ' ' + ua) && !/darwin|mac/i.test(p + ' ' + ua)) {
+        document.documentElement.setAttribute('data-os', 'windows');
       }
     })();
   </script>
@@ -145,7 +149,7 @@
 
     <h1>Loaf Chat, fresh out of the <em>oven</em></h1>
     <p class="lede">An early build for testers: chat with your crew on loaf.moe, from your own computer.</p>
-    <p class="meta">version {{VERSION}} · macOS &amp; Linux</p>
+    <p class="meta">version {{VERSION}} · macOS, Windows &amp; Linux</p>
 
     <div class="downloads">
       <section class="platform platform-mac" aria-labelledby="mac">
@@ -158,6 +162,18 @@
           </a>
         </div>
         <p class="note">Open the .dmg and drag Loaf Chat into Applications.</p>
+      </section>
+
+      <section class="platform platform-windows" aria-labelledby="windows">
+        <h2 id="windows">Windows</h2>
+        <p>Windows 10 or 11, 64-bit Intel or AMD.</p>
+        <div class="actions">
+          <a class="button button-primary" href="{{SETUP_URL}}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 10 5 5 5-5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
+            download for windows
+          </a>
+        </div>
+        <p class="note">This early build isn't signed, so Windows warns about it. Choose More info, then Run anyway. It installs just for you and never asks for admin. If Smart App Control blocks it outright, it can't run on that PC yet.</p>
       </section>
 
       <section class="platform platform-linux" aria-labelledby="linux">

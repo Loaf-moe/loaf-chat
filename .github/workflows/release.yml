@@ -127,6 +127,45 @@ jobs:
           name: linux
           path: dist/
 
+  windows:
+    needs: version
+    runs-on: windows-latest
+    environment: release
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      # mise pins both; its Flutter backend does not install on Windows, so
+      # the versions are read from mise.toml and installed directly.
+      - id: pins
+        run: |
+          echo "flutter=$(sed -n 's/^flutter = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+          echo "rust=$(sed -n 's/^rust = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.pins.outputs.flutter }}
+          channel: stable
+      - run: |
+          rustup toolchain install ${{ steps.pins.outputs.rust }} --profile minimal
+          rustup default ${{ steps.pins.outputs.rust }}
+      - run: >
+          flutter build windows --release
+          --build-name=${{ needs.version.outputs.name }}
+          --build-number=${{ needs.version.outputs.build }}
+          --dart-define=LOAF_BUILD=${{ needs.version.outputs.build }}
+      # The AppImage's key signs Windows' feed entry too; each signs its own
+      # text (lib/update/release_feed.dart), so neither passes for the other.
+      - run: >
+          tool/release/windows.sh "${{ needs.version.outputs.name }}"
+          "${{ needs.version.outputs.build }}" dist
+        env:
+          APPIMAGE_PRIVATE_KEY: ${{ secrets.APPIMAGE_PRIVATE_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/
+
   flatpak:
     needs: [version, linux]
     runs-on: ubuntu-latest
@@ -176,7 +215,7 @@ jobs:
           path: repo.tar
 
   publish:
-    needs: [version, macos, linux, flatpak]
+    needs: [version, macos, linux, windows, flatpak]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -195,7 +234,11 @@ jobs:
         run: |
           mkdir dist
           tar -xf artifacts/flatpak/repo.tar -C dist
-          cp artifacts/macos/appcast.xml artifacts/linux/latest.json dist/
+          cp artifacts/macos/appcast.xml dist/
+          # One feed: the Linux job's, with Windows' entry merged in.
+          jq -e -s '.[0] * .[1]' artifacts/linux/latest.json \
+            artifacts/windows/windows.json > dist/latest.json
+          jq -e '.appimage and .windows' dist/latest.json >/dev/null
           tool/release/pages.sh dist pages
       - name: Release assets
         run: |
@@ -203,7 +246,8 @@ jobs:
             || gh release create "$GITHUB_REF_NAME" --draft \
                  --title "Loaf Chat $VERSION" --generate-notes
           gh release upload "$GITHUB_REF_NAME" --clobber \
-            artifacts/macos/*.dmg artifacts/linux/*.AppImage
+            artifacts/macos/*.dmg artifacts/linux/*.AppImage \
+            artifacts/windows/*-Setup.exe artifacts/windows/*.zip
           # Public before any feed names them: a feed never points at a
           # file that is not there.
           gh release edit "$GITHUB_REF_NAME" --draft=false
