@@ -2,3 +2,5 @@
 /pubspec.lock
 .dart_tool/
 /linux/rust/target/
+/rust/loaf_streams/target/
+/windows/rust/target/

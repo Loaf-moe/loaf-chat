@@ -8,6 +8,7 @@ publish = false
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
+loaf_streams = { path = "../../rust/loaf_streams" }
 gst = { package = "gstreamer", version = "0.25" }
 gst-base = { package = "gstreamer-base", version = "0.25" }
 gst-app = { package = "gstreamer-app", version = "0.25" }

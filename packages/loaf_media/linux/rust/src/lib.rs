@@ -13,7 +13,8 @@ use std::sync::OnceLock;
 pub mod ffi;
 pub mod player;
 pub mod source;
-pub mod streams;
+/// The downloads being read, shared with Windows.
+pub use loaf_streams as streams;
 
 /// Starts GStreamer and registers `loafsrc`, once per process. Later calls
 /// give the first call's outcome.

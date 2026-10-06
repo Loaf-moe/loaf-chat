@@ -1,0 +1,8 @@
+[package]
+name = "loaf_streams"
+edition = "2024"
+rust-version = "1.92"
+publish = false
+
+# Shared by linux/rust and windows/rust; no dependencies of its own.
+[dependencies]

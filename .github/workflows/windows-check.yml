@@ -40,6 +40,8 @@ jobs:
       - run: flutter test
       - if: ${{ !cancelled() }}
         run: cd packages/loaf_media && flutter test
+      - if: ${{ !cancelled() }}
+        run: cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml
       # The build and the package run even when a test fails: both answers
       # are worth having from one slow run.
       - if: ${{ !cancelled() }}
@@ -56,3 +58,22 @@ jobs:
         with:
           name: windows-check
           path: dist/
+
+  # The streams crate is shared with Linux's player: it must still build and
+  # pass there, on the release runner's GStreamer.
+  linux-media:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good \
+            gstreamer1.0-libav
+      - id: pins
+        run: echo "rust=$(sed -n 's/^rust = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+      - run: |
+          rustup toolchain install ${{ steps.pins.outputs.rust }} --profile minimal
+          rustup default ${{ steps.pins.outputs.rust }}
+      - run: cargo test --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml
+      - run: cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml

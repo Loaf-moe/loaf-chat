@@ -1,11 +1,19 @@
 //! The downloads players are reading, by file id. Dart reports each one's
 //! progress over the channel (`stream.begin`, `stream.progress`,
 //! `stream.end`); the other end is `lib/src/streams.dart`.
+//!
+//! Shared by both players that read a download as it arrives: `loafsrc` on
+//! Linux (`linux/rust/`) and the `IMFByteStream` on Windows
+//! (`windows/rust/`). A read past what has arrived waits for it here.
+
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io;
-use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -221,7 +229,7 @@ impl Reader {
             },
         };
         let mut buf = vec![0; n];
-        let read = file.file.read_exact_at(&mut buf, offset);
+        let read = read_exact_at(&file.file, &mut buf, offset);
         *open = Some(file);
         read.map_err(|e| {
             eprintln!("[loaf media] can't read {}: {e}", path.display());
@@ -252,8 +260,38 @@ impl Drop for Reader {
     }
 }
 
+/// Fills [buf] from [offset] without moving a shared cursor, so readers on
+/// other threads never disturb each other.
+#[cfg(unix)]
+fn read_exact_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
+    use std::os::unix::fs::FileExt;
+    file.read_exact_at(buf, offset)
+}
+
+/// Windows' positional read may return short; this one doesn't.
+#[cfg(windows)]
+fn read_exact_at(file: &File, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
+    use std::os::windows::fs::FileExt;
+    while !buf.is_empty() {
+        match file.seek_read(buf, offset) {
+            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(n) => {
+                buf = &mut buf[n..];
+                offset += n as u64;
+            }
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
 /// The `.part` file, or the finished file if the download completed and
 /// renamed it before this reader first opened it.
+///
+/// On Windows, `File::open` shares read, write and delete, and that is what
+/// lets Dart rename the `.part` and evict old files while a player still
+/// holds them open: a handle that withheld delete would block both.
 fn open_download(path: &Path) -> io::Result<File> {
     match File::open(path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
