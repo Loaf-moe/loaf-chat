@@ -56,7 +56,15 @@ Future<void> _pump(
   double column = 400,
 }) async {
   final root = Directory.systemTemp.createTempSync('loaf-media-row-test');
-  addTearDown(() => root.deleteSync(recursive: true));
+  addTearDown(() {
+    try {
+      root.deleteSync(recursive: true);
+    } on FileSystemException {
+      // On Windows a mock file still being written can't be deleted yet;
+      // it is only a temp folder.
+      if (!Platform.isWindows) rethrow;
+    }
+  });
   await tester.pumpWidget(
     MaterialApp(
       theme: loafDarkTheme(),

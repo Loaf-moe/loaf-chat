@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
@@ -96,7 +97,7 @@ void main() {
     // Off the web a picked file's name is the last part of its path.
     XFile file(String name) => XFile.fromData(
       utf8.encode('crumb'),
-      path: '/picked/$name',
+      path: '${Platform.pathSeparator}picked${Platform.pathSeparator}$name',
       mimeType: 'image/jpeg',
     );
 

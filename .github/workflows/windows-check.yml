@@ -37,15 +37,20 @@ jobs:
           rustup toolchain install ${{ steps.pins.outputs.rust }} --profile minimal
           rustup default ${{ steps.pins.outputs.rust }}
       - run: flutter pub get
+      # First: the encryption tests load vodozemac from this build.
+      - run: flutter build windows --release --dart-define=LOAF_BUILD=0
       - run: flutter test
       - if: ${{ !cancelled() }}
         run: cd packages/loaf_media && flutter test
       - if: ${{ !cancelled() }}
         run: cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml
-      # The build and the package run even when a test fails: both answers
-      # are worth having from one slow run.
+      # Windows Server ships Media Foundation as a feature, off by default;
+      # every desktop Windows has it.
       - if: ${{ !cancelled() }}
-        run: flutter build windows --release --dart-define=LOAF_BUILD=0
+        shell: pwsh
+        run: Install-WindowsFeature Server-Media-Foundation
+      - if: ${{ !cancelled() }}
+        run: cargo test --locked --manifest-path packages/loaf_media/windows/rust/Cargo.toml
       # Packs as a release would, with a key made for this run only.
       - if: ${{ !cancelled() }}
         run: |

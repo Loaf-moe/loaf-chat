@@ -11,21 +11,25 @@ import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-/// Where `flutter build macos --debug` (or `flutter run -d macos`) leaves the
-/// native library the app loads.
-const _library = 'build/macos/Build/Products/Debug/';
+/// Where a desktop build leaves the native library the app loads: `flutter
+/// build macos --debug` on a Mac; on Windows (CI), `flutter build windows`.
+(String, String) get _library => Platform.isWindows
+    ? ('build/windows/x64/runner/Release/', 'vodozemac_bindings_dart.dll')
+    : ('build/macos/Build/Products/Debug/', 'libflutter_vodozemac.dylib');
 
 Future<void>? _loading;
 
-/// Loads vodozemac from the macOS build, once per test file.
+/// Loads vodozemac from the desktop build, once per test file.
 Future<void> loadVodozemac() => _loading ??= () async {
-  if (!File('${_library}libflutter_vodozemac.dylib').existsSync()) {
+  final (dir, file) = _library;
+  if (!File('$dir$file').existsSync()) {
     fail(
-      'encryption tests need the macOS build: run '
-      '`mise exec -- flutter build macos --debug` once, then test again',
+      'encryption tests need a desktop build: run '
+      '`mise exec -- flutter build macos --debug` once (on Windows, '
+      '`flutter build windows`), then test again',
     );
   }
-  await vod.init(libraryPath: _library);
+  await vod.init(libraryPath: dir);
 }();
 
 const me = '@test:fakeServer.notExisting';

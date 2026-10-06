@@ -279,7 +279,8 @@ void main() {
       expect(calls, isEmpty);
       expect(find.byType(ImageViewer), findsNothing);
     });
-  });
+    // The private bus listens on a Unix socket, which Windows' Dart lacks.
+  }, skip: Platform.isWindows);
 
   group('save as', () {
     late FileSelectorPlatform original;

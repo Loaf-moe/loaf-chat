@@ -159,6 +159,15 @@ Future<Client> _client(_Api api, {String path = inMemoryDatabasePath}) async {
 Future<void> _settle() =>
     Future<void>.delayed(const Duration(milliseconds: 50));
 
+/// Waits until [done], for tests on a database file: a slow disk (a CI
+/// runner's) can take longer than [_settle].
+Future<void> _until(bool Function() done) async {
+  final give = DateTime.now().add(const Duration(seconds: 10));
+  while (!done() && DateTime.now().isBefore(give)) {
+    await _settle();
+  }
+}
+
 var _n = 0;
 var _clock = 1700000000000;
 
@@ -1236,7 +1245,11 @@ void main() {
     firstRooms.timeline(_roomId)!;
     await _settle();
     firstRooms.timeline(_roomId)!.send('unsent');
-    await _settle();
+    await _until(
+      () =>
+          firstRooms.timeline(_roomId)!.messages.last.status ==
+          MessageStatus.failed,
+    );
     expect(
       firstRooms.timeline(_roomId)!.messages.last.status,
       MessageStatus.failed,
@@ -1252,7 +1265,7 @@ void main() {
     final rooms = MatrixRooms(client);
     addTearDown(rooms.dispose);
     final timeline = rooms.timeline(_roomId)!;
-    await _settle();
+    await _until(() => timeline.messages.length == 2);
     expect(timeline.messages.map((m) => (m.body, m.status)), [
       ('kept', MessageStatus.sent),
       ('unsent', MessageStatus.failed),
@@ -1275,7 +1288,11 @@ void main() {
     firstRooms.timeline(_roomId)!;
     await _settle();
     firstRooms.timeline(_roomId)!.send('in flight');
-    await _settle();
+    await _until(
+      () =>
+          firstRooms.timeline(_roomId)!.messages.last.status ==
+          MessageStatus.sending,
+    );
     expect(
       firstRooms.timeline(_roomId)!.messages.last.status,
       MessageStatus.sending,
