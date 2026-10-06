@@ -263,6 +263,45 @@ static FlMethodResponse* video_call(LoafMediaPlugin* self, const gchar* method,
   return FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
 }
 
+// The clipboard's picture as PNG bytes, or null when it holds none: what a
+// screenshot tool or "copy image" leaves there. GTK reads it from whoever
+// owns the clipboard, so this waits for them, briefly, on the main loop.
+static FlMethodResponse* clipboard_image() {
+  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+  g_autoptr(GdkPixbuf) pixbuf = gtk_clipboard_wait_for_image(clipboard);
+  if (pixbuf == nullptr) {
+    return ok_response();
+  }
+  gchar* buffer = nullptr;
+  gsize size = 0;
+  g_autoptr(GError) error = nullptr;
+  if (!gdk_pixbuf_save_to_buffer(pixbuf, &buffer, &size, "png", &error,
+                                 nullptr)) {
+    return error_response(error != nullptr ? error->message
+                                           : "couldn't encode the picture");
+  }
+  g_autoptr(FlValue) bytes =
+      fl_value_new_uint8_list(reinterpret_cast<const uint8_t*>(buffer), size);
+  g_free(buffer);
+  return ok_response(bytes);
+}
+
+// The paths of the files copied in a file manager: the regular, local files
+// on the clipboard's `text/uri-list`. Empty when there are none.
+static FlMethodResponse* clipboard_files() {
+  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+  g_autoptr(FlValue) paths = fl_value_new_list();
+  gchar** uris = gtk_clipboard_wait_for_uris(clipboard);
+  for (gchar** uri = uris; uri != nullptr && *uri != nullptr; uri++) {
+    g_autofree gchar* path = g_filename_from_uri(*uri, nullptr, nullptr);
+    if (path != nullptr && g_file_test(path, G_FILE_TEST_IS_REGULAR)) {
+      fl_value_append_take(paths, fl_value_new_string(path));
+    }
+  }
+  g_strfreev(uris);
+  return ok_response(paths);
+}
+
 static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
                            gpointer user_data) {
   LoafMediaPlugin* self = LOAF_MEDIA_PLUGIN(user_data);
@@ -272,6 +311,10 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
   g_autoptr(FlMethodResponse) response = nullptr;
   if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  } else if (g_str_equal(method, "clipboard.image")) {
+    response = clipboard_image();
+  } else if (g_str_equal(method, "clipboard.files")) {
+    response = clipboard_files();
   } else if (g_str_has_prefix(method, "stream.")) {
     response = stream_call(method, args);
   } else if (g_str_equal(method, "video.create")) {

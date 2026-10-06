@@ -3,6 +3,7 @@
 /// picker.
 library;
 
+import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -47,6 +48,7 @@ class Composer extends StatefulWidget {
     this.timeline,
     this.prefix = '#',
     this.pickFiles = pickAttachments,
+    this.pasteFiles = pastedAttachments,
   });
 
   final String channelName;
@@ -60,6 +62,10 @@ class Composer extends StatefulWidget {
 
   /// Asks for files to attach. The platform's own picker, but for tests.
   final AttachmentPicker pickFiles;
+
+  /// Reads files off the clipboard for a paste. The platform's own, but for
+  /// tests.
+  final ClipboardAttachments pasteFiles;
 
   @override
   State<Composer> createState() => _ComposerState();
@@ -218,10 +224,27 @@ class _ComposerState extends State<Composer> {
   /// Sends each picked file as its own message. A reply target goes with
   /// the first, as it would with text.
   Future<void> _attach() async {
+    if (widget.timeline == null) return;
+    await _sendFiles(await widget.pickFiles(context));
+  }
+
+  /// Ctrl+V. Files or a picture on the clipboard are sent like picked ones;
+  /// anything else is a paste of text, which the field does itself. Reports
+  /// whether it took the paste.
+  Future<bool> _pasteFiles() async {
+    // An edit changes words only, so a picture has nowhere to go.
+    if (widget.timeline == null || _target?.mode == ComposerMode.edit) {
+      return false;
+    }
+    final files = await widget.pasteFiles();
+    if (files.isEmpty) return false;
+    if (mounted) await _sendFiles(files);
+    return true;
+  }
+
+  Future<void> _sendFiles(List<XFile> picked) async {
     final timeline = widget.timeline;
-    if (timeline == null) return;
-    final picked = await widget.pickFiles(context);
-    if (picked.isEmpty) return;
+    if (timeline == null || picked.isEmpty) return;
     final limit = await timeline.uploadLimit();
     for (final file in picked) {
       // Before reading it: a file the server will never take shouldn't
@@ -373,32 +396,35 @@ class _ComposerState extends State<Composer> {
               padding: EdgeInsets.symmetric(
                 vertical: _fieldPad(MediaQuery.textScalerOf(context)),
               ),
-              child: TextField(
-                controller: _controller,
-                focusNode: _focus,
-                minLines: 1,
-                maxLines: 5,
-                // An explicit line height keeps the field's height
-                // independent of whatever the theme's bodyLarge happens to be.
-                style: loafBody(
-                  _textSize,
-                  400,
-                  height: _textHeight,
-                ).copyWith(color: tokens.textBody),
-                decoration: InputDecoration(
-                  // Collapsed so the field is exactly its line box and the
-                  // padding above does the centring. Left to itself the
-                  // decorator adds its own vertical padding, which is what
-                  // pushed this text off the icons' centreline.
-                  isCollapsed: true,
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
-                  hintText: 'Message ${widget.prefix}${widget.channelName}',
-                  hintStyle: loafBody(
+              child: Actions(
+                actions: {PasteTextIntent: _PasteAction(_pasteFiles)},
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focus,
+                  minLines: 1,
+                  maxLines: 5,
+                  // An explicit line height keeps the field's height
+                  // independent of whatever the theme's bodyLarge happens to be.
+                  style: loafBody(
                     _textSize,
                     400,
                     height: _textHeight,
-                  ).copyWith(color: tokens.textMuted),
+                  ).copyWith(color: tokens.textBody),
+                  decoration: InputDecoration(
+                    // Collapsed so the field is exactly its line box and the
+                    // padding above does the centring. Left to itself the
+                    // decorator adds its own vertical padding, which is what
+                    // pushed this text off the icons' centreline.
+                    isCollapsed: true,
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                    hintText: 'Message ${widget.prefix}${widget.channelName}',
+                    hintStyle: loafBody(
+                      _textSize,
+                      400,
+                      height: _textHeight,
+                    ).copyWith(color: tokens.textMuted),
+                  ),
                 ),
               ),
             ),
@@ -649,6 +675,23 @@ class _TargetChip extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// The text field's paste, with a first look at the clipboard for files. When
+/// there are none it is the field's own paste, which this was layered over.
+class _PasteAction extends Action<PasteTextIntent> {
+  _PasteAction(this._pasteFiles);
+
+  /// Reports whether it took the paste.
+  final Future<bool> Function() _pasteFiles;
+
+  @override
+  Object? invoke(PasteTextIntent intent) {
+    // Read before waiting: the field's action is only offered while this one
+    // is being invoked.
+    final field = callingAction;
+    return _pasteFiles().then((took) => took ? null : field?.invoke(intent));
   }
 }
 

@@ -23,6 +23,20 @@ abstract final class LoafMedia {
   static Future<void> openWithDefaultApp(String path) =>
       _channel.invokeMethod<void>('openWithDefaultApp', {'path': path});
 
+  /// Linux: the picture on the clipboard as PNG bytes, or null when it holds
+  /// none. (The plugin only takes calls that carry arguments, hence the map.)
+  static Future<Uint8List?> clipboardImage() =>
+      _channel.invokeMethod<Uint8List>('clipboard.image', <String, Object?>{});
+
+  /// Linux: the paths of the files copied in a file manager. Empty when the
+  /// clipboard holds none.
+  static Future<List<String>> clipboardFiles() async =>
+      await _channel.invokeListMethod<String>(
+        'clipboard.files',
+        <String, Object?>{},
+      ) ??
+      const [];
+
   /// Linux: org.freedesktop.portal.OpenURI.OpenFile.
   static Future<void> openWithPortal(String path) async {
     final bus = sessionBus();
