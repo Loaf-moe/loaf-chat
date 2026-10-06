@@ -23,13 +23,17 @@ export 'matrix_avatar_images.dart'
 /// What a [ui.Media] from [mediaOf] carries. A copy of the content, so the
 /// event itself can go away.
 class _Ref {
-  _Ref(this.eventId, this.txid, this.content);
+  _Ref(this.eventId, this.txid, this.content, {this.external = false});
 
   final String eventId;
 
   /// The SDK's transaction id, while the file is still going up.
   final String? txid;
   final Map<String, Object?> content;
+
+  /// Whether a link to another site may be fetched for this file. Never in
+  /// an encrypted room, and never when the setting is off: see [mediaOf].
+  final bool external;
 
   Map<String, Object?> get info =>
       content.tryGetMap<String, Object?>('info') ?? const {};
@@ -56,10 +60,11 @@ class _Ref {
       other is _Ref &&
       other.eventId == eventId &&
       other.txid == txid &&
+      other.external == external &&
       other._mxc == _mxc;
 
   @override
-  int get hashCode => Object.hash(eventId, txid, _mxc);
+  int get hashCode => Object.hash(eventId, txid, external, _mxc);
 }
 
 Object? _copy(Object? value) => switch (value) {
@@ -102,12 +107,22 @@ ui.MediaKind? _kindOf(String type) => switch (type) {
 
 /// [event] as media, or null for anything that is not a file message.
 /// Never throws: a missing info block gives a file with what is known.
-ui.Media? mediaOf(Event event) {
+///
+/// A file a bridge links to on another site (an `https` URL where an mxc
+/// should be) is fetched only when [external] allows it, and never in an
+/// encrypted room: there a plain link is not what the sender's client wrote,
+/// and fetching it would tell that site who reads the room.
+ui.Media? mediaOf(Event event, {bool external = true}) {
   try {
     final kind = _kindOf(event.messageType);
     if (kind == null) return null;
     final content = _copy(event.content)! as Map<String, Object?>;
-    final ref = _Ref(event.eventId, event.transactionId, content);
+    final ref = _Ref(
+      event.eventId,
+      event.transactionId,
+      content,
+      external: external && !event.room.encrypted,
+    );
     final info = ref.info;
     final w = _int(info['w']), h = _int(info['h']);
     final ms = _int(info['duration']);
@@ -140,25 +155,37 @@ ui.Media? mediaOf(Event event) {
 
 /// The file itself. A `file` map missing its key or iv gets empty ones,
 /// which the store refuses: the download fails, the timeline doesn't.
-MediaSpec? _fullSpec(_Ref ref) =>
-    _spec(ref.file, ref.content['url'], ref.name, _int(ref.info['size']));
+MediaSpec? _fullSpec(_Ref ref) => _spec(
+  ref.file,
+  ref.content['url'],
+  ref.name,
+  _int(ref.info['size']),
+  external: ref.external,
+);
 
 MediaSpec? _thumbnailSpec(_Ref ref) => _spec(
   ref.thumbnailFile,
   ref.info['thumbnail_url'],
   '${ref.name}.thumbnail',
   _int(ref.info.tryGetMap<String, Object?>('thumbnail_info')?['size']),
+  external: ref.external,
 );
 
 MediaSpec? _spec(
   Map<String, Object?>? file,
   Object? plainUrl,
   String name,
-  int? size,
-) {
+  int? size, {
+  required bool external,
+}) {
   final url = file != null ? file['url'] : plainUrl;
   final mxc = url is String ? Uri.tryParse(url) : null;
-  if (mxc == null || !mxc.isScheme('mxc')) return null;
+  if (mxc == null) return null;
+  // Another site's file, only over https, only plain (an encrypted file
+  // map points at the homeserver's own media), and only when allowed.
+  final elsewhere =
+      external && file == null && mxc.isScheme('https') && mxc.host.isNotEmpty;
+  if (!mxc.isScheme('mxc') && !elsewhere) return null;
   return MediaSpec(
     mxc: mxc,
     name: name,
@@ -207,7 +234,9 @@ _Preview _planOf(_Ref ref, ui.MediaKind kind, int? size, String? mime) {
   }
   if (thumbnail) return _Preview.thumbnail;
   if (!image || full == null) return _Preview.none;
-  if (!ref.encrypted) return _Preview.server;
+  // The server can only thumbnail what it holds; a link to another site
+  // is drawn from the file itself, like a small encrypted image.
+  if (!ref.encrypted && full.mxc.isScheme('mxc')) return _Preview.server;
   return size != null && size <= ui.inlinePreviewCap
       ? _Preview.file
       : _Preview.none;

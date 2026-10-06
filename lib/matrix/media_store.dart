@@ -10,7 +10,8 @@ import 'package:matrix/matrix.dart' show Logs;
 import '../ui/model/media_source.dart';
 import 'ctr_decryptor.dart';
 
-/// What to fetch: one remote file, and how to read it.
+/// What to fetch: one remote file, and how to read it. [mxc] is the
+/// homeserver's own copy, or the `https` link of a file on another site.
 @immutable
 class MediaSpec {
   const MediaSpec({
@@ -308,10 +309,15 @@ class StoredFile extends ChangeNotifier implements MediaFile {
       final part = File(partialPath);
       if (await part.exists()) await part.delete();
 
-      final uri = await _store.downloadUri(_spec.mxc);
+      // Another site's file is fetched as it stands. The access token is the
+      // homeserver's, and goes nowhere else.
+      final homeserver = _spec.mxc.isScheme('mxc');
+      final uri = homeserver
+          ? await _store.downloadUri(_spec.mxc)
+          : _spec.mxc;
       if (_dead) return;
       final request = http.Request('GET', uri);
-      final token = _store.accessToken();
+      final token = homeserver ? _store.accessToken() : null;
       if (token != null) request.headers['authorization'] = 'Bearer $token';
       response = await _store.client.send(request);
       if (_dead) return;

@@ -195,6 +195,77 @@ void main() {
       },
     );
 
+    group('on another site', () {
+      Map<String, Object?> bridged() => {
+        'msgtype': 'm.image',
+        'body': 'cat.png',
+        'url': 'https://cdn.example.net/cat.png',
+        'info': {'size': 2000, 'mimetype': 'image/png'},
+      };
+
+      test('a small image previews through the store, by default', () {
+        final media = mediaOf(_event(bridged()))!;
+        expect(media.hasPreview, isTrue);
+        expect(source.preview(media, 500), isA<StoredFileImage>());
+        expect(source.open(media).error, isNull);
+      });
+
+      test('it is a plain card with the setting off', () {
+        final media = mediaOf(_event(bridged()), external: false)!;
+        expect(media.hasPreview, isFalse);
+        expect(source.preview(media, 500), isNull);
+        expect(source.open(media).error, isNotNull);
+      });
+
+      test('an http link is never fetched', () {
+        final media = mediaOf(
+          _event({...bridged(), 'url': 'http://cdn.example.net/cat.png'}),
+        )!;
+        expect(media.hasPreview, isFalse);
+      });
+
+      test('a link beside an encrypted key is not followed', () {
+        final media = mediaOf(
+          _event({
+            ...bridged(),
+            'file': {..._encrypted(), 'url': 'https://cdn.example.net/x'},
+          }),
+        )!;
+        expect(media.hasPreview, isFalse);
+      });
+
+      test('the access token stays with the homeserver', () async {
+        final seen = <http.BaseRequest>[];
+        final store = MediaStore(
+          root: Directory('${root.path}/ext')..createSync(),
+          client: MockClient.streaming((request, _) async {
+            seen.add(request);
+            return http.StreamedResponse(
+              Stream.value([1, 2, 3]),
+              200,
+              contentLength: 3,
+            );
+          }),
+          downloadUri: (mxc) async => Uri.https('example.com', '/dl${mxc.path}'),
+          accessToken: () => 'tok',
+        );
+        await MatrixMediaSource(_client, store)
+            .open(mediaOf(_event(bridged()))!)
+            .path;
+        await MatrixMediaSource(_client, store)
+            .open(
+              mediaOf(
+                _event({...bridged(), 'url': 'mxc://example.com/home'}),
+              )!,
+            )
+            .path;
+        expect(seen.first.url.host, 'cdn.example.net');
+        expect(seen.first.headers.containsKey('authorization'), isFalse);
+        expect(seen.last.url.host, 'example.com');
+        expect(seen.last.headers['authorization'], 'Bearer tok');
+      });
+    });
+
     test('a small encrypted image previews through the store', () {
       final media = mediaOf(
         _event({

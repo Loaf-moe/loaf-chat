@@ -43,9 +43,24 @@ class AppearanceSection extends StatelessWidget {
             ),
           ],
           const SizedBox(height: LoafSpace.x6),
-          _EasterEggs(
+          _Check(
+            title: 'easter eggs',
+            detail:
+                'seasonal surprises, like ${LoafThemeId.nihon.label} '
+                'from Oct 16 to Nov 6.',
             value: controller.easterEggs,
             onChanged: controller.setEasterEggs,
+          ),
+          const SizedBox(height: LoafSpace.x4),
+          _Label(tokens: tokens, label: 'media'),
+          _Check(
+            title: 'external content',
+            detail:
+                'show pictures, video and files that a bridge links to on '
+                'other sites, like Discord. fetching them tells those sites '
+                'your address. never used in encrypted rooms.',
+            value: controller.externalMedia,
+            onChanged: controller.setExternalMedia,
           ),
         ],
       );
@@ -149,9 +164,16 @@ class _Swatch extends StatelessWidget {
   );
 }
 
-class _EasterEggs extends StatelessWidget {
-  const _EasterEggs({required this.value, required this.onChanged});
+class _Check extends StatelessWidget {
+  const _Check({
+    required this.title,
+    required this.detail,
+    required this.value,
+    required this.onChanged,
+  });
 
+  final String title;
+  final String detail;
   final bool value;
   final ValueChanged<bool> onChanged;
 
@@ -180,15 +202,14 @@ class _EasterEggs extends StatelessWidget {
                   children: [
                     const SizedBox(height: LoafSpace.x2),
                     Text(
-                      'easter eggs',
+                      title,
                       style: loafBody(
                         15,
                         600,
                       ).copyWith(color: tokens.textStrong),
                     ),
                     Text(
-                      'seasonal surprises, like ${LoafThemeId.nihon.label} '
-                      'from Oct 16 to Nov 6.',
+                      detail,
                       style: loafBody(
                         13,
                         400,

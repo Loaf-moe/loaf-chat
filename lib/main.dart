@@ -52,7 +52,10 @@ Future<void> main() async {
   } else {
     final matrix = await MatrixSession.open(desktop: isDesktop);
     session = matrix;
-    newRooms = () => MatrixRooms(matrix.client);
+    newRooms = () => MatrixRooms(
+      matrix.client,
+      externalMedia: appearance.externalMediaListenable,
+    );
     updater = pickUpdater();
   }
   runApp(const LoafApp());

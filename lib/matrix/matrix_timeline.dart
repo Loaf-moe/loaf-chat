@@ -28,7 +28,13 @@ class MatrixTimeline extends ChangeNotifier
   /// Opens [room]'s timeline straight away; until it has, the conversation
   /// is empty and [loadingOlder]. [member] maps a user id to a person as
   /// the rest of the app draws them.
-  MatrixTimeline(this.room, {required this.you, required this.member}) {
+  MatrixTimeline(
+    this.room, {
+    required this.you,
+    required this.member,
+    this.externalMedia,
+  }) {
+    externalMedia?.addListener(_changed);
     unawaited(_open());
   }
 
@@ -38,6 +44,10 @@ class MatrixTimeline extends ChangeNotifier
   final ui.Member you;
 
   final ui.Member Function(String userId) member;
+
+  /// Whether files linked on other sites are shown. Null: they are. The rows
+  /// are drawn afresh when it changes.
+  final ValueListenable<bool>? externalMedia;
 
   Timeline? _timeline;
   var _opening = true;
@@ -164,7 +174,7 @@ class MatrixTimeline extends ChangeNotifier
     }
     final display = _display(event, timeline);
     final media = _fileTypes.contains(display.messageType)
-        ? mediaOf(display)
+        ? mediaOf(display, external: externalMedia?.value ?? true)
         : null;
     final text = display.calcUnlocalizedBody(
       hideReply: true,
@@ -545,6 +555,7 @@ class MatrixTimeline extends ChangeNotifier
   @override
   void dispose() {
     _disposed = true;
+    externalMedia?.removeListener(_changed);
     _timeline?.cancelSubscriptions();
     unawaited(_failures.close());
     super.dispose();

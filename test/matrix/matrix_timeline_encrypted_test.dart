@@ -107,6 +107,28 @@ void main() {
     expect(t.writable, isTrue);
   });
 
+  test('a link to another site is never fetched in an encrypted room', () async {
+    final t = open();
+    await _settle();
+    await _sync(mine, [
+      {
+        'type': 'm.room.message',
+        'sender': other,
+        'content': {
+          'msgtype': 'm.image',
+          'body': 'cat.png',
+          'url': 'https://cdn.example.net/cat.png',
+          'info': {'size': 2000, 'mimetype': 'image/png'},
+        },
+        'event_id': '\$bridged',
+        'origin_server_ts': 1700000001000,
+      },
+    ]);
+    await _settle();
+    // Drawn as a file card: the setting is on (the default) and still no.
+    expect(t.messages.single.media?.hasPreview, isFalse);
+  });
+
   test('a locked message reads once its key arrives', () async {
     final theirs = await cryptoClient(
       api: FakeMatrixApi.currentApi,

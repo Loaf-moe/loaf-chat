@@ -34,6 +34,7 @@ class AppearanceSettings {
   const AppearanceSettings({
     this.theme = LoafThemeId.loafDark,
     this.easterEggs = true,
+    this.externalMedia = true,
   });
 
   /// Anything unreadable falls back to that field's default, so a
@@ -41,6 +42,7 @@ class AppearanceSettings {
   factory AppearanceSettings.fromJson(Object? json) {
     if (json is! Map) return const AppearanceSettings();
     final eggs = json['easterEggs'];
+    final external = json['externalMedia'];
     return AppearanceSettings(
       theme:
           LoafThemeId.values
@@ -48,15 +50,31 @@ class AppearanceSettings {
               .firstOrNull ??
           LoafThemeId.loafDark,
       easterEggs: eggs is bool ? eggs : true,
+      externalMedia: external is bool ? external : true,
     );
   }
 
   final LoafThemeId theme;
   final bool easterEggs;
 
+  /// Whether pictures, video and files a bridge links to on other sites are
+  /// fetched and shown. Never in an encrypted room, whatever this says.
+  final bool externalMedia;
+
+  AppearanceSettings copyWith({
+    LoafThemeId? theme,
+    bool? easterEggs,
+    bool? externalMedia,
+  }) => AppearanceSettings(
+    theme: theme ?? this.theme,
+    easterEggs: easterEggs ?? this.easterEggs,
+    externalMedia: externalMedia ?? this.externalMedia,
+  );
+
   Map<String, Object> toJson() => {
     'theme': theme.name,
     'easterEggs': easterEggs,
+    'externalMedia': externalMedia,
   };
 }
 
@@ -118,6 +136,7 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
     this._clock = DateTime.now,
   }) {
     _lastEffective = effective;
+    externalMediaListenable = ValueNotifier(_settings.externalMedia);
     _armMidnight();
     WidgetsBinding.instance.addObserver(this);
   }
@@ -139,6 +158,11 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
 
   LoafThemeId get chosen => _settings.theme;
   bool get easterEggs => _settings.easterEggs;
+  bool get externalMedia => _settings.externalMedia;
+
+  /// [externalMedia] for the Matrix side, which reads it without knowing
+  /// about themes.
+  late final ValueNotifier<bool> externalMediaListenable;
 
   LoafThemeId get effective =>
       easterEggs && inNihonSeason(_clock()) ? LoafThemeId.nihon : chosen;
@@ -147,16 +171,22 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
   /// so, or the picker would look broken.
   bool get seasonOverrides => effective != chosen;
 
-  void choose(LoafThemeId theme) =>
-      _update(AppearanceSettings(theme: theme, easterEggs: easterEggs));
+  void choose(LoafThemeId theme) => _update(_settings.copyWith(theme: theme));
 
-  void setEasterEggs(bool on) =>
-      _update(AppearanceSettings(theme: chosen, easterEggs: on));
+  void setEasterEggs(bool on) => _update(_settings.copyWith(easterEggs: on));
+
+  void setExternalMedia(bool on) =>
+      _update(_settings.copyWith(externalMedia: on));
 
   void _update(AppearanceSettings next) {
-    if (next.theme == chosen && next.easterEggs == easterEggs) return;
+    if (next.theme == chosen &&
+        next.easterEggs == easterEggs &&
+        next.externalMedia == externalMedia) {
+      return;
+    }
     _settings = next;
     _lastEffective = effective;
+    externalMediaListenable.value = next.externalMedia;
     notifyListeners();
     // A pick that can't be saved still applies for this run; losing it at
     // the next launch beats crashing over a theme.
@@ -193,6 +223,7 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _midnight?.cancel();
+    externalMediaListenable.dispose();
     super.dispose();
   }
 }

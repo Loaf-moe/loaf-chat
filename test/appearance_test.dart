@@ -53,6 +53,21 @@ void main() {
       expect(c.seasonOverrides, isFalse);
     });
 
+    test('external content is on by default, and the choice is kept', () {
+      final store = MemoryAppearanceStore();
+      final c = make(now: offSeason, store: store);
+      expect(c.externalMedia, isTrue);
+      expect(c.externalMediaListenable.value, isTrue);
+      c.setExternalMedia(false);
+      expect(c.externalMedia, isFalse);
+      expect(c.externalMediaListenable.value, isFalse);
+      expect(store.saved?.externalMedia, isFalse);
+      // The other settings ride along unchanged.
+      expect(store.saved?.easterEggs, isTrue);
+      c.choose(LoafThemeId.nihon);
+      expect(store.saved?.externalMedia, isFalse);
+    });
+
     test('the season wins over the pick while easter eggs are on', () {
       final c = make(now: inSeason);
       expect(c.effective, LoafThemeId.nihon);
