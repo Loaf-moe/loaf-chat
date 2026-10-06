@@ -218,14 +218,19 @@ class Message {
   /// See [Message.stub].
   final bool stub;
 
-  Message copyWith({List<Reaction>? reactions, String? body, bool? edited}) =>
-      Message(
+  /// New words make the old formatting wrong: [formatted] goes with a new
+  /// [body], and without one the message has none.
+  Message copyWith({
+    List<Reaction>? reactions,
+    String? body,
+    String? formatted,
+    bool? edited,
+  }) => Message(
         id: id,
         author: author,
         sentAt: sentAt,
         body: body ?? this.body,
-        // New words make the old formatting wrong.
-        formatted: body == null ? formatted : null,
+        formatted: body == null ? this.formatted : formatted,
         reactions: reactions ?? this.reactions,
         edited: edited ?? this.edited,
         replyTo: replyTo,
