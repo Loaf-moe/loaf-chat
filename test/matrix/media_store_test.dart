@@ -389,7 +389,8 @@ void main() {
   });
 
   test('on Windows the whole path fits in MAX_PATH', () {
-    final dir = 'C:\\Users\\someone\\AppData\\Roaming\\moe.loaf\\media\\'
+    final dir =
+        'C:\\Users\\someone\\AppData\\Roaming\\moe.loaf\\media\\'
         'files\\${'a' * 64}';
     final budget = MediaStore.nameBudget(dir, windows: true);
     // Room for the separator and `.part` inside 240.
