@@ -56,6 +56,40 @@ void main() {
   Future<void> settle() =>
       Future<void>.delayed(const Duration(milliseconds: 20));
 
+  group('a limit', () {
+    final elsewhere = Uri.parse('https://cdn.example.net/big.png');
+    MediaSpec spec(int? limit) =>
+        MediaSpec(mxc: elsewhere, name: 'big.png', limit: limit);
+
+    test('stops a file that says it is too big', () async {
+      final store = storeOver(serving([List.filled(100, 1)]));
+      final file = store.open(spec(50));
+      await expectLater(file.path, throwsStateError);
+      expect(file.error, isNotNull);
+    });
+
+    test('stops a file that turns out to be too big', () async {
+      final store = storeOver(
+        MockClient.streaming(
+          (request, body) async => http.StreamedResponse(
+            Stream.fromIterable([List.filled(40, 1), List.filled(40, 1)]),
+            200,
+          ),
+        ),
+      );
+      final file = store.open(spec(50));
+      await expectLater(file.path, throwsStateError);
+    });
+
+    test('lets a file within it through, and one with none', () async {
+      final store = storeOver(serving([List.filled(40, 1)]));
+      expect(File(await store.open(spec(50)).path).lengthSync(), 40);
+      final other = Uri.parse('https://cdn.example.net/other.png');
+      final again = store.open(MediaSpec(mxc: other, name: 'other.png'));
+      expect(File(await again.path).lengthSync(), 40);
+    });
+  });
+
   test('a plain file arrives on disk under its own name', () async {
     final store = storeOver(serving([utf8.encode('hello')]));
     addTearDown(store.dispose);

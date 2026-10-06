@@ -173,16 +173,22 @@ class MatrixTimeline extends ChangeNotifier
       return null;
     }
     final display = _display(event, timeline);
+    final external = externalMedia?.value ?? true;
     final media = _fileTypes.contains(display.messageType)
-        ? mediaOf(display, external: externalMedia?.value ?? true)
+        ? mediaOf(display, external: external)
         : null;
     final text = display.calcUnlocalizedBody(
       hideReply: true,
       hideEdit: true,
       plaintextBody: true,
     );
+    // A bridge that has no copy of an attachment says where it is instead.
+    final linked = media == null
+        ? linkedMediaIn(display, text, external: external)
+        : null;
     final body = switch (display.messageType) {
       _ when media != null => captionOf(display.content) ?? '',
+      _ when linked != null => linked.body,
       MessageTypes.Emote => '${author.name} $text',
       _ => text,
     };
@@ -191,8 +197,11 @@ class MatrixTimeline extends ChangeNotifier
       author: author,
       sentAt: event.originServerTs,
       body: body,
-      media: media,
-      formatted: _formatted(display, author, caption: media != null),
+      media: media ?? linked?.media,
+      // A message that was only a link has no words left to format.
+      formatted: linked != null && linked.body.isEmpty
+          ? null
+          : _formatted(display, author, caption: media != null),
       edited: !identical(display, event),
       reactions: quoting ? const [] : _reactions(event, timeline),
       replyTo: quoting ? null : _replyTo(event, timeline),

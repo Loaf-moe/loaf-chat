@@ -117,30 +117,12 @@ ui.Media? mediaOf(Event event, {bool external = true}) {
     final kind = _kindOf(event.messageType);
     if (kind == null) return null;
     final content = _copy(event.content)! as Map<String, Object?>;
-    final ref = _Ref(
+    return _media(
       event.eventId,
       event.transactionId,
       content,
+      kind,
       external: external && !event.room.encrypted,
-    );
-    final info = ref.info;
-    final w = _int(info['w']), h = _int(info['h']);
-    final ms = _int(info['duration']);
-    final size = _int(info['size']);
-    final mime = info.tryGet<String>('mimetype', TryGet.silent);
-    final mimeType = mime == null || mime.isEmpty ? null : mime.toLowerCase();
-    final plan = _planOf(ref, kind, size, mimeType);
-    return ui.Media(
-      kind: kind,
-      name: ref.name,
-      size: size,
-      mimeType: mimeType,
-      dimensions: w != null && h != null && w > 0 && h > 0
-          ? Size(w.toDouble(), h.toDouble())
-          : null,
-      duration: ms == null ? null : Duration(milliseconds: ms),
-      hasPreview: plan != _Preview.none,
-      ref: ref,
     );
   } on Object catch (e) {
     Logs().v('[loaf] media event ${event.eventId} unreadable: $e');
@@ -151,6 +133,105 @@ ui.Media? mediaOf(Event event, {bool external = true}) {
       ref: _Ref(event.eventId, null, const {}),
     );
   }
+}
+
+ui.Media _media(
+  String eventId,
+  String? txid,
+  Map<String, Object?> content,
+  ui.MediaKind kind, {
+  required bool external,
+}) {
+  final ref = _Ref(eventId, txid, content, external: external);
+  final info = ref.info;
+  final w = _int(info['w']), h = _int(info['h']);
+  final ms = _int(info['duration']);
+  final size = _int(info['size']);
+  final mime = info.tryGet<String>('mimetype', TryGet.silent);
+  final mimeType = mime == null || mime.isEmpty ? null : mime.toLowerCase();
+  final plan = _planOf(ref, kind, size, mimeType);
+  return ui.Media(
+    kind: kind,
+    name: ref.name,
+    size: size,
+    mimeType: mimeType,
+    dimensions: w != null && h != null && w > 0 && h > 0
+        ? Size(w.toDouble(), h.toDouble())
+        : null,
+    duration: ms == null ? null : Duration(milliseconds: ms),
+    hasPreview: plan != _Preview.none,
+    ref: ref,
+  );
+}
+
+const _linkedImages = {
+  'png': 'image/png',
+  'apng': 'image/apng',
+  'jpg': 'image/jpeg',
+  'jpeg': 'image/jpeg',
+  'gif': 'image/gif',
+  'webp': 'image/webp',
+  'avif': 'image/avif',
+  'bmp': 'image/bmp',
+};
+
+const _linkedVideos = {
+  'mp4': 'video/mp4',
+  'm4v': 'video/mp4',
+  'mov': 'video/quicktime',
+  'webm': 'video/webm',
+};
+
+/// A text message's link to a picture or video on another site, drawn as
+/// that media: what a bridge makes of an attachment it has no copy of. The
+/// [body] is what is left to say, which is nothing when the message was only
+/// the link.
+typedef LinkedMedia = ({ui.Media media, String body});
+
+final _link = RegExp(r'https://[^\s<>"]+');
+
+/// The first link in [text], the body of [event], that ends in the name of a
+/// picture or video, as media. Null when there is none, when [external] says
+/// no, in an encrypted room, and for anything but a plain message: the same
+/// rules as for a file message linking elsewhere, see [mediaOf].
+LinkedMedia? linkedMediaIn(Event event, String text, {bool external = true}) {
+  if (!external || event.room.encrypted) return null;
+  if (event.messageType != MessageTypes.Text &&
+      event.messageType != MessageTypes.Notice) {
+    return null;
+  }
+  try {
+    for (final match in _link.allMatches(text)) {
+      // A link at the end of a sentence is not the sentence's full stop.
+      final link = match.group(0)!.replaceFirst(RegExp(r"[.,;:!?)\]}']+$"), '');
+      final uri = Uri.tryParse(link);
+      if (uri == null || uri.host.isEmpty || uri.pathSegments.isEmpty) continue;
+      final name = uri.pathSegments.last;
+      final dot = name.lastIndexOf('.');
+      if (dot < 1) continue;
+      final extension = name.substring(dot + 1).toLowerCase();
+      final image = _linkedImages[extension];
+      final video = _linkedVideos[extension];
+      final mime = image ?? video;
+      if (mime == null) continue;
+      final media = _media(
+        event.eventId,
+        null,
+        {
+          'msgtype': image != null ? MessageTypes.Image : MessageTypes.Video,
+          'body': name,
+          'url': link,
+          'info': {'mimetype': mime},
+        },
+        image != null ? ui.MediaKind.image : ui.MediaKind.video,
+        external: true,
+      );
+      return (media: media, body: text.trim() == link ? '' : text);
+    }
+  } on Object catch (e) {
+    Logs().v('[loaf] links in ${event.eventId} unreadable: $e');
+  }
+  return null;
 }
 
 /// The file itself. A `file` map missing its key or iv gets empty ones,
@@ -187,6 +268,9 @@ MediaSpec? _spec(
       external && file == null && mxc.isScheme('https') && mxc.host.isNotEmpty;
   if (!mxc.isScheme('mxc') && !elsewhere) return null;
   return MediaSpec(
+    // A link to another site that doesn't say how big it is is cut off at a
+    // size no picture row should be waiting for.
+    limit: elsewhere && size == null ? externalLimit : null,
     mxc: mxc,
     name: name,
     size: size,
@@ -235,11 +319,12 @@ _Preview _planOf(_Ref ref, ui.MediaKind kind, int? size, String? mime) {
   if (thumbnail) return _Preview.thumbnail;
   if (!image || full == null) return _Preview.none;
   // The server can only thumbnail what it holds; a link to another site
-  // is drawn from the file itself, like a small encrypted image.
-  if (!ref.encrypted && full.mxc.isScheme('mxc')) return _Preview.server;
-  return size != null && size <= ui.inlinePreviewCap
-      ? _Preview.file
-      : _Preview.none;
+  // is drawn from the file itself, like a small encrypted image. Its size
+  // often goes unsaid: the download is capped instead, see [externalLimit].
+  final elsewhere = !full.mxc.isScheme('mxc');
+  if (!ref.encrypted && !elsewhere) return _Preview.server;
+  final fits = size == null ? elsewhere : size <= ui.inlinePreviewCap;
+  return fits ? _Preview.file : _Preview.none;
 }
 
 /// A file that has already failed, for a ref with nowhere to fetch from.

@@ -20,6 +20,7 @@ class MediaSpec {
     this.key,
     this.iv,
     this.size,
+    this.limit,
   });
 
   final Uri mxc;
@@ -30,7 +31,14 @@ class MediaSpec {
   final String? key;
   final String? iv;
   final int? size;
+
+  /// The most bytes to take: a download that goes past it fails. Null takes
+  /// what comes.
+  final int? limit;
 }
+
+/// How much of a file on another site, with no size given, is worth taking.
+const externalLimit = 25 * 1000 * 1000;
 
 /// Files on disk under [root], one folder per mxc, downloaded once however
 /// many ask, decrypted as they arrive, and trimmed to [capBytes] oldest first.
@@ -325,7 +333,12 @@ class StoredFile extends ChangeNotifier implements MediaFile {
           uri,
         );
       }
-      _total = response.contentLength ?? _spec.size;
+      final limit = _spec.limit;
+      final declared = response.contentLength;
+      if (limit != null && declared != null && declared > limit) {
+        throw StateError('too big: $declared bytes');
+      }
+      _total = declared ?? _spec.size;
 
       raf = await part.open(mode: FileMode.write);
       if (_dead) return;
@@ -338,6 +351,9 @@ class StoredFile extends ChangeNotifier implements MediaFile {
         await raf.writeFrom(bytes);
         if (_dead) return;
         _received += bytes.length;
+        if (limit != null && _received > limit) {
+          throw StateError('too big: over $limit bytes');
+        }
         _notify();
       }
       if (_dead) return;

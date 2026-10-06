@@ -313,6 +313,23 @@ void main() {
       expect(first.locked, isFalse);
     });
 
+    test('a text link to a picture is a picture row', () async {
+      const cdn = 'https://cdn.discordapp.com/attachments/1/2/crumb.png?ex=1';
+      final h = await _open([
+        _text(cdn),
+        _text('and also $cdn'),
+        _text('https://example.com/recipes'),
+      ]);
+      final rows = h.messages;
+      expect(rows[0].media?.name, 'crumb.png');
+      expect(rows[0].body, '');
+      expect(rows[0].formatted, isNull);
+      expect(rows[1].media?.name, 'crumb.png');
+      expect(rows[1].body, 'and also $cdn');
+      expect(rows[2].media, isNull);
+      expect(rows[2].body, 'https://example.com/recipes');
+    });
+
     test('a formatted message carries its HTML', () async {
       final h = await _open([
         _event('m.room.message', {
