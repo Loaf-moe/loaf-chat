@@ -22,13 +22,16 @@ import '../theme/loaf_theme.dart';
 import '../model/media_source.dart';
 import '../widgets/avatar_images.dart';
 import '../widgets/loaf_button.dart';
+import '../model/updater.dart';
+import 'about_section.dart';
 import 'account_section.dart';
 import 'devices.dart';
 import 'devices_section.dart';
 
 enum SettingsSection {
   account('account', LucideIcons.circleUser),
-  devices('devices', LucideIcons.monitorSmartphone);
+  devices('devices', LucideIcons.monitorSmartphone),
+  about('about', LucideIcons.info);
 
   const SettingsSection(this.label, this.icon);
 
@@ -53,6 +56,7 @@ Future<void> showSettings(
   VoidCallback? onSignOut,
   SettingsSection initial = SettingsSection.account,
   Devices? devices,
+  Updater updater = const NoUpdater(),
 }) => showDialog<void>(
   context: context,
   barrierColor: const Color(0x99000016),
@@ -64,6 +68,7 @@ Future<void> showSettings(
       child: SettingsModal(
         initial: initial,
         devices: devices,
+        updater: updater,
         profile: profile,
         me: me,
         editable: editable,
@@ -82,9 +87,13 @@ class SettingsModal extends StatefulWidget {
     this.editable = true,
     this.onSignOut,
     this.devices,
+    this.updater = const NoUpdater(),
   });
 
   final ProfileController? profile;
+
+  /// What the about section shows and asks to check.
+  final Updater updater;
 
   /// Left null, there is no devices section: a backend that can't list
   /// sessions has none to show.
@@ -113,6 +122,7 @@ class _SettingsModalState extends State<SettingsModal> {
   List<SettingsSection> get _sections => [
     SettingsSection.account,
     if (widget.devices != null) SettingsSection.devices,
+    SettingsSection.about,
   ];
 
   late var _section = _sections.contains(widget.initial)
@@ -219,6 +229,7 @@ class _SettingsModalState extends State<SettingsModal> {
     me: widget.me,
     editable: widget.editable,
     devices: widget.devices,
+    updater: widget.updater,
   );
 }
 
@@ -408,10 +419,12 @@ class _Detail extends StatelessWidget {
     required this.profile,
     required this.me,
     required this.editable,
+    required this.updater,
     this.devices,
   });
 
   final Devices? devices;
+  final Updater updater;
   final SettingsSection section;
   final ProfileController? profile;
   final Member? me;
@@ -429,5 +442,6 @@ class _Detail extends StatelessWidget {
       final devices? => DevicesSection(devices: devices),
       null => AccountSection(profile: profile, me: me, editable: editable),
     },
+    SettingsSection.about => AboutSection(updater: updater),
   };
 }

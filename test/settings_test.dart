@@ -132,12 +132,12 @@ void main() {
       'voice & video',
       'stickers',
       'developer',
-      'about',
     ]) {
       expect(find.text(gone), findsNothing, reason: gone);
     }
     expect(find.textContaining('not designed yet'), findsNothing);
     expect(find.text('devices'), findsOneWidget);
+    expect(find.text('about'), findsOneWidget);
     expect(find.text('sign out'), findsOneWidget);
   });
 

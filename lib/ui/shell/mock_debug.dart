@@ -6,6 +6,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../model/updater.dart';
 import '../platform.dart';
 import '../widgets/action_menu.dart';
 
@@ -24,13 +25,17 @@ enum MockDebug {
   freshAccount,
   newSignIn,
   personAsks,
+  forgetUpdate,
+  nextUpdateCheck,
 }
 
-/// [presenceShared] words the presence lever for the state it would change.
+/// [presenceShared] words the presence lever for the state it would change;
+/// [nextCheck] says what the next update check will find.
 Future<MockDebug?> showMockDebug(
   BuildContext context,
   Rect anchor, {
   required bool presenceShared,
+  required UpdateCheck nextCheck,
 }) {
   ActionItem<MockDebug> item(MockDebug d, IconData icon, String label) =>
       ActionItem(value: d, icon: icon, label: label);
@@ -71,6 +76,12 @@ Future<MockDebug?> showMockDebug(
       LucideIcons.userCheck,
       'Mika asks to verify you',
     ),
+    item(MockDebug.forgetUpdate, LucideIcons.archiveX, 'forget the update'),
+    item(MockDebug.nextUpdateCheck, LucideIcons.refreshCw, switch (nextCheck) {
+      UpdateCheck.upToDate => 'next update check: up to date',
+      UpdateCheck.ready => 'next update check: finds 0.3.0',
+      UpdateCheck.failed => 'next update check: fails',
+    }),
   ];
   if (isDesktop) {
     return showActionMenu(context, position: anchor.topLeft, items: items);

@@ -87,7 +87,7 @@ esac''');
     expect(
       lines[configure],
       'mise exec -- flutter build ios --release --config-only '
-      '--build-name=0.1.0 --build-number=42 --dart-define=LOAF_BUILD=42',
+      '--build-name=0.1.0 --build-number=42 --dart-define=LOAF_BUILD=42 --dart-define=LOAF_VERSION=0.1.0',
     );
     expect(lines[archive], contains('-workspace ios/Runner.xcworkspace'));
     expect(lines[archive], contains('-scheme Runner'));

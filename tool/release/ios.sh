@@ -22,7 +22,8 @@ plutil -lint tool/release/ios-export.plist
 
 mise exec -- flutter build ios --release --config-only \
   --build-name="$version" --build-number="$build" \
-  --dart-define=LOAF_BUILD="$build"
+  --dart-define=LOAF_BUILD="$build" \
+  --dart-define=LOAF_VERSION="$version"
 
 # Unsigned: signing here would mint a development certificate on every fresh
 # runner, and Apple caps those. Export signs it for distribution instead.

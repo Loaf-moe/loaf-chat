@@ -86,7 +86,8 @@ class _AppShellState extends State<AppShell> {
   late final Updater _updater =
       widget.updater ??
       (_session is MockSession
-          ? FakeUpdater(const UpdateReady('0.3.0'))
+          ? (FakeUpdater(const UpdateReady('0.3.0'))
+              ..checkTakes = const Duration(milliseconds: 1500))
           : const NoUpdater());
   // The rooms own the profile and dispose it; the controller only views it.
   late final _profile = ProfileController(
@@ -720,6 +721,10 @@ class _AppShellState extends State<AppShell> {
       context,
       anchor,
       presenceShared: _profile.presenceShared,
+      nextCheck: switch (_updater) {
+        final FakeUpdater fake => fake.nextCheck,
+        _ => UpdateCheck.upToDate,
+      },
     );
     if (pick == null) return;
     switch (pick) {
@@ -759,6 +764,16 @@ class _AppShellState extends State<AppShell> {
         if (_session case final MockSession mock) mock.receiveRequest();
       case MockDebug.personAsks:
         if (_session case final MockSession mock) mock.receivePersonRequest();
+      // The update levers move the mock's fake updater only.
+      case MockDebug.forgetUpdate:
+        if (_updater case final FakeUpdater fake) {
+          fake.state = const UpdateIdle();
+        }
+      case MockDebug.nextUpdateCheck:
+        if (_updater case final FakeUpdater fake) {
+          fake.nextCheck = UpdateCheck
+              .values[(fake.nextCheck.index + 1) % UpdateCheck.values.length];
+        }
     }
   }
 
@@ -845,6 +860,7 @@ class _AppShellState extends State<AppShell> {
         me: _me,
         editable: _can(RoomAbility.editProfile),
         onSignOut: _session.signOut,
+        updater: _updater,
       ),
     );
   }
@@ -1317,6 +1333,7 @@ class _AppShellState extends State<AppShell> {
               editable: _can(RoomAbility.editProfile),
               onSignOut: _session.signOut,
               devices: _can(RoomAbility.devices) ? _rooms.devices : null,
+              updater: _updater,
             ),
             me: _me,
             onAvatarTap: _can(RoomAbility.editProfile)

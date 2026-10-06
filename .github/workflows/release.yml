@@ -51,6 +51,7 @@ jobs:
           --build-name=${{ needs.version.outputs.name }}
           --build-number=${{ needs.version.outputs.build }}
           --dart-define=LOAF_BUILD=${{ needs.version.outputs.build }}
+          --dart-define=LOAF_VERSION=${{ needs.version.outputs.name }}
       - run: tool/release/macos.sh "${{ needs.version.outputs.name }}" dist
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
@@ -113,6 +114,7 @@ jobs:
           --build-name=${{ needs.version.outputs.name }}
           --build-number=${{ needs.version.outputs.build }}
           --dart-define=LOAF_BUILD=${{ needs.version.outputs.build }}
+          --dart-define=LOAF_VERSION=${{ needs.version.outputs.name }}
       - run: >
           tool/release/appimage.sh "${{ needs.version.outputs.name }}"
           "${{ needs.version.outputs.build }}" dist
