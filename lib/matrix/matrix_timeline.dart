@@ -405,7 +405,13 @@ class MatrixTimeline extends ChangeNotifier
   @override
   Future<int?> uploadLimit() async {
     try {
-      return (await room.client.getConfig()).mUploadSize;
+      // The SDK's own 3-day cache would keep reporting a limit the server
+      // has since raised; its upload check reads the same entry, so this
+      // refetch also corrects that one.
+      final config = await room.client.getConfig(
+        cacheLifetime: const Duration(hours: 1),
+      );
+      return config.mUploadSize;
     } on Object {
       // Offline, say: the server decides when the file goes.
       return null;
