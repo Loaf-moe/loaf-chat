@@ -7,10 +7,10 @@ library;
 import 'dart:async';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 import '../ui/model/updater.dart';
+import 'asset_download.dart';
 import 'ed25519.dart';
 import 'release_feed.dart';
 import 'state_updater.dart';
@@ -48,9 +48,6 @@ class AppImageUpdater extends StateUpdater {
   /// The check under way, which a second caller waits on rather than racing.
   Future<UpdateCheck>? _checking;
 
-  /// Nothing sane is this big; refuse before filling the disk.
-  static const _largest = 500 * 1024 * 1024;
-
   /// Checks shortly after launch, then hourly: as often as Sparkle allows
   /// on macOS, so a release reaches every desktop at the same pace.
   void start() {
@@ -76,68 +73,16 @@ class AppImageUpdater extends StateUpdater {
       final release = await fetchRelease(_http, feed);
       final asset = release.appImage;
       if (asset == null || release.build <= build) return UpdateCheck.upToDate;
-      if (!verify(release.signedText, asset.signature)) {
+      if (!verify(release.signedTextFor(AssetKind.appImage), asset.signature)) {
         throw StateError('the feed is not signed by the release key');
       }
-      if (asset.size > _largest) throw StateError('${asset.size} bytes');
+      if (asset.size > largestAsset) throw StateError('${asset.size} bytes');
       move(const UpdatePreparing());
 
       // $APPIMAGE may be a link into ~/bin: replace what it points at.
       final target = File(await _appImage.resolveSymbolicLinks());
       part = File('${target.path}.part');
-      // Idle timeouts, not total: a slow link may take as long as it needs,
-      // a dead one must not hold _checking until the next launch.
-      final response = await _http
-          .send(http.Request('GET', asset.url))
-          .timeout(idleTimeout);
-      if (response.statusCode != 200) {
-        throw HttpException('${response.statusCode}', uri: asset.url);
-      }
-      // Refuse up front if Content-Length differs from expected size.
-      final contentLength = response.contentLength;
-      if (contentLength != null &&
-          contentLength != -1 &&
-          contentLength != asset.size) {
-        throw StateError('Content-Length $contentLength != ${asset.size}');
-      }
-
-      // Write to file while counting bytes and refusing if oversized.
-      var bytesWritten = 0;
-      final sink = part.openWrite();
-      try {
-        await response.stream.timeout(idleTimeout).forEach((bytes) {
-          bytesWritten += bytes.length;
-          if (bytesWritten > asset.size) {
-            throw StateError('download exceeded ${asset.size} bytes');
-          }
-          sink.add(bytes);
-        });
-      } finally {
-        try {
-          await sink.flush();
-        } catch (e) {
-          updateLog('could not finish writing the download', e);
-        }
-        try {
-          await sink.close();
-        } catch (e) {
-          updateLog('could not finish writing the download', e);
-        }
-      }
-
-      // Fsync to disk before rename, so a power loss cannot leave the new
-      // name pointing at a partial file.
-      final raf = await part.open(mode: FileMode.append);
-      try {
-        await raf.flush();
-      } finally {
-        await raf.close();
-      }
-
-      final digest = await sha256.bind(part.openRead()).first;
-      if (bytesWritten != asset.size || '$digest' != asset.sha256) {
-        throw StateError('the download does not match the feed');
-      }
+      await downloadAsset(_http, asset, part, idleTimeout: idleTimeout);
       final chmod = await Process.run('chmod', ['+x', part.path]);
       if (chmod.exitCode != 0) throw StateError('chmod: ${chmod.stderr}');
       await part.rename(target.path);
