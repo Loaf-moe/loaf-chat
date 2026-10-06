@@ -51,11 +51,12 @@ class AppImageUpdater extends StateUpdater {
   /// Nothing sane is this big; refuse before filling the disk.
   static const _largest = 500 * 1024 * 1024;
 
-  /// Checks shortly after launch, then every six hours.
+  /// Checks shortly after launch, then hourly: as often as Sparkle allows
+  /// on macOS, so a release reaches every desktop at the same pace.
   void start() {
     _timers
       ..add(Timer(const Duration(seconds: 30), check))
-      ..add(Timer.periodic(const Duration(hours: 6), (_) => check()));
+      ..add(Timer.periodic(const Duration(hours: 1), (_) => check()));
   }
 
   @override

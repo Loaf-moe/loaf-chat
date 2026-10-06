@@ -154,7 +154,8 @@ real backends elsewhere, and `lib/main.dart` choosing between them.
 - The notice appears only for an update already verified on disk.
 - A failure is never a notice. It is logged, the state returns to `idle`,
   and the next check tries again. A tester cannot act on "update failed".
-- The first check runs shortly after launch, then every six hours. The
+- The first check runs shortly after launch, then every hour (Sparkle's
+  floor for a release build). The
   Flatpak portal keeps its own schedule instead.
 - An update nobody restarts into applies when the app next quits.
 
@@ -177,7 +178,7 @@ through the real path.
   the reply; error, acknowledge. Loaf Chat's notice is the only UI.
 - `Info.plist`: `SUFeedURL` (`https://get.loaf.moe/appcast.xml`),
   `SUPublicEDKey`, `SUEnableAutomaticChecks`, `SUAutomaticallyUpdate`,
-  `SUScheduledCheckInterval` of 21600, `SUEnableInstallerLauncherService`.
+  `SUScheduledCheckInterval` of 3600, `SUEnableInstallerLauncherService`.
 - `ready(version)` is the delegate's install-on-quit call, answered true
   with the block kept. `restart()` calls the block.
 - The sandbox stays on, with the two mach-lookup entitlements added to
@@ -282,7 +283,7 @@ allows 1 GB a site and 100 MB a file.
 
 | Situation | What happens |
 |---|---|
-| No network, or the feed is unreachable | `idle`, logged, retried in six hours |
+| No network, or the feed is unreachable | `idle`, logged, retried within the hour |
 | A download cut off part-way | The partial file is discarded; retried |
 | A signature or hash that does not match | The file is deleted, an error is logged, no notice |
 | The feed offers the same build or an older one | Ignored |
