@@ -1,0 +1,42 @@
+# Nobody here has a Windows machine: this is where Windows gets built and
+# tested. Runs on the windows branch and on demand.
+name: windows-check
+
+on:
+  push:
+    branches: [windows, 'windows/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      # mise pins both; its Flutter backend does not install on Windows, so
+      # the versions are read from mise.toml and installed directly.
+      - id: pins
+        run: |
+          echo "flutter=$(sed -n 's/^flutter = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+          echo "rust=$(sed -n 's/^rust = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.pins.outputs.flutter }}
+          channel: stable
+          cache: true
+      - run: |
+          rustup toolchain install ${{ steps.pins.outputs.rust }} --profile minimal
+          rustup default ${{ steps.pins.outputs.rust }}
+      - run: flutter pub get
+      - run: flutter test
+      - run: cd packages/loaf_media && flutter test
+      - run: flutter build windows --release --dart-define=LOAF_BUILD=0
