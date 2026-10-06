@@ -65,6 +65,78 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets(
+      'on a phone, the keyboard steps aside while picking',
+      variant: _mobile,
+      (tester) async {
+        await _pumpShell(tester, const Size(393, 852));
+        final composer = find.byType(TextField).last;
+        await tester.showKeyboard(composer);
+        await tester.pumpAndSettle();
+        expect(tester.testTextInput.isVisible, isTrue);
+
+        await tester.tap(find.byTooltip('Emoji'));
+        // Gone before the sheet's first frame, so its inset never reaches
+        // the sheet's layout.
+        await tester.pump();
+        expect(tester.testTextInput.isVisible, isFalse, reason: 'picking');
+        await tester.pumpAndSettle();
+        expect(tester.testTextInput.isVisible, isFalse, reason: 'picking');
+
+        await _search(tester, 'baguette');
+        await tester.tap(_inPicker(find.text('🥖')));
+        await tester.pumpAndSettle();
+        expect(tester.testTextInput.isVisible, isTrue, reason: 'typing again');
+        final field = tester.widget<EditableText>(
+          find.descendant(of: composer, matching: find.byType(EditableText)),
+        );
+        expect(field.focusNode.hasFocus, isTrue, reason: 'in the composer');
+        expect(field.controller.text, '🥖');
+      },
+    );
+
+    testWidgets(
+      'on a phone, closing the picker brings the keyboard back',
+      variant: _mobile,
+      (tester) async {
+        await _pumpShell(tester, const Size(393, 852));
+        await tester.showKeyboard(find.byType(TextField).last);
+        await tester.pumpAndSettle();
+
+        await _openFromComposer(tester);
+        expect(tester.testTextInput.isVisible, isFalse);
+        // Dismissed by tapping above the sheet.
+        await tester.tapAt(const Offset(200, 40));
+        await tester.pumpAndSettle();
+        expect(_picker(), findsNothing);
+        expect(tester.testTextInput.isVisible, isTrue);
+      },
+    );
+
+    testWidgets(
+      'with the keyboard up, the sheet stays clear of the island',
+      variant: _mobile,
+      (tester) async {
+        await _pumpShell(tester, const Size(393, 852));
+        // An iPhone with a Dynamic Island, typing: the composer has the
+        // keyboard when the emoji button is tapped.
+        tester.view.padding = const FakeViewPadding(top: 59, bottom: 34);
+        tester.view.viewInsets = const FakeViewPadding(bottom: 336);
+        await tester.pumpAndSettle();
+        await _openFromComposer(tester);
+
+        final sheet = tester.getRect(find.byType(BottomSheet));
+        expect(sheet.top, greaterThanOrEqualTo(59), reason: 'below the island');
+        final picker = tester.getRect(_picker());
+        expect(
+          picker.bottom,
+          lessThanOrEqualTo(852 - 336),
+          reason: 'above the keyboard',
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets('picking inserts at the cursor', (tester) async {
       await _pumpShell(tester, const Size(1440, 900));
       final field = find.byType(TextField).last;

@@ -3,6 +3,8 @@
 /// "more reactions" reacts with it.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -46,26 +48,45 @@ Future<String?> showEmojiPicker(BuildContext context, {Rect? anchor}) async {
       ),
     );
   } else {
+    // The keyboard steps aside while picking, and comes back to whatever
+    // had it. Left up, its inset lands under the sheet as it opens and
+    // shoves it to the top of the screen.
+    final typing = FocusManager.instance.primaryFocus;
+    typing?.unfocus();
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: tokens.card,
       showDragHandle: true,
       isScrollControlled: true,
+      // Never under the status bar or the Dynamic Island.
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(
           top: Radius.circular(LoafRadius.xxxl),
         ),
       ),
-      builder: (context) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(context).bottom,
-        ),
-        child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * 0.55,
-          child: SafeArea(top: false, child: picker(context)),
-        ),
-      ),
+      builder: (context) {
+        final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+        return Padding(
+          padding: EdgeInsets.only(bottom: keyboard),
+          // With the keyboard up there is less than 55% of the screen to
+          // spare: the picker gives way rather than push the sheet off the
+          // top.
+          child: LayoutBuilder(
+            builder: (context, constraints) => SizedBox(
+              height: math.min(
+                MediaQuery.sizeOf(context).height * 0.55,
+                constraints.maxHeight,
+              ),
+              child: SafeArea(top: false, child: picker(context)),
+            ),
+          ),
+        );
+      },
     );
+    if (typing != null && typing.context != null && typing.canRequestFocus) {
+      typing.requestFocus();
+    }
   }
   final emoji = picked;
   if (emoji != null) emojiRecents.use(emoji);
