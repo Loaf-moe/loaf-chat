@@ -18,7 +18,7 @@ import 'update_log.dart';
 
 class AppImageUpdater extends StateUpdater {
   AppImageUpdater({
-    required File appImage,
+    required this._appImage,
     required this.build,
     required this.feed,
     required this.verify,
@@ -26,10 +26,7 @@ class AppImageUpdater extends StateUpdater {
     http.Client? httpClient,
     Future<void> Function(String path)? launch,
     void Function()? quit,
-  }) :
-    // ignore: prefer_initializing_formals (public name is appImage, field stays private)
-    _appImage = appImage,
-       _http = httpClient ?? http.Client(),
+  }) : _http = httpClient ?? http.Client(),
        _launch = launch ?? _launchDetached,
        _quit = quit ?? _exit;
 
@@ -86,7 +83,9 @@ class AppImageUpdater extends StateUpdater {
       }
       // Refuse up front if Content-Length differs from expected size.
       final contentLength = response.contentLength;
-      if (contentLength != null && contentLength != -1 && contentLength != asset.size) {
+      if (contentLength != null &&
+          contentLength != -1 &&
+          contentLength != asset.size) {
         throw StateError('Content-Length $contentLength != ${asset.size}');
       }
 

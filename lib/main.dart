@@ -73,7 +73,11 @@ class LoafApp extends StatelessWidget {
         // move between them.
         child: Focus(
           autofocus: true,
-          child: SessionRoot(session: session, rooms: newRooms, updater: updater),
+          child: SessionRoot(
+            session: session,
+            rooms: newRooms,
+            updater: updater,
+          ),
         ),
       ),
     ),

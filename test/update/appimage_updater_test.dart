@@ -24,7 +24,9 @@ class _Server {
   Uri get downloadUri => Uri.parse('http://localhost:${_http.port}/app');
 
   static Future<_Server> start() async {
-    final server = _Server(await HttpServer.bind(InternetAddress.loopbackIPv4, 0));
+    final server = _Server(
+      await HttpServer.bind(InternetAddress.loopbackIPv4, 0),
+    );
     server._http.listen((request) async {
       final response = request.response;
       if (request.uri.path == '/latest.json') {
@@ -163,20 +165,29 @@ void main() {
     ('a bad signature', () => server.offer(signature: 'forged')),
     ('a hash that does not match', () => server.offer(sha: 'ab' * 32)),
     ('a web page where the feed should be', () => server.feed = '<html>'),
-    ('a feed with no AppImage', () {
-      server.feed = '{"version":"0.1.2","build":2}';
-    }),
-    ('a download cut short', () {
-      server
-        ..offer()
-        ..cutDownloadShort = true;
-    }),
-    ('the server sends more than advertised', () {
-      final original = server.download;
-      server.download = utf8.encode(_old);
-      server.offer();
-      server.download = original + utf8.encode(' extra data');
-    }),
+    (
+      'a feed with no AppImage',
+      () {
+        server.feed = '{"version":"0.1.2","build":2}';
+      },
+    ),
+    (
+      'a download cut short',
+      () {
+        server
+          ..offer()
+          ..cutDownloadShort = true;
+      },
+    ),
+    (
+      'the server sends more than advertised',
+      () {
+        final original = server.download;
+        server.download = utf8.encode(_old);
+        server.offer();
+        server.download = original + utf8.encode(' extra data');
+      },
+    ),
   ]) {
     test('$name leaves the file alone', () async {
       arrange();

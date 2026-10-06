@@ -115,7 +115,9 @@ void main() {
     expect(find.text('continue with loaf.moe'), findsOneWidget);
   });
 
-  testWidgets('the debug menu can send a new sign-in to verify', (tester) async {
+  testWidgets('the debug menu can send a new sign-in to verify', (
+    tester,
+  ) async {
     await _pumpRoot(tester);
     await tester.tap(find.byTooltip('Debug'));
     await tester.pumpAndSettle();

@@ -25,7 +25,10 @@ void main() {
   test('a true signature checks out, padded base64 or not', () {
     expect(ed25519Check(_key)('', _signature), isTrue);
     expect(
-      ed25519Check(_key.replaceAll('=', ''))('', _signature.replaceAll('=', '')),
+      ed25519Check(_key.replaceAll('=', ''))(
+        '',
+        _signature.replaceAll('=', ''),
+      ),
       isTrue,
     );
   });

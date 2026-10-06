@@ -23,22 +23,21 @@ Future<ProcessResult> _run({
   Map<String, String> env = const {},
   String exportOutput = '** EXPORT SUCCEEDED **',
   int exportStatus = 0,
-}) =>
-    Process.run(
-      'bash',
-      ['tool/release/ios.sh', '0.1.0', '42'],
-      environment: {
-        'PATH': '${_bin.path}:${Platform.environment['PATH']}',
-        'TMPDIR': _tmp.path,
-        'CALLS': _calls.path,
-        'EXPORT_OUTPUT': exportOutput,
-        'EXPORT_STATUS': '$exportStatus',
-        'NOTARY_KEY_P8': base64.encode(utf8.encode(_key)),
-        'NOTARY_KEY_ID': 'KEYID',
-        'NOTARY_ISSUER_ID': 'ISSUER',
-        ...env,
-      },
-    );
+}) => Process.run(
+  'bash',
+  ['tool/release/ios.sh', '0.1.0', '42'],
+  environment: {
+    'PATH': '${_bin.path}:${Platform.environment['PATH']}',
+    'TMPDIR': _tmp.path,
+    'CALLS': _calls.path,
+    'EXPORT_OUTPUT': exportOutput,
+    'EXPORT_STATUS': '$exportStatus',
+    'NOTARY_KEY_P8': base64.encode(utf8.encode(_key)),
+    'NOTARY_KEY_ID': 'KEYID',
+    'NOTARY_ISSUER_ID': 'ISSUER',
+    ...env,
+  },
+);
 
 List<String> _lines() =>
     _calls.existsSync() ? _calls.readAsLinesSync() : const [];
@@ -118,15 +117,13 @@ esac''');
   });
 
   test('a build already on TestFlight is not a failure', () async {
-    final result =
-        await _run(exportOutput: _redundant('42'), exportStatus: 70);
+    final result = await _run(exportOutput: _redundant('42'), exportStatus: 70);
     expect(result.exitCode, 0);
     expect(result.stdout, contains('::notice::'));
   });
 
   test('a redundant upload of another build still fails', () async {
-    final result =
-        await _run(exportOutput: _redundant('41'), exportStatus: 70);
+    final result = await _run(exportOutput: _redundant('41'), exportStatus: 70);
     expect(result.exitCode, isNot(0));
     expect(result.stdout, contains('::error::'));
     expect(result.stdout, isNot(contains('::notice::')));
@@ -144,9 +141,10 @@ esac''');
 
   test('the export options sign for the App Store and upload', () {
     final plist = File('tool/release/ios-export.plist').readAsStringSync();
-    String? value(String key) => RegExp(
-          '<key>${RegExp.escape(key)}</key>\\s*<string>([^<]*)</string>',
-        ).firstMatch(plist)?.group(1);
+    String? value(String key) =>
+        RegExp('<key>${RegExp.escape(key)}</key>\\s*<string>([^<]*)</string>')
+            .firstMatch(plist)
+            ?.group(1);
     expect(value('method'), 'app-store-connect');
     expect(value('destination'), 'upload');
     expect(value('signingStyle'), 'automatic');

@@ -12,10 +12,10 @@ String _job(String name) {
   final start = _jobs.indexOf(RegExp('^  $name:\$', multiLine: true));
   expect(start, isNot(-1), reason: 'no $name job');
   final rest = _jobs.substring(start);
-  final next = RegExp(r'^  [a-z][a-z-]*:$', multiLine: true)
-      .allMatches(rest)
-      .skip(1)
-      .firstOrNull;
+  final next = RegExp(
+    r'^  [a-z][a-z-]*:$',
+    multiLine: true,
+  ).allMatches(rest).skip(1).firstOrNull;
   return next == null ? rest : rest.substring(0, next.start);
 }
 

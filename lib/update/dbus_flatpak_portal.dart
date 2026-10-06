@@ -10,7 +10,8 @@ import 'flatpak_portal.dart';
 
 class DbusFlatpakPortal implements FlatpakPortal {
   static const _name = 'org.freedesktop.portal.Flatpak';
-  static const _monitorInterface = 'org.freedesktop.portal.Flatpak.UpdateMonitor';
+  static const _monitorInterface =
+      'org.freedesktop.portal.Flatpak.UpdateMonitor';
 
   /// FLATPAK_SPAWN_FLAGS_LATEST_VERSION.
   static const _latestVersion = 2;
@@ -31,12 +32,9 @@ class DbusFlatpakPortal implements FlatpakPortal {
   )).asUint32();
 
   Future<DBusRemoteObject> _open() async {
-    final reply = await _portal.callMethod(
-      _name,
-      'CreateUpdateMonitor',
-      [DBusDict.stringVariant(const {})],
-      replySignature: DBusSignature('o'),
-    );
+    final reply = await _portal.callMethod(_name, 'CreateUpdateMonitor', [
+      DBusDict.stringVariant(const {}),
+    ], replySignature: DBusSignature('o'));
     return _monitor = DBusRemoteObject(
       _bus,
       name: _name,
@@ -44,13 +42,15 @@ class DbusFlatpakPortal implements FlatpakPortal {
     );
   }
 
-  Stream<Map<String, DBusValue>> _signals(DBusRemoteObject monitor, String name) =>
-      DBusRemoteObjectSignalStream(
-        object: monitor,
-        interface: _monitorInterface,
-        name: name,
-        signature: DBusSignature('a{sv}'),
-      ).map((signal) => signal.values.single.asStringVariantDict());
+  Stream<Map<String, DBusValue>> _signals(
+    DBusRemoteObject monitor,
+    String name,
+  ) => DBusRemoteObjectSignalStream(
+    object: monitor,
+    interface: _monitorInterface,
+    name: name,
+    signature: DBusSignature('a{sv}'),
+  ).map((signal) => signal.values.single.asStringVariantDict());
 
   @override
   Stream<UpdateCommits> watch() async* {
@@ -68,15 +68,15 @@ class DbusFlatpakPortal implements FlatpakPortal {
   Future<void> update() async {
     final monitor = _monitor ?? await _open();
     // Status: 0 running, 1 nothing to do, 2 done, 3 failed.
-    final finished = _signals(monitor, 'Progress')
-        .firstWhere((progress) => (progress['status']?.asUint32() ?? 0) != 0);
+    final finished = _signals(
+      monitor,
+      'Progress',
+    ).firstWhere((progress) => (progress['status']?.asUint32() ?? 0) != 0);
     try {
-      await monitor.callMethod(
-        _monitorInterface,
-        'Update',
-        [const DBusString(''), DBusDict.stringVariant(const {})],
-        replySignature: DBusSignature(''),
-      );
+      await monitor.callMethod(_monitorInterface, 'Update', [
+        const DBusString(''),
+        DBusDict.stringVariant(const {}),
+      ], replySignature: DBusSignature(''));
     } catch (_) {
       // Nobody will await `finished` now; an error on it later would be
       // unhandled.
@@ -92,19 +92,14 @@ class DbusFlatpakPortal implements FlatpakPortal {
   }
 
   @override
-  Future<void> spawnLatest() => _portal.callMethod(
-    _name,
-    'Spawn',
-    [
-      _bytes('/'),
-      DBusArray(DBusSignature('ay'), [_bytes('loaf-chat')]),
-      DBusDict(DBusSignature('u'), DBusSignature('h'), const {}),
-      DBusDict(DBusSignature('s'), DBusSignature('s'), const {}),
-      const DBusUint32(_latestVersion),
-      DBusDict.stringVariant(const {}),
-    ],
-    replySignature: DBusSignature('u'),
-  );
+  Future<void> spawnLatest() => _portal.callMethod(_name, 'Spawn', [
+    _bytes('/'),
+    DBusArray(DBusSignature('ay'), [_bytes('loaf-chat')]),
+    DBusDict(DBusSignature('u'), DBusSignature('h'), const {}),
+    DBusDict(DBusSignature('s'), DBusSignature('s'), const {}),
+    const DBusUint32(_latestVersion),
+    DBusDict.stringVariant(const {}),
+  ], replySignature: DBusSignature('u'));
 
   /// The portal takes paths and arguments as NUL-terminated bytes.
   static DBusArray _bytes(String text) =>
