@@ -59,6 +59,8 @@ class ChannelView extends StatelessWidget {
     this.onRead,
     this.trust = DeviceTrust.verified,
     this.onVerify,
+    this.people = const [],
+    this.channels = const [],
   });
 
   final Channel channel;
@@ -101,6 +103,10 @@ class ChannelView extends StatelessWidget {
   final VoidCallback? onOpenNavigation;
 
   final VoidCallback? onToggleMembers;
+
+  /// Who `@` offers in the composer, and what `#` offers.
+  final List<Member> people;
+  final List<Channel> channels;
 
   @override
   Widget build(BuildContext context) {
@@ -166,6 +172,8 @@ class ChannelView extends StatelessWidget {
                             key: ObjectKey(timeline),
                             channelName: channel.name,
                             timeline: timeline!,
+                            people: people,
+                            channels: channels,
                             prefix: switch (channel) {
                               Channel(kind: ChannelKind.direct, members: [_]) =>
                                 '@',

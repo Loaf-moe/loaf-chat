@@ -6,9 +6,11 @@
 library;
 
 import 'package:flutter/foundation.dart';
+import 'package:markdown/markdown.dart' as md;
 
 import '../mock/fixtures.dart';
 import 'media_row.dart';
+import 'mentions.dart';
 import 'timeline.dart';
 
 export 'timeline.dart' show Attachment, ComposerMode, ComposerTarget, Timeline;
@@ -86,7 +88,7 @@ class TimelineController extends ChangeNotifier
   /// is one. Blank text never sends. The mock's stand-in for sending a room
   /// event: it lands locally and immediately.
   @override
-  void send(String text) {
+  void send(String text, {List<Mention> mentions = const []}) {
     final body = text.trim();
     if (body.isEmpty) return;
     final target = this.target;
@@ -96,6 +98,7 @@ class TimelineController extends ChangeNotifier
         author: you,
         sentAt: DateTime.now(),
         body: body,
+        formatted: _formatted(body, mentions),
         replyTo: target?.mode == ComposerMode.reply ? target!.message : null,
       ),
     );
@@ -142,13 +145,36 @@ class TimelineController extends ChangeNotifier
   /// Replaces a message's text. Saving it unchanged is not an edit, so it is
   /// not marked as one.
   @override
-  void saveEdit(String messageId, String text) {
+  void saveEdit(
+    String messageId,
+    String text, {
+    List<Mention> mentions = const [],
+  }) {
     final index = _messages.indexWhere((m) => m.id == messageId);
     final body = text.trim();
     if (index >= 0 && body.isNotEmpty && body != _messages[index].body) {
-      _messages[index] = _messages[index].copyWith(body: body, edited: true);
+      _messages[index] = _messages[index].copyWith(
+        body: body,
+        formatted: _formatted(body, mentions),
+        edited: true,
+      );
     }
     aim(null);
+  }
+
+  /// A message with mentions in it comes with HTML, as the server would see
+  /// it, so they draw as pills. Without any, the plain body is enough.
+  static String? _formatted(String body, List<Mention> mentions) {
+    if (mentions.isEmpty) return null;
+    // Typed tags are text, as the SDK treats them; a lone `>` still quotes.
+    final escaped = body.replaceAllMapped(
+      RegExp('<([^>]*)>'),
+      (m) => '&lt;${m[1]}&gt;',
+    );
+    return md.markdownToHtml(
+      linkMentions(escaped, mentions),
+      extensionSet: md.ExtensionSet.gitHubFlavored,
+    );
   }
 
   @override

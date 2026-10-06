@@ -46,7 +46,8 @@ class _FakeTimeline extends ChangeNotifier
   @override
   void loadOlder() => calls.add('loadOlder');
   @override
-  void send(String text) => calls.add('send $text');
+  void send(String text, {List<Mention> mentions = const []}) =>
+      calls.add('send $text');
   @override
   Future<int?> uploadLimit() async => null;
 
@@ -56,8 +57,11 @@ class _FakeTimeline extends ChangeNotifier
   void toggleReaction(String messageId, String emoji) =>
       calls.add('react $messageId $emoji');
   @override
-  void saveEdit(String messageId, String text) =>
-      calls.add('edit $messageId $text');
+  void saveEdit(
+    String messageId,
+    String text, {
+    List<Mention> mentions = const [],
+  }) => calls.add('edit $messageId $text');
   @override
   void delete(String messageId) => calls.add('delete $messageId');
   @override
