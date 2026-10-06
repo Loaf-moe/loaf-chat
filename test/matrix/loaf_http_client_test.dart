@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/loaf_http_client.dart';
+import 'package:matrix/matrix.dart' show MatrixError, MatrixException;
 
 /// Holds each response on a completer, and reads an upload's body only as
 /// far as [readChunks] lets it. Aborts like a real client: [send] fails with
@@ -195,5 +197,52 @@ void main() {
       async.elapse(const Duration(seconds: 60));
       expect(inner.aborted, isEmpty);
     });
+  });
+
+  group('an upload refused with 413', () {
+    Future<Object?> refusal(String body, String type) async {
+      final inner = _Inner();
+      final sent = LoafHttpClient(inner).send(_upload(10));
+      await Future<void>.delayed(Duration.zero);
+      inner.responses.single.complete(
+        http.StreamedResponse(
+          Stream.value(utf8.encode(body)),
+          413,
+          headers: {'content-type': type},
+        ),
+      );
+      try {
+        await sent;
+        return null;
+      } on Object catch (e) {
+        return e;
+      }
+    }
+
+    // The SDK retries anything that is not a MatrixException for its whole
+    // send timeout, uploading the file again each second.
+    test("by a proxy is Matrix's too large", () async {
+      final error = await refusal('<h1>413 Too Large</h1>', 'text/html');
+      expect(error, isA<MatrixException>());
+      expect((error! as MatrixException).error, MatrixError.M_TOO_LARGE);
+    });
+
+    test("by the homeserver is too large, as it said", () async {
+      final error = await refusal(
+        '{"errcode":"M_TOO_LARGE","error":"Content is too large"}',
+        'application/json',
+      );
+      expect((error! as MatrixException).error, MatrixError.M_TOO_LARGE);
+    });
+  });
+
+  test('a 413 to anything but an upload is passed on', () async {
+    final inner = _Inner();
+    final sent = LoafHttpClient(inner).send(_get('/_matrix/client/v3/x'));
+    await Future<void>.delayed(Duration.zero);
+    inner.responses.single.complete(
+      http.StreamedResponse(const Stream.empty(), 413),
+    );
+    expect((await sent).statusCode, 413);
   });
 }

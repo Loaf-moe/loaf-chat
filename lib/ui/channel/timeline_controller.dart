@@ -16,11 +16,19 @@ export 'timeline.dart' show Attachment, ComposerMode, ComposerTarget, Timeline;
 class TimelineController extends ChangeNotifier
     with ComposerAiming
     implements Timeline {
-  TimelineController(List<Message> messages, {required this.you})
-    : _messages = [...messages];
+  TimelineController(
+    List<Message> messages, {
+    required this.you,
+    this._uploadLimit,
+  }) : _messages = [...messages];
 
   @override
   final Member you;
+
+  final int? _uploadLimit;
+
+  @override
+  Future<int?> uploadLimit() async => _uploadLimit;
 
   final List<Message> _messages;
 

@@ -120,6 +120,46 @@ void main() {
       expect(sent.last.replyTo, isNull);
     });
 
+    testWidgets(
+      'a file over the upload limit is refused before it is read, and says why',
+      (tester) async {
+        final timeline = TimelineController(
+          [question],
+          you: currentUser,
+          uploadLimit: 20000000,
+        );
+        addTearDown(timeline.dispose);
+        final video = _Unreadable('/picked/IMG_0612.MOV', 174325941);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: loafDarkTheme(),
+            home: Scaffold(
+              body: Composer(
+                channelName: 'general',
+                timeline: timeline,
+                pickFiles: (_) async => [video, file('crumb.jpg')],
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byTooltip('Attach files'));
+        await tester.pump();
+        await tester.pump();
+
+        expect(
+          find.text("IMG_0612.MOV is 174.3 MB, over this server's 20 MB limit"),
+          findsOneWidget,
+        );
+        expect(video.read, isFalse, reason: 'never read into memory');
+        // The others still go.
+        expect(timeline.messages.skip(1).map((m) => m.media?.name), [
+          'crumb.jpg',
+        ]);
+        await tester.pumpAndSettle();
+      },
+    );
+
     testWidgets('picking nothing sends nothing', (tester) async {
       final timeline = await pumpWith(tester, () async => []);
       await tester.tap(find.byTooltip('Attach files'));
@@ -289,4 +329,27 @@ void main() {
       );
     });
   });
+}
+
+/// A picked file that knows its size and records whether it was read.
+class _Unreadable extends XFile {
+  _Unreadable(super.path, this._length);
+
+  final int _length;
+  var read = false;
+
+  @override
+  Future<int> length() async => _length;
+
+  @override
+  Future<Uint8List> readAsBytes() {
+    read = true;
+    throw StateError('read whole');
+  }
+
+  @override
+  Stream<Uint8List> openRead([int? start, int? end]) {
+    read = true;
+    throw StateError('read');
+  }
 }

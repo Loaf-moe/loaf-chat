@@ -18,6 +18,8 @@ const _me = '@test:fakeServer.notExisting';
 const _ada = '@ada:example.com';
 const _roomId = '!talk:example.com';
 
+enum _TooLarge { byServer, byProxy }
+
 /// The fake server, plus what a conversation needs of it: sending,
 /// redacting, read markers and history, for [_roomId]. Each can be made to
 /// fail, and history can be held back.
@@ -32,6 +34,16 @@ class _Api extends FakeMatrixApi {
 
   /// The largest upload the server says it takes.
   var uploadLimit = 50000000;
+
+  /// Whether the media config can be read at all.
+  var configFails = false;
+
+  /// How an upload is refused as too large, if it is: by the homeserver,
+  /// with Matrix's own error, or by a proxy in front of it, with a bare 413.
+  _TooLarge? refuseUpload;
+
+  /// Upload requests that reached the server.
+  var uploads = 0;
 
   /// Answers sends with a server error rather than a refusal: the SDK marks
   /// the echo failed but, unlike a 403, does not throw.
@@ -78,9 +90,25 @@ class _Api extends FakeMatrixApi {
   FutureOr<http.Response> mockIntercept(http.Request request) async {
     final path = Uri.decodeComponent(request.url.path);
     if (path.endsWith('/media/config')) {
+      if (configFails) return _serverError;
       return _json({'m.upload.size': uploadLimit});
     }
     if (request.method == 'POST' && path.endsWith('/media/v3/upload')) {
+      uploads++;
+      switch (refuseUpload) {
+        case _TooLarge.byServer:
+          return _json({
+            'errcode': 'M_TOO_LARGE',
+            'error': 'Content is too large',
+          }, 413);
+        case _TooLarge.byProxy:
+          return http.Response(
+            '<html><body>413 Request Entity Too Large</body></html>',
+            413,
+            headers: {'content-type': 'text/html'},
+          );
+        case null:
+      }
       return _json({'content_uri': 'mxc://example.com/up${_ids++}'});
     }
     if (!path.contains('/rooms/$_roomId/')) {
@@ -634,21 +662,54 @@ void main() {
       });
     });
 
-    test('a file too big for the server fails, and says why', () async {
+    test("the upload limit is the server's", () async {
       final h = await _open([_text('hi')]);
-      h.api.uploadLimit = 2;
-      final said = h.timeline.failures.first;
-      h.timeline.sendFile(
-        Attachment(name: 'big.bin', bytes: Uint8List.fromList([1, 2, 3])),
-      );
-      expect(await said, 'big.bin is too big for this server');
-      await _settle();
-      expect(h.api.sent, isEmpty);
-      expect(
-        h.messages.firstWhere((m) => m.media?.name == 'big.bin').status,
-        MessageStatus.failed,
-      );
+      h.api.uploadLimit = 20000000;
+      expect(await h.timeline.uploadLimit(), 20000000);
     });
+
+    test('an upload limit that cannot be read is unknown', () async {
+      final h = await _open([_text('hi')]);
+      h.api.configFails = true;
+      expect(await h.timeline.uploadLimit(), isNull);
+    });
+
+    test(
+      'a file over the limit says how far over, and leaves no row',
+      () async {
+        final h = await _open([_text('hi')]);
+        h.api.uploadLimit = 2;
+        final said = h.timeline.failures.first;
+        h.timeline.sendFile(
+          Attachment(name: 'big.bin', bytes: Uint8List.fromList([1, 2, 3])),
+        );
+        expect(await said, "big.bin is 3 B, over this server's 2 B limit");
+        await _settle();
+        expect(h.api.uploads, 0);
+        expect(h.api.sent, isEmpty);
+        // Retrying could never work: the row goes rather than wait for it.
+        expect(h.messages.where((m) => m.media?.name == 'big.bin'), isEmpty);
+      },
+    );
+
+    for (final (by, label) in [
+      (_TooLarge.byServer, 'the homeserver'),
+      (_TooLarge.byProxy, 'a proxy in front of it'),
+    ]) {
+      test('a file refused as too large by $label says so, once', () async {
+        final h = await _open([_text('hi')]);
+        h.api.refuseUpload = by;
+        final said = h.timeline.failures.first;
+        h.timeline.sendFile(
+          Attachment(name: 'big.bin', bytes: Uint8List.fromList([1, 2, 3])),
+        );
+        expect(await said, 'big.bin (3 B) is too big for this server');
+        await _settle();
+        expect(h.api.uploads, 1, reason: 'not sent again and again');
+        expect(h.api.sent, isEmpty);
+        expect(h.messages.where((m) => m.media?.name == 'big.bin'), isEmpty);
+      });
+    }
 
     test('a stalled upload fails the row', () async {
       // The SDK runs real timers and a real database, so this is real time

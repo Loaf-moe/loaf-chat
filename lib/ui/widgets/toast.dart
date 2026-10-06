@@ -17,7 +17,7 @@ void showToast(BuildContext context, String text) {
         ),
         backgroundColor: tokens.card,
         behavior: SnackBarBehavior.floating,
-        duration: const Duration(milliseconds: 1500),
+        duration: _readingTime(text),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(LoafRadius.full),
           side: BorderSide(color: tokens.border),
@@ -25,3 +25,8 @@ void showToast(BuildContext context, String text) {
       ),
     );
 }
+
+/// Long enough to read: a quick note goes in a moment, a sentence saying
+/// why something didn't send stays a few seconds.
+Duration _readingTime(String text) =>
+    Duration(milliseconds: (text.length * 70).clamp(1500, 5000));

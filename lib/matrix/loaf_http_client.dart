@@ -5,8 +5,10 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:matrix/matrix.dart' show MatrixError, MatrixException;
 
 /// [sent] bytes of [total] (null when the length is unknown) have gone.
 typedef UploadProgress = void Function(int sent, int? total);
@@ -78,12 +80,39 @@ class LoafHttpClient extends http.BaseClient {
     }
     final copy = _Copy(request, body, abort.future);
     arm(upload ? uploadIdle : headersWithin);
+    final http.StreamedResponse response;
     try {
-      return await _inner.send(copy);
+      response = await _inner.send(copy);
     } finally {
       done = true;
       timer?.cancel();
     }
+    if (upload && response.statusCode == 413) {
+      throw await _tooLarge(response);
+    }
+    return response;
+  }
+
+  /// A refused upload as Matrix's "too large", whoever refused it. The SDK
+  /// takes anything but a [MatrixException] for a dropped connection, and
+  /// uploads the whole file again every second until its send limit: a
+  /// proxy before the homeserver answers 413 in HTML, not Matrix's JSON.
+  static Future<MatrixException> _tooLarge(
+    http.StreamedResponse response,
+  ) async {
+    String? said;
+    try {
+      final body = jsonDecode(await response.stream.bytesToString());
+      if (body is Map && body['error'] is String) {
+        said = body['error'] as String;
+      }
+    } on Object {
+      // Not JSON: a proxy's page.
+    }
+    return MatrixException.fromJson({
+      'errcode': MatrixError.M_TOO_LARGE.name,
+      'error': said ?? 'refused as too large (HTTP 413)',
+    });
   }
 
   @override

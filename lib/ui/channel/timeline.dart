@@ -71,8 +71,15 @@ abstract interface class Timeline implements Listenable {
   /// never sends.
   void send(String text);
 
+  /// The largest file the server takes, in bytes, or null where it can't
+  /// be told. The composer checks a picked file against it before reading
+  /// it, so a file that could never send is turned away at once.
+  Future<int?> uploadLimit();
+
   /// Posts [file] as a media message — an image, a video, a sound or any
   /// other file, by its type — quoting the reply target if there is one.
+  /// One the server refuses as too big leaves no row, and says why in
+  /// [failures].
   void sendFile(Attachment file);
 
   /// Adds your [emoji] to the message, or takes it back if it is already

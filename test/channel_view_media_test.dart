@@ -73,6 +73,9 @@ class _Timeline extends ChangeNotifier with ComposerAiming implements Timeline {
   @override
   void send(String text) {}
   @override
+  Future<int?> uploadLimit() async => null;
+
+  @override
   void sendFile(Attachment file) {}
   @override
   void toggleReaction(String messageId, String emoji) {}

@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 
 import '../ui/auth/loaf_session.dart' show DeviceTrust;
+import '../ui/channel/sizes.dart' show tooBigToSend;
 import '../ui/channel/timeline.dart' as ui;
 import '../ui/model/models.dart' as ui;
 import '../ui/spaces/add_space.dart' show spaceColorFor;
@@ -361,23 +362,54 @@ class MatrixTimeline extends ChangeNotifier
       mimeType: file.mimeType,
     );
     // Like text, a failure shows on the message itself, which stays to
-    // retry — except one the server will never take, which says why.
+    // retry — except one the server will never take: no retry could send
+    // it, so the row goes and the toast says why.
+    String? sending;
     unawaited(
-      _send(
-        (txid) => LoafHttpClient.reportingUploads(
+      _send((txid) {
+        sending = txid;
+        return LoafHttpClient.reportingUploads(
           (sent, total) => _uploaded(txid, sent, total, file.bytes.length),
           () => room.sendFileEvent(matrixFile, txid: txid, inReplyTo: replyTo),
-        ),
-      ).then<void>(
+        );
+      }).then<void>(
         (_) {},
         onError: (Object error) {
-          if (error is FileTooBigMatrixException && !_disposed) {
-            _failures.add('${file.name} is too big for this server');
+          if (_disposed) return;
+          // The SDK's own check stores its errcode as the enum rather than
+          // the string, so it reads back as M_UNKNOWN: known by its type.
+          final tooBig =
+              error is FileTooBigMatrixException ||
+              (error is MatrixException &&
+                  error.error == MatrixError.M_TOO_LARGE);
+          if (!tooBig) return;
+          _failures.add(
+            tooBigToSend(
+              file.name,
+              file.bytes.length,
+              error is FileTooBigMatrixException ? error.maxFileSize : null,
+            ),
+          );
+          final echo = sending == null ? null : _event(sending!);
+          if (echo != null && !echo.status.isSent) {
+            unawaited(
+              echo.cancelSend().then<void>((_) {}, onError: (Object _) {}),
+            );
           }
         },
       ),
     );
     aim(null);
+  }
+
+  @override
+  Future<int?> uploadLimit() async {
+    try {
+      return (await room.client.getConfig()).mUploadSize;
+    } on Object {
+      // Offline, say: the server decides when the file goes.
+      return null;
+    }
   }
 
   @override

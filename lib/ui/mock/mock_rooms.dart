@@ -48,8 +48,15 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   /// The original spaces' channels share one conversation; every other
   /// room, Home's and anything joined or made this session, has its own.
-  late final _shared = TimelineController(mockTimeline(), you: currentUser);
+  late final _shared = TimelineController(
+    mockTimeline(),
+    you: currentUser,
+    uploadLimit: _uploadLimit,
+  );
   final _timelines = <String, TimelineController>{};
+
+  /// loaf.moe's, so a big video is turned away here as it would be there.
+  static const _uploadLimit = 20000000;
 
   var _made = 0;
   var _started = 0;
@@ -314,6 +321,7 @@ class MockRooms extends ChangeNotifier implements Rooms {
       final timeline = TimelineController(
         home ? mockHomeTimeline(roomId) : mockSpaceTimeline(roomId),
         you: currentUser,
+        uploadLimit: _uploadLimit,
       );
       var count = timeline.messages.length;
       // A new message moves a DM up the list.

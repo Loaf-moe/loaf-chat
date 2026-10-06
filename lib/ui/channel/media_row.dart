@@ -13,6 +13,7 @@ import '../model/media_source.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'media_open.dart';
+import 'sizes.dart';
 
 const _maxWidth = 400.0;
 const _maxHeight = 360.0;
@@ -38,18 +39,6 @@ String quoteOf(Message m) {
     MediaKind.audio => 'audio',
     MediaKind.file => media.name,
   };
-}
-
-/// Bytes as Finder says them: 1000s, one decimal at most.
-String formatSize(int bytes) {
-  String one(double n) {
-    final s = n.toStringAsFixed(1);
-    return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
-  }
-
-  if (bytes < 1000) return '$bytes B';
-  if (bytes < 1000000) return '${one(bytes / 1000)} KB';
-  return '${one(bytes / 1000000)} MB';
 }
 
 String _clock(Duration d) {

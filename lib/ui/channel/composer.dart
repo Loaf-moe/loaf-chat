@@ -14,6 +14,7 @@ import 'media_row.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'message_actions.dart';
+import 'sizes.dart';
 import '../emoji/emoji_picker.dart';
 import '../emoji/shortcodes.dart';
 import 'timeline.dart';
@@ -220,7 +221,24 @@ class _ComposerState extends State<Composer> {
     final timeline = widget.timeline;
     if (timeline == null) return;
     final picked = await widget.pickFiles(context);
+    if (picked.isEmpty) return;
+    final limit = await timeline.uploadLimit();
     for (final file in picked) {
+      // Before reading it: a file the server will never take shouldn't
+      // be loaded, or sit there failing.
+      if (limit != null) {
+        final int size;
+        try {
+          size = await file.length();
+        } on Object {
+          if (mounted) showToast(context, "couldn't read ${file.name}");
+          continue;
+        }
+        if (size > limit) {
+          if (mounted) showToast(context, tooBigToSend(file.name, size, limit));
+          continue;
+        }
+      }
       final Uint8List bytes;
       try {
         bytes = await file.readAsBytes();
