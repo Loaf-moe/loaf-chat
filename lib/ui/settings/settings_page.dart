@@ -18,6 +18,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../model/models.dart';
 
 import '../shell/profile_controller.dart';
+import '../theme/appearance.dart';
 import '../theme/loaf_theme.dart';
 import '../model/media_source.dart';
 import '../widgets/avatar_images.dart';
@@ -25,11 +26,13 @@ import '../widgets/loaf_button.dart';
 import '../model/updater.dart';
 import 'about_section.dart';
 import 'account_section.dart';
+import 'appearance_section.dart';
 import 'devices.dart';
 import 'devices_section.dart';
 
 enum SettingsSection {
   account('account', LucideIcons.circleUser),
+  appearance('appearance', LucideIcons.palette),
   devices('devices', LucideIcons.monitorSmartphone),
   about('about', LucideIcons.info);
 
@@ -117,10 +120,11 @@ class SettingsModal extends StatefulWidget {
 }
 
 class _SettingsModalState extends State<SettingsModal> {
-  /// What this backend can back. The account always; devices only with
-  /// something that lists them.
+  /// What this backend can back. The account always; appearance only with a
+  /// controller to change; devices only with something that lists them.
   List<SettingsSection> get _sections => [
     SettingsSection.account,
+    if (AppearanceScope.maybeOf(context) != null) SettingsSection.appearance,
     if (widget.devices != null) SettingsSection.devices,
     SettingsSection.about,
   ];
@@ -437,6 +441,12 @@ class _Detail extends StatelessWidget {
       me: me,
       editable: editable,
     ),
+    // Only offered with a controller in scope; the null check is the
+    // backstop.
+    SettingsSection.appearance => switch (AppearanceScope.maybeOf(context)) {
+      final controller? => AppearanceSection(controller: controller),
+      null => AccountSection(profile: profile, me: me, editable: editable),
+    },
     // Only offered with devices to show; the null check is the backstop.
     SettingsSection.devices => switch (devices) {
       final devices? => DevicesSection(devices: devices),

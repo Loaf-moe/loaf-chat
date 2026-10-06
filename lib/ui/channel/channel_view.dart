@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../auth/loaf_session.dart' show DeviceTrust;
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../theme/sakura.dart';
 import '../widgets/loaf_button.dart';
 import '../widgets/toast.dart';
 import 'composer.dart';
@@ -130,12 +131,20 @@ class ChannelView extends StatelessWidget {
             else ...[
               ?callPanel,
               Expanded(
-                // Keyed by the conversation, so switching rooms starts a
-                // fresh list that listens to the room it shows.
-                child: _Timeline(
-                  key: ObjectKey(timeline),
-                  controller: timeline!,
-                  onRead: onRead,
+                // Petals drift over the page colour, behind the messages;
+                // the timeline paints no background of its own.
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    const SakuraPetals(),
+                    // Keyed by the conversation, so switching rooms starts a
+                    // fresh list that listens to the room it shows.
+                    _Timeline(
+                      key: ObjectKey(timeline),
+                      controller: timeline!,
+                      onRead: onRead,
+                    ),
+                  ],
                 ),
               ),
               if (channel.waitingFor.isNotEmpty)
@@ -146,19 +155,25 @@ class ChannelView extends StatelessWidget {
               ListenableBuilder(
                 listenable: timeline!,
                 builder: (context, _) => timeline!.writable
-                    ? Composer(
-                        // Keyed like the list: a reply card or a draft
-                        // belongs to the room it was started in, and must
-                        // not send in the next.
-                        key: ObjectKey(timeline),
-                        channelName: channel.name,
-                        timeline: timeline!,
-                        prefix: switch (channel) {
-                          Channel(kind: ChannelKind.direct, members: [_]) =>
-                            '@',
-                          Channel(kind: ChannelKind.direct) => '',
-                          _ => '#',
-                        },
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const ShinkansenRail(),
+                          Composer(
+                            // Keyed like the list: a reply card or a draft
+                            // belongs to the room it was started in, and must
+                            // not send in the next.
+                            key: ObjectKey(timeline),
+                            channelName: channel.name,
+                            timeline: timeline!,
+                            prefix: switch (channel) {
+                              Channel(kind: ChannelKind.direct, members: [_]) =>
+                                '@',
+                              Channel(kind: ChannelKind.direct) => '',
+                              _ => '#',
+                            },
+                          ),
+                        ],
                       )
                     : _EncryptedNote(trust: trust, onVerify: onVerify),
               ),

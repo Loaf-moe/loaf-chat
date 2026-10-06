@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/mock/mock_devices.dart';
 import 'package:loaf_native/ui/settings/devices.dart';
 import 'package:loaf_native/ui/settings/settings_page.dart';
+import 'package:loaf_native/ui/theme/appearance.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 
 /// Opens settings as the app does with a backend that lists sessions and
@@ -13,6 +14,7 @@ Future<void> _open(
   bool withDevices = true,
   VoidCallback? onSignOut,
   SettingsSection initial = SettingsSection.account,
+  AppearanceController? appearance,
 }) async {
   final Devices? devices = withDevices ? MockDevices() : null;
   addTearDown(() => devices?.dispose());
@@ -20,26 +22,28 @@ Future<void> _open(
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
 
-  await tester.pumpWidget(
-    MaterialApp(
-      theme: loafDarkTheme(),
-      home: Builder(
-        builder: (context) => Scaffold(
-          body: Center(
-            child: TextButton(
-              onPressed: () => showSettings(
-                context,
-                devices: devices,
-                onSignOut: onSignOut,
-                initial: initial,
-              ),
-              child: const Text('open'),
+  Widget app = MaterialApp(
+    theme: loafDarkTheme(),
+    home: Builder(
+      builder: (context) => Scaffold(
+        body: Center(
+          child: TextButton(
+            onPressed: () => showSettings(
+              context,
+              devices: devices,
+              onSignOut: onSignOut,
+              initial: initial,
             ),
+            child: const Text('open'),
           ),
         ),
       ),
     ),
   );
+  if (appearance != null) {
+    app = AppearanceScope(controller: appearance, child: app);
+  }
+  await tester.pumpWidget(app);
   await tester.tap(find.text('open'));
   await tester.pumpAndSettle();
 }
@@ -123,11 +127,32 @@ void main() {
     expect(find.byTooltip('Close'), findsOneWidget);
   });
 
+  testWidgets('appearance is listed only with a controller behind it', (
+    tester,
+  ) async {
+    await _open(tester, const Size(1440, 900));
+    expect(find.text('appearance'), findsNothing);
+  });
+
+  testWidgets('appearance opens the theme picker', (tester) async {
+    final appearance = AppearanceController(store: MemoryAppearanceStore());
+    await _open(tester, const Size(1440, 900), appearance: appearance);
+
+    await tester.tap(find.text('appearance'));
+    await tester.pumpAndSettle();
+    expect(find.text('Loaf Dark'), findsOneWidget);
+    expect(find.text('日本'), findsOneWidget);
+
+    // Unmount before disposing: the controller's midnight Timer must be gone
+    // before testWidgets checks for pending timers.
+    await tester.pumpWidget(const SizedBox());
+    appearance.dispose();
+  });
+
   testWidgets('lists only sections that do something', (tester) async {
     await _open(tester, const Size(1440, 900), onSignOut: () {});
 
     for (final gone in [
-      'appearance',
       'notifications',
       'voice & video',
       'stickers',

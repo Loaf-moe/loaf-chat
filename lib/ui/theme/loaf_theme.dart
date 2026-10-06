@@ -8,6 +8,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'appearance.dart';
+
 // ── Brand constants ────────────────────────────────────────────────────────
 // Straight from tokens/colors.css. Do not use these directly in widgets —
 // read them off [LoafTokens] so light and dark both work.
@@ -146,6 +148,10 @@ TextStyle loafMono(double size, {FontWeight weight = FontWeight.w400}) =>
       leadingDistribution: TextLeadingDistribution.even,
     );
 
+/// What a theme draws besides colour. Widgets that decorate read this off
+/// [LoafTokens], so they follow the theme without knowing why it is on.
+enum LoafDecor { none, sakura }
+
 // ── Theme extension ────────────────────────────────────────────────────────
 
 /// The brand colours Material's [ColorScheme] has no slot for: the rail, the
@@ -175,6 +181,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
     required this.shadowMd,
     required this.shadowLg,
     required this.shadowAccent,
+    this.decor = LoafDecor.none,
   });
 
   /// Spaces rail. Navy-900 in both themes — the brand's anchor surface.
@@ -227,6 +234,9 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
   final List<BoxShadow> shadowLg;
   final List<BoxShadow> shadowAccent;
 
+  /// Extra drawing the theme asks for: petals and a train for 日本.
+  final LoafDecor decor;
+
   static LoafTokens of(BuildContext context) =>
       Theme.of(context).extension<LoafTokens>()!;
 
@@ -254,6 +264,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
     List<BoxShadow>? shadowMd,
     List<BoxShadow>? shadowLg,
     List<BoxShadow>? shadowAccent,
+    LoafDecor? decor,
   }) => LoafTokens(
     rail: rail ?? this.rail,
     onRail: onRail ?? this.onRail,
@@ -277,6 +288,7 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
     shadowMd: shadowMd ?? this.shadowMd,
     shadowLg: shadowLg ?? this.shadowLg,
     shadowAccent: shadowAccent ?? this.shadowAccent,
+    decor: decor ?? this.decor,
   );
 
   @override
@@ -308,6 +320,9 @@ class LoafTokens extends ThemeExtension<LoafTokens> {
       shadowMd: s(shadowMd, other.shadowMd),
       shadowLg: s(shadowLg, other.shadowLg),
       shadowAccent: s(shadowAccent, other.shadowAccent),
+      // An enum can't be blended; it flips halfway, like Material does for
+      // its own enums.
+      decor: t < 0.5 ? decor : other.decor,
     );
   }
 }
@@ -382,6 +397,43 @@ const _darkTokens = LoafTokens(
   ],
 );
 
+// 日本: the dark plum of the "日本 Again" trip checklist. Pink leads where
+// Loaf leads with red, and dark ink sits on it because white on pink is too
+// faint to read. Surfaces darken towards the edges, as in the navy theme.
+const _nihonTokens = LoafTokens(
+  rail: Color(0xFF140F12),
+  onRail: Color(0xFFF6E9EC),
+  sidebar: Color(0xFF191417),
+  page: Color(0xFF1F1A1D),
+  sunken: Color(0xFF171215),
+  card: Color(0xFF2A2327),
+  border: Color(0xFF3D3237),
+  borderStrong: Color(0xFF4D3F45),
+  textStrong: Color(0xFFF6E9EC),
+  textBody: Color(0xFFE6D3D8),
+  textMuted: Color(0xFFBFA6AD),
+  textOnAccent: Color(0xFF1F1A1D),
+  accent: Color(0xFFF29BB5),
+  accentHover: Color(0xFFFF6B73),
+  accentSoft: Color(0xFF3A2A31),
+  nameModerator: Color(0xFFFF6B73),
+  online: Color(0xFFA9C88A),
+  idle: _warning,
+  shadowSm: [
+    BoxShadow(color: Color(0x40000000), blurRadius: 3, offset: Offset(0, 1)),
+  ],
+  shadowMd: [
+    BoxShadow(color: Color(0x4D000000), blurRadius: 12, offset: Offset(0, 4)),
+  ],
+  shadowLg: [
+    BoxShadow(color: Color(0x59000000), blurRadius: 24, offset: Offset(0, 8)),
+  ],
+  shadowAccent: [
+    BoxShadow(color: Color(0x59F29BB5), blurRadius: 16, offset: Offset(0, 4)),
+  ],
+  decor: LoafDecor.sakura,
+);
+
 TextTheme _textTheme(LoafTokens t) => TextTheme(
   // Lora, for headings and space names.
   displaySmall: loafDisplay(30, 600, height: 1.1).copyWith(color: t.textStrong),
@@ -407,7 +459,12 @@ TextTheme _textTheme(LoafTokens t) => TextTheme(
   labelSmall: loafBody(11, 500, height: 1.3).copyWith(color: t.textMuted),
 );
 
-ThemeData _theme(LoafTokens t, Brightness brightness) {
+ThemeData _theme(
+  LoafTokens t,
+  Brightness brightness, {
+  Color secondary = _primary700,
+  Color onSecondary = _cream,
+}) {
   final text = _textTheme(t);
   return ThemeData(
     brightness: brightness,
@@ -421,8 +478,8 @@ ThemeData _theme(LoafTokens t, Brightness brightness) {
       brightness: brightness,
       primary: t.accent,
       onPrimary: t.textOnAccent,
-      secondary: _primary700,
-      onSecondary: _cream,
+      secondary: secondary,
+      onSecondary: onSecondary,
       error: _destructive,
       onError: _white,
       surface: t.page,
@@ -441,3 +498,18 @@ ThemeData _theme(LoafTokens t, Brightness brightness) {
 
 ThemeData loafLightTheme() => _theme(_lightTokens, Brightness.light);
 ThemeData loafDarkTheme() => _theme(_darkTokens, Brightness.dark);
+
+// Navy has no place in the plum palette, so 日本 takes its secondary from
+// its own surfaces.
+ThemeData loafNihonTheme() => _theme(
+  _nihonTokens,
+  Brightness.dark,
+  secondary: _nihonTokens.card,
+  onSecondary: _nihonTokens.textStrong,
+);
+
+/// The theme settings means by [id].
+ThemeData loafTheme(LoafThemeId id) => switch (id) {
+  LoafThemeId.loafDark => loafDarkTheme(),
+  LoafThemeId.nihon => loafNihonTheme(),
+};
