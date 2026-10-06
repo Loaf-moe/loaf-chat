@@ -97,8 +97,12 @@ jobs:
       # packages are loaf_media's: its Linux plugin finds them through
       # pkg-config and links them into the video player. Its Rust crate is
       # built by cargo from CMake, and cargo comes from mise.toml below.
+      # The runner image's LLVM brings libunwind-14-dev, which conflicts
+      # with the libunwind-dev that libgstreamer1.0-dev needs; nothing here
+      # uses LLVM's libunwind (Flutter links libstdc++), so it goes first.
       - run: |
           sudo apt-get update
+          sudo apt-get remove -y libunwind-14-dev
           sudo apt-get install -y clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libstdc++-12-dev jq \
             libwebkit2gtk-4.1-dev libsoup-3.0-dev \
