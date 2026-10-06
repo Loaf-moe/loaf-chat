@@ -49,6 +49,7 @@ class Composer extends StatefulWidget {
     this.prefix = '#',
     this.pickFiles = pickAttachments,
     this.pasteFiles = pastedAttachments,
+    this.hasPasteFiles = hasPastedAttachments,
   });
 
   final String channelName;
@@ -67,11 +68,15 @@ class Composer extends StatefulWidget {
   /// tests.
   final ClipboardAttachments pasteFiles;
 
+  /// Whether the clipboard holds files, for the paste menu to offer. Reads
+  /// nothing: see [ClipboardHasAttachments].
+  final ClipboardHasAttachments hasPasteFiles;
+
   @override
   State<Composer> createState() => _ComposerState();
 }
 
-class _ComposerState extends State<Composer> {
+class _ComposerState extends State<Composer> with WidgetsBindingObserver {
   final _controller = TextEditingController();
   final _focus = FocusNode();
   bool _hasText = false;
@@ -86,6 +91,10 @@ class _ComposerState extends State<Composer> {
   /// Where the shortcode Escape waved away starts. It stays away while
   /// that one is being typed, and comes back for the next.
   int? _dismissedAt;
+
+  /// Whether the clipboard held files when last looked at: the menu is built
+  /// at once, so it can't wait to ask.
+  bool _clipboardHasFiles = false;
 
   final _fieldLink = LayerLink();
   final _suggestionsPortal = OverlayPortalController();
@@ -106,8 +115,56 @@ class _ComposerState extends State<Composer> {
       _suggest();
     });
     _focus.addListener(_suggest);
+    _focus.addListener(_lookAtClipboard);
+    WidgetsBinding.instance.addObserver(this);
     widget.timeline?.addListener(_onTimeline);
     _focus.onKeyEvent = _onKey;
+  }
+
+  /// Notes whether there is something to paste besides text, for the menu.
+  /// Asked when the field is focused, the app comes back, and the field is
+  /// pressed: the three ways a copy elsewhere is followed by a paste here.
+  void _lookAtClipboard() {
+    if (widget.timeline == null) return;
+    widget.hasPasteFiles().then((has) {
+      if (mounted) _clipboardHasFiles = has;
+    }, onError: (Object _) {});
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _lookAtClipboard();
+  }
+
+  /// The field's menu, with its Paste taking files first, and offering one
+  /// when the clipboard holds only files, which Flutter would hide it for.
+  Widget _contextMenu(BuildContext context, EditableTextState field) {
+    Future<void> paste() async {
+      field.hideToolbar();
+      if (!await _pasteFiles()) field.pasteText(SelectionChangedCause.toolbar);
+    }
+
+    final items = [
+      for (final item in field.contextMenuButtonItems)
+        if (item.type == ContextMenuButtonType.paste)
+          item.copyWith(onPressed: paste)
+        else
+          item,
+    ];
+    if (_clipboardHasFiles &&
+        !items.any((item) => item.type == ContextMenuButtonType.paste)) {
+      items.insert(
+        0,
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.paste,
+          onPressed: paste,
+        ),
+      );
+    }
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: field.contextMenuAnchors,
+      buttonItems: items,
+    );
   }
 
   /// Offers emoji for the shortcode at the cursor, if one is being typed
@@ -328,6 +385,8 @@ class _ComposerState extends State<Composer> {
   @override
   void dispose() {
     widget.timeline?.removeListener(_onTimeline);
+    WidgetsBinding.instance.removeObserver(this);
+    _focus.removeListener(_lookAtClipboard);
     _focus.removeListener(_suggest);
     _controller.dispose();
     _focus.dispose();
@@ -396,34 +455,38 @@ class _ComposerState extends State<Composer> {
               padding: EdgeInsets.symmetric(
                 vertical: _fieldPad(MediaQuery.textScalerOf(context)),
               ),
-              child: Actions(
-                actions: {PasteTextIntent: _PasteAction(_pasteFiles)},
-                child: TextField(
-                  controller: _controller,
-                  focusNode: _focus,
-                  minLines: 1,
-                  maxLines: 5,
-                  // An explicit line height keeps the field's height
-                  // independent of whatever the theme's bodyLarge happens to be.
-                  style: loafBody(
-                    _textSize,
-                    400,
-                    height: _textHeight,
-                  ).copyWith(color: tokens.textBody),
-                  decoration: InputDecoration(
-                    // Collapsed so the field is exactly its line box and the
-                    // padding above does the centring. Left to itself the
-                    // decorator adds its own vertical padding, which is what
-                    // pushed this text off the icons' centreline.
-                    isCollapsed: true,
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
-                    hintText: 'Message ${widget.prefix}${widget.channelName}',
-                    hintStyle: loafBody(
+              child: Listener(
+                onPointerDown: (_) => _lookAtClipboard(),
+                child: Actions(
+                  actions: {PasteTextIntent: _PasteAction(_pasteFiles)},
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _focus,
+                    contextMenuBuilder: _contextMenu,
+                    minLines: 1,
+                    maxLines: 5,
+                    // An explicit line height keeps the field's height
+                    // independent of whatever the theme's bodyLarge happens to be.
+                    style: loafBody(
                       _textSize,
                       400,
                       height: _textHeight,
-                    ).copyWith(color: tokens.textMuted),
+                    ).copyWith(color: tokens.textBody),
+                    decoration: InputDecoration(
+                      // Collapsed so the field is exactly its line box and the
+                      // padding above does the centring. Left to itself the
+                      // decorator adds its own vertical padding, which is what
+                      // pushed this text off the icons' centreline.
+                      isCollapsed: true,
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                      hintText: 'Message ${widget.prefix}${widget.channelName}',
+                      hintStyle: loafBody(
+                        _textSize,
+                        400,
+                        height: _textHeight,
+                      ).copyWith(color: tokens.textMuted),
+                    ),
                   ),
                 ),
               ),

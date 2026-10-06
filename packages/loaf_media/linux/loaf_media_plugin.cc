@@ -263,6 +263,15 @@ static FlMethodResponse* video_call(LoafMediaPlugin* self, const gchar* method,
   return FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
 }
 
+// Whether the clipboard holds a picture or files, without fetching either.
+static FlMethodResponse* clipboard_has() {
+  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+  g_autoptr(FlValue) has = fl_value_new_bool(
+      gtk_clipboard_wait_is_image_available(clipboard) ||
+      gtk_clipboard_wait_is_uris_available(clipboard));
+  return ok_response(has);
+}
+
 // The clipboard's picture as PNG bytes, or null when it holds none: what a
 // screenshot tool or "copy image" leaves there. GTK reads it from whoever
 // owns the clipboard, so this waits for them, briefly, on the main loop.
@@ -311,6 +320,8 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
   g_autoptr(FlMethodResponse) response = nullptr;
   if (args == nullptr || fl_value_get_type(args) != FL_VALUE_TYPE_MAP) {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  } else if (g_str_equal(method, "clipboard.has")) {
+    response = clipboard_has();
   } else if (g_str_equal(method, "clipboard.image")) {
     response = clipboard_image();
   } else if (g_str_equal(method, "clipboard.files")) {

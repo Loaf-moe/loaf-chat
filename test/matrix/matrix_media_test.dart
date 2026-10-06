@@ -246,17 +246,17 @@ void main() {
               contentLength: 3,
             );
           }),
-          downloadUri: (mxc) async => Uri.https('example.com', '/dl${mxc.path}'),
+          downloadUri: (mxc) async =>
+              Uri.https('example.com', '/dl${mxc.path}'),
           accessToken: () => 'tok',
         );
-        await MatrixMediaSource(_client, store)
-            .open(mediaOf(_event(bridged()))!)
-            .path;
+        await MatrixMediaSource(
+          _client,
+          store,
+        ).open(mediaOf(_event(bridged()))!).path;
         await MatrixMediaSource(_client, store)
             .open(
-              mediaOf(
-                _event({...bridged(), 'url': 'mxc://example.com/home'}),
-              )!,
+              mediaOf(_event({...bridged(), 'url': 'mxc://example.com/home'}))!,
             )
             .path;
         expect(seen.first.url.host, 'cdn.example.net');

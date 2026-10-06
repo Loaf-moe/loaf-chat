@@ -312,9 +312,7 @@ class StoredFile extends ChangeNotifier implements MediaFile {
       // Another site's file is fetched as it stands. The access token is the
       // homeserver's, and goes nowhere else.
       final homeserver = _spec.mxc.isScheme('mxc');
-      final uri = homeserver
-          ? await _store.downloadUri(_spec.mxc)
-          : _spec.mxc;
+      final uri = homeserver ? await _store.downloadUri(_spec.mxc) : _spec.mxc;
       if (_dead) return;
       final request = http.Request('GET', uri);
       final token = homeserver ? _store.accessToken() : null;
