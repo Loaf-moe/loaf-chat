@@ -297,6 +297,8 @@ Future<_Harness> _open(
   addTearDown(rooms.dispose);
   final h = _Harness(api, client, rooms);
   h.timeline; // Opens it.
+  // Loaded, however long a busy runner takes, before any test looks.
+  await _until(() => !h.timeline.loadingOlder);
   await _settle();
   return h;
 }
