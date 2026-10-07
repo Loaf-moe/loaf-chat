@@ -525,6 +525,88 @@ void main() {
       },
     );
 
+    group('across a relaunch', () {
+      Future<(Client, Directory, Directory)> launch() async {
+        final client = await _client(api: _Api());
+        final dir = await Directory.systemTemp.createTemp('loaf-unread');
+        // Rooms disposed in teardown write the file once more; let it land.
+        addTearDown(() async {
+          await _settle();
+          await dir.delete(recursive: true);
+        });
+        final files = Directory('${dir.path}${Platform.pathSeparator}files');
+        return (client, dir, files);
+      }
+
+      test('a relaunch shows the counts before the server answers', () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final dir = await Directory.systemTemp.createTemp('loaf-unread');
+        // Rooms disposed in teardown write the file once more; let it land.
+        addTearDown(() async {
+          await _settle();
+          await dir.delete(recursive: true);
+        });
+        final files = Directory('${dir.path}${Platform.pathSeparator}files');
+
+        final first = MatrixRooms(client, mediaRoot: files);
+        await _bakery(client);
+        await _timeline(client, general, [_msg('one'), _msg('two')]);
+        await _settle();
+        first.dispose();
+        // Disposing writes the file; let it land.
+        await _settle();
+
+        // The server is unreachable: only the saved counts can say 2.
+        api.failHistory = true;
+        final second = MatrixRooms(client, mediaRoot: files);
+        addTearDown(second.dispose);
+        await _settle();
+        expect(channel(second, general).unread, 2);
+        expect(
+          File('${dir.path}${Platform.pathSeparator}unread.json').existsSync(),
+          isTrue,
+        );
+      });
+
+      test('a restored receipt is not applied again', () async {
+        final (client, dir, files) = await launch();
+
+        final first = MatrixRooms(client, mediaRoot: files);
+        await _bakery(client);
+        await _timeline(client, general, [_msg('one', ts: 1000)]);
+        await _timeline(
+          client,
+          general,
+          const [],
+          ephemeral: [_receipt(r'$reaction-elsewhere', ts: 5000)],
+        );
+        await _settle();
+        expect(channel(first, general).unread, 0);
+        first.dispose();
+        await _settle();
+
+        final second = MatrixRooms(client, mediaRoot: files);
+        addTearDown(second.dispose);
+        await _settle();
+        // Federation lag: it arrives late, stamped before the old receipt.
+        await _timeline(client, general, [_msg('late', ts: 3000)]);
+        await _settle();
+        expect(channel(second, general).unread, 1);
+      });
+
+      test('an unreadable file counts afresh', () async {
+        final (client, dir, files) = await launch();
+        await File('${dir.path}${Platform.pathSeparator}unread.json')
+            .writeAsString('{ torn');
+        await _bakery(client);
+        final rooms = MatrixRooms(client, mediaRoot: files);
+        addTearDown(rooms.dispose);
+        await _settle();
+        expect(channel(rooms, general).unread, 0);
+      });
+    });
+
     test('your own message reads everything before it', () async {
       final (client, rooms) = await bakery();
       await _timeline(client, general, [_msg('one'), _msg('two')]);
@@ -1024,7 +1106,11 @@ void main() {
   test('after a relaunch, an invite still knows who sent it and that it is '
       'a DM', () async {
     final dir = await Directory.systemTemp.createTemp('loaf_relaunch');
-    addTearDown(() => dir.delete(recursive: true));
+    // Rooms disposed in teardown write the file once more; let it land.
+    addTearDown(() async {
+      await _settle();
+      await dir.delete(recursive: true);
+    });
     final path = '${dir.path}/loaf.sqlite';
 
     final first = await openClient(

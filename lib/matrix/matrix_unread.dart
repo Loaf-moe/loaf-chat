@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
@@ -11,9 +13,17 @@ import 'unread_tally.dart';
 /// mentions-only room, and blind to mentions in an encrypted one. Syncs are
 /// applied one at a time, in order, since decrypting makes each one wait.
 class MatrixUnread {
-  MatrixUnread(this.client, {required this.onChange});
+  MatrixUnread(this.client, {required this.onChange, this.file}) {
+    // Syncs and the seed wait for what the last run saved.
+    _queue = _load();
+  }
 
   final Client client;
+
+  /// Where tallies are kept between runs. Beside the media folder, so
+  /// signing out, which clears that folder's parent, clears this too.
+  final File? file;
+  Timer? _saveTimer;
 
   /// Called after counts change, outside any sync's own rebuild.
   final void Function() onChange;
@@ -79,6 +89,7 @@ class MatrixUnread {
       if (own != null &&
           _receipts[roomId] != (eventId: own.eventId, ts: own.ts)) {
         _receipts[roomId] = (eventId: own.eventId, ts: own.ts);
+        _scheduleSave();
         if (_readReceipt(room, tally)) changed = true;
       }
     }
@@ -92,24 +103,38 @@ class MatrixUnread {
       _fillQueue.remove(roomId);
       _refill.remove(roomId);
       if (_tallies.remove(roomId) != null) changed = true;
+      _scheduleSave();
     }
-    if (changed && !_disposed) onChange();
+    if (changed && !_disposed) {
+      _scheduleSave();
+      onChange();
+    }
   }
 
   /// Gives every joined room a tally: those with something new since your
   /// receipt are counted from the server, the rest start empty. For a
   /// session that synced before these counts existed.
   void seed() {
-    for (final room in client.rooms) {
-      if (room.membership != Membership.join || _tallies.containsKey(room.id)) {
-        continue;
-      }
-      if (room.hasNewMessages) {
-        _scheduleFill(room.id);
-      } else {
-        _tallies[room.id] = RoomTally();
-      }
-    }
+    // After the load, or it would count rooms the saved file already knows.
+    _queue = _queue
+        .then((_) {
+          if (_disposed) return;
+          for (final room in client.rooms) {
+            if (room.membership != Membership.join ||
+                _tallies.containsKey(room.id)) {
+              continue;
+            }
+            if (room.hasNewMessages) {
+              _scheduleFill(room.id);
+            } else {
+              _tallies[room.id] = RoomTally();
+            }
+          }
+          _scheduleSave();
+        })
+        .catchError((Object e, StackTrace s) {
+          Logs().w('[loaf] unread seed failed', e, s);
+        });
   }
 
   void _scheduleFill(String roomId) {
@@ -210,7 +235,68 @@ class MatrixUnread {
     // A refill is still owed when something landed that this fetch may have
     // missed; the flag stays so it runs.
     if (!_refill.contains(roomId)) _needsFill.remove(roomId);
+    _scheduleSave();
     onChange();
+  }
+
+  Future<void> _load() async {
+    final file = this.file;
+    if (file == null || !await file.exists()) return;
+    try {
+      final json =
+          jsonDecode(await file.readAsString()) as Map<String, Object?>;
+      if (json['user'] != client.userID) return;
+      final rooms = json['rooms'] as Map<String, Object?>? ?? const {};
+      for (final MapEntry(:key, :value) in rooms.entries) {
+        final room = value! as Map<String, Object?>;
+        _tallies[key] = RoomTally.fromJson(room);
+        // The receipt that was applied, so the SDK handing it back after a
+        // relaunch doesn't read a late message with a time before it.
+        final r = room['r'] as List?;
+        if (r != null) {
+          _receipts[key] = (eventId: r[0] as String, ts: r[1] as int);
+        }
+      }
+      if (!_disposed) onChange();
+    } on Object catch (e) {
+      // A torn or foreign file: the seed counts afresh from the server.
+      _tallies.clear();
+      _receipts.clear();
+      Logs().w('[loaf] unread.json unreadable: $e');
+    }
+  }
+
+  /// At most one write a second, however fast syncs change counts.
+  void _scheduleSave() {
+    if (file == null || _disposed) return;
+    _saveTimer ??= Timer(const Duration(seconds: 1), () {
+      _saveTimer = null;
+      unawaited(_save());
+    });
+  }
+
+  Future<void> _save() async {
+    final file = this.file;
+    if (file == null) return;
+    final json = jsonEncode({
+      'user': client.userID,
+      'rooms': {
+        for (final MapEntry(:key, :value) in _tallies.entries)
+          key: {
+            ...value.toJson(),
+            if (_receipts[key] case final r?) 'r': [r.eventId, r.ts],
+          },
+      },
+    });
+    try {
+      // Written aside and renamed, so a crash mid-write leaves the old one.
+      await file.parent.create(recursive: true);
+      final tmp = File('${file.path}.tmp');
+      await tmp.writeAsString(json, flush: true);
+      await tmp.rename(file.path);
+    } on Object catch (e) {
+      Logs().w('[loaf] unread.json not saved: $e');
+    }
   }
 
   /// Counts, uncounts or reads by one new timeline event. Whether the
@@ -269,5 +355,12 @@ class MatrixUnread {
     return own != null && tally.readUpTo(own.eventId, own.ts);
   }
 
-  void dispose() => _disposed = true;
+  void dispose() {
+    _disposed = true;
+    if (_saveTimer != null) {
+      _saveTimer!.cancel();
+      _saveTimer = null;
+      unawaited(_save());
+    }
+  }
 }

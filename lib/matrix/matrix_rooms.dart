@@ -88,6 +88,14 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// What is unread in each room, counted from the messages themselves.
   late final MatrixUnread _unread = MatrixUnread(
     client,
+    // In the media root's parent, not in it: `MediaStore.evict` walks the
+    // root and must never see this file.
+    file: switch (_mediaRoot ?? _storageRoot()) {
+      final root? => File(
+        '${root.parent.path}${Platform.pathSeparator}unread.json',
+      ),
+      null => null,
+    },
     onChange: () {
       if (!_disposed) _rebuild();
     },
