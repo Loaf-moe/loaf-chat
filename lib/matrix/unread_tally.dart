@@ -74,11 +74,11 @@ class RoomTally {
     } else {
       _entries.removeWhere((e) => e.ts <= ts);
     }
-    final changed = _entries.length != before;
-    // The receipt landed inside what is counted, so nothing older is
-    // unread any more.
-    if (changed) capped = false;
-    return changed;
+    // The receipt landed inside what is counted, so nothing older is unread
+    // any more. With nothing counted at all it is newer than everything.
+    final uncapped = capped && (_entries.length != before || _entries.isEmpty);
+    if (uncapped) capped = false;
+    return _entries.length != before || uncapped;
   }
 
   void clear() {

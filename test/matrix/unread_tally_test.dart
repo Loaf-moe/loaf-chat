@@ -63,6 +63,15 @@ void main() {
     expect(tally.capped, isTrue);
   });
 
+  test('a receipt on an empty capped tally uncaps it', () {
+    // Everything counted was read; a receipt newer than all of it leaves
+    // nothing older unread either.
+    final tally = RoomTally(capped: true);
+    expect(tally.readUpTo(r'$elsewhere', 5), isTrue);
+    expect(tally.capped, isFalse);
+    expect(tally.isEmpty, isTrue);
+  });
+
   test('clear empties and uncaps; remove drops one deleted message', () {
     final tally = RoomTally(capped: true)
       ..add(const TallyEntry(r'$a', 1))
