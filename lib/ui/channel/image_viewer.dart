@@ -8,8 +8,8 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
-import 'media_open.dart';
 import '../window/window_chrome.dart';
+import 'media_open.dart';
 
 class ImageViewer extends StatefulWidget {
   const ImageViewer({super.key, required this.provider, required this.media});

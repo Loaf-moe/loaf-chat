@@ -12,10 +12,10 @@ import '../theme/loaf_theme.dart';
 import '../theme/sakura.dart';
 import '../widgets/loaf_button.dart';
 import '../widgets/toast.dart';
+import '../window/window_chrome.dart';
 import 'composer.dart';
 import 'message_group_tile.dart';
 import 'timeline.dart';
-import '../window/window_chrome.dart';
 
 const _narrowTopicWidth = 480.0;
 

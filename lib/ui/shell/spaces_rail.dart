@@ -10,9 +10,9 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/count_label.dart';
 import '../widgets/loaf_avatar.dart';
+import '../window/window_chrome.dart';
 import 'app_notice.dart';
 import 'user_bar.dart';
-import '../window/window_chrome.dart';
 
 class SpacesRail extends StatelessWidget {
   const SpacesRail({

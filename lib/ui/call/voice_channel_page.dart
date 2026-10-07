@@ -11,12 +11,12 @@ import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
+import '../window/window_chrome.dart';
 import 'call_controller.dart';
 import 'call_controls.dart';
 import 'call_stage.dart';
 import 'call_tile.dart';
 import 'call_view.dart';
-import '../window/window_chrome.dart';
 
 class VoiceChannelPage extends StatelessWidget {
   const VoiceChannelPage({

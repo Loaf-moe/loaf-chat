@@ -44,6 +44,7 @@ import '../verify/verify_state.dart';
 import '../model/media_source.dart';
 import '../widgets/avatar_images.dart';
 import '../widgets/toast.dart';
+import '../window/window_chrome.dart';
 import '../settings/settings_page.dart';
 import 'app_notice.dart';
 import 'channel_actions.dart';
@@ -55,7 +56,6 @@ import 'space_actions.dart';
 import 'status_picker.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
-import '../window/window_chrome.dart';
 
 /// Below this width the navigation collapses into a drawer.
 const _wideBreakpoint = 900.0;

@@ -185,7 +185,8 @@ corner, so each corner draws once.
 |---|---|---|
 | Wide shell | A `bandHeight` strip at the top of the `SpacesRail`, above the loaf mark, as a drag area | Inside the rightmost column. On the channel header, the controls sit at its end, past the members toggle, and the header is the drag area. When the member list is open, its top gets a `bandHeight` drag band holding the controls |
 | Narrow shell | Before the hamburger in the channel header / `_Face` bar | At the end of the channel header / `_Face` bar |
-| Sign-in, call view, call fullscreen, `_Face` without a bar | A `Positioned` corner overlay over a `bandHeight` drag band laid across the top | Same, in the trailing corner |
+| Sign-in, `_Face` without a bar | A `WindowBand` (draggable 56pt band) at the top, outside any `SafeArea` | Same band, controls in the trailing corner |
+| Call view, call fullscreen | The call bar's own `WindowControls` (the bar is the drag area) | Same, in the trailing corner |
 
 The channel list's space header is a drag area too. Each column that touches
 a top corner reads `WindowChrome.of(context)` for its inset, so no control
@@ -211,8 +212,10 @@ narrow.
   - `stateChanged` to maximized swaps the maximize icon
   - an empty layout draws nothing and gives zero insets
   - on `TargetPlatform.iOS` nothing is drawn
-- **Shell** (an existing shell test, extended): with trailing buttons, the
-  channel header's trailing inset is at least `trailingInset`.
+- **Placement** (`test/window_placement_test.dart`): each corner shows its
+  buttons exactly once in every shell layout (wide with and without
+  members, narrow, call fullscreen, sign-in, Linux left-hand layout), and
+  none on a tiling WM.
 - **By hand, macOS:** a debug build. Check `pgrep -x "Loaf Chat"` first;
   never run both. Screenshot dark and light, wide and narrow, check drag,
   double-click and fullscreen.

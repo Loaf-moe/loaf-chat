@@ -19,10 +19,10 @@ import '../widgets/error_note.dart';
 import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
 import '../widgets/loaf_field.dart';
+import '../window/window_chrome.dart';
 import 'browser_wait.dart';
 import 'sign_in_controller.dart';
 import 'sign_in_state.dart';
-import '../window/window_chrome.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key, required this.controller, this.onSignOutInstead});

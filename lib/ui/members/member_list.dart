@@ -7,10 +7,10 @@ import 'package:flutter/material.dart';
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
+import '../window/window_chrome.dart';
 import 'presence.dart';
 import 'presence_dot.dart';
 import 'role_colors.dart';
-import '../window/window_chrome.dart';
 
 /// Splits [members] into the two sections the list shows. Moderators stay
 /// with members: their name colour already sets them apart, and a third

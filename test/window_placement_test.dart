@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/auth/login_page.dart';
+import 'package:loaf_native/ui/call/call_controller.dart';
 import 'package:loaf_native/ui/auth/sign_in_controller.dart';
 import 'package:loaf_native/ui/auth/sign_in_state.dart';
 import 'package:loaf_native/ui/mock/accounts.dart';
@@ -140,6 +142,46 @@ void main() {
         'env': {'SWAYSOCK': '/run/sway'},
       });
       expect(find.byKey(_close), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'call fullscreen: the call bar holds the corner, once',
+    variant: TargetPlatformVariant({
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+    }),
+    (tester) async {
+      await _pump(tester, const Size(1440, 900), const AppShell());
+      await tester.tap(find.text('the hangout'));
+      // Not pumpAndSettle: a live call keeps animating.
+      await tester.pump(CallController.connectDelay);
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.byTooltip('Fullscreen'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(_close), findsOneWidget);
+      final close = tester.getRect(find.byKey(_close));
+      expect(close.top, lessThan(WindowMetrics.band));
+      if (defaultTargetPlatform == TargetPlatform.macOS) {
+        expect(close.left, lessThan(60));
+      } else {
+        expect(close.right, greaterThan(1440 - 60));
+      }
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Linux with its buttons on the left: they sit in the rail, fitted',
+    variant: TargetPlatformVariant.only(TargetPlatform.linux),
+    (tester) async {
+      await _pump(tester, const Size(1440, 900), const AppShell(), {
+        'decorationLayout': 'close,minimize:',
+      });
+      expect(find.byKey(_close), findsOneWidget);
+      final close = tester.getRect(find.byKey(_close));
+      expect(close.right, lessThan(LoafShell.railWidth));
       expect(tester.takeException(), isNull);
     },
   );

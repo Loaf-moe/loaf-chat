@@ -13,11 +13,11 @@ import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
 import '../widgets/loaf_button.dart';
 import '../widgets/toast.dart';
+import '../window/window_chrome.dart';
 import 'call_controller.dart';
 import 'call_controls.dart';
 import 'call_stage.dart';
 import 'call_tile.dart';
-import '../window/window_chrome.dart';
 
 class CallView extends StatelessWidget {
   const CallView({
