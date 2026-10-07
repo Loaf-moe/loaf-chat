@@ -277,8 +277,50 @@ void main() {
       await tester.pump();
       expect(controller.state, WindowState.hidden);
       expect(find.byKey(const ValueKey('window-close')), findsNothing);
-      await controller.close(); // must not throw
-      expect(tester.takeException(), isNull);
+      await expectLater(controller.close(), completes);
+    },
+  );
+
+  testWidgets(
+    'a runner that throws is quietly no buttons too',
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    (tester) async {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        _channel,
+        (_) async => throw PlatformException(code: 'x'),
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          _channel,
+          null,
+        ),
+      );
+      final controller = await _pump(tester, _header());
+      await tester.pump();
+      expect(controller.state, WindowState.hidden);
+      expect(find.byKey(const ValueKey('window-close')), findsNothing);
+      await expectLater(controller.close(), completes);
+      await expectLater(controller.startDrag(), completes);
+    },
+  );
+
+  testWidgets(
+    'a resize tells the runner where the maximize button went',
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    (tester) async {
+      final calls = _fakeRunner(tester);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await _pump(tester, _header());
+      await tester.pump();
+      await tester.pump();
+
+      tester.view.physicalSize = const Size(1000, 700);
+      await tester.pump();
+      await tester.pump();
+      final box = tester.getRect(find.byKey(const ValueKey('window-maximize')));
+      final rect = calls.lastWhere((c) => c.method == 'setMaxButtonRect');
+      expect((rect.arguments as Map)['x'], box.left);
     },
   );
 

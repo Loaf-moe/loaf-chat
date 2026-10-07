@@ -422,8 +422,9 @@ class _PillState extends State<_Pill> {
 
   void _report(Duration _) {
     final onPlaced = widget.onPlaced;
+    if (!mounted || onPlaced == null) return;
     final box = context.findRenderObject() as RenderBox?;
-    if (!mounted || onPlaced == null || box == null || !box.hasSize) return;
+    if (box == null || !box.hasSize) return;
     final rect = box.localToGlobal(Offset.zero) & box.size;
     if (rect == _placed) return;
     _placed = rect;
@@ -439,6 +440,9 @@ class _PillState extends State<_Pill> {
   @override
   Widget build(BuildContext context) {
     if (widget.onPlaced != null) {
+      // A resize moves the button without rebuilding it; depending on the
+      // size makes it rebuild, so the runner hears the new position.
+      MediaQuery.sizeOf(context);
       SchedulerBinding.instance.addPostFrameCallback(_report);
     }
     final tokens = LoafTokens.of(context);
