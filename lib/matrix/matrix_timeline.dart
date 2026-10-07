@@ -5,6 +5,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 // The SDK's own Timeline is the one wrapped here; the UI's is `ui.Timeline`.
@@ -144,7 +145,15 @@ class MatrixTimeline extends ChangeNotifier
       _pageFailed = true;
     } else {
       final previous = _timeline;
+      // The SDK aggregates a context chunk while its encrypted events are
+      // still locked, then decrypts them in place: an edit or reaction that
+      // was unreadable then counts for nothing until filed again. Redactions
+      // in the chunk are not applied by the SDK at all.
+      if (at != null) _file(timeline, timeline.events);
       _timeline = timeline;
+      // Pages of the replaced timeline no longer speak for this one.
+      _newer = null;
+      _newerFailed = false;
       if (previous != null) {
         previous.cancelSubscriptions();
         _stretch++;
@@ -153,6 +162,28 @@ class MatrixTimeline extends ChangeNotifier
     }
     _opening = false;
     _changed();
+  }
+
+  /// Files events that arrived by paging rather than sync, as sync's own
+  /// handling would: each is aggregated onto what it relates to, then each
+  /// redaction is applied. The SDK's paging does neither. Redactions come
+  /// second, so one that arrives before the reaction it removes still wins.
+  /// Filing the same event twice is harmless.
+  void _file(Timeline timeline, Iterable<Event> arrived) {
+    final events = arrived.toList();
+    events.forEach(timeline.addAggregatedEvent);
+    for (final event in events) {
+      if (event.type != EventTypes.Redaction) continue;
+      final target = timeline.events
+          .where((e) => e.eventId == event.redacts)
+          .firstOrNull;
+      if (target == null) continue;
+      timeline.removeAggregatedEvent(target);
+      // A redacted reaction or edit has no row: only what it counted toward
+      // changes.
+      if (target.relationshipEventId != null) continue;
+      target.setRedactionEvent(event);
+    }
   }
 
   void _changed() {
@@ -696,23 +727,28 @@ class MatrixTimeline extends ChangeNotifier
   /// failure it is cleared here, or no page would ever be asked for again.
   Future<void> _pageNewer() => _newer ??= () async {
     final timeline = _timeline!;
+    // A reopen can replace the timeline while this page is out. Its outcome
+    // is then no business of the new one.
+    bool current() => identical(_timeline, timeline);
     _newerFailed = false;
     _changed();
     try {
       final had = timeline.events.length;
       await timeline.requestFuture(historyCount: historyPage);
-      // The SDK files a forward page's events but not their relations, so
-      // a reaction or edit in it would count for nothing. New events go in
-      // at the front.
-      for (final event in timeline.events.take(timeline.events.length - had)) {
-        timeline.addAggregatedEvent(event);
-      }
+      // New events go in at the front. A limited sync can have emptied the
+      // timeline meanwhile, which would make the count negative.
+      _file(
+        timeline,
+        timeline.events.take(math.max(0, timeline.events.length - had)),
+      );
     } on Object {
       timeline.isRequestingFuture = false;
-      _newerFailed = true;
+      if (current()) _newerFailed = true;
     } finally {
-      _newer = null;
-      _changed();
+      if (current()) {
+        _newer = null;
+        _changed();
+      }
     }
   }();
 
@@ -779,11 +815,18 @@ class MatrixTimeline extends ChangeNotifier
     _paging = true;
     _pageFailed = false;
     _changed();
+    final had = timeline.events.length;
     unawaited(
       timeline
           .requestHistory(historyCount: historyPage)
           .then<void>(
-            (_) {},
+            (_) {
+              // Sync and the database file their own relations. A fragment
+              // is paged from the server, which the SDK leaves unfiled.
+              if (timeline.isFragmentedTimeline) {
+                _file(timeline, timeline.events.skip(had));
+              }
+            },
             onError: (Object _) {
               _pageFailed = true;
             },

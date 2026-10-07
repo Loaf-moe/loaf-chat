@@ -28,6 +28,13 @@ class _Api extends FakeMatrixApi {
   final forward = <Map<String, Object?>>[];
   var failForward = false;
 
+  /// Holds forward pages until completed, to overtake one with a reopen.
+  Completer<void>? holdForward;
+  var forwardAsked = 0;
+
+  /// What each backward page answers with, in turn. Past these, the top.
+  final backward = <Map<String, Object?>>[];
+
   final contextAsked = <String>[];
   final sent = <String>[];
   final redacted = <String>[];
@@ -60,11 +67,14 @@ class _Api extends FakeMatrixApi {
     }
     if (request.method == 'GET' && path.endsWith('/messages')) {
       if (request.url.queryParameters['dir'] == 'f') {
+        forwardAsked++;
+        await holdForward?.future;
         if (failForward) {
           return _json({'errcode': 'M_UNKNOWN', 'error': 'down'}, 500);
         }
         return _json(forward.removeAt(0));
       }
+      if (backward.isNotEmpty) return _json(backward.removeAt(0));
       // Nothing further back than what the test gives.
       return _json({'start': 'top', 'chunk': <Object>[]});
     }
@@ -105,6 +115,29 @@ Map<String, Object?> _text(String body, {String? id, String sender = _ada}) =>
       sender: sender,
       id: id,
     );
+
+Map<String, Object?> _reaction(
+  String target,
+  String key, {
+  String sender = _ada,
+  String? id,
+}) => _event(
+  'm.reaction',
+  {
+    'm.relates_to': {
+      'rel_type': 'm.annotation',
+      'event_id': target,
+      'key': key,
+    },
+  },
+  sender: sender,
+  id: id,
+);
+
+Map<String, Object?> _redaction(String target, {String? id}) => {
+  ..._event('m.room.redaction', {}, id: id),
+  'redacts': target,
+};
 
 Map<String, Object?> _member(String user, String name) => _event(
   'm.room.member',
@@ -454,4 +487,98 @@ void main() {
       expect(h.api.sent, isEmpty);
     },
   );
+
+  test('an older page keeps the reactions to its messages', () async {
+    final h = await _open();
+    h.api.contexts[r'$old'] = _context(r'$old', 'the old one');
+    // Newest first, as a backward page is.
+    h.api.backward.add({
+      'start': 'back1',
+      'end': 'back2',
+      'chunk': [
+        _reaction(r'$older', '👍', id: r'$r1'),
+        _text('older', id: r'$older'),
+      ],
+    });
+    h.timeline.jumpTo(r'$old');
+    await _until(() => h.timeline.jumpTarget != null);
+
+    h.timeline.loadOlder();
+    await _until(() => !h.timeline.loadingOlder);
+    final older = h.timeline.messages.firstWhere((m) => m.id == r'$older');
+    expect(older.reactions.single.emoji, '👍');
+  });
+
+  test('a redaction in the context chunk takes effect', () async {
+    final h = await _open();
+    h.api.contexts[r'$old'] = _context(
+      r'$old',
+      'the old one',
+      before: [_reaction(r'$old', '👍', id: r'$r1')],
+      after: [_redaction(r'$r1')],
+    );
+    h.timeline.jumpTo(r'$old');
+    await _until(() => h.timeline.jumpTarget != null);
+    final old = h.timeline.messages.firstWhere((m) => m.id == r'$old');
+    expect(old.reactions, isEmpty);
+  });
+
+  test('deleting a message from back in history removes it', () async {
+    final h = await _open();
+    h.api.contexts[r'$old'] = _context(r'$old', 'the old one');
+    h.api.forward.add(_page([_redaction(r'$old')], last: true));
+    h.timeline.jumpTo(r'$old');
+    await _until(() => h.timeline.jumpTarget != null);
+
+    h.timeline.delete(r'$old');
+    await _until(() => !h.timeline.canLoadNewer && h.api.redacted.isNotEmpty);
+    await _settle();
+    expect(h.api.redacted, [r'$old']);
+    expect(h.bodies, isNot(contains('the old one')));
+  });
+
+  test('a redacted reaction in a forward page is taken off', () async {
+    final h = await _open();
+    h.api.contexts[r'$old'] = _context(
+      r'$old',
+      'the old one',
+      after: [_reaction(r'$old', '👍', id: r'$r1')],
+    );
+    h.api.forward.add(_page([_redaction(r'$r1')], last: true));
+    h.timeline.jumpTo(r'$old');
+    await _until(() => h.timeline.jumpTarget != null);
+    expect(
+      h.timeline.messages.firstWhere((m) => m.id == r'$old').reactions,
+      hasLength(1),
+    );
+
+    h.timeline.loadNewer();
+    await _until(() => !h.timeline.loadingNewer);
+    expect(
+      h.timeline.messages.firstWhere((m) => m.id == r'$old').reactions,
+      isEmpty,
+    );
+  });
+
+  test('a newer page that fails after a reopen does not flag the new '
+      'timeline', () async {
+    final h = await _open();
+    h.api.contexts[r'$old'] = _context(r'$old', 'the old one');
+    h.timeline.jumpTo(r'$old');
+    await _until(() => h.timeline.jumpTarget != null);
+
+    h.api
+      ..holdForward = Completer<void>()
+      ..failForward = true;
+    h.timeline.loadNewer();
+    await _until(() => h.api.forwardAsked == 1);
+    h.timeline.showNewest();
+    await _until(() => !h.timeline.canLoadNewer);
+    expect(h.timeline.loadingNewer, isFalse);
+
+    h.api.holdForward!.complete();
+    await _settle();
+    expect(h.timeline.loadNewerFailed, isFalse);
+    expect(h.timeline.loadingNewer, isFalse);
+  });
 }
