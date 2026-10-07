@@ -30,6 +30,10 @@ class MatrixUnread {
   final _needsFill = <String>{};
   final _filling = <String>{};
 
+  /// Rooms that needed a fill again while one was already out: a gap, or
+  /// your own message, that the fetch in flight may have missed.
+  final _refill = <String>{};
+
   /// At most this many rooms fetch at once, so a launch with many unread
   /// rooms doesn't fire every request together.
   static const _parallelFills = 4;
@@ -84,6 +88,9 @@ class MatrixUnread {
     }
     for (final roomId in update.rooms?.leave?.keys ?? const <String>[]) {
       _receipts.remove(roomId);
+      _needsFill.remove(roomId);
+      _fillQueue.remove(roomId);
+      _refill.remove(roomId);
       if (_tallies.remove(roomId) != null) changed = true;
     }
     if (changed && !_disposed) onChange();
@@ -107,7 +114,11 @@ class MatrixUnread {
 
   void _scheduleFill(String roomId) {
     _needsFill.add(roomId);
-    if (_filling.contains(roomId) || _fillQueue.contains(roomId)) return;
+    if (_filling.contains(roomId)) {
+      _refill.add(roomId);
+      return;
+    }
+    if (_fillQueue.contains(roomId)) return;
     _fillQueue.add(roomId);
     _pump();
   }
@@ -121,6 +132,9 @@ class MatrixUnread {
       unawaited(
         _fill(roomId).whenComplete(() {
           _filling.remove(roomId);
+          if (_refill.remove(roomId) && _needsFill.contains(roomId)) {
+            _fillQueue.add(roomId);
+          }
           _pump();
         }),
       );
@@ -172,6 +186,11 @@ class MatrixUnread {
       return; // Still in _needsFill: the next sync tries again.
     }
     if (_disposed) return;
+    if (client.getRoomById(roomId)?.membership != Membership.join) {
+      // Left while the fetch was out: nothing to count.
+      _needsFill.remove(roomId);
+      return;
+    }
     // Messages a sync counted while this fill was out are newer than
     // anything it saw; keep them.
     final during = (_tallies[roomId]?.entries ?? const <TallyEntry>[])
@@ -188,7 +207,9 @@ class MatrixUnread {
       _receipts[roomId] = (eventId: current.eventId, ts: current.ts);
     }
     _tallies[roomId] = tally;
-    _needsFill.remove(roomId);
+    // A refill is still owed when something landed that this fetch may have
+    // missed; the flag stays so it runs.
+    if (!_refill.contains(roomId)) _needsFill.remove(roomId);
     onChange();
   }
 
@@ -201,7 +222,9 @@ class MatrixUnread {
     }
     if (!countsAsMessage(event)) return false;
     if (event.senderId == client.userID) {
-      // Sending in a room reads it, as the server counts it too.
+      // Sending in a room reads it, as the server counts it too. A fill in
+      // flight would bring the older unreads back, so it runs again.
+      if (_filling.contains(room.id)) _scheduleFill(room.id);
       final had = !tally.isEmpty;
       tally.clear();
       return had;

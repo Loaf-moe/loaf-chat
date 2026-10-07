@@ -185,6 +185,9 @@ class _Api extends FakeMatrixApi {
         path.split('/rooms/')[1].split('/messages')[0],
       );
       historyCalls[roomId] = (historyCalls[roomId] ?? 0) + 1;
+      // Read before the hold: a held fetch answers with what the server
+      // had when it was asked.
+      final events = roomHistory[roomId] ?? const [];
       await hold?.future;
       if (failHistory) {
         return http.Response(
@@ -192,7 +195,6 @@ class _Api extends FakeMatrixApi {
           500,
         );
       }
-      final events = roomHistory[roomId] ?? const [];
       final from = int.tryParse(request.url.queryParameters['from'] ?? '') ?? 0;
       final limit =
           int.tryParse(request.url.queryParameters['limit'] ?? '') ?? 10;
@@ -662,6 +664,63 @@ void main() {
       api.hold!.complete();
       await _settle();
       expect(channel(rooms, general).unread, 3);
+    });
+
+    test('a gap that arrives during a fill is filled again', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [_msg('a', ts: 1000)];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      final fresh = _msg('fresh', ts: 3000);
+      await _timeline(client, general, [fresh], limited: true);
+      await _settle();
+      api.roomHistory[general] = [fresh, ...api.roomHistory[general]!];
+      api.hold!.complete();
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+    });
+
+    test('leaving during a fill leaves no tally behind', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [_msg('a'), _msg('b')];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      await _sync(client, {
+        'leave': {general: <String, Object?>{}},
+      });
+      await _settle();
+      api.hold!.complete();
+      await _settle();
+      expect(rooms.unreadTally(general).isEmpty, isTrue);
+    });
+
+    test('your own message during a fill still reads the room', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [_msg('a', ts: 1000), _msg('b', ts: 900)];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      final mine = _msg('mine', sender: _me, ts: 3000);
+      await _timeline(client, general, [mine]);
+      await _settle();
+      api.roomHistory[general] = [mine, ...api.roomHistory[general]!];
+      api.hold!.complete();
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
     });
 
     test(
