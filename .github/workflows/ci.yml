@@ -35,6 +35,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, macos-latest, windows-latest]
+        # A third of the test files each: alone, a runner takes three to five
+        # minutes over them.
+        shard: [0, 1, 2]
+    name: test (${{ matrix.os }}, ${{ matrix.shard }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     defaults:
@@ -60,6 +64,13 @@ jobs:
         run: |
           rustup toolchain install ${{ steps.pins.outputs.rust }} --profile minimal
           rustup default ${{ steps.pins.outputs.rust }}
+      # mise-action keeps Flutter, not the packages it fetches.
+      - if: runner.os != 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
       - run: ${{ runner.os != 'Windows' && 'mise exec -- ' || '' }}flutter pub get
       # The encryption tests' native library. It changes only with
       # vodozemac or Rust, so it is built once per pair.
@@ -73,8 +84,10 @@ jobs:
           key: vodozemac-${{ runner.os }}-${{ steps.pins.outputs.vodozemac }}-rust${{ steps.pins.outputs.rust }}
       - if: steps.vodozemac.outputs.cache-hit != 'true'
         run: ${{ runner.os != 'Windows' && 'mise exec -- ' || '' }}sh tool/build-vodozemac
-      - run: ${{ runner.os != 'Windows' && 'mise exec -- ' || '' }}flutter test
-      - if: ${{ !cancelled() }}
+      - run: >
+          ${{ runner.os != 'Windows' && 'mise exec -- ' || '' }}flutter test
+          --total-shards 3 --shard-index ${{ matrix.shard }}
+      - if: ${{ !cancelled() && matrix.shard == 0 }}
         working-directory: packages/loaf_media
         run: ${{ runner.os != 'Windows' && 'mise exec -- ' || '' }}flutter test
 
