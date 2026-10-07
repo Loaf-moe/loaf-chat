@@ -46,7 +46,9 @@ iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
 if [ ! -x "$iscc" ]; then
   choco install innosetup --version=6.5.4 -y --no-progress
 fi
-"$iscc" /Qp \
+# Git Bash would read /Qp and each /D as a path and rewrite it, and ISCC
+# would take them all for script files.
+MSYS_NO_PATHCONV=1 "$iscc" /Qp \
   "/DAppVersion=$version" "/DBuild=$build" \
   "/DBundle=$(cygpath -w "$(pwd)/$bundle")" "/DOutDir=$(cygpath -w "$out")" \
   windows/packaging/loaf-chat.iss

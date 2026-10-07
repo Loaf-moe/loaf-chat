@@ -97,7 +97,8 @@ void main() {
     addTearDown(store.dispose);
     final file = store.open(MediaSpec(mxc: _mxc, name: 'recipe.pdf'));
     final path = await file.path;
-    expect(path, '${root.path}/${_id(_mxc)}/recipe.pdf');
+    final sep = Platform.pathSeparator;
+    expect(path, '${root.path}$sep${_id(_mxc)}${sep}recipe.pdf');
     expect(File(path).readAsStringSync(), 'hello');
     expect(File('$path.part').existsSync(), isFalse);
     expect(file.complete, isTrue);
@@ -271,7 +272,8 @@ void main() {
         ..setLastModifiedSync(DateTime(2026, 1, 1 + i));
     }
     // The oldest folder refuses to go the first time.
-    final locked = '${root.path}/${_id(uris[0])}';
+    // Compared with the store's own path, so joined the way it joins.
+    final locked = '${root.path}${Platform.pathSeparator}${_id(uris[0])}';
     var refuse = true;
     final store = storeOver(
       serving([]),

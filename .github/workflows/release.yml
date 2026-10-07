@@ -146,6 +146,8 @@ jobs:
         with:
           flutter-version: ${{ steps.pins.outputs.flutter }}
           channel: stable
+          # Restored from what ci.yml saves on main.
+          cache: true
       - run: |
           rustup toolchain install ${{ steps.pins.outputs.rust }} --profile minimal
           rustup default ${{ steps.pins.outputs.rust }}

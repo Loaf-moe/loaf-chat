@@ -31,6 +31,15 @@ Future<MatrixSession> _session({String? mediaPath}) async {
 Future<void> _settle() =>
     Future<void>.delayed(const Duration(milliseconds: 50));
 
+/// Waits until [done]: on a loaded CI runner, signing out can take longer
+/// than [_settle].
+Future<void> _until(bool Function() done) async {
+  final give = DateTime.now().add(const Duration(seconds: 10));
+  while (!done() && DateTime.now().isBefore(give)) {
+    await _settle();
+  }
+}
+
 Future<void> _signIn(MatrixSession s) async {
   final hs = s.newHomeserver();
   await hs.probe('fakeServer.notExisting');
@@ -77,7 +86,7 @@ void main() {
     await _signIn(s);
     await _settle();
     s.signOut();
-    await _settle();
+    await _until(() => s.account == AccountState.signedOut);
     expect(s.account, AccountState.signedOut);
   });
 
@@ -86,7 +95,7 @@ void main() {
     await _signIn(s);
     await _settle();
     s.signOut();
-    await _settle();
+    await _until(() => s.account == AccountState.signedOut);
     expect(s.account, AccountState.signedOut);
     await _signIn(s);
     await _settle();
@@ -101,7 +110,7 @@ void main() {
     await _settle();
     File('${dir.path}/abc').writeAsStringSync('a picture');
     s.signOut();
-    await _settle();
+    await _until(() => s.account == AccountState.signedOut);
     expect(s.account, AccountState.signedOut);
     expect(dir.existsSync(), isTrue);
     expect(dir.listSync(), isEmpty);
@@ -113,7 +122,7 @@ void main() {
     await _settle();
     s.signOut();
     s.signOut();
-    await _settle();
+    await _until(() => s.account == AccountState.signedOut);
     expect(s.account, AccountState.signedOut);
     expect(FakeMatrixApi.calledEndpoints['/client/v3/logout'], hasLength(1));
   });
