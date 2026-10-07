@@ -292,7 +292,11 @@ Future<void> _timeline(
 }) => _sync(client, {
   'join': {
     roomId: {
-      'timeline': {'events': timeline, 'limited': limited, 'prev_batch': 'p${_events++}'},
+      'timeline': {
+        'events': timeline,
+        'limited': limited,
+        'prev_batch': 'p${_events++}',
+      },
       'ephemeral': {'events': ephemeral},
     },
   },
@@ -388,9 +392,8 @@ void main() {
       return (client, rooms);
     }
 
-    Channel channel(MatrixRooms rooms, String id) => rooms.spaces
-        .expand((s) => s.allChannels)
-        .firstWhere((c) => c.id == id);
+    Channel channel(MatrixRooms rooms, String id) =>
+        rooms.spaces.expand((s) => s.allChannels).firstWhere((c) => c.id == id);
 
     test('messages from others count; the server\'s numbers do not', () async {
       final (client, rooms) = await bakery();
@@ -405,7 +408,12 @@ void main() {
     test('a mention counts toward mentions', () async {
       final (client, rooms) = await bakery();
       await _timeline(client, general, [
-        _msg('hey', mentions: {'user_ids': [_me]}),
+        _msg(
+          'hey',
+          mentions: {
+            'user_ids': [_me],
+          },
+        ),
         _msg('chatter', mentions: <String, Object?>{}),
       ]);
       await _settle();
@@ -428,23 +436,55 @@ void main() {
         _msg('two', id: r'$two'),
         _msg('three', id: r'$three'),
       ]);
-      await _timeline(client, general, const [], ephemeral: [_receipt(r'$two', ts: 0)]);
+      await _timeline(
+        client,
+        general,
+        const [],
+        ephemeral: [_receipt(r'$two', ts: 0)],
+      );
       await _settle();
       expect(channel(rooms, general).unread, 1);
     });
 
-    test('read on another device, by time, on an event never counted', () async {
-      final (client, rooms) = await bakery();
-      await _timeline(client, general, [
-        _msg('one', ts: 1000),
-        _msg('two', ts: 2000),
-      ]);
-      await _timeline(client, general, const [], ephemeral: [
-        _receipt(r'$reaction-elsewhere', ts: 2000),
-      ]);
-      await _settle();
-      expect(channel(rooms, general).unread, 0);
-    });
+    test(
+      'read on another device, by time, on an event never counted',
+      () async {
+        final (client, rooms) = await bakery();
+        await _timeline(client, general, [
+          _msg('one', ts: 1000),
+          _msg('two', ts: 2000),
+        ]);
+        await _timeline(
+          client,
+          general,
+          const [],
+          ephemeral: [_receipt(r'$reaction-elsewhere', ts: 2000)],
+        );
+        await _settle();
+        expect(channel(rooms, general).unread, 0);
+      },
+    );
+
+    test(
+      'an old receipt is not applied again to a later, older message',
+      () async {
+        final (client, rooms) = await bakery();
+        await _timeline(client, general, [_msg('one', ts: 1000)]);
+        await _timeline(
+          client,
+          general,
+          const [],
+          ephemeral: [_receipt(r'$reaction-elsewhere', ts: 5000)],
+        );
+        await _settle();
+        expect(channel(rooms, general).unread, 0);
+
+        // Federation lag: it arrives late, stamped before the receipt.
+        await _timeline(client, general, [_msg('late', ts: 3000)]);
+        await _settle();
+        expect(channel(rooms, general).unread, 1);
+      },
+    );
 
     test('your own message reads everything before it', () async {
       final (client, rooms) = await bakery();
@@ -478,7 +518,11 @@ void main() {
           'type': 'm.reaction',
           'sender': '@ada:example.com',
           'content': {
-            'm.relates_to': {'rel_type': 'm.annotation', 'event_id': r'$x', 'key': '👍'},
+            'm.relates_to': {
+              'rel_type': 'm.annotation',
+              'event_id': r'$x',
+              'key': '👍',
+            },
           },
           'event_id': '\$x${_events++}',
           'origin_server_ts': 1700000000000 + _events++ * 1000,

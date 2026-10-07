@@ -19,6 +19,11 @@ class MatrixUnread {
   final void Function() onChange;
 
   final _tallies = <String, RoomTally>{};
+
+  /// The last receipt of yours applied to each room. The SDK keeps handing
+  /// back the same one, and applying it again would read a message that
+  /// arrived late with a time before it.
+  final _receipts = <String, ({String eventId, int ts})>{};
   Future<void> _queue = Future.value();
   var _disposed = false;
 
@@ -50,9 +55,15 @@ class MatrixUnread {
           changed = true;
         }
       }
-      if (_readReceipt(room, tally)) changed = true;
+      final own = room.receiptState.global.latestOwnReceipt;
+      if (own != null &&
+          _receipts[roomId] != (eventId: own.eventId, ts: own.ts)) {
+        _receipts[roomId] = (eventId: own.eventId, ts: own.ts);
+        if (_readReceipt(room, tally)) changed = true;
+      }
     }
     for (final roomId in update.rooms?.leave?.keys ?? const <String>[]) {
+      _receipts.remove(roomId);
       if (_tallies.remove(roomId) != null) changed = true;
     }
     if (changed && !_disposed) onChange();
@@ -87,7 +98,9 @@ class MatrixUnread {
       mention: mentionsMe(
         shown,
         userId: me,
-        displayName: room.unsafeGetUserFromMemoryOrFallback(me).calcDisplayname(),
+        displayName: room
+            .unsafeGetUserFromMemoryOrFallback(me)
+            .calcDisplayname(),
       ),
       locked: shown.type == EventTypes.Encrypted,
     );
@@ -104,6 +117,7 @@ class MatrixUnread {
     }
   }
 
+  /// Applies your current receipt in [room], changed or not.
   bool _readReceipt(Room room, RoomTally tally) {
     final own = room.receiptState.global.latestOwnReceipt;
     return own != null && tally.readUpTo(own.eventId, own.ts);
