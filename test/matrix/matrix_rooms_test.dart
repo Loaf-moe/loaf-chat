@@ -308,6 +308,21 @@ Map<String, Object?> _msg(
   'origin_server_ts': ts ?? 1700000000000 + _events++ * 1000,
 };
 
+/// Your own `m.room.member` event: a join, or a profile change when
+/// [profileChange] says you were already in.
+Map<String, Object?> _join({bool profileChange = false, int? ts}) => {
+  'type': 'm.room.member',
+  'state_key': _me,
+  'sender': _me,
+  'content': {'membership': 'join', 'displayname': 'Test'},
+  'unsigned': {
+    if (profileChange)
+      'prev_content': {'membership': 'join', 'displayname': 'Old'},
+  },
+  'event_id': '\$j${_events++}',
+  'origin_server_ts': ts ?? 1700000000000 + _events++ * 1000,
+};
+
 /// Your receipt on [eventId], placed at [ts].
 Map<String, Object?> _receipt(
   String eventId, {
@@ -914,6 +929,41 @@ void main() {
       await _settle();
       expect(api.historyCalls[general], 1);
       expect(channel(rooms, general).unread, 2);
+    });
+
+    test('history from before you joined does not count', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [_msg('before you came'), _join()]);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test('a profile change is not a join', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        _msg('one'),
+        _join(profileChange: true),
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 1);
+    });
+
+    test('a fill stops at your join', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [
+        _msg('new', ts: 3000),
+        _join(ts: 2000),
+        _msg('old', ts: 1000),
+        _msg('older', ts: 900),
+      ];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      expect(channel(rooms, general).unread, 1);
     });
 
     test('leaving during a fill leaves no tally behind', () async {

@@ -234,6 +234,7 @@ class MatrixUnread {
           if (own != null && (event.eventId == own.eventId || ts <= own.ts)) {
             break pages;
           }
+          if (_isOwnJoin(event)) break pages;
           if (!countsAsMessage(event)) continue;
           if (event.senderId == client.userID) break pages;
           if (found.length == RoomTally.cap) {
@@ -344,6 +345,12 @@ class MatrixUnread {
       final redacts = event.redacts;
       return redacts != null && tally.remove(redacts);
     }
+    if (_isOwnJoin(event)) {
+      // What came before you joined was never yours to read.
+      final had = !tally.isEmpty;
+      tally.clear();
+      return had;
+    }
     if (!countsAsMessage(event)) return false;
     if (event.senderId == client.userID) {
       // Sending in a room reads it, as the server counts it too. A fill in
@@ -356,6 +363,15 @@ class MatrixUnread {
     tally.add(await _entry(room, event));
     return true;
   }
+
+  /// Whether [event] is you joining the room. A change of your name or
+  /// avatar is a join too, but with a join before it; that isn't one. With
+  /// no previous state to tell, any join of yours is taken as arriving.
+  bool _isOwnJoin(Event event) =>
+      event.type == EventTypes.RoomMember &&
+      event.stateKey == client.userID &&
+      event.content['membership'] == 'join' &&
+      event.prevContent?['membership'] != 'join';
 
   /// [event] as an unread entry: decrypted first where a key is here, so a
   /// mention in an encrypted room is seen.
