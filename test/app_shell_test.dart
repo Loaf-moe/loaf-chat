@@ -327,28 +327,49 @@ void main() {
       expect(inRow('kitchen', find.text('3')), findsNothing);
     });
 
-    testWidgets('the rail badge recounts as you read', variant: desktop, (
+    testWidgets(
+      'a muted channel with unreads is still bold',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+        await rightClick(tester, 'chess');
+        await pick(tester, 'Mute channel');
+
+        final name = tester.widget<Text>(inRow('chess', find.text('chess')));
+        expect(name.style!.fontWeight, FontWeight.w600);
+      },
+    );
+
+    testWidgets('the rail badges mentions and pips unreads', variant: desktop, (
       tester,
     ) async {
       await _pumpShell(tester, const Size(1440, 900));
-      Finder railBadge(String count) => find.descendant(
-        of: find.byKey(const ValueKey('space-starter')),
-        matching: find.text(count),
+      Finder inSpace(String id, Finder matching) => find.descendant(
+        of: find.byKey(ValueKey('space-$id')),
+        matching: matching,
       );
-      // The Starter Pack: kitchen's 3 mentions win over the unread count.
-      expect(railBadge('3'), findsOneWidget);
+      final ryePip = find.byKey(const ValueKey('space-unread-ryedevs'));
+
+      // The Starter Pack: kitchen's 3 mentions.
+      expect(inSpace('starter', find.text('3')), findsOneWidget);
+      // Rye Devs: loaf-native's 2 unreads, no mentions: a pip, no number.
+      expect(ryePip, findsOneWidget);
+      expect(inSpace('ryedevs', find.text('2')), findsNothing);
 
       await rightClick(tester, 'kitchen');
       await pick(tester, 'Mark as read');
-      // No mentions left, so the badge counts what is unread: #chess's 2.
-      // #general's 4 are read — it is the channel on screen.
-      expect(railBadge('3'), findsNothing);
-      expect(railBadge('2'), findsOneWidget);
+      expect(inSpace('starter', find.text('3')), findsNothing);
+      // chess still has 2 unread, but a space never shows an unread count.
+      expect(inSpace('starter', find.text('2')), findsNothing);
 
-      // Opening a channel reads it too.
-      await tester.tap(find.text('chess'));
+      // Reading loaf-native clears Rye Devs' pip.
+      await tester.tap(find.byKey(const ValueKey('space-ryedevs')));
       await tester.pumpAndSettle();
-      expect(railBadge('2'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('channel-loaf-native')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('space-starter')));
+      await tester.pumpAndSettle();
+      expect(ryePip, findsNothing);
     });
 
     testWidgets(

@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
+import 'package:loaf_native/matrix/unread_tally.dart';
 import 'package:loaf_native/ui/members/presence.dart' as loaf;
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
@@ -47,6 +48,16 @@ class _Api extends FakeMatrixApi {
 
   /// Each space's `/hierarchy` pages, in order, keyed by space id.
   final hierarchyPages = <String, List<Map<String, Object?>>>{};
+
+  /// Each room's events, newest first, served by `/messages?dir=b` in
+  /// pages of the request's `limit`. `from` is the index to start at.
+  final roomHistory = <String, List<Map<String, Object?>>>{};
+
+  /// How many `/messages` calls each room has had.
+  final historyCalls = <String, int>{};
+
+  /// While set, `/messages` fails with a server error.
+  var failHistory = false;
 
   var _createdRooms = 0;
 
@@ -165,6 +176,38 @@ class _Api extends FakeMatrixApi {
           ? http.Response(jsonEncode({'room_id': '!invited:example.com'}), 200)
           : http.Response(jsonEncode({}), 200);
     }
+    if (request.method == 'POST' && path.endsWith('/read_markers')) {
+      answered.add(path);
+      return http.Response('{}', 200);
+    }
+    if (request.method == 'GET' && path.endsWith('/messages')) {
+      final roomId = Uri.decodeComponent(
+        path.split('/rooms/')[1].split('/messages')[0],
+      );
+      historyCalls[roomId] = (historyCalls[roomId] ?? 0) + 1;
+      // Read before the hold: a held fetch answers with what the server
+      // had when it was asked.
+      final events = roomHistory[roomId] ?? const [];
+      await hold?.future;
+      if (failHistory) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_UNKNOWN', 'error': 'boom'}),
+          500,
+        );
+      }
+      final from = int.tryParse(request.url.queryParameters['from'] ?? '') ?? 0;
+      final limit =
+          int.tryParse(request.url.queryParameters['limit'] ?? '') ?? 10;
+      final end = (from + limit).clamp(0, events.length);
+      return http.Response(
+        jsonEncode({
+          'start': '$from',
+          'chunk': events.sublist(from.clamp(0, events.length), end),
+          if (end < events.length) 'end': '$end',
+        }),
+        200,
+      );
+    }
     return super.mockIntercept(request);
   }
 }
@@ -249,6 +292,74 @@ Future<void> _sync(Client client, Map<String, Object?> rooms) =>
       SyncUpdate.fromJson({'next_batch': 'b${_events++}', 'rooms': rooms}),
     );
 
+/// A text message from [sender], [id] or a fresh one, sent at [ts] or a
+/// fresh, later time.
+Map<String, Object?> _msg(
+  String body, {
+  String sender = '@ada:example.com',
+  String? id,
+  int? ts,
+  Map<String, Object?>? mentions,
+}) => {
+  'type': 'm.room.message',
+  'sender': sender,
+  'content': {'msgtype': 'm.text', 'body': body, 'm.mentions': ?mentions},
+  'event_id': id ?? '\$m${_events++}',
+  'origin_server_ts': ts ?? 1700000000000 + _events++ * 1000,
+};
+
+/// Your own `m.room.member` event: a join, or a profile change when
+/// [profileChange] says you were already in.
+Map<String, Object?> _join({bool profileChange = false, int? ts}) => {
+  'type': 'm.room.member',
+  'state_key': _me,
+  'sender': _me,
+  'content': {'membership': 'join', 'displayname': 'Test'},
+  'unsigned': {
+    if (profileChange)
+      'prev_content': {'membership': 'join', 'displayname': 'Old'},
+  },
+  'event_id': '\$j${_events++}',
+  'origin_server_ts': ts ?? 1700000000000 + _events++ * 1000,
+};
+
+/// Your receipt on [eventId], placed at [ts].
+Map<String, Object?> _receipt(
+  String eventId, {
+  required int ts,
+  String? thread,
+}) => {
+  'type': 'm.receipt',
+  'content': {
+    eventId: {
+      'm.read': {
+        _me: {'ts': ts, 'thread_id': ?thread},
+      },
+    },
+  },
+};
+
+/// A sync of one joined room's new [timeline] events and [ephemeral]
+/// events. [limited] says the server skipped some.
+Future<void> _timeline(
+  Client client,
+  String roomId,
+  List<Map<String, Object?>> timeline, {
+  List<Map<String, Object?>> ephemeral = const [],
+  bool limited = false,
+}) => _sync(client, {
+  'join': {
+    roomId: {
+      'timeline': {
+        'events': timeline,
+        'limited': limited,
+        'prev_batch': 'p${_events++}',
+      },
+      'ephemeral': {'events': ephemeral},
+    },
+  },
+});
+
 /// A space "Bakery" with a channel and a voice channel directly under it, a
 /// category subspace holding a private channel and a nested subspace, and a
 /// child you have not joined. "Annex" is a second space.
@@ -327,6 +438,599 @@ Future<void> _invited(Client client, {bool direct = false}) => _sync(client, {
 });
 
 void main() {
+  group('unread', () {
+    const general = '!general:example.com';
+
+    // _Api, not the plain fake: muting needs its push-rules answers.
+    Future<(Client, MatrixRooms)> bakery() async {
+      final client = await _client(api: _Api());
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _settle();
+      return (client, rooms);
+    }
+
+    Channel channel(MatrixRooms rooms, String id) =>
+        rooms.spaces.expand((s) => s.allChannels).firstWhere((c) => c.id == id);
+
+    test('messages from others count; the server\'s numbers do not', () async {
+      final (client, rooms) = await bakery();
+      // _bakery gives #general a notification_count of 3 and no messages.
+      expect(channel(rooms, general).unread, 0);
+
+      await _timeline(client, general, [_msg('one'), _msg('two')]);
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+    });
+
+    test('a mention counts toward mentions', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        _msg(
+          'hey',
+          mentions: {
+            'user_ids': [_me],
+          },
+        ),
+        _msg('chatter', mentions: <String, Object?>{}),
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+      expect(channel(rooms, general).mentions, 1);
+    });
+
+    test('an encrypted message counts while it is locked', () async {
+      // Reading it once its key arrives is covered with a real key in
+      // matrix_unread_encrypted_test.dart.
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        {
+          'type': 'm.room.encrypted',
+          'sender': '@ada:example.com',
+          'content': {
+            'algorithm': 'm.megolm.v1.aes-sha2',
+            'ciphertext': 'locked',
+            'session_id': 'nokey',
+            'sender_key': 'k',
+            'device_id': 'D',
+          },
+          'event_id': r'$locked',
+          'origin_server_ts': 1700000000000 + _events++ * 1000,
+        },
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 1);
+      expect(channel(rooms, general).mentions, 0);
+      expect(rooms.unreadTally(general).entries.single.locked, isTrue);
+    });
+
+    test('a fill landing during a sync does not lose the sync', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _timeline(client, general, [_msg('before')]);
+      await _settle();
+
+      // A room never counted starts a fill that waits on the server.
+      const oven = '!oven:example.com';
+      api.hold = Completer<void>();
+      api.roomHistory[oven] = [_msg('baked')];
+      await _timeline(client, oven, [
+        api.roomHistory[oven]!.first,
+      ], limited: true);
+      await _settle();
+
+      // The fill lands, adding a tally, while this sync is counted.
+      final sync = _timeline(client, general, [_msg('after')]);
+      api.hold!.complete();
+      await sync;
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+      expect(channel(rooms, oven).unread, 1);
+    });
+
+    test('a muted room still counts', () async {
+      final (client, rooms) = await bakery();
+      await rooms.setMuted(general, true);
+      await _timeline(client, general, [_msg('one')]);
+      await _settle();
+      expect(channel(rooms, general).unread, 1);
+    });
+
+    test('your receipt reads what came before it', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        _msg('one', id: r'$one'),
+        _msg('two', id: r'$two'),
+        _msg('three', id: r'$three'),
+      ]);
+      await _timeline(
+        client,
+        general,
+        const [],
+        ephemeral: [_receipt(r'$two', ts: 0)],
+      );
+      await _settle();
+      expect(channel(rooms, general).unread, 1);
+    });
+
+    test('a receipt on the main timeline reads too', () async {
+      // Element Web sends m.read with thread_id "main"; the SDK keeps it
+      // apart from the unthreaded ones.
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        _msg('one', id: r'$one'),
+        _msg('two', id: r'$two'),
+      ]);
+      await _timeline(
+        client,
+        general,
+        const [],
+        ephemeral: [_receipt(r'$two', ts: 0, thread: 'main')],
+      );
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test(
+      'a receipt recorded before its message arrives still reads it',
+      () async {
+        final (client, rooms) = await bakery();
+        await _timeline(
+          client,
+          general,
+          const [],
+          ephemeral: [_receipt(r'$m', ts: 0)],
+        );
+        await _settle();
+        await _timeline(client, general, [_msg('covered', id: r'$m')]);
+        await _settle();
+        expect(channel(rooms, general).unread, 0);
+      },
+    );
+
+    test(
+      'read on another device, by time, on an event never counted',
+      () async {
+        final (client, rooms) = await bakery();
+        await _timeline(client, general, [
+          _msg('one', ts: 1000),
+          _msg('two', ts: 2000),
+        ]);
+        await _timeline(
+          client,
+          general,
+          const [],
+          ephemeral: [_receipt(r'$reaction-elsewhere', ts: 2000)],
+        );
+        await _settle();
+        expect(channel(rooms, general).unread, 0);
+      },
+    );
+
+    test(
+      'an old receipt is not applied again to a later, older message',
+      () async {
+        final (client, rooms) = await bakery();
+        await _timeline(client, general, [_msg('one', ts: 1000)]);
+        await _timeline(
+          client,
+          general,
+          const [],
+          ephemeral: [_receipt(r'$reaction-elsewhere', ts: 5000)],
+        );
+        await _settle();
+        expect(channel(rooms, general).unread, 0);
+
+        // Federation lag: it arrives late, stamped before the receipt.
+        await _timeline(client, general, [_msg('late', ts: 3000)]);
+        await _settle();
+        expect(channel(rooms, general).unread, 1);
+      },
+    );
+
+    group('across a relaunch', () {
+      Future<(Client, Directory, Directory)> launch() async {
+        final client = await _client(api: _Api());
+        final dir = await Directory.systemTemp.createTemp('loaf-unread');
+        // Rooms disposed in teardown write the file once more; let it land.
+        addTearDown(() async {
+          await _settle();
+          await dir.delete(recursive: true);
+        });
+        final files = Directory('${dir.path}${Platform.pathSeparator}files');
+        return (client, dir, files);
+      }
+
+      test('a relaunch shows the counts before the server answers', () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final dir = await Directory.systemTemp.createTemp('loaf-unread');
+        // Rooms disposed in teardown write the file once more; let it land.
+        addTearDown(() async {
+          await _settle();
+          await dir.delete(recursive: true);
+        });
+        final files = Directory('${dir.path}${Platform.pathSeparator}files');
+
+        final first = MatrixRooms(client, mediaRoot: files);
+        await _bakery(client);
+        await _timeline(client, general, [_msg('one'), _msg('two')]);
+        await _settle();
+        first.dispose();
+        // Disposing writes the file; let it land.
+        await _settle();
+
+        // The server is unreachable: only the saved counts can say 2.
+        api.failHistory = true;
+        final second = MatrixRooms(client, mediaRoot: files);
+        addTearDown(second.dispose);
+        await _settle();
+        expect(channel(second, general).unread, 2);
+        expect(
+          File('${dir.path}${Platform.pathSeparator}unread.json').existsSync(),
+          isTrue,
+        );
+      });
+
+      test('a restored receipt is not applied again', () async {
+        final (client, dir, files) = await launch();
+
+        final first = MatrixRooms(client, mediaRoot: files);
+        await _bakery(client);
+        await _timeline(client, general, [_msg('one', ts: 1000)]);
+        await _timeline(
+          client,
+          general,
+          const [],
+          ephemeral: [_receipt(r'$reaction-elsewhere', ts: 5000)],
+        );
+        await _settle();
+        expect(channel(first, general).unread, 0);
+        first.dispose();
+        await _settle();
+
+        final second = MatrixRooms(client, mediaRoot: files);
+        addTearDown(second.dispose);
+        await _settle();
+        // Federation lag: it arrives late, stamped before the old receipt.
+        await _timeline(client, general, [_msg('late', ts: 3000)]);
+        await _settle();
+        expect(channel(second, general).unread, 1);
+      });
+
+      test('saving at dispose does not bring back a cleared folder', () async {
+        // Signing out clears the folder the file lives in.
+        final client = await _client(api: _Api());
+        final dir = await Directory.systemTemp.createTemp('loaf-unread');
+        final files = Directory('${dir.path}${Platform.pathSeparator}files');
+        final rooms = MatrixRooms(client, mediaRoot: files);
+        await _bakery(client);
+        await _timeline(client, general, [_msg('one')]);
+        await _settle();
+        await dir.delete(recursive: true);
+        rooms.dispose();
+        await _settle();
+        expect(dir.existsSync(), isFalse);
+      });
+
+      test('an unreadable file counts afresh', () async {
+        final (client, dir, files) = await launch();
+        await File('${dir.path}${Platform.pathSeparator}unread.json')
+            .writeAsString('{ torn');
+        await _bakery(client);
+        final rooms = MatrixRooms(client, mediaRoot: files);
+        addTearDown(rooms.dispose);
+        await _settle();
+        expect(channel(rooms, general).unread, 0);
+      });
+    });
+
+    test('your own message reads everything before it', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [_msg('one'), _msg('two')]);
+      await _timeline(client, general, [_msg('mine', sender: _me)]);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test('a message deleted while unread stops counting', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [_msg('oops', id: r'$oops')]);
+      await _timeline(client, general, [
+        {
+          'type': 'm.room.redaction',
+          'sender': '@ada:example.com',
+          'redacts': r'$oops',
+          'content': {'redacts': r'$oops'},
+          'event_id': '\$r${_events++}',
+          'origin_server_ts': 1700000000000 + _events++ * 1000,
+        },
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test('edits and reactions do not count', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        {
+          'type': 'm.reaction',
+          'sender': '@ada:example.com',
+          'content': {
+            'm.relates_to': {
+              'rel_type': 'm.annotation',
+              'event_id': r'$x',
+              'key': '👍',
+            },
+          },
+          'event_id': '\$x${_events++}',
+          'origin_server_ts': 1700000000000 + _events++ * 1000,
+        },
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test('leaving a room forgets its count', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [_msg('one')]);
+      await _sync(client, {
+        'leave': {general: <String, Object?>{}},
+      });
+      await _settle();
+      expect(rooms.unreadTally(general).isEmpty, isTrue);
+    });
+
+    test('mark as read is sent while something is unread', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _timeline(client, general, [_msg('one')]);
+      await _settle();
+      rooms.markRead(general);
+      await _settle();
+      expect(api.answered.where((p) => p.contains('read_markers')), isNotEmpty);
+    });
+
+    test('a limited sync refetches the room from the server', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [
+        _msg('newest'),
+        _msg('newer'),
+        _msg('read one', id: r'$read'),
+        _msg('older'),
+      ];
+      await _timeline(
+        client,
+        general,
+        const [],
+        ephemeral: [_receipt(r'$read', ts: 0)],
+      );
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+    });
+
+    test('history past 99 unread reads as more than 99', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [for (var i = 0; i < 150; i++) _msg('m$i')];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      expect(channel(rooms, general).unread, RoomTally.cap + 1);
+    });
+
+    test('a failed fill keeps the count and tries again next sync', () async {
+      final api = _Api()..failHistory = true;
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _timeline(client, general, [_msg('before')]);
+      api.roomHistory[general] = [_msg('a'), _msg('b'), _msg('c')];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      expect(channel(rooms, general).unread, 1, reason: 'the old count stays');
+
+      api.failHistory = false;
+      await _timeline(client, general, const []);
+      await _settle();
+      expect(channel(rooms, general).unread, 3);
+    });
+
+    test('messages that arrive during a fill are kept', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [_msg('a', ts: 1000), _msg('b', ts: 900)];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      await _timeline(client, general, [_msg('during', ts: 2000)]);
+      await _settle();
+      api.hold!.complete();
+      await _settle();
+      expect(channel(rooms, general).unread, 3);
+    });
+
+    test('a gap that arrives during a fill is filled again', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [_msg('a', ts: 1000)];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      final fresh = _msg('fresh', ts: 3000);
+      await _timeline(client, general, [fresh], limited: true);
+      await _settle();
+      api.roomHistory[general] = [fresh, ...api.roomHistory[general]!];
+      api.hold!.complete();
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+    });
+
+    test('a plain sync during a fill does not start another', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [_msg('a', ts: 1000)];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      await _timeline(client, general, [_msg('during', ts: 2000)]);
+      await _timeline(client, general, const []);
+      await _settle();
+      api.hold!.complete();
+      await _settle();
+      expect(api.historyCalls[general], 1);
+      expect(channel(rooms, general).unread, 2);
+    });
+
+    test('history from before you joined does not count', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [_msg('before you came'), _join()]);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test('a profile change is not a join', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        _msg('one'),
+        _join(profileChange: true),
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 1);
+    });
+
+    test('a fill stops at your join', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [
+        _msg('new', ts: 3000),
+        _join(ts: 2000),
+        _msg('old', ts: 1000),
+        _msg('older', ts: 900),
+      ];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      expect(channel(rooms, general).unread, 1);
+    });
+
+    test('leaving during a fill leaves no tally behind', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [_msg('a'), _msg('b')];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      await _sync(client, {
+        'leave': {general: <String, Object?>{}},
+      });
+      await _settle();
+      api.hold!.complete();
+      await _settle();
+      expect(rooms.unreadTally(general).isEmpty, isTrue);
+    });
+
+    test('your own message during a fill still reads the room', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [_msg('a', ts: 1000), _msg('b', ts: 900)];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      final mine = _msg('mine', sender: _me, ts: 3000);
+      await _timeline(client, general, [mine]);
+      await _settle();
+      api.roomHistory[general] = [mine, ...api.roomHistory[general]!];
+      api.hold!.complete();
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test('a main-timeline receipt on the last message seeds no fill', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      await _bakery(client);
+      await _timeline(
+        client,
+        general,
+        [_msg('waiting', id: r'$waiting')],
+        ephemeral: [_receipt(r'$waiting', ts: 0, thread: 'main')],
+      );
+      final rooms = await _rooms(client);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+      expect(api.historyCalls[general], isNull);
+    });
+
+    test('until a room is counted, the server\'s numbers stand in', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      await _bakery(client);
+      await _timeline(client, general, [_msg('waiting')]);
+      api.roomHistory[general] = [_msg('waiting'), _msg('earlier')];
+      final rooms = await _rooms(client);
+      // _bakery gives #general a notification_count of 3; the fill is out.
+      expect(channel(rooms, general).unread, 3);
+      api.hold!.complete();
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+    });
+
+    test(
+      'rooms that synced before the counts existed are filled once',
+      () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        await _bakery(client);
+        // A message from someone else is the newest event: hasNewMessages.
+        await _timeline(client, general, [_msg('waiting')]);
+        api.roomHistory[general] = [_msg('waiting'), _msg('earlier')];
+        final rooms = await _rooms(client);
+        await _settle();
+        expect(channel(rooms, general).unread, 2);
+        expect(api.historyCalls[general], 1);
+        expect(
+          api.historyCalls['!sourdough:example.com'],
+          isNull,
+          reason: 'a room with nothing new is not fetched',
+        );
+      },
+    );
+  });
+
   test('rooms in no space land in Home, a DM as a DM', () async {
     final rooms = await _rooms(await _client());
     expect(rooms.synced, isTrue);
@@ -335,8 +1039,6 @@ void main() {
     // The fake's m.direct lists this one.
     final dm = byId['!726s6s6q:example.com']!;
     expect(dm.kind, ChannelKind.direct);
-    expect(dm.unread, 2);
-    expect(dm.mentions, 2);
     expect(dm.members, isNotEmpty);
     expect(dm.members.map((m) => m.id), isNot(contains(_me)));
     expect(byId['!calls:example.com']!.kind, ChannelKind.room);
@@ -406,7 +1108,7 @@ void main() {
     },
   );
 
-  test('a channel carries its counts, topic and lock', () async {
+  test('a channel carries its topic and lock', () async {
     final client = await _client();
     final rooms = await _rooms(client);
     await _bakery(client);
@@ -415,10 +1117,7 @@ void main() {
     final sourdough = rooms.spaces.last.categories.last.channels.first;
     expect(sourdough.private, isTrue);
     expect(sourdough.topic, 'wild yeast');
-    expect(sourdough.unread, 4);
-    expect(sourdough.mentions, 1);
     expect(sourdough.muted, isFalse);
-    expect(rooms.spaces.last.mentions, 1);
   });
 
   test('a space\'s rooms never also appear in Home', () async {
@@ -611,7 +1310,11 @@ void main() {
   test('after a relaunch, an invite still knows who sent it and that it is '
       'a DM', () async {
     final dir = await Directory.systemTemp.createTemp('loaf_relaunch');
-    addTearDown(() => dir.delete(recursive: true));
+    // Rooms disposed in teardown write the file once more; let it land.
+    addTearDown(() async {
+      await _settle();
+      await dir.delete(recursive: true);
+    });
     final path = '${dir.path}/loaf.sqlite';
 
     final first = await openClient(
