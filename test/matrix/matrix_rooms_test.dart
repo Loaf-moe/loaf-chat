@@ -1020,6 +1020,20 @@ void main() {
       expect(api.historyCalls[general], isNull);
     });
 
+    test('until a room is counted, the server\'s numbers stand in', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      await _bakery(client);
+      await _timeline(client, general, [_msg('waiting')]);
+      api.roomHistory[general] = [_msg('waiting'), _msg('earlier')];
+      final rooms = await _rooms(client);
+      // _bakery gives #general a notification_count of 3; the fill is out.
+      expect(channel(rooms, general).unread, 3);
+      api.hold!.complete();
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+    });
+
     test(
       'rooms that synced before the counts existed are filled once',
       () async {

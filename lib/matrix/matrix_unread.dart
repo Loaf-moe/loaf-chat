@@ -51,6 +51,10 @@ class MatrixUnread {
   Future<void> _queue = Future.value();
   var _disposed = false;
 
+  /// Whether [roomId] has been counted. Until it has, the server's numbers
+  /// are all there is.
+  bool knows(String roomId) => _tallies.containsKey(roomId);
+
   RoomTally of(String roomId) => _tallies[roomId] ?? RoomTally();
 
   /// Completes once every sync handed to [apply] so far is counted.

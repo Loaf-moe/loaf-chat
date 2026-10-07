@@ -557,14 +557,17 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         : ChannelKind.room;
     final topic = room.topic;
     final tally = _unread.of(room.id);
+    final counted = _unread.knows(room.id);
     final favourite = room.tags[TagType.favourite];
     final channel = Channel(
       id: room.id,
       name: room.getLocalizedDisplayname(),
       avatar: AvatarRef.maybe(room.avatar?.toString()),
       kind: kind,
-      unread: tally.count,
-      mentions: tally.mentions,
+      // A room not counted yet, as on the first launch with these counts,
+      // shows the server's numbers rather than nothing.
+      unread: counted ? tally.count : room.notificationCount,
+      mentions: counted ? tally.mentions : room.highlightCount,
       private: const {
         JoinRules.invite,
         JoinRules.knock,
