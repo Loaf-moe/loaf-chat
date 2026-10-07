@@ -55,6 +55,7 @@ import 'space_actions.dart';
 import 'status_picker.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
+import '../window/window_chrome.dart';
 
 /// Below this width the navigation collapses into a drawer.
 const _wideBreakpoint = 900.0;
@@ -1102,6 +1103,15 @@ class _AppShellState extends State<AppShell> {
         final me = _me;
         final channel = _channel;
         final members = channel == null ? null : _members(channel, me);
+        final membersShown =
+            members != null &&
+            _showMembers &&
+            _previewInvite == null &&
+            (channel!.kind == ChannelKind.text ||
+                channel.kind == ChannelKind.room ||
+                // A voice channel that can't be joined yet is
+                // the same pane as a room, toggle and all.
+                (channel.kind == ChannelKind.voice && !_voiceWorks));
 
         if (wide) {
           return Scaffold(
@@ -1111,29 +1121,37 @@ class _AppShellState extends State<AppShell> {
                 ? main
                 : Row(
                     children: [
-                      SizedBox(
-                        width: LoafShell.railWidth + LoafShell.sidebarWidth,
-                        child: _navigation,
+                      // Each column says which window corner it touches, so
+                      // exactly one bar draws each corner's buttons.
+                      WindowEdges(
+                        leading: true,
+                        trailing: false,
+                        child: SizedBox(
+                          width: LoafShell.railWidth + LoafShell.sidebarWidth,
+                          child: _navigation,
+                        ),
                       ),
-                      Expanded(child: main),
-                      if (members != null &&
-                          _showMembers &&
-                          _previewInvite == null &&
-                          (channel!.kind == ChannelKind.text ||
-                              channel.kind == ChannelKind.room ||
-                              // A voice channel that can't be joined yet is
-                              // the same pane as a room, toggle and all.
-                              (channel.kind == ChannelKind.voice &&
-                                  !_voiceWorks)))
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            border: Border(
-                              left: BorderSide(color: tokens.border),
+                      Expanded(
+                        child: WindowEdges(
+                          leading: false,
+                          trailing: !membersShown,
+                          child: main,
+                        ),
+                      ),
+                      if (membersShown)
+                        WindowEdges(
+                          leading: false,
+                          trailing: true,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              border: Border(
+                                left: BorderSide(color: tokens.border),
+                              ),
                             ),
-                          ),
-                          child: SizedBox(
-                            width: LoafShell.memberListWidth,
-                            child: members,
+                            child: SizedBox(
+                              width: LoafShell.memberListWidth,
+                              child: members,
+                            ),
                           ),
                         ),
                     ],
@@ -1154,7 +1172,8 @@ class _AppShellState extends State<AppShell> {
             width: drawerWidth,
             shape: const RoundedRectangleBorder(),
             backgroundColor: tokens.sidebar,
-            child: _navigation,
+            // Drawers slide over the page that already holds the buttons.
+            child: WindowEdges.none(child: _navigation),
           ),
           // The mirror of the navigation drawer: same width rules, same
           // edge-to-edge surface.
@@ -1164,7 +1183,7 @@ class _AppShellState extends State<AppShell> {
                   width: drawerWidth.clamp(0.0, LoafShell.memberListWidth + 40),
                   shape: const RoundedRectangleBorder(),
                   backgroundColor: tokens.sidebar,
-                  child: members,
+                  child: WindowEdges.none(child: members),
                 ),
           body: main,
         );

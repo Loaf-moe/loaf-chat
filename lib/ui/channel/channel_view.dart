@@ -15,6 +15,7 @@ import '../widgets/toast.dart';
 import 'composer.dart';
 import 'message_group_tile.dart';
 import 'timeline.dart';
+import '../window/window_chrome.dart';
 
 const _narrowTopicWidth = 480.0;
 
@@ -214,109 +215,121 @@ class _ChannelHeader extends StatelessWidget {
     final topic = channel.topic;
     final direct = channel.kind == ChannelKind.direct;
     final onStartCall = this.onStartCall;
-    return Container(
-      height: 56,
-      decoration: BoxDecoration(
-        color: tokens.page,
-        border: Border(bottom: BorderSide(color: tokens.border)),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x4),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final showTopic =
-              topic != null && constraints.maxWidth >= _narrowTopicWidth;
-          return Row(
-            children: [
-              if (onOpenNavigation != null) ...[
-                Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    _HeaderIconButton(
-                      icon: LucideIcons.menu,
-                      onTap: onOpenNavigation,
-                    ),
-                    if (navigationAttention)
-                      Positioned(
-                        right: 8,
-                        top: 8,
-                        child: IgnorePointer(
-                          child: Container(
-                            key: const ValueKey('navigation-attention'),
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                              color: tokens.accent,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: tokens.page, width: 2),
+    return WindowDragArea(
+      child: Container(
+        height: 56,
+        decoration: BoxDecoration(
+          color: tokens.page,
+          border: Border(bottom: BorderSide(color: tokens.border)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x4),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final showTopic =
+                topic != null && constraints.maxWidth >= _narrowTopicWidth;
+            return Row(
+              children: [
+                const WindowControls(WindowEdge.leading),
+                if (onOpenNavigation != null) ...[
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      _HeaderIconButton(
+                        icon: LucideIcons.menu,
+                        onTap: onOpenNavigation,
+                      ),
+                      if (navigationAttention)
+                        Positioned(
+                          right: 8,
+                          top: 8,
+                          child: IgnorePointer(
+                            child: Container(
+                              key: const ValueKey('navigation-attention'),
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                color: tokens.accent,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: tokens.page,
+                                  width: 2,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                  ],
-                ),
-                const SizedBox(width: LoafSpace.x2),
-              ],
-              Icon(
-                switch (channel.kind) {
-                  ChannelKind.direct when channel.members.length > 1 =>
-                    LucideIcons.users,
-                  ChannelKind.direct => LucideIcons.atSign,
-                  ChannelKind.room => LucideIcons.messagesSquare,
-                  ChannelKind.voice => LucideIcons.volume2,
-                  _ => LucideIcons.hash,
-                },
-                size: 18,
-                color: tokens.textMuted,
-              ),
-              const SizedBox(width: LoafSpace.x1),
-              Flexible(
-                flex: 0,
-                child: Text(
-                  channel.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: loafBody(15, 600).copyWith(color: tokens.textStrong),
-                ),
-              ),
-              if (showTopic) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
-                  child: SizedBox(
-                    height: 16,
-                    child: VerticalDivider(color: tokens.border, width: 1),
+                    ],
                   ),
+                  const SizedBox(width: LoafSpace.x2),
+                ],
+                Icon(
+                  switch (channel.kind) {
+                    ChannelKind.direct when channel.members.length > 1 =>
+                      LucideIcons.users,
+                    ChannelKind.direct => LucideIcons.atSign,
+                    ChannelKind.room => LucideIcons.messagesSquare,
+                    ChannelKind.voice => LucideIcons.volume2,
+                    _ => LucideIcons.hash,
+                  },
+                  size: 18,
+                  color: tokens.textMuted,
                 ),
-                Expanded(
+                const SizedBox(width: LoafSpace.x1),
+                Flexible(
+                  flex: 0,
                   child: Text(
-                    topic,
-                    overflow: TextOverflow.ellipsis,
+                    channel.name,
                     maxLines: 1,
-                    style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+                    overflow: TextOverflow.ellipsis,
+                    style: loafBody(15, 600).copyWith(color: tokens.textStrong),
                   ),
                 ),
-              ] else
-                const Spacer(),
-              if (direct && onStartCall != null) ...[
-                _HeaderIconButton(
-                  icon: LucideIcons.phone,
-                  tooltip: 'Start a voice call',
-                  onTap: () => onStartCall(video: false),
-                ),
-                _HeaderIconButton(
-                  icon: LucideIcons.video,
-                  tooltip: 'Start a video call',
-                  onTap: () => onStartCall(video: true),
-                ),
-              ] else if (!direct)
-                _HeaderIconButton(
-                  icon: LucideIcons.users,
-                  onTap: onToggleMembers,
-                ),
-              // No search button: message search is a v1 non-goal, and in
-              // encrypted rooms it needs a client-side index (see the spec).
-            ],
-          );
-        },
+                if (showTopic) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: LoafSpace.x3,
+                    ),
+                    child: SizedBox(
+                      height: 16,
+                      child: VerticalDivider(color: tokens.border, width: 1),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      topic,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      style: loafBody(
+                        13,
+                        400,
+                      ).copyWith(color: tokens.textMuted),
+                    ),
+                  ),
+                ] else
+                  const Spacer(),
+                if (direct && onStartCall != null) ...[
+                  _HeaderIconButton(
+                    icon: LucideIcons.phone,
+                    tooltip: 'Start a voice call',
+                    onTap: () => onStartCall(video: false),
+                  ),
+                  _HeaderIconButton(
+                    icon: LucideIcons.video,
+                    tooltip: 'Start a video call',
+                    onTap: () => onStartCall(video: true),
+                  ),
+                ] else if (!direct)
+                  _HeaderIconButton(
+                    icon: LucideIcons.users,
+                    onTap: onToggleMembers,
+                  ),
+                // No search button: message search is a v1 non-goal, and in
+                // encrypted rooms it needs a client-side index (see the spec).
+                const WindowControls(WindowEdge.trailing),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

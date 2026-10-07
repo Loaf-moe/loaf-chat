@@ -22,6 +22,7 @@ import '../widgets/loaf_field.dart';
 import 'browser_wait.dart';
 import 'sign_in_controller.dart';
 import 'sign_in_state.dart';
+import '../window/window_chrome.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key, required this.controller, this.onSignOutInstead});
@@ -111,40 +112,48 @@ class _LoginPageState extends State<LoginPage> {
     final tokens = LoafTokens.of(context);
     return Scaffold(
       backgroundColor: tokens.page,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(LoafSpace.x6),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 380),
-              child: ListenableBuilder(
-                listenable: _c,
-                builder: (context, _) {
-                  _formShown = false;
-                  final state = _c.state;
-                  // The point of no return: the picker offers a "connect"
-                  // nothing would act on, and popping it up again on a
-                  // commit that then fails would be worse than not asking.
-                  if (state.activity == SignInActivity.signedIn &&
-                      _editingServer) {
-                    _editingServer = false;
-                  }
-                  final faces = _faces(tokens, state);
-                  _forgetAbandonedForm();
-                  // Around the whole screen, not the form: it outlives the form,
-                  // so only the screen going (signed in) commits a save.
-                  return AutofillGroup(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: faces,
+      body: Column(
+        children: [
+          // Sign-in is the whole window, so it holds both corners.
+          const WindowBand(),
+          Expanded(
+            child: SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(LoafSpace.x6),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 380),
+                    child: ListenableBuilder(
+                      listenable: _c,
+                      builder: (context, _) {
+                        _formShown = false;
+                        final state = _c.state;
+                        // The point of no return: the picker offers a "connect"
+                        // nothing would act on, and popping it up again on a
+                        // commit that then fails would be worse than not asking.
+                        if (state.activity == SignInActivity.signedIn &&
+                            _editingServer) {
+                          _editingServer = false;
+                        }
+                        final faces = _faces(tokens, state);
+                        _forgetAbandonedForm();
+                        // Around the whole screen, not the form: it outlives the form,
+                        // so only the screen going (signed in) commits a save.
+                        return AutofillGroup(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: faces,
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
+                  ),
+                ),
               ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

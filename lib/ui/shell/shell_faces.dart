@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../call/call_view.dart';
 import '../theme/loaf_theme.dart';
+import '../window/window_chrome.dart';
 
 /// The first sync, still coming. A spinner while the server has not
 /// answered, which says nothing about how long; a bar once its answer is
@@ -89,15 +90,27 @@ class _Face extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (onOpenNavigation != null)
-              Container(
-                height: 56,
-                padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
-                alignment: Alignment.centerLeft,
-                child: TopBarButton(
-                  icon: LucideIcons.menu,
-                  tooltip: 'Channels',
-                  onTap: onOpenNavigation,
+            // Without a drawer to open there is no bar, so the window's
+            // buttons get a band of their own.
+            if (onOpenNavigation == null)
+              const WindowBand()
+            else
+              WindowDragArea(
+                child: Container(
+                  height: 56,
+                  padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
+                  child: Row(
+                    children: [
+                      const WindowControls(WindowEdge.leading),
+                      TopBarButton(
+                        icon: LucideIcons.menu,
+                        tooltip: 'Channels',
+                        onTap: onOpenNavigation,
+                      ),
+                      const Spacer(),
+                      const WindowControls(WindowEdge.trailing),
+                    ],
+                  ),
                 ),
               ),
             Expanded(child: Center(child: child)),

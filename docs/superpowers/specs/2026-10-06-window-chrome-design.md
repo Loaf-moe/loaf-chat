@@ -47,14 +47,14 @@ Mobile is untouched. Every widget here is inert unless [isDesktop].
   titlebar becomes an empty `GtkBox` of height 0 via
   `gtk_window_set_titlebar`. With that set, GTK keeps client-side shadows
   and resize edges and draws no bar.
-- On a tiling WM the window is instead `gtk_window_set_decorated(FALSE)`:
-  the WM owns borders and gaps, and CSD shadows would only fight it.
+- On a tiling WM the empty titlebar stays: GTK3 already drops its shadows
+  and resize margins for a tiled window, and a floating one keeps its resize
+  edges.
 - `minimize` → `gtk_window_iconify`. `toggleMaximize` → `gtk_window_maximize`
   or `gtk_window_unmaximize`. `close` → `gtk_window_close`.
-- `startDrag` → `gtk_window_begin_move_drag`, using the button, root
-  coordinates and time of the last `button-press-event` seen on the
-  `FlView`. That event is recorded by a signal handler connected *before*
-  Flutter's own handler.
+- `startDrag` → `gtk_window_begin_move_drag` at the pointer's current
+  position, button 1, `gtk_get_current_event_time()`. Flutter starts a drag
+  from a press it still holds, so the WM sees a live button.
 - `titlebarDoubleClick` → toggle maximize.
 - State comes from `window-state-event`: `GDK_WINDOW_STATE_MAXIMIZED`,
   `FULLSCREEN`, `FOCUSED`, and the four `*_TILED` edges. It also comes from
@@ -83,7 +83,9 @@ Mobile is untouched. Every widget here is inert unless [isDesktop].
 - `minimize` / `toggleMaximize` / `close` → `ShowWindow(SW_MINIMIZE)`,
   `SW_MAXIMIZE`/`SW_RESTORE`, `PostMessage(WM_CLOSE)`.
   `titlebarDoubleClick` → toggle maximize.
-- State comes from `WM_SIZE` (maximized) and `WM_ACTIVATE` (focused).
+- State comes from `WM_SIZE` (maximized) and `WM_ACTIVATE` (focused). It
+  also carries `maxHovered`: over the maximize button, mouse events go to the
+  frame and not to Flutter, so the runner says when to show hover.
 
 ## The channel — `loaf/window`
 
@@ -97,6 +99,7 @@ Native → Dart: `stateChanged` with the same map `state` returns:
 
 ```
 { maximized: bool, fullscreen: bool, focused: bool,
+  maxHovered: bool,  // Windows only
   // Linux only; absent elsewhere
   wmName: String?, env: {String: String}, tiled: bool,
   decorationLayout: String }
@@ -174,6 +177,10 @@ Native → Dart: `stateChanged` with the same map `state` returns:
 
 ### Where the controls go
 
+Bands are `WindowMetrics.band` = 56pt, the headers' height. Each bar holds
+its own controls; `WindowEdges` per column decides which bar touches which
+corner, so each corner draws once.
+
 | Face | macOS (leading) | Linux / Windows (trailing, or leading per layout) |
 |---|---|---|
 | Wide shell | A `bandHeight` strip at the top of the `SpacesRail`, above the loaf mark, as a drag area | Inside the rightmost column. On the channel header, the controls sit at its end, past the members toggle, and the header is the drag area. When the member list is open, its top gets a `bandHeight` drag band holding the controls |
@@ -190,12 +197,12 @@ narrow.
 
 ## Testing
 
-- **Unit** (`test/ui/window/window_state_test.dart`): `parseGtk` (the
+- **Unit** (`test/window_state_test.dart`): `parseGtk` (the
   GNOME default `appmenu:close`, buttons on the left, empty, unknown
   names); `isTilingWm` (each env var, `XDG_CURRENT_DESKTOP=sway:wlroots`,
   each WM name, GNOME, KDE and an empty env being false, `tiled: true`
   being true); `fromPlatform` (macOS fullscreen empty, Linux tiling empty).
-- **Widget** (`test/ui/window/window_chrome_test.dart`), with a fake
+- **Widget** (`test/window_chrome_test.dart`), with a fake
   `MethodChannel`:
   - tapping each button sends its method
   - a pan on `WindowDragArea` sends `startDrag`, and a double tap sends

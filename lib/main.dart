@@ -11,6 +11,7 @@ import 'ui/platform.dart';
 import 'ui/rooms/rooms.dart';
 import 'ui/theme/appearance.dart';
 import 'ui/theme/loaf_theme.dart';
+import 'ui/window/window_chrome.dart';
 import 'update/pick_updater.dart';
 
 /// Dark is the default. The brand defines no dark palette, but a community
@@ -24,6 +25,10 @@ late final AppearanceController appearance;
 /// The app talks to a real homeserver; `--dart-define=LOAF_BACKEND=mock`
 /// plays the mock instead, for previews and the debug levers.
 const backend = String.fromEnvironment('LOAF_BACKEND', defaultValue: 'matrix');
+
+/// The window's own controls, in place of the OS title bar. Lives as long
+/// as the app, like [themeMode].
+final windowChrome = WindowChromeController();
 
 /// The app's one account. Lives as long as the app, like [themeMode].
 late final LoafSession session;
@@ -58,6 +63,9 @@ Future<void> main() async {
     );
     updater = pickUpdater();
   }
+  // Before the first frame, so the buttons are there from the start rather
+  // than popping in.
+  await windowChrome.start();
   runApp(const LoafApp());
 }
 
@@ -79,6 +87,8 @@ class LoafApp extends StatelessWidget {
           theme: nihon ? loafNihonTheme() : loafLightTheme(),
           darkTheme: nihon ? loafNihonTheme() : loafDarkTheme(),
           themeMode: mode,
+          builder: (context, child) =>
+              WindowChrome(controller: windowChrome, child: child!),
           home: CallbackShortcuts(
             bindings: {
               // Ctrl+T flips the palette. This exists so both themes get looked

@@ -12,6 +12,7 @@ import '../widgets/count_label.dart';
 import '../widgets/loaf_avatar.dart';
 import 'app_notice.dart';
 import 'user_bar.dart';
+import '../window/window_chrome.dart';
 
 class SpacesRail extends StatelessWidget {
   const SpacesRail({
@@ -71,54 +72,66 @@ class SpacesRail extends StatelessWidget {
       color: tokens.rail,
       // The rail's colour runs the full height of the screen; only its
       // contents keep clear of the status bar and home indicator.
-      child: SafeArea(
-        right: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Column(
-            children: [
-              _LoafMark(
-                tokens: tokens,
-                selected: homeSelected,
-                onTap: onHome,
-                badge: homeBadge,
-                ringing: homeRinging,
-              ),
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      for (final space in spaces) ...[
-                        _SpaceItem(
-                          key: ValueKey('space-${space.id}'),
-                          space: space,
-                          selected: space.id == selectedSpaceId,
-                          tokens: tokens,
-                          onTap: () => onSelect(space.id),
-                          onActions: onSpaceActions == null
-                              ? null
-                              : (position) =>
-                                    onSpaceActions!(space.id, position),
+      child: Column(
+        children: [
+          // A Mac's buttons, or Linux's when its layout puts them on the
+          // left, sit above the loaf mark.
+          const WindowBand(),
+          Expanded(
+            child: SafeArea(
+              right: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                child: Column(
+                  children: [
+                    _LoafMark(
+                      tokens: tokens,
+                      selected: homeSelected,
+                      onTap: onHome,
+                      badge: homeBadge,
+                      ringing: homeRinging,
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            for (final space in spaces) ...[
+                              _SpaceItem(
+                                key: ValueKey('space-${space.id}'),
+                                space: space,
+                                selected: space.id == selectedSpaceId,
+                                tokens: tokens,
+                                onTap: () => onSelect(space.id),
+                                onActions: onSpaceActions == null
+                                    ? null
+                                    : (position) =>
+                                          onSpaceActions!(space.id, position),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+                            if (addSpace)
+                              _AddSpaceButton(
+                                tokens: tokens,
+                                onTap: onAddSpace,
+                              ),
+                            const SizedBox(height: LoafSpace.x2),
+                          ],
                         ),
-                        const SizedBox(height: 8),
-                      ],
-                      if (addSpace)
-                        _AddSpaceButton(tokens: tokens, onTap: onAddSpace),
-                      const SizedBox(height: LoafSpace.x2),
-                    ],
-                  ),
+                      ),
+                    ),
+                    for (final notice in notices)
+                      Padding(
+                        padding: const EdgeInsets.only(top: LoafSpace.x2),
+                        child: NoticeTile(notice: notice),
+                      ),
+                    // Clears the account panel floating over the bottom.
+                    const SizedBox(height: UserBar.clearance),
+                  ],
                 ),
               ),
-              for (final notice in notices)
-                Padding(
-                  padding: const EdgeInsets.only(top: LoafSpace.x2),
-                  child: NoticeTile(notice: notice),
-                ),
-              // Clears the account panel floating over the bottom.
-              const SizedBox(height: UserBar.clearance),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
