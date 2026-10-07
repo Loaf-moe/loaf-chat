@@ -51,7 +51,9 @@ pkg_check_modules(GST REQUIRED IMPORTED_TARGET
 set(LOAF_MEDIA_RS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rust")
 set(LOAF_MEDIA_RS_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/cargo")
 set(LOAF_MEDIA_RS_LIB "${LOAF_MEDIA_RS_TARGET_DIR}/release/libloaf_media_rs.a")
-file(GLOB LOAF_MEDIA_RS_SOURCES CONFIGURE_DEPENDS "${LOAF_MEDIA_RS_DIR}/src/*.rs")
+file(GLOB LOAF_MEDIA_RS_SOURCES CONFIGURE_DEPENDS "${LOAF_MEDIA_RS_DIR}/src/*.rs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../rust/loaf_streams/src/*.rs"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../rust/loaf_streams/Cargo.toml")
 # Release even in a debug app: a debug GStreamer element decoding video
 # in Rust is needlessly slow, and the crate has its own tests.
 add_custom_command(

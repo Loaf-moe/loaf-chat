@@ -159,28 +159,55 @@ class MediaStore {
       path.substring(path.lastIndexOf(Platform.pathSeparator) + 1);
 
   /// The sender's name made safe as one path segment: no directories, no
-  /// characters a filesystem refuses, never empty.
+  /// characters a filesystem refuses, no name Windows keeps for a device,
+  /// never empty, and at most [maxBytes] of UTF-8.
   @visibleForTesting
-  static String safeName(String name) {
+  static String safeName(String name, {int maxBytes = _maxNameBytes}) {
     var s = name.split(RegExp(r'[/\\]')).last;
-    s = s.replaceAll(RegExp(r'[:*?"<>|\x00-\x1f]'), '_').trim();
-    if (s.isEmpty || s == '.' || s == '..') return 'file';
-    return _capped(s);
+    s = s.replaceAll(RegExp(r'[:*?"<>|\x00-\x1f]'), '_');
+    s = _trimEnd(s.trim());
+    if (s.isEmpty) return 'file';
+    // CON, NUL, COM1… open the device on Windows, whatever follows the dot.
+    if (_device.hasMatch(s)) s = '_$s';
+    final capped = _trimEnd(_capped(s, maxBytes));
+    return capped.isEmpty ? 'file' : capped;
   }
+
+  static final _device = RegExp(
+    r'^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$',
+    caseSensitive: false,
+  );
+
+  /// Windows drops a name's trailing dots and spaces, so a file saved as
+  /// `photo.jpg.` could never be opened by that name again.
+  static String _trimEnd(String name) =>
+      name.replaceFirst(RegExp(r'[. ]+$'), '');
 
   /// Most filesystems refuse a name over 255 bytes, and the download adds
   /// `.part`: a name past this would fail every retry.
   static const _maxNameBytes = 200;
 
-  /// [name] cut to [_maxNameBytes] of UTF-8 between characters, keeping a
-  /// short extension so the file still opens in the right app.
-  static String _capped(String name) {
-    if (utf8.encode(name).length <= _maxNameBytes) return name;
+  /// How long a name in [dir] may be. On Windows a path past MAX_PATH fails
+  /// in the shell and in Media Foundation unless the machine opted in, so
+  /// the whole path, `.part` included, stays under 240.
+  @visibleForTesting
+  static int nameBudget(String dir, {required bool windows}) {
+    if (!windows) return _maxNameBytes;
+    const limit = 240, minimum = 16;
+    final room = limit - dir.length - 1 - '.part'.length;
+    return room.clamp(minimum, _maxNameBytes);
+  }
+
+  /// [name] cut to [maxBytes] of UTF-8 between characters, keeping a short
+  /// extension so the file still opens in the right app. UTF-8 is never
+  /// shorter than UTF-16, so a byte budget also bounds Windows' characters.
+  static String _capped(String name, int maxBytes) {
+    if (utf8.encode(name).length <= maxBytes) return name;
     final dot = name.lastIndexOf('.');
     final extension = dot > 0 ? name.substring(dot) : '';
     final keep = utf8.encode(extension).length <= 16 ? extension : '';
     final stem = keep.isEmpty ? name : name.substring(0, dot);
-    final budget = _maxNameBytes - utf8.encode(keep).length;
+    final budget = maxBytes - utf8.encode(keep).length;
     final out = StringBuffer();
     var used = 0;
     for (final rune in stem.runes) {
@@ -205,8 +232,12 @@ class _Entry {
 class StoredFile extends ChangeNotifier implements MediaFile {
   StoredFile._(this._store, this._spec)
     : id = sha256.convert(utf8.encode(_spec.mxc.toString())).toString() {
-    final name = MediaStore.safeName(_spec.name);
-    _finalPath = '${_store.root.path}/$id/$name';
+    final dir = '${_store.root.path}${Platform.pathSeparator}$id';
+    final name = MediaStore.safeName(
+      _spec.name,
+      maxBytes: MediaStore.nameBudget(dir, windows: Platform.isWindows),
+    );
+    _finalPath = '$dir${Platform.pathSeparator}$name';
     partialPath = '$_finalPath.part';
     _path.future.ignore(); // Failures reach callers through [error] as well.
   }

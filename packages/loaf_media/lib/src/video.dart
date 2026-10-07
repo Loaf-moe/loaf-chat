@@ -1,8 +1,8 @@
 /// Video played in place by the platform's own player, reading the file as
 /// it downloads. The Swift end is
-/// `darwin/loaf_media/Sources/loaf_media/VideoViewFactory.swift`; on Linux,
-/// GStreamer draws into a texture under Flutter controls
-/// (`linux_video.dart`).
+/// `darwin/loaf_media/Sources/loaf_media/VideoViewFactory.swift`; on Linux
+/// and Windows, GStreamer or Media Foundation draws into a texture under
+/// Flutter controls (`texture_video.dart`).
 library;
 
 import 'dart:async';
@@ -13,7 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'growing_file.dart';
-import 'linux_video.dart';
+import 'texture_video.dart';
 import 'streams.dart';
 
 /// The one playing video, by platform view id. Starting another pauses
@@ -129,7 +129,8 @@ class LoafVideo extends StatefulWidget {
   final VoidCallback? onHold;
   final VoidCallback? onRelease;
 
-  /// Linux: opens the file in another app when this player can't play it,
+  /// Linux and Windows: opens the file in another app when this player
+  /// can't play it,
   /// offered beside "couldn't play this". The platform players elsewhere
   /// say so themselves.
   final VoidCallback? onOpen;
@@ -145,8 +146,8 @@ class LoafVideo extends StatefulWidget {
       player.onRelease?.call();
       if (videoFocus.value == view) videoFocus.value = null;
     }
-    // Linux draws its player in Flutter, which goes with the rows.
-    if (native && defaultTargetPlatform != TargetPlatform.linux) {
+    // A player drawn in Flutter goes with the rows.
+    if (native && !drawsOwnControls) {
       unawaited(
         _channel.invokeMethod<void>('video.stopAll').catchError((Object e) {
           debugPrint('[loaf media] stopAll: $e');
@@ -156,10 +157,20 @@ class LoafVideo extends StatefulWidget {
     VideoStreams.endAll();
   }
 
-  /// Where this platform has a player: iOS, macOS and Linux. Asked of the
-  /// target platform, as the player is chosen by it.
+  /// Whether this platform's player is drawn in Flutter, controls, failure
+  /// and all ([TextureVideo]), rather than being the platform's own view.
+  static bool get drawsOwnControls => switch (defaultTargetPlatform) {
+    TargetPlatform.linux || TargetPlatform.windows => true,
+    _ => false,
+  };
+
+  /// Where this platform has a player: iOS, macOS, Linux and Windows. Asked
+  /// of the target platform, as the player is chosen by it.
   static bool get supported => switch (defaultTargetPlatform) {
-    TargetPlatform.iOS || TargetPlatform.macOS || TargetPlatform.linux => true,
+    TargetPlatform.iOS ||
+    TargetPlatform.macOS ||
+    TargetPlatform.linux ||
+    TargetPlatform.windows => true,
     _ => false,
   };
 
@@ -293,10 +304,11 @@ class _LoafVideoState extends State<LoafVideo> {
         creationParamsCodec: const StandardMessageCodec(),
         onPlatformViewCreated: _created,
       ),
-      TargetPlatform.linux => LinuxVideo(
+      TargetPlatform.linux || TargetPlatform.windows => TextureVideo(
         key: key,
         id: widget.file.id,
         aspect: widget.aspect,
+        mimeType: widget.mimeType,
         onCreated: _created,
         onFailed: _failed,
         onOpen: widget.onOpen,

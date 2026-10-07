@@ -25,14 +25,20 @@ build as `mise exec -- flutter build linux` so cargo is on the path.
 
 ## Installing
 
-Download Loaf Chat for macOS or Linux from <https://get.loaf.moe>. Every copy
-installed from there updates itself. Phones get Loaf Chat through TestFlight.
+Download Loaf Chat for macOS, Windows or Linux from <https://get.loaf.moe>.
+Every copy installed from there updates itself. Phones get Loaf Chat through
+TestFlight.
+
+The Windows build isn't signed. SmartScreen warns on first run (More info,
+then Run anyway), and Smart App Control, where it is on, blocks it outright.
+Setup installs for the current user only and never asks for admin.
 
 ## Releasing
 
 Push a tag like `v0.1.0` that sits on `main`. `.github/workflows/release.yml`
-does the rest: it builds, signs and notarizes, publishes a GitHub Release, and
-rewrites get.loaf.moe, including the download page in `tool/release/site/`.
+does the rest: it builds, signs and notarizes (on Windows, only the feed
+entry is signed), publishes a GitHub Release, and rewrites get.loaf.moe,
+including the download page in `tool/release/site/`.
 The same tag sends iOS to TestFlight, where the Testing group picks it up.
 Preview that page with `tool/release/site.sh <latest.json> <out dir>`.
 The signing keys were made once by `tool/release/keygen.sh`.

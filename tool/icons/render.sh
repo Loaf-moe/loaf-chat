@@ -37,3 +37,22 @@ done
 
 cp "$src/tile.svg" linux/packaging/moe.loaf.chat.svg
 png "$src/tile.svg" 512 linux/packaging/moe.loaf.chat.png
+
+# Windows wants one .ico holding every size the shell asks for. Since Vista
+# an entry may be a whole PNG, so the renders go in as they are.
+ico_work="$(mktemp -d)"
+ico_sizes=(16 20 24 32 40 48 64 256)
+for px in "${ico_sizes[@]}"; do png "$src/tile.svg" "$px" "$ico_work/$px.png"; done
+python3 - "$ico_work" windows/runner/resources/app_icon.ico "${ico_sizes[@]}" <<'PY'
+import struct, sys
+work, out, sizes = sys.argv[1], sys.argv[2], [int(s) for s in sys.argv[3:]]
+pngs = [open(f"{work}/{px}.png", "rb").read() for px in sizes]
+offset = 6 + 16 * len(pngs)
+head = struct.pack("<HHH", 0, 1, len(pngs))
+for px, data in zip(sizes, pngs):
+    # 0 in a size byte means 256.
+    head += struct.pack("<BBBBHHII", px % 256, px % 256, 0, 0, 1, 32, len(data), offset)
+    offset += len(data)
+open(out, "wb").write(head + b"".join(pngs))
+PY
+rm -rf "$ico_work"

@@ -416,4 +416,36 @@ void main() {
     expect(MediaStore.safeName('a/b:c.png'), 'b_c.png');
     expect(MediaStore.safeName('..'), 'file');
   });
+
+  test('names Windows keeps for devices are not file names', () {
+    expect(MediaStore.safeName('CON.mp4'), '_CON.mp4');
+    expect(MediaStore.safeName('nul'), '_nul');
+    expect(MediaStore.safeName('com1.tar.gz'), '_com1.tar.gz');
+    expect(MediaStore.safeName('LPT9'), '_LPT9');
+    expect(MediaStore.safeName('conference.mp4'), 'conference.mp4');
+    expect(MediaStore.safeName('com10.txt'), 'com10.txt');
+  });
+
+  test('a name never ends in a dot or a space', () {
+    expect(MediaStore.safeName('photo.jpg.'), 'photo.jpg');
+    expect(MediaStore.safeName('notes. . '), 'notes');
+    expect(MediaStore.safeName('...'), 'file');
+  });
+
+  test('on Windows the whole path fits in MAX_PATH', () {
+    final dir =
+        'C:\\Users\\someone\\AppData\\Roaming\\moe.loaf\\media\\'
+        'files\\${'a' * 64}';
+    final budget = MediaStore.nameBudget(dir, windows: true);
+    // Room for the separator and `.part` inside 240.
+    expect(dir.length + 1 + budget + '.part'.length, lessThanOrEqualTo(240));
+    final name = MediaStore.safeName('${'x' * 300}.pdf', maxBytes: budget);
+    expect(name.length, lessThanOrEqualTo(budget));
+    expect(name, endsWith('.pdf'));
+
+    // Elsewhere only the file system's own limit applies.
+    expect(MediaStore.nameBudget(dir, windows: false), 200);
+    // A directory too deep for any name still gets a short one.
+    expect(MediaStore.nameBudget('C:\\${'d' * 300}', windows: true), 16);
+  });
 }

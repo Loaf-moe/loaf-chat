@@ -7,11 +7,13 @@ UpdaterKind _choose({
   int build = 412,
   TargetPlatform platform = TargetPlatform.linux,
   Map<String, String> environment = const {},
+  bool installedBySetup = false,
 }) => chooseUpdater(
   release: release,
   build: build,
   platform: platform,
   environment: environment,
+  installedBySetup: installedBySetup,
 );
 
 const _flatpak = {'FLATPAK_ID': 'moe.loaf.chat'};
@@ -42,12 +44,20 @@ void main() {
     expect(_choose(environment: {'APPIMAGE': ''}), UpdaterKind.none);
   });
 
-  test('Windows has none yet, and phones never', () {
-    for (final platform in [
-      TargetPlatform.windows,
-      TargetPlatform.iOS,
-      TargetPlatform.android,
-    ]) {
+  test('a Windows install from Setup updates itself', () {
+    expect(
+      _choose(platform: TargetPlatform.windows, installedBySetup: true),
+      UpdaterKind.windows,
+    );
+  });
+
+  test('a Windows build run from where it was built has none', () {
+    // Swapping files under a developer's build folder would be a surprise.
+    expect(_choose(platform: TargetPlatform.windows), UpdaterKind.none);
+  });
+
+  test('phones never', () {
+    for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
       expect(_choose(platform: platform), UpdaterKind.none);
     }
   });
@@ -66,5 +76,13 @@ void main() {
     expect(_choose(build: 0, platform: TargetPlatform.macOS), UpdaterKind.none);
     expect(_choose(build: 0, environment: _appImage), UpdaterKind.none);
     expect(_choose(build: 0, environment: _flatpak), UpdaterKind.none);
+    expect(
+      _choose(
+        build: 0,
+        platform: TargetPlatform.windows,
+        installedBySetup: true,
+      ),
+      UpdaterKind.none,
+    );
   });
 }

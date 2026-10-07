@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
@@ -96,7 +97,7 @@ void main() {
     // Off the web a picked file's name is the last part of its path.
     XFile file(String name) => XFile.fromData(
       utf8.encode('crumb'),
-      path: '/picked/$name',
+      path: '${Platform.pathSeparator}picked${Platform.pathSeparator}$name',
       mimeType: 'image/jpeg',
     );
 
@@ -393,6 +394,130 @@ void main() {
         timeline.messages.single.body,
         'fresh 🍞 and `:bread:` :notathing:',
       );
+    });
+  });
+
+  group('mentions', () {
+    final desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
+    final mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
+    final suggestions = find.byKey(const ValueKey('mention-suggestions'));
+
+    const ada = Member('@ada:loaf.moe', 'Ada', Color(0xFF7C3AED));
+    const adam = Member('@adam:loaf.moe', 'Adam Crumb', Color(0xFF0891B2));
+    const kitchen = Channel(id: '!kitchen:loaf.moe', name: 'kitchen');
+    const ovens = Channel(id: '!ovens:loaf.moe', name: 'ovens');
+
+    Future<TimelineController> pump(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(800, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final timeline = TimelineController(const [], you: currentUser);
+      addTearDown(timeline.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: Composer(
+                channelName: 'general',
+                timeline: timeline,
+                people: const [currentUser, ada, adam],
+                channels: const [kitchen, ovens],
+              ),
+            ),
+          ),
+        ),
+      );
+      return timeline;
+    }
+
+    Future<void> type(WidgetTester tester, String text) async {
+      await tester.showKeyboard(find.byType(TextField));
+      await tester.enterText(find.byType(TextField), text);
+      await tester.pumpAndSettle();
+    }
+
+    String field(WidgetTester tester) =>
+        tester.widget<TextField>(find.byType(TextField)).controller!.text;
+
+    Finder offered(String name) =>
+        find.descendant(of: suggestions, matching: find.text(name));
+
+    testWidgets('@ lists the people here, but not you', (tester) async {
+      await pump(tester);
+      await type(tester, 'hi @');
+      expect(suggestions, findsOneWidget);
+      expect(offered('Ada'), findsOneWidget);
+      expect(offered('Adam Crumb'), findsOneWidget);
+      expect(offered(currentUser.name), findsNothing);
+
+      await type(tester, 'hi @crumb');
+      expect(offered('Ada'), findsNothing);
+      expect(offered('Adam Crumb'), findsOneWidget);
+    });
+
+    testWidgets('# lists the channels', (tester) async {
+      await pump(tester);
+      await type(tester, 'see #ov');
+      expect(offered('ovens'), findsOneWidget);
+      expect(offered('kitchen'), findsNothing);
+    });
+
+    testWidgets('mid-word is an address, not a mention', (tester) async {
+      await pump(tester);
+      await type(tester, 'mail ada@loaf.moe');
+      expect(suggestions, findsNothing);
+    });
+
+    testWidgets('Tab completes the highlighted one', variant: desktop, (
+      tester,
+    ) async {
+      final timeline = await pump(tester);
+      await type(tester, 'hi @ad');
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      expect(field(tester), 'hi @Adam Crumb ');
+      expect(suggestions, findsNothing);
+      expect(timeline.messages, isEmpty);
+    });
+
+    testWidgets('tapping one completes it', variant: mobile, (tester) async {
+      await pump(tester);
+      await type(tester, 'see #ki');
+      await tester.tap(offered('kitchen'));
+      await tester.pumpAndSettle();
+      expect(field(tester), 'see #kitchen ');
+      expect(suggestions, findsNothing);
+    });
+
+    testWidgets('a completed mention sends as a pill', (tester) async {
+      final timeline = await pump(tester);
+      await type(tester, '@ad');
+      await tester.tap(offered('Ada'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '${field(tester)}hello');
+      await tester.tap(find.byIcon(LucideIcons.send));
+      await tester.pumpAndSettle();
+
+      final sent = timeline.messages.single;
+      expect(sent.body, '@Ada hello');
+      expect(
+        sent.formatted,
+        contains('href="https://matrix.to/#/@ada:loaf.moe"'),
+      );
+    });
+
+    testWidgets('a mention deleted before sending is not sent', (tester) async {
+      final timeline = await pump(tester);
+      await type(tester, '@ad');
+      await tester.tap(offered('Ada'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'never mind');
+      await tester.tap(find.byIcon(LucideIcons.send));
+      await tester.pumpAndSettle();
+      expect(timeline.messages.single.formatted, isNull);
     });
   });
 }

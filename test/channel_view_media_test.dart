@@ -71,7 +71,7 @@ class _Timeline extends ChangeNotifier with ComposerAiming implements Timeline {
   @override
   void loadOlder() {}
   @override
-  void send(String text) {}
+  void send(String text, {List<Mention> mentions = const []}) {}
   @override
   Future<int?> uploadLimit() async => null;
 
@@ -80,7 +80,11 @@ class _Timeline extends ChangeNotifier with ComposerAiming implements Timeline {
   @override
   void toggleReaction(String messageId, String emoji) {}
   @override
-  void saveEdit(String messageId, String text) {}
+  void saveEdit(
+    String messageId,
+    String text, {
+    List<Mention> mentions = const [],
+  }) {}
   @override
   void delete(String messageId) {}
   @override

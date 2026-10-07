@@ -39,10 +39,10 @@ List<MessageAction> actionsFor(
 }) => [
   if (!writable || message.status != MessageStatus.sent) ...[
     if (message.status == MessageStatus.sent && message.media != null)
-      ..._mediaActions,
+      ..._mediaActions(message.media!),
     if (message.body.isNotEmpty) MessageAction.copy,
   ] else ...[
-    if (message.media != null) ..._mediaActions,
+    if (message.media != null) ..._mediaActions(message.media!),
     MessageAction.reply,
     if (message.body.isNotEmpty) MessageAction.copy,
     if (message.author.id == you.id) ...[
@@ -53,12 +53,15 @@ List<MessageAction> actionsFor(
 ];
 
 /// A file's own actions, ahead of the rest. A computer opens and saves
-/// (and, on a Mac, names the app it would open in); a phone opens and
-/// shares, the share sheet being where it saves from.
-List<MessageAction> get _mediaActions => isDesktop
+/// (and names the app it would open in: on a Mac, always; on Windows, for
+/// a picture, which Open shows in the app rather than in that app); a phone
+/// opens and shares, the share sheet being where it saves from.
+List<MessageAction> _mediaActions(Media media) => isDesktop
     ? [
         MessageAction.open,
-        if (defaultTargetPlatform == TargetPlatform.macOS)
+        if (defaultTargetPlatform == TargetPlatform.macOS ||
+            (defaultTargetPlatform == TargetPlatform.windows &&
+                media.kind == MediaKind.image))
           MessageAction.openWith,
         MessageAction.saveAs,
       ]

@@ -6,7 +6,10 @@ import 'package:loaf_native/update/release_feed.dart';
 const _feed = '''
 {"version":"0.1.1","build":412,"appimage":{
   "url":"https://github.com/Loaf-moe/loaf-chat/releases/download/v0.1.1/Loaf-Chat-0.1.1-x86_64.AppImage",
-  "sha256":"abc123","size":1024,"signature":"c2ln"}}
+  "sha256":"abc123","size":1024,"signature":"c2ln"},
+ "windows":{
+  "url":"https://github.com/Loaf-moe/loaf-chat/releases/download/v0.1.1/Loaf-Chat-0.1.1-windows-x64.zip",
+  "sha256":"def456","size":2048,"signature":"d2lu"}}
 ''';
 
 void main() {
@@ -20,14 +23,33 @@ void main() {
 
   test('the signed text names the version, the build and the hash', () {
     expect(
-      Release.parse(_feed).signedText,
+      Release.parse(_feed).signedTextFor(AssetKind.appImage),
       'loaf-chat-appimage\n0.1.1\n412\nabc123',
     );
+  });
+
+  test('each asset signs its own text, so one never passes for another', () {
+    final release = Release.parse(_feed);
+    expect(release.windows!.size, 2048);
+    expect(
+      release.signedTextFor(AssetKind.windows),
+      'loaf-chat-windows\n0.1.1\n412\ndef456',
+    );
+  });
+
+  test('a feed from before Windows still parses', () {
+    final release = Release.parse(
+      '{"version":"0.1.1","build":412,"appimage":'
+      '{"url":"https://x/a","sha256":"abc","size":1,"signature":"s"}}',
+    );
+    expect(release.appImage, isNotNull);
+    expect(release.windows, isNull);
   });
 
   test('a feed with no AppImage still says its version', () {
     final release = Release.parse('{"version":"0.1.1","build":412}');
     expect(release.appImage, isNull);
+    expect(release.windows, isNull);
   });
 
   for (final (name, body) in [

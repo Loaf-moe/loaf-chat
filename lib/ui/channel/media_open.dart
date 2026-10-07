@@ -87,10 +87,13 @@ String? _extensionOf(Media media) {
   return media.name.substring(dot + 1).toLowerCase();
 }
 
-/// macOS: asks which app opens files like [media], for [defaultAppFor].
-/// Once at a time per extension; elsewhere, nothing.
+/// macOS and Windows: asks which app opens files like [media], for
+/// [defaultAppFor]. Once at a time per extension; elsewhere, nothing.
 void lookUpDefaultApp(Media media) {
-  if (defaultTargetPlatform != TargetPlatform.macOS) return;
+  if (defaultTargetPlatform != TargetPlatform.macOS &&
+      defaultTargetPlatform != TargetPlatform.windows) {
+    return;
+  }
   final extension = _extensionOf(media);
   if (extension == null || !_asking.add(extension)) return;
   unawaited(_askDefaultApp(extension));
@@ -118,7 +121,8 @@ String? defaultAppFor(Media media) {
 }
 
 /// Shows [media] in the platform's own viewer: Quick Look on iOS and macOS;
-/// on Linux, pictures in [ImageViewer] and anything else in its default app.
+/// on Linux and Windows, which have none, pictures in [ImageViewer] and
+/// anything else in its default app.
 Future<void> openMedia(BuildContext context, Media media) async {
   final source = MediaSourceScope.of(context);
   final navigator = Navigator.of(context, rootNavigator: true);
@@ -128,7 +132,8 @@ Future<void> openMedia(BuildContext context, Media media) async {
       switch (defaultTargetPlatform) {
         case TargetPlatform.iOS || TargetPlatform.macOS:
           await LoafMedia.quickLook(path);
-        case TargetPlatform.linux when media.kind == MediaKind.image:
+        case TargetPlatform.linux || TargetPlatform.windows
+            when media.kind == MediaKind.image:
           // The root navigator sits above the scope, so the viewer carries
           // it, as `MediaSourceScope.carry` does. The source was read before
           // the wait: the row may have scrolled away since.
@@ -147,6 +152,8 @@ Future<void> openMedia(BuildContext context, Media media) async {
           );
         case TargetPlatform.linux:
           await LoafMedia.openWithPortal(path);
+        case TargetPlatform.windows:
+          await LoafMedia.openWithDefaultApp(path);
         case final platform:
           throw UnsupportedError('no viewer on $platform');
       }
@@ -157,7 +164,8 @@ Future<void> openMedia(BuildContext context, Media media) async {
   }
 }
 
-/// macOS: opens [media] in the app Finder would open it with.
+/// macOS and Windows: opens [media] in the app Finder or Explorer would
+/// open it with.
 Future<void> openMediaWithDefaultApp(BuildContext context, Media media) async {
   final source = MediaSourceScope.of(context);
   final toast = _toastContext(context);

@@ -1,3 +1,7 @@
+// The AppImage is Linux's, and its executable bit is POSIX.
+@TestOn('!windows')
+library;
+
 import 'dart:convert';
 import 'dart:io';
 

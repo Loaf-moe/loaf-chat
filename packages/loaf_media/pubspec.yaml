@@ -27,3 +27,5 @@ flutter:
         sharedDarwinSource: true
       linux:
         pluginClass: LoafMediaPlugin
+      windows:
+        pluginClass: LoafMediaPluginCApi

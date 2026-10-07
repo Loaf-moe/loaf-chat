@@ -9,7 +9,8 @@ import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/loaf_http_client.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/matrix/matrix_timeline.dart';
-import 'package:loaf_native/ui/channel/timeline.dart' show Attachment;
+import 'package:loaf_native/ui/channel/timeline.dart'
+    show Attachment, Mention, MentionKind;
 import 'package:loaf_native/ui/model/models.dart' hide Role;
 import 'package:matrix/matrix.dart' hide MediaKind, Timeline;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -157,6 +158,15 @@ Future<Client> _client(_Api api, {String path = inMemoryDatabasePath}) async {
 /// Lets the SDK's streams and the fake server deliver.
 Future<void> _settle() =>
     Future<void>.delayed(const Duration(milliseconds: 50));
+
+/// Waits until [done], for tests on a database file: a slow disk (a CI
+/// runner's) can take longer than [_settle].
+Future<void> _until(bool Function() done) async {
+  final give = DateTime.now().add(const Duration(seconds: 10));
+  while (!done() && DateTime.now().isBefore(give)) {
+    await _settle();
+  }
+}
 
 var _n = 0;
 var _clock = 1700000000000;
@@ -621,6 +631,59 @@ void main() {
         sent[2]['formatted_body'],
         'see <a href="https://loaf.moe/menu">the menu</a>',
       );
+    });
+
+    test('mentions go as pills, and the people in them are told', () async {
+      final h = await _open([_text('hi')]);
+      h.timeline.send(
+        '@Ada and @me, see #kitchen',
+        mentions: const [
+          Mention(kind: MentionKind.person, id: '@ada:loaf.moe', label: '@Ada'),
+          Mention(kind: MentionKind.person, id: _me, label: '@me'),
+          Mention(
+            kind: MentionKind.channel,
+            id: '!kitchen:loaf.moe',
+            label: '#kitchen',
+          ),
+        ],
+      );
+      await _settle();
+      final content = h.api.sent.single.$2;
+      // The plain body keeps the names as typed: no markdown links in it.
+      expect(content['body'], '@Ada and @me, see #kitchen');
+      expect(content['format'], 'org.matrix.custom.html');
+      expect(
+        content['formatted_body'],
+        '<a href="https://matrix.to/#/@ada:loaf.moe">@Ada</a> and '
+        '<a href="https://matrix.to/#/$_me">@me</a>, see '
+        '<a href="https://matrix.to/#/!kitchen:loaf.moe">#kitchen</a>',
+      );
+      // Rooms notify no one, and neither do you.
+      expect(content['m.mentions'], {
+        'user_ids': ['@ada:loaf.moe'],
+      });
+    });
+
+    test('a reply with a mention tells both people', () async {
+      final h = await _open([
+        _text('question', id: r'$q', sender: '@sam:example.com'),
+      ]);
+      h.timeline.startReply(h.byBody('question'));
+      h.timeline.send(
+        'ask @Ada',
+        mentions: const [
+          Mention(kind: MentionKind.person, id: '@ada:loaf.moe', label: '@Ada'),
+        ],
+      );
+      await _settle();
+      final content = h.api.sent.single.$2;
+      expect((content['m.mentions']! as Map)['user_ids'], [
+        '@ada:loaf.moe',
+        '@sam:example.com',
+      ]);
+      expect((content['m.relates_to']! as Map)['m.in_reply_to'], {
+        'event_id': r'$q',
+      });
     });
 
     test('blank text never sends', () async {
@@ -1199,7 +1262,11 @@ void main() {
     firstRooms.timeline(_roomId)!;
     await _settle();
     firstRooms.timeline(_roomId)!.send('unsent');
-    await _settle();
+    await _until(
+      () =>
+          firstRooms.timeline(_roomId)!.messages.last.status ==
+          MessageStatus.failed,
+    );
     expect(
       firstRooms.timeline(_roomId)!.messages.last.status,
       MessageStatus.failed,
@@ -1215,7 +1282,7 @@ void main() {
     final rooms = MatrixRooms(client);
     addTearDown(rooms.dispose);
     final timeline = rooms.timeline(_roomId)!;
-    await _settle();
+    await _until(() => timeline.messages.length == 2);
     expect(timeline.messages.map((m) => (m.body, m.status)), [
       ('kept', MessageStatus.sent),
       ('unsent', MessageStatus.failed),
@@ -1238,7 +1305,11 @@ void main() {
     firstRooms.timeline(_roomId)!;
     await _settle();
     firstRooms.timeline(_roomId)!.send('in flight');
-    await _settle();
+    await _until(
+      () =>
+          firstRooms.timeline(_roomId)!.messages.last.status ==
+          MessageStatus.sending,
+    );
     expect(
       firstRooms.timeline(_roomId)!.messages.last.status,
       MessageStatus.sending,

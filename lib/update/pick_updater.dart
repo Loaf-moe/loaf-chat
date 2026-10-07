@@ -16,14 +16,16 @@ import 'ed25519.dart';
 import 'flatpak_updater.dart';
 import 'release_feed.dart';
 import 'sparkle_updater.dart';
+import 'windows_updater.dart';
 
-enum UpdaterKind { none, sparkle, flatpak, appImage }
+enum UpdaterKind { none, sparkle, flatpak, appImage, windows }
 
 UpdaterKind chooseUpdater({
   required bool release,
   required int build,
   required TargetPlatform platform,
   required Map<String, String> environment,
+  required bool installedBySetup,
 }) {
   if (!release || build == 0) return UpdaterKind.none;
   bool has(String name) => (environment[name] ?? '').isNotEmpty;
@@ -32,6 +34,8 @@ UpdaterKind chooseUpdater({
     // Flatpak first: its sandbox is what is really running.
     TargetPlatform.linux when has('FLATPAK_ID') => UpdaterKind.flatpak,
     TargetPlatform.linux when has('APPIMAGE') => UpdaterKind.appImage,
+    // Only what Setup put in place: never a developer's build folder.
+    TargetPlatform.windows when installedBySetup => UpdaterKind.windows,
     _ => UpdaterKind.none,
   };
 }
@@ -39,11 +43,17 @@ UpdaterKind chooseUpdater({
 /// Call after vodozemac is initialised: the AppImage updater verifies with it.
 Updater pickUpdater() {
   final environment = Platform.environment;
+  final install = File(Platform.resolvedExecutable).parent;
   switch (chooseUpdater(
     release: kReleaseMode,
     build: buildNumber,
     platform: defaultTargetPlatform,
     environment: environment,
+    // Setup's uninstall log sits beside the executable it installed.
+    installedBySetup:
+        defaultTargetPlatform == TargetPlatform.windows &&
+        File('${install.path}${Platform.pathSeparator}unins000.dat')
+            .existsSync(),
   )) {
     case UpdaterKind.none:
       return const NoUpdater();
@@ -68,7 +78,16 @@ Updater pickUpdater() {
         appImage: File(environment['APPIMAGE']!),
         build: buildNumber,
         feed: latestFeed,
-        verify: ed25519Check(appImagePublicKey),
+        verify: ed25519Check(releasePublicKey),
       )..start();
+    case UpdaterKind.windows:
+      final updater = WindowsUpdater(
+        install: install,
+        build: buildNumber,
+        feed: latestFeed,
+        verify: ed25519Check(releasePublicKey),
+      );
+      unawaited(updater.start());
+      return updater;
   }
 }

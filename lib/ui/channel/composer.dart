@@ -1,6 +1,6 @@
 /// The message composer at the bottom of a channel: text, emoji — picked, or
-/// typed as `:shortcodes:` — and files attached from the platform's own
-/// picker.
+/// typed as `:shortcodes:` — `@person` and `#channel` mentions, and files
+/// attached from the platform's own picker.
 library;
 
 import 'package:file_selector/file_selector.dart' show XFile;
@@ -9,9 +9,12 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../members/role_colors.dart';
+import '../model/models.dart';
+import '../widgets/loaf_avatar.dart';
 import '../widgets/toast.dart';
 import 'attach.dart';
 import 'media_row.dart';
+import 'mentions.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'message_actions.dart';
@@ -50,6 +53,8 @@ class Composer extends StatefulWidget {
     this.pickFiles = pickAttachments,
     this.pasteFiles = pastedAttachments,
     this.hasPasteFiles = hasPastedAttachments,
+    this.people = const [],
+    this.channels = const [],
   });
 
   final String channelName;
@@ -72,6 +77,13 @@ class Composer extends StatefulWidget {
   /// nothing: see [ClipboardHasAttachments].
   final ClipboardHasAttachments hasPasteFiles;
 
+  /// Who `@` offers: the people here, in the member list's order. You are
+  /// left out, since there is no telling yourself.
+  final List<Member> people;
+
+  /// What `#` offers: the channels around this one.
+  final List<Channel> channels;
+
   @override
   State<Composer> createState() => _ComposerState();
 }
@@ -82,19 +94,28 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
   bool _hasText = false;
   ComposerTarget? _target;
 
-  /// Emoji for the `:shortcode` being typed, best first, and which one
-  /// Enter or Tab would take. Empty when there is no popup.
-  List<ShortcodeMatch> _suggestions = const [];
-  ShortcodeQuery? _query;
+  /// Emoji for the `:shortcode` being typed, or people or channels for the
+  /// `@` or `#` mention, best first, and which one Enter or Tab would take.
+  /// Empty when there is no popup.
+  List<_Suggestion> _suggestions = const [];
+
+  /// The [ShortcodeQuery] or [MentionQuery] being answered, and where it
+  /// starts in the text.
+  Object? _query;
+  int? _queryStart;
   int _highlight = 0;
 
-  /// Where the shortcode Escape waved away starts. It stays away while
-  /// that one is being typed, and comes back for the next.
+  /// Where the shortcode or mention Escape waved away starts. It stays
+  /// away while that one is being typed, and comes back for the next.
   int? _dismissedAt;
 
   /// Whether the clipboard held files when last looked at: the menu is built
   /// at once, so it can't wait to ask.
   bool _clipboardHasFiles = false;
+
+  /// Mentions picked into the field. Sending keeps only those the text
+  /// still holds.
+  List<Mention> _picked = const [];
 
   final _fieldLink = LayerLink();
   final _suggestionsPortal = OverlayPortalController();
@@ -107,6 +128,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     _target = widget.timeline?.target;
     if (_target case ComposerTarget(mode: ComposerMode.edit, :final message)) {
       _controller.text = message.body;
+      _picked = mentionsOf(message);
       _hasText = message.body.trim().isNotEmpty;
     }
     _controller.addListener(() {
@@ -167,35 +189,79 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     );
   }
 
-  /// Offers emoji for the shortcode at the cursor, if one is being typed
-  /// into a focused field.
+  /// Offers people or channels for the mention at the cursor, or emoji for
+  /// the shortcode, if one is being typed into a focused field.
   void _suggest() {
-    final query = _focus.hasFocus ? shortcodeAt(_controller.value) : null;
-    if (query?.start != _dismissedAt) _dismissedAt = null;
-    final matches = query == null || query.start == _dismissedAt
-        ? const <ShortcodeMatch>[]
-        : shortcodes.search(query.query, limit: 6);
+    final value = _controller.value;
+    final mention = _focus.hasFocus ? mentionAt(value) : null;
+    final code = _focus.hasFocus && mention == null ? shortcodeAt(value) : null;
+    final Object? query = mention ?? code;
+    final start = mention?.start ?? code?.start;
+    if (start != _dismissedAt) _dismissedAt = null;
+    final List<_Suggestion> matches;
+    if (start == null || start == _dismissedAt) {
+      matches = const [];
+    } else if (mention != null) {
+      final found = searchMentions(mention.query, _candidates(mention.kind));
+      matches = [for (final c in found) _MentionSuggestion(c)];
+    } else {
+      matches = [
+        for (final m in shortcodes.search(code!.query, limit: 6))
+          _EmojiSuggestion(m),
+      ];
+    }
     if (matches.isEmpty && _suggestions.isEmpty) return;
     setState(() {
       // A new letter narrows the list: start again from the best.
       if (query != _query) _highlight = 0;
       _query = query;
+      _queryStart = start;
       _suggestions = matches;
     });
     matches.isEmpty ? _suggestionsPortal.hide() : _suggestionsPortal.show();
   }
 
-  /// Puts [match]'s emoji where its shortcode was being typed.
-  void _acceptSuggestion(ShortcodeMatch match) {
-    final query = _query;
-    if (query == null) return;
+  Iterable<MentionCandidate> _candidates(MentionKind kind) => switch (kind) {
+    MentionKind.person => [
+      for (final m in widget.people)
+        if (m.id != widget.timeline?.you.id) MentionCandidate.person(m),
+    ],
+    MentionKind.channel => [
+      for (final c in widget.channels) MentionCandidate.channel(c),
+    ],
+  };
+
+  /// Puts [suggestion] where its shortcode or mention was being typed: an
+  /// emoji in place of its code, a mention's name followed by a space, so
+  /// the next word can simply be typed.
+  void _acceptSuggestion(_Suggestion suggestion) {
+    final start = _queryStart;
+    if (start == null) return;
     final value = _controller.value;
     final end = value.selection.baseOffset;
-    final emoji = match.emoji.char;
-    _controller.value = TextEditingValue(
-      text: value.text.replaceRange(query.start, end, emoji),
-      selection: TextSelection.collapsed(offset: query.start + emoji.length),
-    );
+    switch (suggestion) {
+      case _EmojiSuggestion(:final match):
+        final emoji = match.emoji.char;
+        _controller.value = TextEditingValue(
+          text: value.text.replaceRange(start, end, emoji),
+          selection: TextSelection.collapsed(offset: start + emoji.length),
+        );
+      case _MentionSuggestion(:final candidate):
+        final label = candidate.label;
+        // A space already after the cursor is the one to step over.
+        final spaced =
+            end < value.text.length && value.text[end].trim().isEmpty;
+        final text = value.text.replaceRange(
+          start,
+          end,
+          spaced ? label : '$label ',
+        );
+        _picked = [..._picked, candidate.mention];
+        _controller.value = TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: start + label.length + 1),
+        );
+    }
   }
 
   /// Arrow keys move through the suggestions, Enter or Tab takes one, and
@@ -222,7 +288,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.escape) {
-      _dismissedAt = _query?.start;
+      _dismissedAt = _queryStart;
       _suggest();
       return KeyEventResult.handled;
     }
@@ -339,12 +405,13 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     // A complete :shortcode: goes as its emoji, whether or not it was
     // picked from the suggestions.
     final text = shortcodes.expand(_controller.text);
+    final mentions = mentionsIn(text, _picked);
     final target = _target;
 
     if (target != null && target.mode == ComposerMode.edit) {
       if (text.trim().isNotEmpty) {
         // Clearing the target clears the field: see _onTimeline.
-        timeline.saveEdit(target.message.id, text);
+        timeline.saveEdit(target.message.id, text, mentions: mentions);
       } else if (await confirmDeleteMessage(context)) {
         timeline.delete(target.message.id);
       }
@@ -352,7 +419,8 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     }
 
     if (text.trim().isEmpty) return;
-    timeline.send(text);
+    timeline.send(text, mentions: mentions);
+    _picked = const [];
     _controller.clear();
   }
 
@@ -375,8 +443,10 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     setState(() => _target = next);
 
     if (next?.mode == ComposerMode.edit) {
-      _controller.text = next!.message.body;
+      _picked = mentionsOf(next!.message);
+      _controller.text = next.message.body;
     } else if (wasEditing) {
+      _picked = const [];
       _controller.clear();
     }
     if (next != null) _focus.requestFocus();
@@ -531,7 +601,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
             // Part of the field as far as taps go, so picking one keeps the
             // keyboard and focus where they are.
             child: TextFieldTapRegion(
-              child: _ShortcodeSuggestions(
+              child: _Suggestions(
                 matches: _suggestions,
                 highlight: _highlight,
                 onHover: (i) => setState(() => _highlight = i),
@@ -546,29 +616,47 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
   }
 }
 
-/// Emoji for the `:shortcode` being typed, above the field. Each row shows
-/// the emoji and the code it matched under, so the next time it can simply
-/// be typed.
-class _ShortcodeSuggestions extends StatelessWidget {
-  const _ShortcodeSuggestions({
+/// One row of the popup above the field.
+sealed class _Suggestion {
+  const _Suggestion();
+}
+
+class _EmojiSuggestion extends _Suggestion {
+  const _EmojiSuggestion(this.match);
+  final ShortcodeMatch match;
+}
+
+class _MentionSuggestion extends _Suggestion {
+  const _MentionSuggestion(this.candidate);
+  final MentionCandidate candidate;
+}
+
+/// What the `:shortcode` or `@`/`#` mention being typed could become, above
+/// the field. An emoji row shows the code it matched under, so the next
+/// time it can simply be typed; a person's shows their user id, which tells
+/// two of the same name apart. Each row is a tap target too, which is how a
+/// phone with no Tab key picks one.
+class _Suggestions extends StatelessWidget {
+  const _Suggestions({
     required this.matches,
     required this.highlight,
     required this.onHover,
     required this.onPick,
   });
 
-  final List<ShortcodeMatch> matches;
+  final List<_Suggestion> matches;
   final int highlight;
   final ValueChanged<int> onHover;
-  final ValueChanged<ShortcodeMatch> onPick;
+  final ValueChanged<_Suggestion> onPick;
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
     // A finger needs a taller row than a pointer.
     final rowHeight = isDesktop ? 32.0 : 44.0;
+    final mentions = matches.firstOrNull is _MentionSuggestion;
     return DecoratedBox(
-      key: const ValueKey('shortcode-suggestions'),
+      key: ValueKey(mentions ? 'mention-suggestions' : 'shortcode-suggestions'),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(LoafRadius.lg),
         boxShadow: tokens.shadowMd,
@@ -581,7 +669,10 @@ class _ShortcodeSuggestions extends StatelessWidget {
           side: BorderSide(color: tokens.border),
         ),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: 200, maxWidth: 320),
+          constraints: BoxConstraints(
+            minWidth: mentions ? 240 : 200,
+            maxWidth: 320,
+          ),
           child: Padding(
             padding: const EdgeInsets.all(LoafSpace.x1),
             child: Column(
@@ -606,24 +697,12 @@ class _ShortcodeSuggestions extends StatelessWidget {
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(LoafRadius.md),
                         ),
-                        child: Row(
-                          children: [
-                            Text(
-                              matches[i].emoji.char,
-                              style: const TextStyle(fontSize: 18),
-                            ),
-                            const SizedBox(width: LoafSpace.x2),
-                            Flexible(
-                              child: Text(
-                                ':${matches[i].code}:',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: loafMono(13)
-                                    .copyWith(color: tokens.textBody),
-                              ),
-                            ),
-                          ],
-                        ),
+                        child: switch (matches[i]) {
+                          _EmojiSuggestion(:final match) => _EmojiRow(match),
+                          _MentionSuggestion(:final candidate) => _MentionRow(
+                            candidate,
+                          ),
+                        },
                       ),
                     ),
                   ),
@@ -632,6 +711,86 @@ class _ShortcodeSuggestions extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _EmojiRow extends StatelessWidget {
+  const _EmojiRow(this.match);
+
+  final ShortcodeMatch match;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return Row(
+      children: [
+        Text(match.emoji.char, style: const TextStyle(fontSize: 18)),
+        const SizedBox(width: LoafSpace.x2),
+        Flexible(
+          child: Text(
+            ':${match.code}:',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: loafMono(13).copyWith(color: tokens.textBody),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MentionRow extends StatelessWidget {
+  const _MentionRow(this.candidate);
+
+  final MentionCandidate candidate;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    final member = candidate.member;
+    final channel = candidate.channel;
+    final Widget leading = member != null
+        ? LoafAvatar(
+            label: member.initials,
+            color: member.color,
+            size: 22,
+            image: member.avatar,
+            textStyle: loafBody(10, 600),
+          )
+        : SizedBox(
+            width: 22,
+            child: Icon(channel!.icon, size: 16, color: tokens.textMuted),
+          );
+    return Row(
+      children: [
+        leading,
+        const SizedBox(width: LoafSpace.x2),
+        Flexible(
+          child: Text(
+            candidate.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: loafBody(14, 600).copyWith(
+              color: member != null
+                  ? tokens.nameColor(member.role)
+                  : tokens.textStrong,
+            ),
+          ),
+        ),
+        if (member != null) ...[
+          const SizedBox(width: LoafSpace.x2),
+          Expanded(
+            child: Text(
+              member.id,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+              style: loafMono(11).copyWith(color: tokens.textMuted),
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

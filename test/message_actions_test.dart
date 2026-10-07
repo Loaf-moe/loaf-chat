@@ -440,6 +440,34 @@ void main() {
       },
     );
 
+    testWidgets(
+      'on Windows a picture also names the app it would open in; a file, '
+      'which Open already opens there, does not',
+      variant: TargetPlatformVariant.only(TargetPlatform.windows),
+      (tester) async {
+        expect(
+          actionsFor(captionless(MessageStatus.sent), _you, writable: false),
+          [MessageAction.open, MessageAction.openWith, MessageAction.saveAs],
+        );
+        final pdf = Message(
+          id: 'p',
+          author: _you,
+          sentAt: DateTime(2026, 9, 24, 10),
+          body: '',
+          status: MessageStatus.sent,
+          media: const Media(
+            kind: MediaKind.file,
+            name: 'recipe.pdf',
+            ref: 'x',
+          ),
+        );
+        expect(actionsFor(pdf, _you, writable: false), [
+          MessageAction.open,
+          MessageAction.saveAs,
+        ]);
+      },
+    );
+
     test('a failed captioned one can still be copied', () {
       final m = Message(
         id: 'c',

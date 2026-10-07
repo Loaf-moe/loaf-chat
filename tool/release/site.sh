@@ -11,11 +11,14 @@ version="$(jq -er '.version' "$feed")"
 appimage_url="$(jq -er '.appimage.url' "$feed")"
 # The DMG sits beside the AppImage on the same GitHub Release; see macos.sh.
 dmg_url="https://github.com/Loaf-moe/loaf-chat/releases/download/v$version/Loaf-Chat-$version.dmg"
+# Setup is there too; the zip in the feed is for updates, not for people.
+setup_url="https://github.com/Loaf-moe/loaf-chat/releases/download/v$version/Loaf-Chat-$version-Setup.exe"
 
 mkdir -p "$out/fonts"
 sed -e "s|{{VERSION}}|$version|g" \
     -e "s|{{DMG_URL}}|$dmg_url|g" \
     -e "s|{{APPIMAGE_URL}}|$appimage_url|g" \
+    -e "s|{{SETUP_URL}}|$setup_url|g" \
     "$site/index.html" > "$out/index.html"
 # A placeholder left in means the template grew one this script doesn't fill.
 if grep -n '{{' "$out/index.html"; then

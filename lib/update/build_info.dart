@@ -7,6 +7,6 @@ const buildNumber = int.fromEnvironment('LOAF_BUILD');
 
 final latestFeed = Uri.parse('https://get.loaf.moe/latest.json');
 
-/// The release key's public half. Its private half signs `latest.json` in
-/// CI; see tool/release/keygen.sh.
-const appImagePublicKey = 'pkPvo7yx06M9su5PnOilqBnM2okapgEXH3B1e6BY+bo=';
+/// The release key's public half. Its private half signs each build named in
+/// `latest.json` (the AppImage, Windows) in CI; see tool/release/keygen.sh.
+const releasePublicKey = 'pkPvo7yx06M9su5PnOilqBnM2okapgEXH3B1e6BY+bo=';

@@ -1051,8 +1051,19 @@ class _AppShellState extends State<AppShell> {
             )
           : null,
       callPanelExpanded: _dmPanelExpanded,
+      people: _members(channel, _me).members,
+      channels: _mentionableChannels,
     );
   }
+
+  /// What `#` offers in the composer: the space's channels, or Home's rooms
+  /// — never its DMs, which are people rather than places.
+  List<Channel> get _mentionableChannels => _home
+      ? [
+          for (final room in _homeRooms)
+            if (room.kind == ChannelKind.room) room,
+        ]
+      : _space.allChannels.toList();
 
   /// Desktop call shortcuts, live only while you are in a call. Escape
   /// leaves fullscreen.

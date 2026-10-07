@@ -1,7 +1,8 @@
-/// Video on Linux: GStreamer, through the Rust player in `linux/rust/`,
-/// draws into a Flutter texture, and the controls are drawn here, since
-/// Linux has no player UI of its own. The C end is
-/// `linux/loaf_media_plugin.cc`.
+/// Video drawn into a Flutter texture, with controls drawn here: Linux
+/// (GStreamer, through `linux/rust/`) and Windows (Media Foundation, through
+/// `windows/rust/`). Linux has no player UI of its own, and Windows' can't
+/// sit inside Flutter. The C ends are `linux/loaf_media_plugin.cc` and
+/// `windows/loaf_media_plugin.cpp`.
 library;
 
 import 'dart:async';
@@ -114,11 +115,12 @@ class _Player extends ChangeNotifier {
 
 /// The player for one file on Linux: the texture, and Flutter controls
 /// over it.
-class LinuxVideo extends StatefulWidget {
-  const LinuxVideo({
+class TextureVideo extends StatefulWidget {
+  const TextureVideo({
     super.key,
     required this.id,
     required this.aspect,
+    this.mimeType,
     this.onCreated,
     this.onFailed,
     this.onOpen,
@@ -131,6 +133,9 @@ class LinuxVideo extends StatefulWidget {
   final String id;
   final double aspect;
 
+  /// What the sender said the file is, so the player knows its container.
+  final String? mimeType;
+
   /// The native view's id, for what the native side says about it.
   final ValueChanged<int>? onCreated;
 
@@ -142,10 +147,10 @@ class LinuxVideo extends StatefulWidget {
   final VoidCallback? onOpen;
 
   @override
-  State<LinuxVideo> createState() => _LinuxVideoState();
+  State<TextureVideo> createState() => _TextureVideoState();
 }
 
-class _LinuxVideoState extends State<LinuxVideo> {
+class _TextureVideoState extends State<TextureVideo> {
   _Player? _player;
   var _createFailed = false;
   var _gone = false;
@@ -165,7 +170,7 @@ class _LinuxVideoState extends State<LinuxVideo> {
     try {
       created = await _channel.invokeMapMethod<String, Object?>(
         'video.create',
-        {'id': widget.id},
+        {'id': widget.id, 'mime': widget.mimeType},
       );
     } on Exception catch (e) {
       debugPrint('[loaf media] video.create: $e');
@@ -422,7 +427,7 @@ class _SurfaceState extends State<_Surface> {
           },
         );
     return Material(
-      key: LinuxVideo.controlsKey,
+      key: TextureVideo.controlsKey,
       type: MaterialType.transparency,
       child: DecoratedBox(
         decoration: const BoxDecoration(

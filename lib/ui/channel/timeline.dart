@@ -6,6 +6,9 @@ library;
 import 'package:flutter/foundation.dart';
 
 import '../model/models.dart';
+import 'mentions.dart';
+
+export 'mentions.dart' show Mention, MentionKind;
 
 enum ComposerMode { reply, edit }
 
@@ -68,8 +71,10 @@ abstract interface class Timeline implements Listenable {
   void clearTarget();
 
   /// Posts [text], quoting the reply target if there is one. Blank text
-  /// never sends.
-  void send(String text);
+  /// never sends. [mentions] are the people and channels picked into it,
+  /// already narrowed to the ones [text] still holds: each goes as a pill,
+  /// and each person is told.
+  void send(String text, {List<Mention> mentions = const []});
 
   /// The largest file the server takes, in bytes, or null where it can't
   /// be told. The composer checks a picked file against it before reading
@@ -87,7 +92,12 @@ abstract interface class Timeline implements Listenable {
   void toggleReaction(String messageId, String emoji);
 
   /// Replaces a message's text. Blank or unchanged text is not an edit.
-  void saveEdit(String messageId, String text);
+  /// [mentions] are as for [send].
+  void saveEdit(
+    String messageId,
+    String text, {
+    List<Mention> mentions = const [],
+  });
 
   void delete(String messageId);
 

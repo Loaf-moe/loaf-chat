@@ -9,8 +9,13 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 // The SDK's own Timeline is the one wrapped here; the UI's is `ui.Timeline`.
 import 'package:matrix/matrix.dart';
+// The SDK's own markdown, so a message with mentions is formatted exactly as
+// one without: it is not exported, but it is what sendTextEvent runs.
+// ignore: implementation_imports
+import 'package:matrix/src/utils/markdown.dart' show markdown;
 
 import '../ui/auth/loaf_session.dart' show DeviceTrust;
+import '../ui/channel/mentions.dart' as ui;
 import '../ui/channel/sizes.dart' show tooBigToSend;
 import '../ui/channel/timeline.dart' as ui;
 import '../ui/model/models.dart' as ui;
@@ -342,7 +347,7 @@ class MatrixTimeline extends ChangeNotifier
   }
 
   @override
-  void send(String text) {
+  void send(String text, {List<ui.Mention> mentions = const []}) {
     final body = text.trim();
     if (body.isEmpty) return;
     final target = this.target;
@@ -352,20 +357,66 @@ class MatrixTimeline extends ChangeNotifier
     // A failure shows on the message itself, which stays to retry.
     unawaited(
       _send(
-        (txid) => room.sendTextEvent(
-          body,
-          txid: txid,
-          inReplyTo: replyTo,
-          // Markdown goes as formatted_body HTML beside the plain body, as
-          // Element sends it; the SDK leaves the format off when there is
-          // nothing to format. A leading slash is still just text.
-          parseMarkdown: true,
-          parseCommands: false,
-        ),
+        (txid) => mentions.isEmpty
+            ? room.sendTextEvent(
+                body,
+                txid: txid,
+                inReplyTo: replyTo,
+                // Markdown goes as formatted_body HTML beside the plain body,
+                // as Element sends it; the SDK leaves the format off when
+                // there is nothing to format. A leading slash is still just
+                // text.
+                parseMarkdown: true,
+                parseCommands: false,
+              )
+            : room.sendEvent(
+                _mentioning(body, mentions, replyTo: replyTo),
+                txid: txid,
+                inReplyTo: replyTo,
+              ),
       ).then<void>((_) {}, onError: (Object _) {}),
     );
     aim(null);
   }
+
+  /// A text message's content with [mentions] in it, as sendTextEvent would
+  /// write it but for the pills: the plain body keeps the names as typed,
+  /// `@Ada`, and only the formatted body links them. sendTextEvent can't
+  /// say that, since it formats the body it sends. [already] are people the
+  /// edited message told before, who an edit need not tell again.
+  Map<String, Object?> _mentioning(
+    String body,
+    List<ui.Mention> mentions, {
+    Event? replyTo,
+    Set<String> already = const {},
+  }) {
+    final html = markdown(
+      ui.linkMentions(body, mentions),
+      getEmotePacks: () => room.getImagePacksFlat(ImagePackUsage.emoticon),
+      getMention: room.getMention,
+      convertLinebreaks: room.client.convertLinebreaksInFormatting,
+      enableLatex: room.client.enableLatexMarkdown,
+    );
+    final users = {
+      ...ui.mentionedUserIds(mentions),
+      // https://spec.matrix.org/v1.7/client-server-api/#mentioning-the-replied-to-user
+      ?replyTo?.senderId,
+    }..removeAll({?room.client.userID, ...already});
+    final everyone = _roomPing.hasMatch(body);
+    return {
+      'msgtype': MessageTypes.Text,
+      'body': body,
+      'format': 'org.matrix.custom.html',
+      'formatted_body': html,
+      if (users.isNotEmpty || everyone)
+        'm.mentions': {
+          if (everyone) 'room': true,
+          if (users.isNotEmpty) 'user_ids': users.toList(),
+        },
+    };
+  }
+
+  static final _roomPing = RegExp(r'(?:^|\s)@room\b');
 
   @override
   void sendFile(ui.Attachment file) {
@@ -438,19 +489,35 @@ class MatrixTimeline extends ChangeNotifier
   }
 
   @override
-  void saveEdit(String messageId, String text) {
+  void saveEdit(
+    String messageId,
+    String text, {
+    List<ui.Mention> mentions = const [],
+  }) {
     final body = text.trim();
     final current = messages.where((m) => m.id == messageId).firstOrNull;
     if (current != null && body.isNotEmpty && body != current.body) {
+      // Whoever the message told already heard: an edit tells only the
+      // people it newly names.
+      final told = switch (_event(messageId)?.content['m.mentions']) {
+        {'user_ids': final List<Object?> ids} => {...ids.whereType<String>()},
+        _ => const <String>{},
+      };
       _attempt(
         () => _send(
-          (txid) => room.sendTextEvent(
-            body,
-            txid: txid,
-            editEventId: messageId,
-            parseMarkdown: true,
-            parseCommands: false,
-          ),
+          (txid) => mentions.isEmpty
+              ? room.sendTextEvent(
+                  body,
+                  txid: txid,
+                  editEventId: messageId,
+                  parseMarkdown: true,
+                  parseCommands: false,
+                )
+              : room.sendEvent(
+                  _mentioning(body, mentions, already: told),
+                  txid: txid,
+                  editEventId: messageId,
+                ),
         ),
         "couldn't save that edit",
       );

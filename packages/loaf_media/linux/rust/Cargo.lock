@@ -354,7 +354,12 @@ dependencies = [
  "gstreamer-app",
  "gstreamer-base",
  "gstreamer-video",
+ "loaf_streams",
 ]
+
+[[package]]
+name = "loaf_streams"
+version = "0.0.0"
 
 [[package]]
 name = "memchr"
