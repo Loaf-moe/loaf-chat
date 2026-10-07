@@ -383,10 +383,9 @@ class Space {
   int get mentions =>
       allChannels.where((c) => c.joined).fold(0, (sum, c) => sum + c.mentions);
 
-  /// Unread messages across the channels you are in and have not muted.
-  int get unread => allChannels
-      .where((c) => c.joined && !c.muted)
-      .fold(0, (sum, c) => sum + c.unread);
+  /// Unread messages across the channels you are in, muted or not.
+  int get unread =>
+      allChannels.where((c) => c.joined).fold(0, (sum, c) => sum + c.unread);
 
   /// '?' for a name with nothing in it, which a server will happily send.
   String get initials {

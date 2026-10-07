@@ -11,6 +11,7 @@ import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/count_label.dart';
 import '../widgets/loaf_avatar.dart';
 import 'channel_actions.dart';
 import 'user_bar.dart';
@@ -520,9 +521,8 @@ class _ChannelEntry extends StatelessWidget {
     final joined = channel.joined;
     final direct = channel.kind == ChannelKind.direct;
     final room = channel.kind == ChannelKind.room;
-    // Muted channels keep their mentions but lose the bold "something new"
-    // styling: that is the point of muting them.
-    final unread = joined && !channel.muted && channel.unread > 0;
+    // Mute quiets notifications and sound, not what's unread.
+    final unread = joined && channel.unread > 0;
     final iconData = channel.icon;
     final fg = selected
         ? tokens.accent
@@ -886,7 +886,7 @@ class _CountBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(LoafRadius.full),
       ),
       child: Text(
-        '$count',
+        countLabel(count),
         style: loafBody(11, 700).copyWith(color: Colors.white),
       ),
     );

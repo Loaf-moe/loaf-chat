@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/count_label.dart';
 import '../widgets/loaf_avatar.dart';
 import 'app_notice.dart';
 import 'user_bar.dart';
@@ -224,19 +225,32 @@ class _LoafMark extends StatelessWidget {
 
 /// The accent bar at the rail's left edge that marks where you are.
 class _SelectionPill extends StatelessWidget {
-  const _SelectionPill({required this.tokens, required this.selected});
+  const _SelectionPill({
+    super.key,
+    required this.tokens,
+    required this.selected,
+    this.unread = false,
+  });
 
   final LoafTokens tokens;
   final bool selected;
+
+  /// Something unread in a space you aren't in: a short pip where the
+  /// selection pill goes.
+  final bool unread;
 
   @override
   Widget build(BuildContext context) => AnimatedContainer(
     duration: LoafMotion.fast,
     curve: LoafMotion.ease,
     width: 4,
-    height: selected ? 26 : 0,
+    height: selected
+        ? 26
+        : unread
+        ? 8
+        : 0,
     decoration: BoxDecoration(
-      color: tokens.accent,
+      color: selected ? tokens.accent : tokens.textStrong,
       borderRadius: BorderRadius.circular(2),
     ),
   );
@@ -264,8 +278,8 @@ class _SpaceItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final badgeCount = space.mentions > 0 ? space.mentions : space.unread;
-    final showBadge = space.mentions > 0 || space.unread > 0;
+    // Only a mention is addressed to you; plain unreads get the pip.
+    final showBadge = space.mentions > 0;
 
     return GestureDetector(
       onTap: onTap,
@@ -288,7 +302,14 @@ class _SpaceItem extends StatelessWidget {
               top: 0,
               bottom: 0,
               child: Center(
-                child: _SelectionPill(tokens: tokens, selected: selected),
+                child: _SelectionPill(
+                  key: !selected && space.unread > 0
+                      ? ValueKey('space-unread-${space.id}')
+                      : null,
+                  tokens: tokens,
+                  selected: selected,
+                  unread: space.unread > 0,
+                ),
               ),
             ),
             Center(
@@ -324,7 +345,7 @@ class _SpaceItem extends StatelessWidget {
                         right: -4,
                         top: -4,
                         child: _CountBadge(
-                          count: badgeCount,
+                          count: space.mentions,
                           tokens: tokens,
                           ringColor: tokens.rail,
                         ),
@@ -369,7 +390,7 @@ class _CountBadge extends StatelessWidget {
             : Border.all(color: ringColor!, width: 2),
       ),
       child: Text(
-        '$count',
+        countLabel(count),
         style: loafBody(11, 700).copyWith(color: Colors.white),
       ),
     );
