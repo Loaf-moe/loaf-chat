@@ -49,6 +49,7 @@ class MediaStore {
     required this.downloadUri,
     required this.accessToken,
     this.capBytes = 2000 * 1000 * 1000,
+    this.removeFolder = _removeFolder,
   });
 
   final Directory root;
@@ -56,6 +57,12 @@ class MediaStore {
   final Future<Uri> Function(Uri mxc) downloadUri;
   final String? Function() accessToken;
   final int capBytes;
+
+  /// How an evicted file's folder goes. Here so a test can have one refuse.
+  final Future<void> Function(Directory folder) removeFolder;
+
+  static Future<void> _removeFolder(Directory folder) =>
+      folder.delete(recursive: true);
 
   final _running = <Uri, StoredFile>{};
   final _held = <String, int>{};
@@ -134,7 +141,7 @@ class MediaStore {
       if (total <= capBytes) break;
       if (_disposed) return;
       if ((_held[e.id] ?? 0) > 0 || busy.contains(e.id)) continue;
-      if (await e.dir.exists()) await e.dir.delete(recursive: true);
+      if (await e.dir.exists()) await removeFolder(e.dir);
       total -= e.size;
     }
   }

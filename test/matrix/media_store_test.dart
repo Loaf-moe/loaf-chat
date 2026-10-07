@@ -29,6 +29,7 @@ void main() {
   MediaStore storeOver(
     http.Client client, {
     int capBytes = 2000 * 1000 * 1000,
+    Future<void> Function(Directory)? removeFolder,
   }) => MediaStore(
     root: root,
     client: client,
@@ -38,6 +39,7 @@ void main() {
     ),
     accessToken: () => 'tok',
     capBytes: capBytes,
+    removeFolder: removeFolder ?? (d) => d.delete(recursive: true),
   );
 
   /// Serves [chunks] whole, at once.
@@ -268,15 +270,23 @@ void main() {
         ..writeAsBytesSync(List.filled(100, 1))
         ..setLastModifiedSync(DateTime(2026, 1, 1 + i));
     }
-    final store = storeOver(serving([]), capBytes: 100);
-    addTearDown(store.dispose);
-    // A folder that cannot be written to refuses to give up its file.
+    // The oldest folder refuses to go the first time.
     final locked = '${root.path}/${_id(uris[0])}';
-    Process.runSync('chmod', ['555', locked]);
-    addTearDown(() => Process.runSync('chmod', ['755', locked]));
+    var refuse = true;
+    final store = storeOver(
+      serving([]),
+      capBytes: 100,
+      removeFolder: (folder) async {
+        if (refuse && folder.path == locked) {
+          throw const FileSystemException('permission denied');
+        }
+        await folder.delete(recursive: true);
+      },
+    );
+    addTearDown(store.dispose);
     await store.evict();
     expect(File('$locked/f.bin').existsSync(), isTrue);
-    Process.runSync('chmod', ['755', locked]);
+    refuse = false;
     await store.evict();
     expect(Directory('${root.path}/${_id(uris[0])}').existsSync(), isFalse);
     expect(Directory('${root.path}/${_id(uris[1])}').existsSync(), isTrue);

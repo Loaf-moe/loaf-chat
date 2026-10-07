@@ -106,8 +106,6 @@ void main() {
 
   tearDown(() async {
     await server.close();
-    // A test may have made the folder read-only.
-    Process.runSync('chmod', ['-R', 'u+w', dir.path]);
     dir.deleteSync(recursive: true);
   });
 
@@ -222,9 +220,11 @@ void main() {
     expect(appImage.readAsStringSync(), _old);
   });
 
-  test('a folder that cannot be written leaves the file alone', () async {
+  test('an update that cannot be written leaves the file alone', () async {
     server.offer();
-    Process.runSync('chmod', ['u-w', dir.path]);
+    // Where the download goes is taken by a folder, so no file can be made
+    // there. Permissions would do it too, but not for root.
+    Directory('${appImage.path}.part').createSync();
     final u = updater();
     await u.check();
     expect(u.state, isA<UpdateIdle>());
