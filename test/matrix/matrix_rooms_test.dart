@@ -507,6 +507,50 @@ void main() {
       expect(channel(rooms, general).mentions, 1);
     });
 
+    test(
+      'a fill finishing during the re-check does not lose the sync',
+      () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _bakery(client);
+        await _settle();
+        await _timeline(client, general, [
+          {
+            'type': 'm.room.encrypted',
+            'sender': '@ada:example.com',
+            'content': {
+              'algorithm': 'm.megolm.v1.aes-sha2',
+              'ciphertext': 'locked',
+              'session_id': 'nokey',
+              'sender_key': 'k',
+              'device_id': 'D',
+            },
+            'event_id': r'$locked',
+            'origin_server_ts': 1700000000000 + _events++ * 1000,
+          },
+        ]);
+        await _settle();
+
+        // A room never counted starts a fill that waits on the server.
+        const oven = '!oven:example.com';
+        api.hold = Completer<void>();
+        api.roomHistory[oven] = [_msg('baked')];
+        await _timeline(client, oven, [
+          api.roomHistory[oven]!.first,
+        ], limited: true);
+        await _settle();
+
+        // The fill lands, adding a tally, while this sync re-checks general.
+        final sync = _timeline(client, general, [_msg('after')]);
+        api.hold!.complete();
+        await sync;
+        await _settle();
+        expect(channel(rooms, general).unread, 2);
+        expect(channel(rooms, oven).unread, 1);
+      },
+    );
+
     test('a muted room still counts', () async {
       final (client, rooms) = await bakery();
       await rooms.setMuted(general, true);

@@ -95,17 +95,31 @@ class MatrixUnread {
     }
     // Messages counted while still encrypted: once the SDK has stored them
     // readable, see whether they mention you. A room being filled is skipped,
-    // since the fill replaces its tally anyway.
-    for (final MapEntry(key: roomId, value: tally) in _tallies.entries) {
+    // since the fill replaces its tally anyway. Walks a snapshot: a fill
+    // finishing during an await adds rooms to the live map.
+    for (final MapEntry(key: roomId, value: tally)
+        in <MapEntry<String, RoomTally>>[..._tallies.entries]) {
       if (_filling.contains(roomId)) continue;
       final locked = tally.entries.where((e) => e.locked).toList();
       if (locked.isEmpty) continue;
       final room = client.getRoomById(roomId);
       if (room == null) continue;
-      for (final entry in locked) {
-        final stored = await client.database.getEventById(entry.id, room);
-        if (stored == null || stored.type == EventTypes.Encrypted) continue;
-        if (tally.replace(await _entry(room, stored))) changed = true;
+      try {
+        for (final entry in locked) {
+          final stored = await client.database.getEventById(entry.id, room);
+          if (stored == null || stored.type == EventTypes.Encrypted) continue;
+          final reread = await _entry(room, stored);
+          // A fill that landed meanwhile replaced this tally; it counted
+          // the message itself.
+          if (_filling.contains(roomId) ||
+              !identical(_tallies[roomId], tally)) {
+            break;
+          }
+          if (tally.replace(reread)) changed = true;
+        }
+      } on Object catch (e) {
+        // One unreadable room mustn't cost the rest of the sync its flush.
+        Logs().v('[loaf] unread re-check for $roomId failed: $e');
       }
     }
     // Fills that failed get another go now the server answers syncs again.
