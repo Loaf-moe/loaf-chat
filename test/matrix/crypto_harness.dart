@@ -11,30 +11,29 @@ import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-/// Where a desktop build leaves the native library the app loads: `flutter
-/// build macos --debug` on a Mac, `flutter build windows` on Windows (CI); on
-/// Linux, what `tool/build-vodozemac` builds.
-(String, String) get _library => Platform.isWindows
-    ? ('build/windows/x64/runner/Release/', 'vodozemac_bindings_dart.dll')
+/// The native library under the name vodozemac loads on this platform.
+final _file = Platform.isWindows
+    ? 'vodozemac_bindings_dart.dll'
     : Platform.isMacOS
-    ? ('build/macos/Build/Products/Debug/', 'libflutter_vodozemac.dylib')
-    : ('build/vodozemac/', 'libvodozemac_bindings_dart.so');
+    ? 'libflutter_vodozemac.dylib'
+    : 'libvodozemac_bindings_dart.so';
 
-final _howToBuild = Platform.isWindows
-    ? 'run `flutter build windows`'
-    : Platform.isMacOS
-    ? 'run `mise exec -- flutter build macos --debug`'
-    : 'run `sh tool/build-vodozemac`';
+/// What `tool/build-vodozemac` builds, which CI uses; on a Mac, a debug app
+/// build has one too.
+final _dirs = [
+  'build/vodozemac/',
+  if (Platform.isMacOS) 'build/macos/Build/Products/Debug/',
+];
 
 Future<void>? _loading;
 
 /// Loads vodozemac from its build, once per test file.
 Future<void> loadVodozemac() => _loading ??= () async {
-  final (dir, file) = _library;
-  if (!File('$dir$file').existsSync()) {
+  final dir = _dirs.where((d) => File('$d$_file').existsSync()).firstOrNull;
+  if (dir == null) {
     fail(
-      'encryption tests need vodozemac built: $_howToBuild once, then test '
-      'again',
+      'encryption tests need vodozemac built: run `sh tool/build-vodozemac` '
+      'once, then test again',
     );
   }
   await vod.init(libraryPath: dir);
