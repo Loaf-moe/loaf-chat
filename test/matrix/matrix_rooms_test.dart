@@ -897,6 +897,25 @@ void main() {
       expect(channel(rooms, general).unread, 2);
     });
 
+    test('a plain sync during a fill does not start another', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [_msg('a', ts: 1000)];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      await _timeline(client, general, [_msg('during', ts: 2000)]);
+      await _timeline(client, general, const []);
+      await _settle();
+      api.hold!.complete();
+      await _settle();
+      expect(api.historyCalls[general], 1);
+      expect(channel(rooms, general).unread, 2);
+    });
+
     test('leaving during a fill leaves no tally behind', () async {
       final api = _Api()..hold = Completer<void>();
       final client = await _client(api: api);

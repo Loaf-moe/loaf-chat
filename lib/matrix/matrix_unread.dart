@@ -35,9 +35,9 @@ class MatrixUnread {
   /// arrived late with a time before it.
   final _receipts = <String, ({String eventId, int ts})>{};
 
-  /// Rooms whose local history can't be trusted and must be counted from
-  /// the server: a limited sync skipped messages, or a fill failed.
-  final _needsFill = <String>{};
+  /// Rooms whose last fill failed. Their counts stay as they were and the
+  /// next sync tries again.
+  final _failed = <String>{};
   final _filling = <String>{};
 
   /// Rooms that needed a fill again while one was already out: a gap, or
@@ -130,12 +130,16 @@ class MatrixUnread {
       }
     }
     // Fills that failed get another go now the server answers syncs again.
-    for (final roomId in [..._needsFill]) {
-      _scheduleFill(roomId);
+    // Only those: a room mid-fill would otherwise be asked for again by
+    // every sync that lands, and never finish.
+    for (final roomId in [..._failed]) {
+      if (!_filling.contains(roomId) && !_fillQueue.contains(roomId)) {
+        _scheduleFill(roomId);
+      }
     }
     for (final roomId in update.rooms?.leave?.keys ?? const <String>[]) {
       _receipts.remove(roomId);
-      _needsFill.remove(roomId);
+      _failed.remove(roomId);
       _fillQueue.remove(roomId);
       _refill.remove(roomId);
       if (_tallies.remove(roomId) != null) changed = true;
@@ -174,7 +178,6 @@ class MatrixUnread {
   }
 
   void _scheduleFill(String roomId) {
-    _needsFill.add(roomId);
     if (_filling.contains(roomId)) {
       _refill.add(roomId);
       return;
@@ -193,7 +196,7 @@ class MatrixUnread {
       unawaited(
         _fill(roomId).whenComplete(() {
           _filling.remove(roomId);
-          if (_refill.remove(roomId) && _needsFill.contains(roomId)) {
+          if (_refill.remove(roomId)) {
             _fillQueue.add(roomId);
           }
           _pump();
@@ -207,7 +210,7 @@ class MatrixUnread {
   Future<void> _fill(String roomId) async {
     final room = client.getRoomById(roomId);
     if (room == null) {
-      _needsFill.remove(roomId);
+      _failed.remove(roomId);
       return;
     }
     final own = _ownReceipt(room);
@@ -244,12 +247,13 @@ class MatrixUnread {
       }
     } on Object catch (e) {
       Logs().v('[loaf] unread fill for $roomId failed: $e');
-      return; // Still in _needsFill: the next sync tries again.
+      _failed.add(roomId); // The next sync tries again.
+      return;
     }
     if (_disposed) return;
     if (client.getRoomById(roomId)?.membership != Membership.join) {
       // Left while the fetch was out: nothing to count.
-      _needsFill.remove(roomId);
+      _failed.remove(roomId);
       return;
     }
     // Messages a sync counted while this fill was out are newer than
@@ -268,9 +272,7 @@ class MatrixUnread {
       _receipts[roomId] = (eventId: current.eventId, ts: current.ts);
     }
     _tallies[roomId] = tally;
-    // A refill is still owed when something landed that this fetch may have
-    // missed; the flag stays so it runs.
-    if (!_refill.contains(roomId)) _needsFill.remove(roomId);
+    _failed.remove(roomId);
     _scheduleSave();
     onChange();
   }
