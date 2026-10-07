@@ -2,6 +2,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -399,6 +400,10 @@ class _TimelineState extends State<_Timeline> {
   /// then is a page coming in, not a message arriving.
   late bool _short;
 
+  /// The stretch this State was built for. A notify that bumps it is for
+  /// the State that replaces this one, which must find its jump target.
+  late final int _stretch;
+
   /// The message the list grows from, once one has been jumped to.
   String? _split;
 
@@ -411,6 +416,7 @@ class _TimelineState extends State<_Timeline> {
     super.initState();
     _lastId = widget.controller.messages.lastOrNull?.id;
     _short = widget.controller.canLoadNewer;
+    _stretch = widget.controller.stretch;
     widget.controller.addListener(_onMessages);
     _scroll.addListener(_maybeLoadMore);
     _failures = widget.controller.failures.listen((text) {
@@ -438,8 +444,10 @@ class _TimelineState extends State<_Timeline> {
   /// change neither.
   void _onMessages() {
     final controller = widget.controller;
+    if (controller.stretch != _stretch) return;
     final last = controller.messages.lastOrNull;
     final paged = _short;
+    final atNewest = _scroll.hasClients && _scroll.position.extentBefore < 4;
     _short = controller.canLoadNewer;
     final arrived = last != null && last.id != _lastId && !paged;
     _lastId = last?.id;
@@ -447,6 +455,15 @@ class _TimelineState extends State<_Timeline> {
     _checkFilled();
     _maybeReveal();
     if (!arrived) return;
+    if (atNewest && _split != null && last.author.id != controller.you.id) {
+      // After a jump new messages grow below the split, out of view: stay
+      // at the newest end rather than leave them below the fold.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scroll.hasClients) {
+          _scroll.jumpTo(_scroll.position.minScrollExtent);
+        }
+      });
+    }
     if (last.author.id == controller.you.id) {
       if (_scroll.hasClients) {
         // The newest end: below any jump's split, so not always offset 0.
@@ -469,7 +486,7 @@ class _TimelineState extends State<_Timeline> {
   void _maybeReveal() {
     final controller = widget.controller;
     final target = controller.jumpTarget;
-    if (!mounted || target == null) return;
+    if (!mounted || target == null || controller.stretch != _stretch) return;
     controller.jumpShown();
     if (!controller.messages.any((m) => m.id == target)) return;
     _unlight?.cancel();
@@ -482,12 +499,7 @@ class _TimelineState extends State<_Timeline> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) return;
       _scroll.jumpTo(0);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final context = _focusKey.currentContext;
-        if (mounted && context != null) {
-          unawaited(Scrollable.ensureVisible(context, alignment: 0.5));
-        }
-      });
+      _centre(20);
     });
     _unlight = Timer(_litFor, () {
       if (mounted) setState(() => _lit = false);
@@ -521,6 +533,31 @@ class _TimelineState extends State<_Timeline> {
     if (position.extentAfter < position.viewportDimension) {
       timeline.loadOlder();
     }
+  }
+
+  /// Centres the focused row once it is built. In a tall group the target
+  /// can sit well above the fold, unbuilt: step toward older a viewport at a
+  /// time until it is.
+  void _centre(int tries) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final context = _focusKey.currentContext;
+      if (context != null) {
+        unawaited(Scrollable.ensureVisible(context, alignment: 0.5));
+        return;
+      }
+      final position = _scroll.position;
+      if (tries <= 0 || position.pixels >= position.maxScrollExtent) return;
+      _scroll.jumpTo(
+        math.min(
+          position.pixels + position.viewportDimension,
+          position.maxScrollExtent,
+        ),
+      );
+      _centre(tries - 1);
+    });
+    // A step that moved nothing lays out nothing: ask for the next frame.
+    WidgetsBinding.instance.scheduleFrame();
   }
 
   void _maybeLoadMore() {
@@ -573,9 +610,9 @@ class _TimelineState extends State<_Timeline> {
         : controller.loadNewerFailed
         ? _PageLine(newer: true, failed: true, onRetry: controller.loadNewer)
         : null;
-    // With no jump there is no split, and the newer sliver sits at negative
+    // With no split row (no jump, or one not drawn), the newer sliver sits at negative
     // offsets, out of sight: the bottom line leads the centre sliver instead.
-    final lead = split == null && bottom != null ? 1 : 0;
+    final lead = at < 0 && bottom != null ? 1 : 0;
     final belowSplit = newer.isNotEmpty || (bottom != null && lead == 0);
     // Each list matches its children by key, not by place: a new message
     // shifts every entry along one, and each must keep its own State (a

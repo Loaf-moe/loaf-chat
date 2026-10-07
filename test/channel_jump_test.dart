@@ -60,6 +60,21 @@ class _Paged extends TimelineController {
     notifyListeners();
   }
 
+  /// What a jump that reopens the conversation does: one notify carrying
+  /// both the new stretch and the target.
+  void reopenAt(String id) {
+    _stretch++;
+    _forced = id;
+    notifyListeners();
+  }
+
+  /// A message arriving live, once nothing newer is left to page in.
+  void arrive(Message message) {
+    assert(!canLoadNewer);
+    _landed.add(message);
+    notifyListeners();
+  }
+
   /// A target that draws no row, as a deleted message would.
   void forceTarget(String id) {
     _forced = id;
@@ -177,6 +192,7 @@ void main() {
 
     timeline.loadNewer();
     await tester.pumpAndSettle();
+    expect(timeline.messages.any((m) => m.id == 'm40'), isTrue);
     expect(tester.getRect(find.text('message 10')).top, before);
     await tester.pump(const Duration(seconds: 2));
   });
@@ -207,9 +223,62 @@ void main() {
     final timeline = _FailingNewer(_messages(0, 39));
     await _pump(tester, timeline);
     expect(find.text("couldn't load newer messages · "), findsOneWidget);
+    expect(_onScreen("couldn't load newer messages · "), isTrue);
     await tester.tap(find.text('try again'));
     await tester.pumpAndSettle();
     expect(timeline.retried, 1);
+  });
+
+  testWidgets('a target high in a tall group is scrolled to', (tester) async {
+    _tester = tester;
+    final timeline = TimelineController([
+      for (var i = 0; i < 60; i++)
+        Message(
+          id: 'm$i',
+          author: _ada,
+          sentAt: DateTime(2026, 10, 6, 9).add(Duration(minutes: i)),
+          body: 'message $i',
+        ),
+    ], you: _you);
+    await _pump(tester, timeline);
+    timeline.jumpTo('m2');
+    await tester.pumpAndSettle();
+    expect(_onScreen('message 2'), isTrue);
+    expect(_glow(), greaterThan(0));
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('a jump that reopens the conversation still lands', (
+    tester,
+  ) async {
+    _tester = tester;
+    final timeline = _Paged(_messages(0, 119), const []);
+    await _pump(tester, timeline);
+    timeline.reopenAt('m10');
+    await tester.pumpAndSettle();
+    expect(_onScreen('message 10'), isTrue);
+    expect(_glow(), greaterThan(0));
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  testWidgets('a live message after a jump stays in view at the newest end', (
+    tester,
+  ) async {
+    _tester = tester;
+    final timeline = _Paged(_messages(0, 39), [_messages(40, 59)]);
+    await _pump(tester, timeline);
+    timeline.jumpTo('m10');
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 40 && !_onScreen('message 59'); i++) {
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
+      await tester.pumpAndSettle();
+    }
+    expect(_onScreen('message 59'), isTrue);
+    await tester.pump(const Duration(seconds: 2));
+
+    timeline.arrive(_messages(60, 60).single);
+    await tester.pumpAndSettle();
+    expect(_onScreen('message 60'), isTrue);
   });
 
   testWidgets('a new stretch starts the list over, at its newest', (
