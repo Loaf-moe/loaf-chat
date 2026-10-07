@@ -165,6 +165,10 @@ class _Api extends FakeMatrixApi {
           ? http.Response(jsonEncode({'room_id': '!invited:example.com'}), 200)
           : http.Response(jsonEncode({}), 200);
     }
+    if (request.method == 'POST' && path.endsWith('/read_markers')) {
+      answered.add(path);
+      return http.Response('{}', 200);
+    }
     return super.mockIntercept(request);
   }
 }
@@ -249,6 +253,51 @@ Future<void> _sync(Client client, Map<String, Object?> rooms) =>
       SyncUpdate.fromJson({'next_batch': 'b${_events++}', 'rooms': rooms}),
     );
 
+/// A text message from [sender], [id] or a fresh one, sent at [ts] or a
+/// fresh, later time.
+Map<String, Object?> _msg(
+  String body, {
+  String sender = '@ada:example.com',
+  String? id,
+  int? ts,
+  Map<String, Object?>? mentions,
+}) => {
+  'type': 'm.room.message',
+  'sender': sender,
+  'content': {'msgtype': 'm.text', 'body': body, 'm.mentions': ?mentions},
+  'event_id': id ?? '\$m${_events++}',
+  'origin_server_ts': ts ?? 1700000000000 + _events++ * 1000,
+};
+
+/// Your receipt on [eventId], placed at [ts].
+Map<String, Object?> _receipt(String eventId, {required int ts}) => {
+  'type': 'm.receipt',
+  'content': {
+    eventId: {
+      'm.read': {
+        _me: {'ts': ts},
+      },
+    },
+  },
+};
+
+/// A sync of one joined room's new [timeline] events and [ephemeral]
+/// events. [limited] says the server skipped some.
+Future<void> _timeline(
+  Client client,
+  String roomId,
+  List<Map<String, Object?>> timeline, {
+  List<Map<String, Object?>> ephemeral = const [],
+  bool limited = false,
+}) => _sync(client, {
+  'join': {
+    roomId: {
+      'timeline': {'events': timeline, 'limited': limited, 'prev_batch': 'p${_events++}'},
+      'ephemeral': {'events': ephemeral},
+    },
+  },
+});
+
 /// A space "Bakery" with a channel and a voice channel directly under it, a
 /// category subspace holding a private channel and a nested subspace, and a
 /// child you have not joined. "Annex" is a second space.
@@ -327,6 +376,141 @@ Future<void> _invited(Client client, {bool direct = false}) => _sync(client, {
 });
 
 void main() {
+  group('unread', () {
+    const general = '!general:example.com';
+
+    // _Api, not the plain fake: muting needs its push-rules answers.
+    Future<(Client, MatrixRooms)> bakery() async {
+      final client = await _client(api: _Api());
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _settle();
+      return (client, rooms);
+    }
+
+    Channel channel(MatrixRooms rooms, String id) => rooms.spaces
+        .expand((s) => s.allChannels)
+        .firstWhere((c) => c.id == id);
+
+    test('messages from others count; the server\'s numbers do not', () async {
+      final (client, rooms) = await bakery();
+      // _bakery gives #general a notification_count of 3 and no messages.
+      expect(channel(rooms, general).unread, 0);
+
+      await _timeline(client, general, [_msg('one'), _msg('two')]);
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+    });
+
+    test('a mention counts toward mentions', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        _msg('hey', mentions: {'user_ids': [_me]}),
+        _msg('chatter', mentions: <String, Object?>{}),
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+      expect(channel(rooms, general).mentions, 1);
+    });
+
+    test('a muted room still counts', () async {
+      final (client, rooms) = await bakery();
+      await rooms.setMuted(general, true);
+      await _timeline(client, general, [_msg('one')]);
+      await _settle();
+      expect(channel(rooms, general).unread, 1);
+    });
+
+    test('your receipt reads what came before it', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        _msg('one', id: r'$one'),
+        _msg('two', id: r'$two'),
+        _msg('three', id: r'$three'),
+      ]);
+      await _timeline(client, general, const [], ephemeral: [_receipt(r'$two', ts: 0)]);
+      await _settle();
+      expect(channel(rooms, general).unread, 1);
+    });
+
+    test('read on another device, by time, on an event never counted', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        _msg('one', ts: 1000),
+        _msg('two', ts: 2000),
+      ]);
+      await _timeline(client, general, const [], ephemeral: [
+        _receipt(r'$reaction-elsewhere', ts: 2000),
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test('your own message reads everything before it', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [_msg('one'), _msg('two')]);
+      await _timeline(client, general, [_msg('mine', sender: _me)]);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test('a message deleted while unread stops counting', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [_msg('oops', id: r'$oops')]);
+      await _timeline(client, general, [
+        {
+          'type': 'm.room.redaction',
+          'sender': '@ada:example.com',
+          'redacts': r'$oops',
+          'content': {'redacts': r'$oops'},
+          'event_id': '\$r${_events++}',
+          'origin_server_ts': 1700000000000 + _events++ * 1000,
+        },
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test('edits and reactions do not count', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        {
+          'type': 'm.reaction',
+          'sender': '@ada:example.com',
+          'content': {
+            'm.relates_to': {'rel_type': 'm.annotation', 'event_id': r'$x', 'key': '👍'},
+          },
+          'event_id': '\$x${_events++}',
+          'origin_server_ts': 1700000000000 + _events++ * 1000,
+        },
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test('leaving a room forgets its count', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [_msg('one')]);
+      await _sync(client, {
+        'leave': {general: <String, Object?>{}},
+      });
+      await _settle();
+      expect(rooms.unreadTally(general).isEmpty, isTrue);
+    });
+
+    test('mark as read is sent while something is unread', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _timeline(client, general, [_msg('one')]);
+      await _settle();
+      rooms.markRead(general);
+      await _settle();
+      expect(api.answered.where((p) => p.contains('read_markers')), isNotEmpty);
+    });
+  });
+
   test('rooms in no space land in Home, a DM as a DM', () async {
     final rooms = await _rooms(await _client());
     expect(rooms.synced, isTrue);
@@ -335,8 +519,6 @@ void main() {
     // The fake's m.direct lists this one.
     final dm = byId['!726s6s6q:example.com']!;
     expect(dm.kind, ChannelKind.direct);
-    expect(dm.unread, 2);
-    expect(dm.mentions, 2);
     expect(dm.members, isNotEmpty);
     expect(dm.members.map((m) => m.id), isNot(contains(_me)));
     expect(byId['!calls:example.com']!.kind, ChannelKind.room);
@@ -406,7 +588,7 @@ void main() {
     },
   );
 
-  test('a channel carries its counts, topic and lock', () async {
+  test('a channel carries its topic and lock', () async {
     final client = await _client();
     final rooms = await _rooms(client);
     await _bakery(client);
@@ -415,10 +597,7 @@ void main() {
     final sourdough = rooms.spaces.last.categories.last.channels.first;
     expect(sourdough.private, isTrue);
     expect(sourdough.topic, 'wild yeast');
-    expect(sourdough.unread, 4);
-    expect(sourdough.mentions, 1);
     expect(sourdough.muted, isFalse);
-    expect(rooms.spaces.last.mentions, 1);
   });
 
   test('a space\'s rooms never also appear in Home', () async {

@@ -27,7 +27,9 @@ import 'matrix_media.dart';
 import 'matrix_profile.dart';
 import 'matrix_space_directory.dart';
 import 'matrix_timeline.dart';
+import 'matrix_unread.dart';
 import 'media_store.dart';
+import 'unread_tally.dart';
 
 /// `m.room.create` types that make a room a voice channel: Element's video
 /// rooms, stable and unstable.
@@ -81,6 +83,17 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// other of the two small maps `MatrixRooms` keeps beside its derived
   /// snapshot.
   late final MatrixHierarchy _hierarchy;
+
+  /// What is unread in each room, counted from the messages themselves.
+  late final MatrixUnread _unread = MatrixUnread(
+    client,
+    onChange: () {
+      if (!_disposed) _rebuild();
+    },
+  );
+
+  @visibleForTesting
+  RoomTally unreadTally(String roomId) => _unread.of(roomId);
 
   /// Where spaces you have not joined are found: a server's public
   /// directory, or an address someone shared. Also the via servers of the
@@ -257,6 +270,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
               false);
       if (changed) _hierarchy.invalidateContaining(roomId);
     });
+    _unread.apply(update);
     _synced = true;
     _progress = null;
     _rebuild();
@@ -533,14 +547,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         ? ChannelKind.direct
         : ChannelKind.room;
     final topic = room.topic;
+    final tally = _unread.of(room.id);
     final favourite = room.tags[TagType.favourite];
     final channel = Channel(
       id: room.id,
       name: room.getLocalizedDisplayname(),
       avatar: AvatarRef.maybe(room.avatar?.toString()),
       kind: kind,
-      unread: room.notificationCount,
-      mentions: room.highlightCount,
+      unread: tally.count,
+      mentions: tally.mentions,
       private: const {
         JoinRules.invite,
         JoinRules.knock,
@@ -712,7 +727,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final last = room?.lastEvent;
     // Your own message still on its way has no event id to mark.
     if (room == null || last == null || !last.status.isSent) return;
-    if (room.notificationCount == 0 && room.fullyRead == last.eventId) return;
+    if (_unread.of(roomId).isEmpty && room.fullyRead == last.eventId) return;
     if (!_reading.add(roomId)) {
       _readAgain.add(roomId);
       return;
@@ -1211,6 +1226,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       t.dispose();
     }
     _hierarchy.dispose();
+    _unread.dispose();
     _profile?.dispose();
     _devices?.dispose();
     _media?.dispose();
