@@ -4,11 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/auth/login_page.dart';
-import 'package:loaf_native/ui/call/call_controller.dart';
 import 'package:loaf_native/ui/auth/sign_in_controller.dart';
 import 'package:loaf_native/ui/auth/sign_in_state.dart';
+import 'package:loaf_native/ui/call/call_controller.dart';
+import 'package:loaf_native/ui/call/call_view.dart';
 import 'package:loaf_native/ui/mock/accounts.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
+import 'package:loaf_native/ui/shell/channel_list.dart';
+import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/window/window_chrome.dart';
 
@@ -160,6 +163,17 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.byTooltip('Fullscreen'));
       await tester.pump(const Duration(milliseconds: 300));
+      // Fullscreen is really on: the shell's own columns are gone...
+      expect(find.byType(SpacesRail), findsNothing);
+      expect(find.byType(ChannelList), findsNothing);
+      // ...so the call's bar, not the shell, holds the corner.
+      expect(
+        find.descendant(
+          of: find.byType(CallTopBar),
+          matching: find.byKey(_close),
+        ),
+        findsOneWidget,
+      );
       expect(find.byKey(_close), findsOneWidget);
       final close = tester.getRect(find.byKey(_close));
       expect(close.top, lessThan(WindowMetrics.band));
