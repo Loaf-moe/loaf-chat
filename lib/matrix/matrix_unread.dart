@@ -48,6 +48,13 @@ class MatrixUnread {
   /// rooms doesn't fire every request together.
   static const _parallelFills = 4;
   final _fillQueue = <String>[];
+
+  /// Each room's key-arrival subscription, with the [Room] it listens to: a
+  /// room left and joined again is a new object.
+  final _keySubs = <String, ({Room room, StreamSubscription<String> sub})>{};
+
+  /// Rooms with a re-check of their locked messages already waiting.
+  final _rechecks = <String>{};
   Future<void> _queue = Future.value();
   var _disposed = false;
 
@@ -77,6 +84,7 @@ class MatrixUnread {
         in (update.rooms?.join ?? const <String, JoinedRoomUpdate>{}).entries) {
       final room = client.getRoomById(roomId);
       if (room == null) continue;
+      _watchKeys(room);
       if (joined.timeline?.limited == true) {
         // The server skipped messages; only it knows how many were unread.
         // The fill applies the receipt itself.
@@ -104,35 +112,6 @@ class MatrixUnread {
         }
       }
     }
-    // Messages counted while still encrypted: once the SDK has stored them
-    // readable, see whether they mention you. A room being filled is skipped,
-    // since the fill replaces its tally anyway. Walks a snapshot: a fill
-    // finishing during an await adds rooms to the live map.
-    for (final MapEntry(key: roomId, value: tally)
-        in <MapEntry<String, RoomTally>>[..._tallies.entries]) {
-      if (_filling.contains(roomId)) continue;
-      final locked = tally.entries.where((e) => e.locked).toList();
-      if (locked.isEmpty) continue;
-      final room = client.getRoomById(roomId);
-      if (room == null) continue;
-      try {
-        for (final entry in locked) {
-          final stored = await client.database.getEventById(entry.id, room);
-          if (stored == null || stored.type == EventTypes.Encrypted) continue;
-          final reread = await _entry(room, stored);
-          // A fill that landed meanwhile replaced this tally; it counted
-          // the message itself.
-          if (_filling.contains(roomId) ||
-              !identical(_tallies[roomId], tally)) {
-            break;
-          }
-          if (tally.replace(reread)) changed = true;
-        }
-      } on Object catch (e) {
-        // One unreadable room mustn't cost the rest of the sync its flush.
-        Logs().v('[loaf] unread re-check for $roomId failed: $e');
-      }
-    }
     // Fills that failed get another go now the server answers syncs again.
     // Only those: a room mid-fill would otherwise be asked for again by
     // every sync that lands, and never finish.
@@ -146,6 +125,7 @@ class MatrixUnread {
       _failed.remove(roomId);
       _fillQueue.remove(roomId);
       _refill.remove(roomId);
+      _keySubs.remove(roomId)?.sub.cancel();
       if (_tallies.remove(roomId) != null) changed = true;
       _scheduleSave();
     }
@@ -164,10 +144,10 @@ class MatrixUnread {
         .then((_) {
           if (_disposed) return;
           for (final room in client.rooms) {
-            if (room.membership != Membership.join ||
-                _tallies.containsKey(room.id)) {
-              continue;
-            }
+            if (room.membership != Membership.join) continue;
+            // Saved tallies may hold locked messages, too.
+            _watchKeys(room);
+            if (_tallies.containsKey(room.id)) continue;
             if (_hasNewMessages(room)) {
               _scheduleFill(room.id);
             } else {
@@ -179,6 +159,80 @@ class MatrixUnread {
         .catchError((Object e, StackTrace s) {
           Logs().w('[loaf] unread seed failed', e, s);
         });
+  }
+
+  /// Looks again at [room]'s locked messages whenever a key for it arrives.
+  /// The SDK stores a decrypted copy only for the room's last event or a
+  /// timeline that is open, so key arrival is the one moment a message
+  /// counted while locked can be read.
+  void _watchKeys(Room room) {
+    if (_keySubs[room.id] case final known? when identical(known.room, room)) {
+      return;
+    }
+    _keySubs[room.id]?.sub.cancel();
+    _keySubs[room.id] = (
+      room: room,
+      sub: room.onSessionKeyReceived.stream.listen(
+        (_) => _recheckSoon(room.id),
+      ),
+    );
+  }
+
+  /// Queues one re-check of [roomId], behind the syncs already waiting. A
+  /// key backup brings many keys at once; they share it.
+  void _recheckSoon(String roomId) {
+    if (_disposed || !_rechecks.add(roomId)) return;
+    _queue = _queue
+        .then((_) {
+          _rechecks.remove(roomId);
+          return _recheck(roomId);
+        })
+        .catchError((Object e, StackTrace s) {
+          Logs().w('[loaf] unread re-check failed', e, s);
+        });
+  }
+
+  /// Reads [roomId]'s locked messages again, now that a key came. A room
+  /// being filled is skipped, since the fill replaces its tally anyway.
+  Future<void> _recheck(String roomId) async {
+    if (_disposed || _filling.contains(roomId)) return;
+    final tally = _tallies[roomId];
+    final room = client.getRoomById(roomId);
+    if (tally == null || room == null) return;
+    var changed = false;
+    try {
+      for (final entry in tally.entries.where((e) => e.locked).toList()) {
+        final event = await _stored(room, entry.id);
+        if (event == null) continue;
+        final reread = await _entry(room, event);
+        if (reread.locked) continue;
+        // A fill that landed meanwhile replaced this tally; it counted the
+        // message itself.
+        if (_disposed ||
+            _filling.contains(roomId) ||
+            !identical(_tallies[roomId], tally)) {
+          break;
+        }
+        if (tally.replace(reread)) changed = true;
+      }
+    } on Object catch (e) {
+      Logs().v('[loaf] unread re-check for $roomId failed: $e');
+    }
+    if (changed && !_disposed) {
+      _scheduleSave();
+      onChange();
+    }
+  }
+
+  /// The event as the server sent it: from the SDK's store, else asked of
+  /// the server.
+  Future<Event?> _stored(Room room, String eventId) async {
+    final stored = await client.database.getEventById(eventId, room);
+    if (stored != null) return stored;
+    return Event.fromMatrixEvent(
+      await client.getOneRoomEvent(room.id, eventId),
+      room,
+    );
   }
 
   void _scheduleFill(String roomId) {
@@ -444,6 +498,10 @@ class MatrixUnread {
 
   void dispose() {
     _disposed = true;
+    for (final known in _keySubs.values) {
+      known.sub.cancel();
+    }
+    _keySubs.clear();
     if (_saveTimer != null) {
       _saveTimer!.cancel();
       _saveTimer = null;

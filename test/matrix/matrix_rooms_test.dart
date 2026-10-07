@@ -479,7 +479,9 @@ void main() {
       expect(channel(rooms, general).mentions, 1);
     });
 
-    test('an encrypted message is checked again once it can be read', () async {
+    test('an encrypted message counts while it is locked', () async {
+      // Reading it once its key arrives is covered with a real key in
+      // matrix_unread_encrypted_test.dart.
       final (client, rooms) = await bakery();
       await _timeline(client, general, [
         {
@@ -499,76 +501,34 @@ void main() {
       await _settle();
       expect(channel(rooms, general).unread, 1);
       expect(channel(rooms, general).mentions, 0);
-
-      // The key arrived and the SDK stored the message decrypted.
-      final room = client.getRoomById(general)!;
-      await client.database.storeEventUpdate(
-        general,
-        Event(
-          type: EventTypes.Message,
-          content: {
-            'msgtype': 'm.text',
-            'body': 'hey',
-            'm.mentions': {
-              'user_ids': [_me],
-            },
-          },
-          senderId: '@ada:example.com',
-          eventId: r'$locked',
-          originServerTs: DateTime.fromMillisecondsSinceEpoch(1700000000000),
-          room: room,
-        ),
-        EventUpdateType.timeline,
-        client,
-      );
-      await _timeline(client, general, const []);
-      await _settle();
-      expect(channel(rooms, general).mentions, 1);
+      expect(rooms.unreadTally(general).entries.single.locked, isTrue);
     });
 
-    test(
-      'a fill finishing during the re-check does not lose the sync',
-      () async {
-        final api = _Api();
-        final client = await _client(api: api);
-        final rooms = await _rooms(client);
-        await _bakery(client);
-        await _settle();
-        await _timeline(client, general, [
-          {
-            'type': 'm.room.encrypted',
-            'sender': '@ada:example.com',
-            'content': {
-              'algorithm': 'm.megolm.v1.aes-sha2',
-              'ciphertext': 'locked',
-              'session_id': 'nokey',
-              'sender_key': 'k',
-              'device_id': 'D',
-            },
-            'event_id': r'$locked',
-            'origin_server_ts': 1700000000000 + _events++ * 1000,
-          },
-        ]);
-        await _settle();
+    test('a fill landing during a sync does not lose the sync', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _timeline(client, general, [_msg('before')]);
+      await _settle();
 
-        // A room never counted starts a fill that waits on the server.
-        const oven = '!oven:example.com';
-        api.hold = Completer<void>();
-        api.roomHistory[oven] = [_msg('baked')];
-        await _timeline(client, oven, [
-          api.roomHistory[oven]!.first,
-        ], limited: true);
-        await _settle();
+      // A room never counted starts a fill that waits on the server.
+      const oven = '!oven:example.com';
+      api.hold = Completer<void>();
+      api.roomHistory[oven] = [_msg('baked')];
+      await _timeline(client, oven, [
+        api.roomHistory[oven]!.first,
+      ], limited: true);
+      await _settle();
 
-        // The fill lands, adding a tally, while this sync re-checks general.
-        final sync = _timeline(client, general, [_msg('after')]);
-        api.hold!.complete();
-        await sync;
-        await _settle();
-        expect(channel(rooms, general).unread, 2);
-        expect(channel(rooms, oven).unread, 1);
-      },
-    );
+      // The fill lands, adding a tally, while this sync is counted.
+      final sync = _timeline(client, general, [_msg('after')]);
+      api.hold!.complete();
+      await sync;
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+      expect(channel(rooms, oven).unread, 1);
+    });
 
     test('a muted room still counts', () async {
       final (client, rooms) = await bakery();
