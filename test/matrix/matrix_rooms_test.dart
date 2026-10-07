@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
+import 'package:loaf_native/matrix/unread_tally.dart';
 import 'package:loaf_native/ui/members/presence.dart' as loaf;
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
@@ -47,6 +48,16 @@ class _Api extends FakeMatrixApi {
 
   /// Each space's `/hierarchy` pages, in order, keyed by space id.
   final hierarchyPages = <String, List<Map<String, Object?>>>{};
+
+  /// Each room's events, newest first, served by `/messages?dir=b` in
+  /// pages of the request's `limit`. `from` is the index to start at.
+  final roomHistory = <String, List<Map<String, Object?>>>{};
+
+  /// How many `/messages` calls each room has had.
+  final historyCalls = <String, int>{};
+
+  /// While set, `/messages` fails with a server error.
+  var failHistory = false;
 
   var _createdRooms = 0;
 
@@ -168,6 +179,32 @@ class _Api extends FakeMatrixApi {
     if (request.method == 'POST' && path.endsWith('/read_markers')) {
       answered.add(path);
       return http.Response('{}', 200);
+    }
+    if (request.method == 'GET' && path.endsWith('/messages')) {
+      final roomId = Uri.decodeComponent(
+        path.split('/rooms/')[1].split('/messages')[0],
+      );
+      historyCalls[roomId] = (historyCalls[roomId] ?? 0) + 1;
+      await hold?.future;
+      if (failHistory) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_UNKNOWN', 'error': 'boom'}),
+          500,
+        );
+      }
+      final events = roomHistory[roomId] ?? const [];
+      final from = int.tryParse(request.url.queryParameters['from'] ?? '') ?? 0;
+      final limit =
+          int.tryParse(request.url.queryParameters['limit'] ?? '') ?? 10;
+      final end = (from + limit).clamp(0, events.length);
+      return http.Response(
+        jsonEncode({
+          'start': '$from',
+          'chunk': events.sublist(from.clamp(0, events.length), end),
+          if (end < events.length) 'end': '$end',
+        }),
+        200,
+      );
     }
     return super.mockIntercept(request);
   }
@@ -553,6 +590,100 @@ void main() {
       await _settle();
       expect(api.answered.where((p) => p.contains('read_markers')), isNotEmpty);
     });
+
+    test('a limited sync refetches the room from the server', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [
+        _msg('newest'),
+        _msg('newer'),
+        _msg('read one', id: r'$read'),
+        _msg('older'),
+      ];
+      await _timeline(
+        client,
+        general,
+        const [],
+        ephemeral: [_receipt(r'$read', ts: 0)],
+      );
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      expect(channel(rooms, general).unread, 2);
+    });
+
+    test('history past 99 unread reads as more than 99', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [for (var i = 0; i < 150; i++) _msg('m$i')];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      expect(channel(rooms, general).unread, RoomTally.cap + 1);
+    });
+
+    test('a failed fill keeps the count and tries again next sync', () async {
+      final api = _Api()..failHistory = true;
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _timeline(client, general, [_msg('before')]);
+      api.roomHistory[general] = [_msg('a'), _msg('b'), _msg('c')];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      expect(channel(rooms, general).unread, 1, reason: 'the old count stays');
+
+      api.failHistory = false;
+      await _timeline(client, general, const []);
+      await _settle();
+      expect(channel(rooms, general).unread, 3);
+    });
+
+    test('messages that arrive during a fill are kept', () async {
+      final api = _Api()..hold = Completer<void>();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      api.roomHistory[general] = [_msg('a', ts: 1000), _msg('b', ts: 900)];
+      await _timeline(client, general, [
+        api.roomHistory[general]!.first,
+      ], limited: true);
+      await _settle();
+      await _timeline(client, general, [_msg('during', ts: 2000)]);
+      await _settle();
+      api.hold!.complete();
+      await _settle();
+      expect(channel(rooms, general).unread, 3);
+    });
+
+    test(
+      'rooms that synced before the counts existed are filled once',
+      () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        await _bakery(client);
+        // A message from someone else is the newest event: hasNewMessages.
+        await _timeline(client, general, [_msg('waiting')]);
+        api.roomHistory[general] = [_msg('waiting'), _msg('earlier')];
+        final rooms = await _rooms(client);
+        await _settle();
+        expect(channel(rooms, general).unread, 2);
+        expect(api.historyCalls[general], 1);
+        expect(
+          api.historyCalls['!sourdough:example.com'],
+          isNull,
+          reason: 'a room with nothing new is not fetched',
+        );
+      },
+    );
   });
 
   test('rooms in no space land in Home, a DM as a DM', () async {
