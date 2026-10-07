@@ -130,7 +130,10 @@ void main() {
           uploadLimit: 20000000,
         );
         addTearDown(timeline.dispose);
-        final video = _Unreadable('/picked/IMG_0612.MOV', 174325941);
+        final video = _Unreadable(
+          '${Platform.pathSeparator}picked${Platform.pathSeparator}IMG_0612.MOV',
+          174325941,
+        );
         await tester.pumpWidget(
           MaterialApp(
             theme: loafDarkTheme(),
