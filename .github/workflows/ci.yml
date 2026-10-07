@@ -47,7 +47,6 @@ jobs:
           key: pub-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: pub-${{ runner.os }}-
       - run: mise exec -- flutter pub get
-      - run: mise exec -- flutter analyze
       # The encryption tests' native library. It changes only with
       # vodozemac or Rust, so it is built once per pair.
       - id: vodozemac
@@ -58,7 +57,7 @@ jobs:
       - if: steps.vodozemac.outputs.cache-hit != 'true'
         run: mise exec -- sh tool/build-vodozemac
       - if: ${{ !cancelled() }}
-        run: mise exec -- flutter test
+        run: mise exec -- flutter test -j "$(nproc)"
       - if: ${{ !cancelled() }}
         working-directory: packages/loaf_media
         run: mise exec -- flutter test
@@ -71,6 +70,8 @@ jobs:
         run: mise exec -- cargo test --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml
       - if: ${{ !cancelled() }}
         run: mise exec -- cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml
+      - if: ${{ !cancelled() }}
+        run: mise exec -- flutter analyze
 
   windows:
     runs-on: windows-latest
@@ -79,13 +80,18 @@ jobs:
       run:
         shell: bash
     steps:
+      # Defender scans every file written, and this job writes tens of
+      # thousands (Flutter unpacking, compiles); the runner is thrown away
+      # after, so there is nothing for it to protect.
+      #
       # Windows Server ships Media Foundation as a feature, off by default
       # (every desktop Windows has it), and the player's tests need it. It
       # takes minutes to turn on, so it does while everything else runs.
       - shell: pwsh
-        run: >
-          Start-Process powershell -WindowStyle Hidden -ArgumentList
-          '-NoProfile', '-Command', 'Install-WindowsFeature Server-Media-Foundation'
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true
+          Start-Process powershell -WindowStyle Hidden -ArgumentList `
+            '-NoProfile', '-Command', 'Install-WindowsFeature Server-Media-Foundation'
       - uses: actions/checkout@v4
       # mise pins both; its Flutter backend does not install on Windows, so
       # the versions are read from mise.toml and installed directly.
@@ -111,7 +117,7 @@ jobs:
       - if: steps.vodozemac.outputs.cache-hit != 'true'
         run: sh tool/build-vodozemac
       - if: ${{ !cancelled() }}
-        run: flutter test
+        run: flutter test -j "$(nproc)"
       - if: ${{ !cancelled() }}
         working-directory: packages/loaf_media
         run: flutter test
