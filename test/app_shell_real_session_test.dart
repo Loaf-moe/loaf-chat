@@ -67,6 +67,15 @@ Future<void> _act(WidgetTester tester, String tile, String action) async {
 }
 
 void main() {
+  testWidgets('a real session has no mock levers, even in a debug build', (
+    tester,
+  ) async {
+    final session = _RealSession(DeviceTrust.verified, MockVerifier());
+    addTearDown(session.dispose);
+    await _pumpShell(tester, session);
+    expect(find.byTooltip('Debug'), findsNothing);
+  });
+
   testWidgets('verifying a real session opens its own panel', (tester) async {
     final session = _RealSession(DeviceTrust.unverified, MockVerifier());
     addTearDown(session.dispose);

@@ -1351,7 +1351,9 @@ class _AppShellState extends State<AppShell> {
                 ? (anchor) =>
                       showStatusPicker(context, _profile, anchor: anchor)
                 : null,
-            onDebug: kDebugMode ? _debug : null,
+            // The levers drive the mocks. On a real account they would
+            // ring fake calls over real rooms, and sign-out is real.
+            onDebug: kDebugMode && _session is MockSession ? _debug : null,
           ),
         ),
       ],
