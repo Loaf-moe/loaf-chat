@@ -109,7 +109,8 @@ class _AppShellState extends State<AppShell> {
   StreamSubscription<MessageRoute>? _routes;
 
   /// A route that came before the rooms were synced: its room may not be
-  /// known yet, so it waits rather than say the message isn't there.
+  /// known yet, so it waits rather than say the message isn't there. Only
+  /// the latest is kept: of two clicks before the sync, the last one wins.
   MessageRoute? _heldRoute;
 
   late final _calls = CallController(

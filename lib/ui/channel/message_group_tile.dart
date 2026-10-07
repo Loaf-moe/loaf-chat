@@ -118,8 +118,14 @@ class MessageGroupTile extends StatelessWidget {
             );
     }
     final focus = this.focus;
-    if (focus == null || focus.id != message.id) return row;
-    return _JumpGlow(key: focus.key, lit: focus.lit, child: row);
+    final focused = focus != null && focus.id == message.id;
+    // Wrapped whether focused or not: a row that gains a wrapper is
+    // reparented and loses its State (a video playing in it) as it is lit.
+    return _JumpGlow(
+      focusKey: focused ? focus.key : null,
+      lit: focused && focus.lit,
+      child: row,
+    );
   }
 }
 
@@ -718,10 +724,17 @@ const _glowFade = Duration(milliseconds: 600);
 
 /// The accent wash behind a message jumped to, so the eye finds where it
 /// landed. Unlike [_Highlight] it is the accent, not the card: it marks a
-/// place rather than a pointer.
+/// place rather than a pointer. Only the focused row ([focusKey] set) draws
+/// the wash; the rest wrap their row all the same, to keep it where it is
+/// in the tree.
 class _JumpGlow extends StatelessWidget {
-  const _JumpGlow({super.key, required this.lit, required this.child});
+  const _JumpGlow({
+    required this.focusKey,
+    required this.lit,
+    required this.child,
+  });
 
+  final GlobalKey? focusKey;
   final bool lit;
   final Widget child;
 
@@ -731,21 +744,24 @@ class _JumpGlow extends StatelessWidget {
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Positioned(
-          left: -LoafSpace.x2,
-          right: -LoafSpace.x2,
-          top: -2,
-          bottom: -2,
-          child: AnimatedContainer(
-            key: const ValueKey('jump-glow'),
-            duration: _glowFade,
-            curve: LoafMotion.ease,
-            decoration: BoxDecoration(
-              color: tokens.accent.withValues(alpha: lit ? 0.18 : 0),
-              borderRadius: BorderRadius.circular(LoafRadius.md),
+        if (focusKey != null)
+          if (focusKey != null)
+            Positioned(
+              key: focusKey,
+              left: -LoafSpace.x2,
+              right: -LoafSpace.x2,
+              top: -2,
+              bottom: -2,
+              child: AnimatedContainer(
+                key: const ValueKey('jump-glow'),
+                duration: _glowFade,
+                curve: LoafMotion.ease,
+                decoration: BoxDecoration(
+                  color: tokens.accent.withValues(alpha: lit ? 0.18 : 0),
+                  borderRadius: BorderRadius.circular(LoafRadius.md),
+                ),
+              ),
             ),
-          ),
-        ),
         child,
       ],
     );

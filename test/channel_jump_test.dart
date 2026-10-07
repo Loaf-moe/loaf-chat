@@ -90,7 +90,11 @@ class _Paged extends TimelineController {
   }
 }
 
-Future<void> _pump(WidgetTester tester, TimelineController timeline) async {
+Future<void> _pump(
+  WidgetTester tester,
+  TimelineController timeline, {
+  VoidCallback? onRead,
+}) async {
   tester.view.physicalSize = const Size(800, 900);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
@@ -99,7 +103,11 @@ Future<void> _pump(WidgetTester tester, TimelineController timeline) async {
     MaterialApp(
       theme: loafDarkTheme(),
       home: Scaffold(
-        body: ChannelView(channel: _channel, timeline: timeline),
+        body: ChannelView(
+          channel: _channel,
+          timeline: timeline,
+          onRead: onRead,
+        ),
       ),
     ),
   );
@@ -160,15 +168,38 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
   });
 
-  testWidgets('a target that draws no row is let go quietly', (tester) async {
+  testWidgets('a target that draws no row says it is unavailable', (
+    tester,
+  ) async {
     _tester = tester;
     final timeline = _Paged(_messages(0, 30), const []);
     await _pump(tester, timeline);
     timeline.forceTarget('deleted');
     await tester.pumpAndSettle();
     expect(timeline.jumpTarget, isNull);
+    expect(find.text(messageUnavailable), findsOneWidget);
     expect(find.byKey(const ValueKey('jump-glow')), findsNothing);
     expect(_onScreen('message 30'), isTrue);
+  });
+
+  testWidgets('scrolling down to the live end marks the room read', (
+    tester,
+  ) async {
+    _tester = tester;
+    final timeline = _Paged(_messages(0, 39), [_messages(40, 59)]);
+    var read = 0;
+    await _pump(tester, timeline, onRead: () => read++);
+    timeline.jumpTo('m10');
+    await tester.pumpAndSettle();
+
+    // Near the newest loaded message, the next page loads by itself.
+    for (var i = 0; i < 40 && timeline.canLoadNewer; i++) {
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
+      await tester.pumpAndSettle();
+    }
+    expect(timeline.canLoadNewer, isFalse);
+    expect(read, 1);
+    await tester.pump(const Duration(seconds: 2));
   });
 
   testWidgets('a message that is not there says so', (tester) async {

@@ -2,7 +2,6 @@
 library;
 
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -449,11 +448,15 @@ class _TimelineState extends State<_Timeline> {
     final paged = _short;
     final atNewest = _scroll.hasClients && _scroll.position.extentBefore < 4;
     _short = controller.canLoadNewer;
+    // The last page to land at the live end: the conversation caught up
+    // while you read it, with nothing new to tell you so.
+    final caughtUp = paged && !controller.canLoadNewer;
     final arrived = last != null && last.id != _lastId && !paged;
     _lastId = last?.id;
     setState(() {});
     _checkFilled();
     _maybeReveal();
+    if (caughtUp) _read();
     if (!arrived) return;
     if (atNewest && _split != null && last.author.id != controller.you.id) {
       // After a jump new messages grow below the split, out of view: stay
@@ -473,7 +476,14 @@ class _TimelineState extends State<_Timeline> {
           curve: LoafMotion.ease,
         );
       }
-    } else if (_looking) {
+    } else {
+      _read();
+    }
+  }
+
+  /// Read now if you are looking, else once you are back.
+  void _read() {
+    if (_looking) {
       widget.onRead?.call();
     } else {
       _unreadWhileAway = true;
@@ -481,14 +491,17 @@ class _TimelineState extends State<_Timeline> {
   }
 
   /// Brings the message jumped to into view and lights it. One that draws
-  /// no row (deleted, or not a message) is let go: the conversation is
-  /// already open around where it was.
+  /// no row (deleted, a reaction, an edit) is let go with a word on it: the
+  /// conversation is already open around where it was.
   void _maybeReveal() {
     final controller = widget.controller;
     final target = controller.jumpTarget;
     if (!mounted || target == null || controller.stretch != _stretch) return;
     controller.jumpShown();
-    if (!controller.messages.any((m) => m.id == target)) return;
+    if (!controller.messages.any((m) => m.id == target)) {
+      showToast(context, messageUnavailable);
+      return;
+    }
     _unlight?.cancel();
     setState(() {
       _split = target;
@@ -499,7 +512,7 @@ class _TimelineState extends State<_Timeline> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) return;
       _scroll.jumpTo(0);
-      _centre(20);
+      _centre();
     });
     _unlight = Timer(_litFor, () {
       if (mounted) setState(() => _lit = false);
@@ -535,28 +548,15 @@ class _TimelineState extends State<_Timeline> {
     }
   }
 
-  /// Centres the focused row once it is built. In a tall group the target
-  /// can sit well above the fold, unbuilt: step toward older a viewport at a
-  /// time until it is.
-  void _centre(int tries) {
+  /// Centres the focused row once it is laid out. A group builds all its
+  /// rows, so the row exists whenever its group does.
+  void _centre() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) return;
       final context = _focusKey.currentContext;
-      if (context != null) {
-        unawaited(Scrollable.ensureVisible(context, alignment: 0.5));
-        return;
-      }
-      final position = _scroll.position;
-      if (tries <= 0 || position.pixels >= position.maxScrollExtent) return;
-      _scroll.jumpTo(
-        math.min(
-          position.pixels + position.viewportDimension,
-          position.maxScrollExtent,
-        ),
-      );
-      _centre(tries - 1);
+      if (!mounted || context == null) return;
+      unawaited(Scrollable.ensureVisible(context, alignment: 0.5));
     });
-    // A step that moved nothing lays out nothing: ask for the next frame.
+    // A jump that moved nothing lays out nothing: ask for the next frame.
     WidgetsBinding.instance.scheduleFrame();
   }
 
