@@ -601,6 +601,24 @@ class MatrixTimeline extends ChangeNotifier
   // ── History ────────────────────────────────────────────────────────────
 
   @override
+  bool get canLoadNewer => false;
+  @override
+  bool get loadingNewer => false;
+  @override
+  bool get loadNewerFailed => false;
+  @override
+  void loadNewer() {}
+  @override
+  int get stretch => 0;
+  @override
+  String? get jumpTarget => null;
+  @override
+  void jumpShown() {}
+  @override
+  void jumpTo(String messageId) {}
+  @override
+  void showNewest() {}
+  @override
   void loadOlder() {
     if (_opening || _paging) return;
     final timeline = _timeline;

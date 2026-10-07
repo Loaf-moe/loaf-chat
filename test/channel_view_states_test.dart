@@ -44,6 +44,24 @@ class _FakeTimeline extends ChangeNotifier
   bool get listening => hasListeners;
 
   @override
+  bool get canLoadNewer => false;
+  @override
+  bool get loadingNewer => false;
+  @override
+  bool get loadNewerFailed => false;
+  @override
+  void loadNewer() {}
+  @override
+  int get stretch => 0;
+  @override
+  String? get jumpTarget => null;
+  @override
+  void jumpShown() {}
+  @override
+  void jumpTo(String messageId) {}
+  @override
+  void showNewest() {}
+  @override
   void loadOlder() => calls.add('loadOlder');
   @override
   void send(String text, {List<Mention> mentions = const []}) =>

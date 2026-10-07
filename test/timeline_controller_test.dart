@@ -156,4 +156,50 @@ void main() {
     expect(c.messages.last.callLine, CallLine.missed);
     expect(c.messages.last.author, _them);
   });
+
+  group('jumping', () {
+    TimelineController timeline() => TimelineController([
+      _msg('1', _them),
+      _msg('2', _you),
+      _msg('3', _them),
+    ], you: _you);
+
+    test('to a loaded message names it as the target, and says so', () {
+      final t = timeline();
+      addTearDown(t.dispose);
+      var heard = 0;
+      t.addListener(() => heard++);
+      t.jumpTo('2');
+      expect(t.jumpTarget, '2');
+      expect(heard, 1);
+    });
+
+    test('once shown, the target is let go', () {
+      final t = timeline()..jumpTo('2');
+      addTearDown(t.dispose);
+      t.jumpShown();
+      expect(t.jumpTarget, isNull);
+    });
+
+    test('to a message it does not have says it is not available', () async {
+      final t = timeline();
+      addTearDown(t.dispose);
+      final said = <String>[];
+      t.failures.listen(said.add);
+      t.jumpTo('nope');
+      await Future<void>.delayed(Duration.zero);
+      expect(said, [messageUnavailable]);
+      expect(t.jumpTarget, isNull);
+    });
+
+    test('the mock is always at the live end', () {
+      final t = timeline();
+      addTearDown(t.dispose);
+      expect(t.canLoadNewer, isFalse);
+      expect(t.loadingNewer, isFalse);
+      expect(t.loadNewerFailed, isFalse);
+      expect(t.stretch, 0);
+      t.showNewest(); // Nothing to do, and nothing breaks.
+    });
+  });
 }
