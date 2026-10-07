@@ -740,6 +740,21 @@ void main() {
         expect(channel(second, general).unread, 1);
       });
 
+      test('saving at dispose does not bring back a cleared folder', () async {
+        // Signing out clears the folder the file lives in.
+        final client = await _client(api: _Api());
+        final dir = await Directory.systemTemp.createTemp('loaf-unread');
+        final files = Directory('${dir.path}${Platform.pathSeparator}files');
+        final rooms = MatrixRooms(client, mediaRoot: files);
+        await _bakery(client);
+        await _timeline(client, general, [_msg('one')]);
+        await _settle();
+        await dir.delete(recursive: true);
+        rooms.dispose();
+        await _settle();
+        expect(dir.existsSync(), isFalse);
+      });
+
       test('an unreadable file counts afresh', () async {
         final (client, dir, files) = await launch();
         await File('${dir.path}${Platform.pathSeparator}unread.json')

@@ -332,8 +332,9 @@ class MatrixUnread {
       },
     });
     try {
+      // Signing out clears this folder; a late save mustn't bring it back.
+      if (!await file.parent.exists()) return;
       // Written aside and renamed, so a crash mid-write leaves the old one.
-      await file.parent.create(recursive: true);
       final tmp = File('${file.path}.tmp');
       await tmp.writeAsString(json, flush: true);
       await tmp.rename(file.path);
@@ -446,7 +447,8 @@ class MatrixUnread {
     if (_saveTimer != null) {
       _saveTimer!.cancel();
       _saveTimer = null;
-      unawaited(_save());
+      // A signed-out client's counts are gone with its session.
+      if (client.isLogged()) unawaited(_save());
     }
   }
 }
