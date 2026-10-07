@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
@@ -121,7 +122,8 @@ void main() {
               pasteFiles: () async => [
                 XFile.fromData(
                   utf8.encode('crumb'),
-                  path: '/pasted/crumb.png',
+                  path:
+                      '${Platform.pathSeparator}pasted${Platform.pathSeparator}crumb.png',
                   mimeType: 'image/png',
                 ),
               ],

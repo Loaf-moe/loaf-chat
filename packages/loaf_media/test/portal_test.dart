@@ -78,6 +78,7 @@ void main() {
       }
       expect(call.values[2].asStringVariantDict(), isEmpty);
     },
+    skip: _noUnixSocket,
   );
 
   test('an error reply is a PortalError', () async {
@@ -103,5 +104,9 @@ void main() {
             .having((e) => e.message, 'message', 'no app for this'),
       ),
     );
-  });
+  }, skip: _noUnixSocket);
 }
+
+// The private bus listens on a Unix socket, which Windows' Dart lacks; the
+// portal is Linux's alone anyway.
+final _noUnixSocket = Platform.isWindows;

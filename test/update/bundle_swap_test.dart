@@ -125,16 +125,22 @@ void main() {
   for (var n = 0; n < 10; n++) {
     test('a swap cut off at rename $n is undone by the next launch', () async {
       var calls = 0;
+      // Renames are real disk work, so no count of event-loop turns is sure
+      // to reach the cut; the swap says when it has.
+      final cut = Completer<void>();
       unawaited(
         BundleSwap(
           install,
           rename: (from, to) async {
-            if (calls++ == n) return Completer<void>().future; // never
+            if (calls++ == n) {
+              cut.complete();
+              return Completer<void>().future; // never
+            }
             await File(from).rename(to);
           },
         ).apply(staged),
       );
-      await pumpEventQueue();
+      await cut.future;
 
       expect(await BundleSwap(install).cleanUp(), isTrue);
       expect(_tree(install), _installed);

@@ -57,24 +57,22 @@ class BundleSwap {
     final outgoing = _files(install).where(_swappable).toList();
 
     work.createSync(recursive: true);
-    final journal = _journal.openSync(mode: FileMode.writeOnly);
+    _journal.writeAsStringSync('');
     try {
       for (final rel in _executableLast(outgoing)) {
-        _record(journal, 'old', rel);
+        _record('old', rel);
         await _retrying(_at(install, rel), '${_at(install, rel)}$_old');
       }
       for (final rel in _executableLast(incoming)) {
-        _record(journal, 'new', rel);
+        _record('new', rel);
         final to = _at(install, rel);
         File(to).parent.createSync(recursive: true);
         await _retrying(_at(staged, rel), to);
       }
     } catch (_) {
-      journal.closeSync();
       _rollBack();
       rethrow;
     }
-    journal.closeSync();
     // The swap is whole: without a journal there is nothing to undo.
     _journal.deleteSync();
   }
@@ -135,11 +133,14 @@ class BundleSwap {
   }
 
   /// Written and flushed before the rename it names, so the journal never
-  /// misses a rename that happened.
-  static void _record(RandomAccessFile journal, String kind, String rel) {
-    journal.writeStringSync('$kind\t$rel\n');
-    journal.flushSync();
-  }
+  /// misses a rename that happened. Closed again straight after: Windows
+  /// will not delete a file anyone holds open, and a swap that stalls must
+  /// still leave a journal [cleanUp] can play back and delete.
+  void _record(String kind, String rel) => _journal.writeAsStringSync(
+    '$kind\t$rel\n',
+    mode: FileMode.append,
+    flush: true,
+  );
 
   bool _swappable(String rel) {
     final top = rel.split('/').first.toLowerCase();

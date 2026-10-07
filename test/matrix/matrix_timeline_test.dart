@@ -1264,7 +1264,7 @@ void main() {
     firstRooms.timeline(_roomId)!.send('unsent');
     await _until(
       () =>
-          firstRooms.timeline(_roomId)!.messages.last.status ==
+          firstRooms.timeline(_roomId)!.messages.lastOrNull?.status ==
           MessageStatus.failed,
     );
     expect(
@@ -1307,7 +1307,7 @@ void main() {
     firstRooms.timeline(_roomId)!.send('in flight');
     await _until(
       () =>
-          firstRooms.timeline(_roomId)!.messages.last.status ==
+          firstRooms.timeline(_roomId)!.messages.lastOrNull?.status ==
           MessageStatus.sending,
     );
     expect(
@@ -1325,7 +1325,7 @@ void main() {
     final rooms = MatrixRooms(client);
     addTearDown(rooms.dispose);
     final timeline = rooms.timeline(_roomId)!;
-    await _settle();
+    await _until(() => timeline.messages.length == 2);
     final stranded = timeline.messages.last;
     expect(
       (stranded.body, stranded.status),
@@ -1333,7 +1333,7 @@ void main() {
     );
 
     timeline.retry(stranded.id);
-    await _settle();
+    await _until(() => timeline.messages.last.status == MessageStatus.sent);
     expect(timeline.messages.last.status, MessageStatus.sent);
     expect(api.sent.single.$2['body'], 'in flight');
   });

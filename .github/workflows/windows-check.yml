@@ -72,6 +72,9 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           sudo apt-get update
+          # The image's LLVM brings libunwind-14-dev, which conflicts with the
+          # libunwind-dev GStreamer needs; as in release.yml, it goes first.
+          sudo apt-get remove -y libunwind-14-dev
           sudo apt-get install -y libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good \
             gstreamer1.0-libav
