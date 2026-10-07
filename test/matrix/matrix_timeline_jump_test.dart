@@ -30,10 +30,16 @@ class _Api extends FakeMatrixApi {
 
   final contextAsked = <String>[];
   final sent = <String>[];
+  final redacted = <String>[];
   var _ids = 0;
 
   static http.Response _json(Object body, [int status = 200]) =>
-      http.Response(jsonEncode(body), status);
+      // UTF-8 spelled out: the default is Latin-1, which can't carry an emoji.
+      http.Response(
+        jsonEncode(body),
+        status,
+        headers: {'content-type': 'application/json; charset=utf-8'},
+      );
 
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
@@ -65,6 +71,10 @@ class _Api extends FakeMatrixApi {
     if (request.method == 'PUT' && path.contains('/send/')) {
       sent.add(path.split('/send/').last.split('/').first);
       return _json({'event_id': '\$sent${_ids++}'});
+    }
+    if (request.method == 'PUT' && path.contains('/redact/')) {
+      redacted.add(path.split('/redact/').last.split('/').first);
+      return _json({'event_id': '\$redaction${_ids++}'});
     }
     return super.mockIntercept(request);
   }
@@ -177,7 +187,7 @@ class _Harness {
 }
 
 /// A room whose newest messages are `now 1` and `now 2`, opened.
-Future<_Harness> _open() async {
+Future<_Harness> _open({bool wait = true}) async {
   final api = _Api();
   final client = await openClient(
     httpClient: api,
@@ -200,6 +210,7 @@ Future<_Harness> _open() async {
   final rooms = MatrixRooms(client);
   addTearDown(rooms.dispose);
   final h = _Harness(api, client, rooms);
+  if (!wait) return h;
   await _until(() => !h.timeline.loadingOlder);
   await _settle();
   return h;
@@ -394,6 +405,53 @@ void main() {
       await _settle();
       final old = h.timeline.messages.firstWhere((m) => m.id == r'$old');
       expect(old.reactions.single.emoji, '👍');
+    },
+  );
+
+  test('a jump to a gone message before the first open lands '
+      'still opens the newest', () async {
+    final h = await _open(wait: false);
+    // The getter builds the timeline, which starts its first open.
+    h.timeline.jumpTo(r'$gone');
+    await _until(() => !h.timeline.loadingOlder);
+    await _settle();
+    final said = <String>[];
+    h.timeline.failures.listen(said.add);
+    await _settle();
+    expect(said, [messageUnavailable]);
+    expect(h.bodies, ['now 1', 'now 2']);
+    expect(h.timeline.canLoadNewer, isFalse);
+  });
+
+  test(
+    'taking back a reaction newer than the loaded window redacts it',
+    () async {
+      final h = await _open();
+      h.api.contexts[r'$old'] = _context(r'$old', 'the old one');
+      h.api.forward.add(
+        _page([
+          _event(
+            'm.reaction',
+            {
+              'm.relates_to': {
+                'rel_type': 'm.annotation',
+                'event_id': r'$old',
+                'key': '👍',
+              },
+            },
+            sender: _me,
+            id: r'$mine',
+          ),
+        ], last: true),
+      );
+      h.timeline.jumpTo(r'$old');
+      await _until(() => h.timeline.jumpTarget != null);
+
+      h.timeline.toggleReaction(r'$old', '👍');
+      await _until(() => h.api.redacted.isNotEmpty || h.api.sent.isNotEmpty);
+      await _settle();
+      expect(h.api.redacted, [r'$mine']);
+      expect(h.api.sent, isEmpty);
     },
   );
 }

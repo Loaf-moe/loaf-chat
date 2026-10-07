@@ -133,7 +133,7 @@ class MatrixTimeline extends ChangeNotifier
       // Deleted, never yours to see, or out of reach: the newest messages
       // are the nearest there is. Already there, you stay where you were.
       _fail(ui.messageUnavailable);
-      if (canLoadNewer) return _open();
+      if (_timeline == null || canLoadNewer) return _open();
       _opening = false;
       _changed();
       return;
@@ -562,10 +562,10 @@ class MatrixTimeline extends ChangeNotifier
     String text, {
     List<ui.Mention> mentions = const [],
   }) {
-    _catchUpForWrite();
     final body = text.trim();
     final current = messages.where((m) => m.id == messageId).firstOrNull;
     if (current != null && body.isNotEmpty && body != current.body) {
+      _catchUpForWrite();
       // Whoever the message told already heard: an edit tells only the
       // people it newly names.
       final told = switch (_event(messageId)?.content['m.mentions']) {
@@ -596,32 +596,35 @@ class MatrixTimeline extends ChangeNotifier
 
   @override
   void toggleReaction(String messageId, String emoji) {
-    _catchUpForWrite();
-    final event = _event(messageId);
-    final timeline = _timeline;
-    if (event == null || timeline == null) return;
+    if (_event(messageId) == null || _timeline == null) return;
     final key = (messageId, emoji);
     if (_reacting.contains(key)) return;
-    final mine = event
-        .aggregatedEvents(timeline, RelationshipTypes.reaction)
-        .where(
-          (r) =>
-              r.senderId == you.id && !_unsent(r) && _reactionKey(r) == emoji,
-        )
-        .firstOrNull;
-    // Still on its way, a reaction has no event id to take back yet.
-    if (mine != null && !mine.status.isSent) return;
     _reacting.add(key);
-    _attempt(
-      () =>
-          (mine == null
-                  ? _send(
-                      (txid) => room.sendReaction(messageId, emoji, txid: txid),
-                    )
-                  : room.redactEvent(mine.eventId))
-              .whenComplete(() => _reacting.remove(key)),
-      "couldn't react",
-    );
+    _attempt(() async {
+      try {
+        // Short of the live end, a reaction of yours may be newer than what
+        // is loaded: deciding to add or take back waits until it is not.
+        if (canLoadNewer) await _catchUp();
+        final timeline = _timeline;
+        if (_event(messageId) == null || timeline == null) return null;
+        final mine = _event(messageId)!
+            .aggregatedEvents(timeline, RelationshipTypes.reaction)
+            .where(
+              (r) =>
+                  r.senderId == you.id &&
+                  !_unsent(r) &&
+                  _reactionKey(r) == emoji,
+            )
+            .firstOrNull;
+        // Still on its way, a reaction has no event id to take back yet.
+        if (mine != null && !mine.status.isSent) return null;
+        return await (mine == null
+            ? _send((txid) => room.sendReaction(messageId, emoji, txid: txid))
+            : room.redactEvent(mine.eventId));
+      } finally {
+        _reacting.remove(key);
+      }
+    }, "couldn't react");
   }
 
   @override
@@ -696,7 +699,14 @@ class MatrixTimeline extends ChangeNotifier
     _newerFailed = false;
     _changed();
     try {
+      final had = timeline.events.length;
       await timeline.requestFuture(historyCount: historyPage);
+      // The SDK files a forward page's events but not their relations, so
+      // a reaction or edit in it would count for nothing. New events go in
+      // at the front.
+      for (final event in timeline.events.take(timeline.events.length - had)) {
+        timeline.addAggregatedEvent(event);
+      }
     } on Object {
       timeline.isRequestingFuture = false;
       _newerFailed = true;
@@ -708,13 +718,14 @@ class MatrixTimeline extends ChangeNotifier
 
   /// Pages forward to the live end, so a reaction, edit or deletion lands
   /// in a timeline that hears it, without losing your place. Stops at a
-  /// failed page, or one that brought nothing: the write has gone either
-  /// way, and scrolling down tries again.
+  /// failed page, or one that moved the forward token nowhere: the write has
+  /// gone either way, and scrolling down tries again. Events are no measure
+  /// of a page: one of only reactions adds none to the list.
   Future<void> _catchUp() async {
     while (!_disposed && canLoadNewer) {
-      final before = _timeline?.events.length;
+      final before = _timeline?.chunk.nextBatch;
       await _pageNewer();
-      if (_newerFailed || _timeline?.events.length == before) return;
+      if (_newerFailed || _timeline?.chunk.nextBatch == before) return;
     }
   }
 
