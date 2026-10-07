@@ -93,6 +93,21 @@ class MatrixUnread {
         if (_readReceipt(room, tally)) changed = true;
       }
     }
+    // Messages counted while still encrypted: once the SDK has stored them
+    // readable, see whether they mention you. A room being filled is skipped,
+    // since the fill replaces its tally anyway.
+    for (final MapEntry(key: roomId, value: tally) in _tallies.entries) {
+      if (_filling.contains(roomId)) continue;
+      final locked = tally.entries.where((e) => e.locked).toList();
+      if (locked.isEmpty) continue;
+      final room = client.getRoomById(roomId);
+      if (room == null) continue;
+      for (final entry in locked) {
+        final stored = await client.database.getEventById(entry.id, room);
+        if (stored == null || stored.type == EventTypes.Encrypted) continue;
+        if (tally.replace(await _entry(room, stored))) changed = true;
+      }
+    }
     // Fills that failed get another go now the server answers syncs again.
     for (final roomId in [..._needsFill]) {
       _scheduleFill(roomId);

@@ -460,6 +460,53 @@ void main() {
       expect(channel(rooms, general).mentions, 1);
     });
 
+    test('an encrypted message is checked again once it can be read', () async {
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        {
+          'type': 'm.room.encrypted',
+          'sender': '@ada:example.com',
+          'content': {
+            'algorithm': 'm.megolm.v1.aes-sha2',
+            'ciphertext': 'locked',
+            'session_id': 'nokey',
+            'sender_key': 'k',
+            'device_id': 'D',
+          },
+          'event_id': r'$locked',
+          'origin_server_ts': 1700000000000 + _events++ * 1000,
+        },
+      ]);
+      await _settle();
+      expect(channel(rooms, general).unread, 1);
+      expect(channel(rooms, general).mentions, 0);
+
+      // The key arrived and the SDK stored the message decrypted.
+      final room = client.getRoomById(general)!;
+      await client.database.storeEventUpdate(
+        general,
+        Event(
+          type: EventTypes.Message,
+          content: {
+            'msgtype': 'm.text',
+            'body': 'hey',
+            'm.mentions': {
+              'user_ids': [_me],
+            },
+          },
+          senderId: '@ada:example.com',
+          eventId: r'$locked',
+          originServerTs: DateTime.fromMillisecondsSinceEpoch(1700000000000),
+          room: room,
+        ),
+        EventUpdateType.timeline,
+        client,
+      );
+      await _timeline(client, general, const []);
+      await _settle();
+      expect(channel(rooms, general).mentions, 1);
+    });
+
     test('a muted room still counts', () async {
       final (client, rooms) = await bakery();
       await rooms.setMuted(general, true);
