@@ -296,6 +296,30 @@ void main() {
     await tester.pumpAndSettle();
     expect(_onScreen('message 119'), isTrue);
   });
+
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.iOS]) {
+    testWidgets(
+      "tapping a reply's quote jumps to what it answers",
+      variant: TargetPlatformVariant.only(platform),
+      (tester) async {
+        _tester = tester;
+        final timeline = TimelineController(
+          _messages(0, 59, replies: {59: 5}),
+          you: _you,
+        );
+        await _pump(tester, timeline);
+        expect(_onScreen('message 5'), isFalse);
+
+        await tester.tap(
+          find.textContaining('  message 5', findRichText: true),
+        );
+        await tester.pumpAndSettle();
+        expect(_onScreen('message 5'), isTrue);
+        expect(_glow(), greaterThan(0));
+        await tester.pump(const Duration(seconds: 2));
+      },
+    );
+  }
 }
 
 /// Short of live, and its last newer page failed.

@@ -151,9 +151,14 @@ class _MessageBody extends StatelessWidget {
     this.onDiscard,
     this.keyNeverCame = false,
     this.you,
+    this.onOpenReply,
   });
 
   final Message message;
+
+  /// Tapping the quote of what this replies to goes there. Null leaves the
+  /// quote display-only.
+  final VoidCallback? onOpenReply;
 
   /// Your user id, so mentions of you stand out.
   final String? you;
@@ -197,7 +202,8 @@ class _MessageBody extends StatelessWidget {
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (replyTo != null) _ReplyContext(replyTo: replyTo),
+        if (replyTo != null)
+          _ReplyContext(replyTo: replyTo, onTap: onOpenReply),
         if (message.media != null)
           MediaRow(
             key: ValueKey(message.id),
@@ -269,14 +275,15 @@ class _MessageBody extends StatelessWidget {
 }
 
 class _ReplyContext extends StatelessWidget {
-  const _ReplyContext({required this.replyTo});
+  const _ReplyContext({required this.replyTo, this.onTap});
 
   final Message replyTo;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
-    return Padding(
+    final quote = Padding(
       padding: const EdgeInsets.only(bottom: LoafSpace.x1),
       child: IntrinsicHeight(
         child: Row(
@@ -324,6 +331,17 @@ class _ReplyContext extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+    final onTap = this.onTap;
+    if (onTap == null) return quote;
+    // The quote is a way to what it answers: a pointer says so.
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: quote,
       ),
     );
   }
@@ -480,6 +498,9 @@ class _TouchMessageState extends State<_TouchMessage> {
         onAddReaction: _canReact ? (_) => _openSheet() : null,
         onRetry: () => widget.controller.retry(widget.message.id),
         onDiscard: () => widget.controller.discard(widget.message.id),
+        onOpenReply: widget.message.replyTo == null
+            ? null
+            : () => widget.controller.jumpTo(widget.message.replyTo!.id),
       ),
     ),
   );
@@ -643,6 +664,11 @@ class _PointerMessageState extends State<_PointerMessage> {
                   onSelectionChanged: (text) => _selection = text,
                   onRetry: () => widget.controller.retry(widget.message.id),
                   onDiscard: () => widget.controller.discard(widget.message.id),
+                  onOpenReply: widget.message.replyTo == null
+                      ? null
+                      : () => widget.controller.jumpTo(
+                          widget.message.replyTo!.id,
+                        ),
                 ),
               ),
             ),
