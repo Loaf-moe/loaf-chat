@@ -43,21 +43,16 @@ WindowChrome::WindowChrome(HWND window, flutter::BinaryMessenger* messenger)
       // Posted, not sent, so this reply isn't held up for the whole move.
       // The cursor position rides along because the loop starts from it.
       POINT cursor{};
-      GetCursorPos(&cursor);
+      const LPARAM at = GetCursorPos(&cursor) ? MAKELPARAM(cursor.x, cursor.y)
+                                              : 0;
       ReleaseCapture();
-      PostMessage(window_, WM_NCLBUTTONDOWN, HTCAPTION,
-                  MAKELPARAM(cursor.x, cursor.y));
+      PostMessage(window_, WM_NCLBUTTONDOWN, HTCAPTION, at);
     } else if (method == "setMaxButtonRect") {
       const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
       if (args != nullptr) {
-        const double scale = GetDpiForWindow(window_) / 96.0;
-        max_button_ = RECT{
-            static_cast<LONG>(ArgDouble(*args, "x") * scale),
-            static_cast<LONG>(ArgDouble(*args, "y") * scale),
-            static_cast<LONG>((ArgDouble(*args, "x") + ArgDouble(*args, "w")) *
-                              scale),
-            static_cast<LONG>((ArgDouble(*args, "y") + ArgDouble(*args, "h")) *
-                              scale)};
+        max_button_ = LogicalRect{ArgDouble(*args, "x"), ArgDouble(*args, "y"),
+                                  ArgDouble(*args, "w"),
+                                  ArgDouble(*args, "h")};
       }
     } else {
       result->NotImplemented();
@@ -66,6 +61,9 @@ WindowChrome::WindowChrome(HWND window, flutter::BinaryMessenger* messenger)
     result->Success();
   });
 
+}
+
+void WindowChrome::Install() {
   // A one-pixel top margin keeps DWM's shadow on a window with no caption.
   const MARGINS margins{0, 0, 1, 0};
   DwmExtendFrameIntoClientArea(window_, &margins);
@@ -96,6 +94,7 @@ int WindowChrome::FrameX() const {
 
 int WindowChrome::FrameY() const {
   const UINT dpi = GetDpiForWindow(window_);
+  // SM_CXPADDEDBORDER is the padding for both axes; there is no CY variant.
   return GetSystemMetricsForDpi(SM_CYFRAME, dpi) +
          GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
 }
@@ -105,6 +104,14 @@ LRESULT WindowChrome::HitTest(POINT screen) const {
   ScreenToClient(window_, &p);
   RECT client;
   GetClientRect(window_, &client);
+  // The button comes first so its top pixels still offer snap layouts
+  // rather than a resize.
+  const double scale = GetDpiForWindow(window_) / 96.0;
+  const RECT button{static_cast<LONG>(max_button_.x * scale),
+                    static_cast<LONG>(max_button_.y * scale),
+                    static_cast<LONG>((max_button_.x + max_button_.w) * scale),
+                    static_cast<LONG>((max_button_.y + max_button_.h) * scale)};
+  if (PtInRect(&button, p)) return HTMAXBUTTON;
   // The caption is gone, so the top resize edge lies inside the client
   // area and has to be claimed here.
   if (!IsZoomed(window_) && p.y >= 0 && p.y < FrameY()) {
@@ -112,7 +119,6 @@ LRESULT WindowChrome::HitTest(POINT screen) const {
     if (p.x >= client.right - FrameX()) return HTTOPRIGHT;
     return HTTOP;
   }
-  if (PtInRect(&max_button_, p)) return HTMAXBUTTON;
   return HTCLIENT;
 }
 

@@ -31,6 +31,7 @@ bool FlutterWindow::OnCreate() {
   chrome_ = std::make_unique<WindowChrome>(
       GetHandle(), flutter_controller_->engine()->messenger());
   chrome_->AttachChild(flutter_controller_->view()->GetNativeWindow());
+  chrome_->Install();
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();

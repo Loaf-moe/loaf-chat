@@ -16,6 +16,10 @@ class WindowChrome {
   WindowChrome(HWND window, flutter::BinaryMessenger* messenger);
   ~WindowChrome();
 
+  // Drops the caption. Not in the constructor: the resulting WM_NCCALCSIZE is
+  // sent at once, before FlutterWindow holds this object to route it to.
+  void Install();
+
   // Lets the Flutter view pass the top resize edge and the maximize button
   // through to the frame, which owns them.
   void AttachChild(HWND child);
@@ -39,7 +43,12 @@ class WindowChrome {
 
   HWND window_;
   HWND child_ = nullptr;
-  RECT max_button_{};  // physical pixels, client coordinates
+  // Logical pixels, client coordinates. Kept logical because Dart reports it
+  // only when it changes, so a DPI change must not leave it stale.
+  struct LogicalRect {
+    double x = 0, y = 0, w = 0, h = 0;
+  };
+  LogicalRect max_button_;
   bool max_hovered_ = false;
   bool max_pressed_ = false;
   // From WM_ACTIVATE, because GetForegroundWindow() can lag the message.
