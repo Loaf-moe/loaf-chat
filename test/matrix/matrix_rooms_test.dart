@@ -309,12 +309,16 @@ Map<String, Object?> _msg(
 };
 
 /// Your receipt on [eventId], placed at [ts].
-Map<String, Object?> _receipt(String eventId, {required int ts}) => {
+Map<String, Object?> _receipt(
+  String eventId, {
+  required int ts,
+  String? thread,
+}) => {
   'type': 'm.receipt',
   'content': {
     eventId: {
       'm.read': {
-        _me: {'ts': ts},
+        _me: {'ts': ts, 'thread_id': ?thread},
       },
     },
   },
@@ -575,6 +579,41 @@ void main() {
       await _settle();
       expect(channel(rooms, general).unread, 1);
     });
+
+    test('a receipt on the main timeline reads too', () async {
+      // Element Web sends m.read with thread_id "main"; the SDK keeps it
+      // apart from the unthreaded ones.
+      final (client, rooms) = await bakery();
+      await _timeline(client, general, [
+        _msg('one', id: r'$one'),
+        _msg('two', id: r'$two'),
+      ]);
+      await _timeline(
+        client,
+        general,
+        const [],
+        ephemeral: [_receipt(r'$two', ts: 0, thread: 'main')],
+      );
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+    });
+
+    test(
+      'a receipt recorded before its message arrives still reads it',
+      () async {
+        final (client, rooms) = await bakery();
+        await _timeline(
+          client,
+          general,
+          const [],
+          ephemeral: [_receipt(r'$m', ts: 0)],
+        );
+        await _settle();
+        await _timeline(client, general, [_msg('covered', id: r'$m')]);
+        await _settle();
+        expect(channel(rooms, general).unread, 0);
+      },
+    );
 
     test(
       'read on another device, by time, on an event never counted',
@@ -894,6 +933,22 @@ void main() {
       api.hold!.complete();
       await _settle();
       expect(channel(rooms, general).unread, 0);
+    });
+
+    test('a main-timeline receipt on the last message seeds no fill', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      await _bakery(client);
+      await _timeline(
+        client,
+        general,
+        [_msg('waiting', id: r'$waiting')],
+        ephemeral: [_receipt(r'$waiting', ts: 0, thread: 'main')],
+      );
+      final rooms = await _rooms(client);
+      await _settle();
+      expect(channel(rooms, general).unread, 0);
+      expect(api.historyCalls[general], isNull);
     });
 
     test(

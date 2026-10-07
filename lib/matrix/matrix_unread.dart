@@ -85,12 +85,19 @@ class MatrixUnread {
           changed = true;
         }
       }
-      final own = room.receiptState.global.latestOwnReceipt;
-      if (own != null &&
-          _receipts[roomId] != (eventId: own.eventId, ts: own.ts)) {
-        _receipts[roomId] = (eventId: own.eventId, ts: own.ts);
-        _scheduleSave();
-        if (_readReceipt(room, tally)) changed = true;
+      final own = _ownReceipt(room);
+      if (own != null) {
+        final fresh = _receipts[roomId] != (eventId: own.eventId, ts: own.ts);
+        // The by-time reading is what the gate guards against repeating. A
+        // receipt on a message that is counted is exact, and applies even
+        // when it was recorded before that message arrived, as happens when
+        // the queue lags behind the SDK.
+        final onCounted = tally.entries.any((e) => e.id == own.eventId);
+        if (fresh || onCounted) {
+          _receipts[roomId] = (eventId: own.eventId, ts: own.ts);
+          if (fresh) _scheduleSave();
+          if (_readReceipt(room, tally)) changed = true;
+        }
       }
     }
     // Messages counted while still encrypted: once the SDK has stored them
@@ -153,7 +160,7 @@ class MatrixUnread {
                 _tallies.containsKey(room.id)) {
               continue;
             }
-            if (room.hasNewMessages) {
+            if (_hasNewMessages(room)) {
               _scheduleFill(room.id);
             } else {
               _tallies[room.id] = RoomTally();
@@ -203,7 +210,7 @@ class MatrixUnread {
       _needsFill.remove(roomId);
       return;
     }
-    final own = room.receiptState.global.latestOwnReceipt;
+    final own = _ownReceipt(room);
     final found = <TallyEntry>[];
     var capped = false;
     int? newestSeen;
@@ -256,7 +263,7 @@ class MatrixUnread {
     );
     _readReceipt(room, tally);
     // Remembered so the next sync doesn't apply this receipt a second time.
-    final current = room.receiptState.global.latestOwnReceipt;
+    final current = _ownReceipt(room);
     if (current != null) {
       _receipts[roomId] = (eventId: current.eventId, ts: current.ts);
     }
@@ -378,9 +385,37 @@ class MatrixUnread {
     }
   }
 
+  /// Your latest read receipt in [room]: the later of the unthreaded ones
+  /// and those on the main timeline, which the SDK keeps apart. Receipts on
+  /// real threads are ignored, since Loaf shows thread replies inline and
+  /// reading a thread says nothing about the room.
+  LatestReceiptStateData? _ownReceipt(Room room) {
+    final state = room.receiptState;
+    final global = state.global.latestOwnReceipt;
+    final main = state.mainThread?.latestOwnReceipt;
+    if (global == null || main == null) return global ?? main;
+    return main.ts > global.ts ? main : global;
+  }
+
+  /// Whether the room's last event is a message from someone else that your
+  /// receipt doesn't cover. [Room.hasNewMessages] looks at unthreaded
+  /// receipts only.
+  bool _hasNewMessages(Room room) {
+    final last = room.lastEvent;
+    if (last == null ||
+        !countsAsMessage(last) ||
+        last.senderId == client.userID) {
+      return false;
+    }
+    final own = _ownReceipt(room);
+    return own == null ||
+        (own.eventId != last.eventId &&
+            own.ts < last.originServerTs.millisecondsSinceEpoch);
+  }
+
   /// Applies your current receipt in [room], changed or not.
   bool _readReceipt(Room room, RoomTally tally) {
-    final own = room.receiptState.global.latestOwnReceipt;
+    final own = _ownReceipt(room);
     return own != null && tally.readUpTo(own.eventId, own.ts);
   }
 

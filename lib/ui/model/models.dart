@@ -226,21 +226,21 @@ class Message {
     String? formatted,
     bool? edited,
   }) => Message(
-        id: id,
-        author: author,
-        sentAt: sentAt,
-        body: body ?? this.body,
-        formatted: body == null ? this.formatted : formatted,
-        reactions: reactions ?? this.reactions,
-        edited: edited ?? this.edited,
-        replyTo: replyTo,
-        media: media,
-        uploaded: uploaded,
-        callLine: callLine,
-        status: status,
-        locked: locked,
-        stub: stub,
-      );
+    id: id,
+    author: author,
+    sentAt: sentAt,
+    body: body ?? this.body,
+    formatted: body == null ? this.formatted : formatted,
+    reactions: reactions ?? this.reactions,
+    edited: edited ?? this.edited,
+    replyTo: replyTo,
+    media: media,
+    uploaded: uploaded,
+    callLine: callLine,
+    status: status,
+    locked: locked,
+    stub: stub,
+  );
 }
 
 class Channel {

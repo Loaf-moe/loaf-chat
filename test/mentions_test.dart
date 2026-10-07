@@ -85,8 +85,9 @@ void main() {
 
     test('channels match by name', () {
       expect(
-        searchMentions('kit', [const MentionCandidate.channel(_kitchen)]).single
-            .label,
+        searchMentions('kit', [
+          const MentionCandidate.channel(_kitchen),
+        ]).single.label,
         '#kitchen',
       );
     });
@@ -136,9 +137,7 @@ void main() {
   });
 
   test('mentionedUserIds tells people, not rooms', () {
-    expect(mentionedUserIds([_adaMention, _kitchenMention]), [
-      '@ada:loaf.moe',
-    ]);
+    expect(mentionedUserIds([_adaMention, _kitchenMention]), ['@ada:loaf.moe']);
   });
 
   test('mentionsOf reads a sent message\'s mentions back for an edit', () {

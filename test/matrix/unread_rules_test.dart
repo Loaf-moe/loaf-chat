@@ -61,7 +61,9 @@ void main() {
       final room = _room();
       expect(countsAsMessage(_event(room)), isTrue);
       expect(
-        countsAsMessage(_event(room, type: EventTypes.Sticker, content: {'body': 's'})),
+        countsAsMessage(
+          _event(room, type: EventTypes.Sticker, content: {'body': 's'}),
+        ),
         isTrue,
       );
     });
@@ -70,52 +72,84 @@ void main() {
       final room = _room();
       expect(
         countsAsMessage(
-          _event(room, content: {
-            'msgtype': 'm.text',
-            'body': '* hi',
-            'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$x'},
-          }),
+          _event(
+            room,
+            content: {
+              'msgtype': 'm.text',
+              'body': '* hi',
+              'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$x'},
+            },
+          ),
         ),
         isFalse,
       );
       expect(
         countsAsMessage(
-          _event(room, type: EventTypes.Reaction, content: {
-            'm.relates_to': {'rel_type': 'm.annotation', 'event_id': r'$x', 'key': '👍'},
-          }),
+          _event(
+            room,
+            type: EventTypes.Reaction,
+            content: {
+              'm.relates_to': {
+                'rel_type': 'm.annotation',
+                'event_id': r'$x',
+                'key': '👍',
+              },
+            },
+          ),
         ),
         isFalse,
       );
       expect(
-        countsAsMessage(_event(room, type: EventTypes.RoomTopic, content: {'topic': 't'})),
+        countsAsMessage(
+          _event(room, type: EventTypes.RoomTopic, content: {'topic': 't'}),
+        ),
         isFalse,
       );
     });
 
-    test('an encrypted message counts; an encrypted edit or reaction does not', () {
-      final room = _room();
-      expect(
-        countsAsMessage(_event(room, type: EventTypes.Encrypted, content: {'ciphertext': 'x'})),
-        isTrue,
-      );
-      expect(
-        countsAsMessage(
-          _event(room, type: EventTypes.Encrypted, content: {
-            'ciphertext': 'x',
-            'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$x'},
-          }),
-        ),
-        isFalse,
-      );
-    });
+    test(
+      'an encrypted message counts; an encrypted edit or reaction does not',
+      () {
+        final room = _room();
+        expect(
+          countsAsMessage(
+            _event(
+              room,
+              type: EventTypes.Encrypted,
+              content: {'ciphertext': 'x'},
+            ),
+          ),
+          isTrue,
+        );
+        expect(
+          countsAsMessage(
+            _event(
+              room,
+              type: EventTypes.Encrypted,
+              content: {
+                'ciphertext': 'x',
+                'm.relates_to': {'rel_type': 'm.replace', 'event_id': r'$x'},
+              },
+            ),
+          ),
+          isFalse,
+        );
+      },
+    );
 
     test('a deleted message does not', () {
       final room = _room();
       expect(
         countsAsMessage(
-          _event(room, unsigned: {
-            'redacted_because': {'type': 'm.room.redaction', 'sender': '@ada:example.com'},
-          }),
+          _event(
+            room,
+            unsigned: {
+              'redacted_because': {
+                'type': 'm.room.redaction',
+                'sender': '@ada:example.com',
+              },
+            },
+          ),
         ),
         isFalse,
       );
@@ -125,36 +159,60 @@ void main() {
   group('mentionsMe', () {
     test('m.mentions naming you is a mention', () {
       final room = _room();
-      final event = _event(room, content: _text('hey', mentions: {'user_ids': [_me]}));
+      final event = _event(
+        room,
+        content: _text(
+          'hey',
+          mentions: {
+            'user_ids': [_me],
+          },
+        ),
+      );
       expect(mentionsMe(event, userId: _me, displayName: 'Me'), isTrue);
     });
 
     test('m.mentions decides alone: a name in the body is not a mention', () {
       final room = _room();
-      final event = _event(room, content: _text('Me, look', mentions: <String, Object?>{}));
+      final event = _event(
+        room,
+        content: _text('Me, look', mentions: <String, Object?>{}),
+      );
       expect(mentionsMe(event, userId: _me, displayName: 'Me'), isFalse);
     });
 
     test('@room counts from a sender with the power to notify the room', () {
       final room = _room(users: {'@ada:example.com': 50});
-      final event = _event(room, content: _text('all', mentions: {'room': true}));
+      final event = _event(
+        room,
+        content: _text('all', mentions: {'room': true}),
+      );
       expect(mentionsMe(event, userId: _me), isTrue);
     });
 
     test('@room from a sender below the room level is not a mention', () {
       final room = _room(roomNotify: 75, users: {'@ada:example.com': 50});
-      final event = _event(room, content: _text('all', mentions: {'room': true}));
+      final event = _event(
+        room,
+        content: _text('all', mentions: {'room': true}),
+      );
       expect(mentionsMe(event, userId: _me), isFalse);
     });
 
     test('without m.mentions, your name or id in the body is a mention', () {
       final room = _room();
       expect(
-        mentionsMe(_event(room, content: _text('ask me later, Ada')), userId: _me, displayName: 'Ada'),
+        mentionsMe(
+          _event(room, content: _text('ask me later, Ada')),
+          userId: _me,
+          displayName: 'Ada',
+        ),
         isTrue,
       );
       expect(
-        mentionsMe(_event(room, content: _text('cc @me:example.com')), userId: _me),
+        mentionsMe(
+          _event(room, content: _text('cc @me:example.com')),
+          userId: _me,
+        ),
         isTrue,
       );
     });
@@ -162,19 +220,33 @@ void main() {
     test('a name inside another word is not a mention', () {
       final room = _room();
       expect(
-        mentionsMe(_event(room, content: _text('Adamant')), userId: _me, displayName: 'Ada'),
+        mentionsMe(
+          _event(room, content: _text('Adamant')),
+          userId: _me,
+          displayName: 'Ada',
+        ),
         isFalse,
       );
     });
 
-    test('without m.mentions, a legacy @room from a sender with power counts', () {
-      final room = _room(users: {'@ada:example.com': 50});
-      expect(mentionsMe(_event(room, content: _text('@room lunch')), userId: _me), isTrue);
-    });
+    test(
+      'without m.mentions, a legacy @room from a sender with power counts',
+      () {
+        final room = _room(users: {'@ada:example.com': 50});
+        expect(
+          mentionsMe(_event(room, content: _text('@room lunch')), userId: _me),
+          isTrue,
+        );
+      },
+    );
 
     test('a still-encrypted message mentions no one', () {
       final room = _room();
-      final event = _event(room, type: EventTypes.Encrypted, content: {'ciphertext': 'x'});
+      final event = _event(
+        room,
+        type: EventTypes.Encrypted,
+        content: {'ciphertext': 'x'},
+      );
       expect(mentionsMe(event, userId: _me, displayName: 'Me'), isFalse);
     });
   });
