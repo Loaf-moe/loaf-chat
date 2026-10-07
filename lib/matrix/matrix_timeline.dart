@@ -33,7 +33,13 @@ class MatrixTimeline extends ChangeNotifier
   /// Opens [room]'s timeline straight away; until it has, the conversation
   /// is empty and [loadingOlder]. [member] maps a user id to a person as
   /// the rest of the app draws them.
-  MatrixTimeline(this.room, {required this.you, required this.member}) {
+  MatrixTimeline(
+    this.room, {
+    required this.you,
+    required this.member,
+    this.externalMedia,
+  }) {
+    externalMedia?.addListener(_changed);
     unawaited(_open());
   }
 
@@ -43,6 +49,10 @@ class MatrixTimeline extends ChangeNotifier
   final ui.Member you;
 
   final ui.Member Function(String userId) member;
+
+  /// Whether files linked on other sites are shown. Null: they are. The rows
+  /// are drawn afresh when it changes.
+  final ValueListenable<bool>? externalMedia;
 
   Timeline? _timeline;
   var _opening = true;
@@ -168,16 +178,22 @@ class MatrixTimeline extends ChangeNotifier
       return null;
     }
     final display = _display(event, timeline);
+    final external = externalMedia?.value ?? true;
     final media = _fileTypes.contains(display.messageType)
-        ? mediaOf(display)
+        ? mediaOf(display, external: external)
         : null;
     final text = display.calcUnlocalizedBody(
       hideReply: true,
       hideEdit: true,
       plaintextBody: true,
     );
+    // A bridge that has no copy of an attachment says where it is instead.
+    final linked = media == null
+        ? linkedMediaIn(display, text, external: external)
+        : null;
     final body = switch (display.messageType) {
       _ when media != null => captionOf(display.content) ?? '',
+      _ when linked != null => linked.body,
       MessageTypes.Emote => '${author.name} $text',
       _ => text,
     };
@@ -186,8 +202,11 @@ class MatrixTimeline extends ChangeNotifier
       author: author,
       sentAt: event.originServerTs,
       body: body,
-      media: media,
-      formatted: _formatted(display, author, caption: media != null),
+      media: media ?? linked?.media,
+      // A message that was only a link has no words left to format.
+      formatted: linked != null && linked.body.isEmpty
+          ? null
+          : _formatted(display, author, caption: media != null),
       edited: !identical(display, event),
       reactions: quoting ? const [] : _reactions(event, timeline),
       replyTo: quoting ? null : _replyTo(event, timeline),
@@ -612,6 +631,7 @@ class MatrixTimeline extends ChangeNotifier
   @override
   void dispose() {
     _disposed = true;
+    externalMedia?.removeListener(_changed);
     _timeline?.cancelSubscriptions();
     unawaited(_failures.close());
     super.dispose();

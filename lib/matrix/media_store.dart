@@ -10,7 +10,8 @@ import 'package:matrix/matrix.dart' show Logs;
 import '../ui/model/media_source.dart';
 import 'ctr_decryptor.dart';
 
-/// What to fetch: one remote file, and how to read it.
+/// What to fetch: one remote file, and how to read it. [mxc] is the
+/// homeserver's own copy, or the `https` link of a file on another site.
 @immutable
 class MediaSpec {
   const MediaSpec({
@@ -19,6 +20,7 @@ class MediaSpec {
     this.key,
     this.iv,
     this.size,
+    this.limit,
   });
 
   final Uri mxc;
@@ -29,7 +31,14 @@ class MediaSpec {
   final String? key;
   final String? iv;
   final int? size;
+
+  /// The most bytes to take: a download that goes past it fails. Null takes
+  /// what comes.
+  final int? limit;
 }
+
+/// How much of a file on another site, with no size given, is worth taking.
+const externalLimit = 25 * 1000 * 1000;
 
 /// Files on disk under [root], one folder per mxc, downloaded once however
 /// many ask, decrypted as they arrive, and trimmed to [capBytes] oldest first.
@@ -40,6 +49,7 @@ class MediaStore {
     required this.downloadUri,
     required this.accessToken,
     this.capBytes = 2000 * 1000 * 1000,
+    this.removeFolder = _removeFolder,
   });
 
   final Directory root;
@@ -47,6 +57,12 @@ class MediaStore {
   final Future<Uri> Function(Uri mxc) downloadUri;
   final String? Function() accessToken;
   final int capBytes;
+
+  /// How an evicted file's folder goes. Here so a test can have one refuse.
+  final Future<void> Function(Directory folder) removeFolder;
+
+  static Future<void> _removeFolder(Directory folder) =>
+      folder.delete(recursive: true);
 
   final _running = <Uri, StoredFile>{};
   final _held = <String, int>{};
@@ -125,7 +141,7 @@ class MediaStore {
       if (total <= capBytes) break;
       if (_disposed) return;
       if ((_held[e.id] ?? 0) > 0 || busy.contains(e.id)) continue;
-      if (await e.dir.exists()) await e.dir.delete(recursive: true);
+      if (await e.dir.exists()) await removeFolder(e.dir);
       total -= e.size;
     }
   }
@@ -339,10 +355,13 @@ class StoredFile extends ChangeNotifier implements MediaFile {
       final part = File(partialPath);
       if (await part.exists()) await part.delete();
 
-      final uri = await _store.downloadUri(_spec.mxc);
+      // Another site's file is fetched as it stands. The access token is the
+      // homeserver's, and goes nowhere else.
+      final homeserver = _spec.mxc.isScheme('mxc');
+      final uri = homeserver ? await _store.downloadUri(_spec.mxc) : _spec.mxc;
       if (_dead) return;
       final request = http.Request('GET', uri);
-      final token = _store.accessToken();
+      final token = homeserver ? _store.accessToken() : null;
       if (token != null) request.headers['authorization'] = 'Bearer $token';
       response = await _store.client.send(request);
       if (_dead) return;
@@ -352,7 +371,12 @@ class StoredFile extends ChangeNotifier implements MediaFile {
           uri,
         );
       }
-      _total = response.contentLength ?? _spec.size;
+      final limit = _spec.limit;
+      final declared = response.contentLength;
+      if (limit != null && declared != null && declared > limit) {
+        throw StateError('too big: $declared bytes');
+      }
+      _total = declared ?? _spec.size;
 
       raf = await part.open(mode: FileMode.write);
       if (_dead) return;
@@ -365,6 +389,9 @@ class StoredFile extends ChangeNotifier implements MediaFile {
         await raf.writeFrom(bytes);
         if (_dead) return;
         _received += bytes.length;
+        if (limit != null && _received > limit) {
+          throw StateError('too big: over $limit bytes');
+        }
         _notify();
       }
       if (_dead) return;

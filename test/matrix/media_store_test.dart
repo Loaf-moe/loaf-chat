@@ -29,6 +29,7 @@ void main() {
   MediaStore storeOver(
     http.Client client, {
     int capBytes = 2000 * 1000 * 1000,
+    Future<void> Function(Directory)? removeFolder,
   }) => MediaStore(
     root: root,
     client: client,
@@ -38,6 +39,7 @@ void main() {
     ),
     accessToken: () => 'tok',
     capBytes: capBytes,
+    removeFolder: removeFolder ?? (d) => d.delete(recursive: true),
   );
 
   /// Serves [chunks] whole, at once.
@@ -55,6 +57,40 @@ void main() {
 
   Future<void> settle() =>
       Future<void>.delayed(const Duration(milliseconds: 20));
+
+  group('a limit', () {
+    final elsewhere = Uri.parse('https://cdn.example.net/big.png');
+    MediaSpec spec(int? limit) =>
+        MediaSpec(mxc: elsewhere, name: 'big.png', limit: limit);
+
+    test('stops a file that says it is too big', () async {
+      final store = storeOver(serving([List.filled(100, 1)]));
+      final file = store.open(spec(50));
+      await expectLater(file.path, throwsStateError);
+      expect(file.error, isNotNull);
+    });
+
+    test('stops a file that turns out to be too big', () async {
+      final store = storeOver(
+        MockClient.streaming(
+          (request, body) async => http.StreamedResponse(
+            Stream.fromIterable([List.filled(40, 1), List.filled(40, 1)]),
+            200,
+          ),
+        ),
+      );
+      final file = store.open(spec(50));
+      await expectLater(file.path, throwsStateError);
+    });
+
+    test('lets a file within it through, and one with none', () async {
+      final store = storeOver(serving([List.filled(40, 1)]));
+      expect(File(await store.open(spec(50)).path).lengthSync(), 40);
+      final other = Uri.parse('https://cdn.example.net/other.png');
+      final again = store.open(MediaSpec(mxc: other, name: 'other.png'));
+      expect(File(await again.path).lengthSync(), 40);
+    });
+  });
 
   test('a plain file arrives on disk under its own name', () async {
     final store = storeOver(serving([utf8.encode('hello')]));
@@ -234,15 +270,23 @@ void main() {
         ..writeAsBytesSync(List.filled(100, 1))
         ..setLastModifiedSync(DateTime(2026, 1, 1 + i));
     }
-    final store = storeOver(serving([]), capBytes: 100);
-    addTearDown(store.dispose);
-    // A folder that cannot be written to refuses to give up its file.
+    // The oldest folder refuses to go the first time.
     final locked = '${root.path}/${_id(uris[0])}';
-    Process.runSync('chmod', ['555', locked]);
-    addTearDown(() => Process.runSync('chmod', ['755', locked]));
+    var refuse = true;
+    final store = storeOver(
+      serving([]),
+      capBytes: 100,
+      removeFolder: (folder) async {
+        if (refuse && folder.path == locked) {
+          throw const FileSystemException('permission denied');
+        }
+        await folder.delete(recursive: true);
+      },
+    );
+    addTearDown(store.dispose);
     await store.evict();
     expect(File('$locked/f.bin').existsSync(), isTrue);
-    Process.runSync('chmod', ['755', locked]);
+    refuse = false;
     await store.evict();
     expect(Directory('${root.path}/${_id(uris[0])}').existsSync(), isFalse);
     expect(Directory('${root.path}/${_id(uris[1])}').existsSync(), isTrue);

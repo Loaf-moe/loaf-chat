@@ -10,7 +10,8 @@
 import LoafMediaCore
 
 /// The native half of `package:loaf_media`: Quick Look, on macOS the
-/// default app, and the inline video player. The other ends are
+/// default app, the clipboard's pictures and files, and the inline video
+/// player. The other ends are
 /// `lib/src/native.dart`, `lib/src/streams.dart` and `lib/src/video.dart`.
 public final class LoafMediaPlugin: NSObject, FlutterPlugin {
   private let quickLook = QuickLook()
@@ -40,6 +41,12 @@ public final class LoafMediaPlugin: NSObject, FlutterPlugin {
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     let arguments = call.arguments as? [String: Any]
     switch call.method {
+    case "clipboard.has":
+      result(Clipboard.hasFiles())
+    case "clipboard.files":
+      result(Clipboard.files())
+    case "clipboard.image":
+      result(Clipboard.png().map { FlutterStandardTypedData(bytes: $0) })
     case "stream.begin":
       guard let id = arguments?["id"] as? String, let path = arguments?["path"] as? String,
         let progress = Self.progress(arguments)

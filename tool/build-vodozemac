@@ -1,0 +1,13 @@
+#!/bin/sh
+# Builds vodozemac's native library for the encryption tests on Linux, where
+# there is no macOS build to take it from. Run after `flutter pub get`, from
+# the repo root; the tests find the result in build/vodozemac/.
+set -eu
+
+package=$(sed -n 's|.*"rootUri": "file://\(.*flutter_vodozemac[^"]*\)".*|\1|p' \
+  .dart_tool/package_config.json | head -n 1)
+[ -n "$package" ] || { echo "run flutter pub get first" >&2; exit 1; }
+
+CARGO_TARGET_DIR=build/vodozemac/target \
+  cargo build --release --lib --manifest-path "$package/rust/Cargo.toml"
+cp build/vodozemac/target/release/libvodozemac_bindings_dart.so build/vodozemac/

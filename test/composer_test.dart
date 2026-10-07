@@ -184,6 +184,72 @@ void main() {
       expect(find.byTooltip('Attach files'), findsOneWidget);
     });
 
+    group('pasting', () {
+      Future<TimelineController> pumpPaste(
+        WidgetTester tester,
+        Future<List<XFile>> Function() paste,
+      ) async {
+        final timeline = TimelineController([question], you: currentUser);
+        addTearDown(timeline.dispose);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: loafDarkTheme(),
+            home: Scaffold(
+              body: Composer(
+                channelName: 'general',
+                timeline: timeline,
+                pasteFiles: paste,
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.byType(TextField));
+        await tester.pump();
+        return timeline;
+      }
+
+      Future<void> ctrlV(WidgetTester tester) async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('a picture on the clipboard is sent as an image', (
+        tester,
+      ) async {
+        final timeline = await pumpPaste(
+          tester,
+          () async => [file('pasted.png')],
+        );
+        await ctrlV(tester);
+        expect(timeline.messages.skip(1).map((m) => m.media?.name), [
+          'pasted.png',
+        ]);
+      });
+
+      testWidgets('with nothing but text on it, the field pastes the text', (
+        tester,
+      ) async {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          (call) async => call.method == 'Clipboard.getData'
+              ? <String, Object?>{'text': 'a loaf'}
+              : null,
+        );
+        addTearDown(
+          () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            null,
+          ),
+        );
+        final timeline = await pumpPaste(tester, () async => []);
+        await ctrlV(tester);
+        expect(find.text('a loaf'), findsOneWidget);
+        expect(timeline.messages, hasLength(1));
+      });
+    });
+
     testWidgets('there is one way to attach, not two', (tester) async {
       await pumpWith(tester, () async => []);
       expect(find.byIcon(LucideIcons.paperclip), findsNothing);

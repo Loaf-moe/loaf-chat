@@ -195,6 +195,148 @@ void main() {
       },
     );
 
+    group('on another site', () {
+      Map<String, Object?> bridged() => {
+        'msgtype': 'm.image',
+        'body': 'cat.png',
+        'url': 'https://cdn.example.net/cat.png',
+        'info': {'size': 2000, 'mimetype': 'image/png'},
+      };
+
+      test('a small image previews through the store, by default', () {
+        final media = mediaOf(_event(bridged()))!;
+        expect(media.hasPreview, isTrue);
+        expect(source.preview(media, 500), isA<StoredFileImage>());
+        expect(source.open(media).error, isNull);
+      });
+
+      test('it is a plain card with the setting off', () {
+        final media = mediaOf(_event(bridged()), external: false)!;
+        expect(media.hasPreview, isFalse);
+        expect(source.preview(media, 500), isNull);
+        expect(source.open(media).error, isNotNull);
+      });
+
+      test('an http link is never fetched', () {
+        final media = mediaOf(
+          _event({...bridged(), 'url': 'http://cdn.example.net/cat.png'}),
+        )!;
+        expect(media.hasPreview, isFalse);
+      });
+
+      test('a link beside an encrypted key is not followed', () {
+        final media = mediaOf(
+          _event({
+            ...bridged(),
+            'file': {..._encrypted(), 'url': 'https://cdn.example.net/x'},
+          }),
+        )!;
+        expect(media.hasPreview, isFalse);
+      });
+
+      test('the access token stays with the homeserver', () async {
+        final seen = <http.BaseRequest>[];
+        final store = MediaStore(
+          root: Directory('${root.path}/ext')..createSync(),
+          client: MockClient.streaming((request, _) async {
+            seen.add(request);
+            return http.StreamedResponse(
+              Stream.value([1, 2, 3]),
+              200,
+              contentLength: 3,
+            );
+          }),
+          downloadUri: (mxc) async =>
+              Uri.https('example.com', '/dl${mxc.path}'),
+          accessToken: () => 'tok',
+        );
+        await MatrixMediaSource(
+          _client,
+          store,
+        ).open(mediaOf(_event(bridged()))!).path;
+        await MatrixMediaSource(_client, store)
+            .open(
+              mediaOf(_event({...bridged(), 'url': 'mxc://example.com/home'}))!,
+            )
+            .path;
+        expect(seen.first.url.host, 'cdn.example.net');
+        expect(seen.first.headers.containsKey('authorization'), isFalse);
+        expect(seen.last.url.host, 'example.com');
+        expect(seen.last.headers['authorization'], 'Bearer tok');
+      });
+    });
+
+    group('a link in plain text', () {
+      LinkedMedia? linked(String body, {bool external = true}) => linkedMediaIn(
+        _event({'msgtype': 'm.text', 'body': body}),
+        body,
+        external: external,
+      );
+
+      const cdn = 'https://cdn.discordapp.com/attachments/1/2/crumb.png';
+
+      test('to a picture is that picture, and nothing left to say', () {
+        final found = linked(cdn)!;
+        expect(found.media.kind, ui.MediaKind.image);
+        expect(found.media.name, 'crumb.png');
+        expect(found.media.mimeType, 'image/png');
+        expect(found.media.hasPreview, isTrue);
+        expect(found.body, '');
+        expect(source.preview(found.media, 500), isA<StoredFileImage>());
+      });
+
+      test(
+        'keeps the words around it, and ignores a query and a full stop',
+        () {
+          final found = linked('look at this: $cdn?ex=abc&hm=def.')!;
+          expect(found.media.name, 'crumb.png');
+          expect(found.body, 'look at this: $cdn?ex=abc&hm=def.');
+        },
+      );
+
+      test('to a GIF, or a video, is one', () {
+        final gif = linked('https://media.example.net/wow.GIF')!;
+        expect(gif.media.kind, ui.MediaKind.image);
+        expect(gif.media.mimeType, 'image/gif');
+        final video = linked('https://media.example.net/clip.mp4')!;
+        expect(video.media.kind, ui.MediaKind.video);
+        expect(video.media.hasPreview, isFalse);
+      });
+
+      test('to anything else is only text', () {
+        expect(linked('https://example.com/recipes'), isNull);
+        expect(linked('https://example.com/notes.pdf'), isNull);
+        expect(linked('http://example.com/crumb.png'), isNull);
+        expect(linked('no links here'), isNull);
+        expect(linked('https://example.com/.png'), isNull);
+      });
+
+      test('is the first picture of several links', () {
+        final found = linked(
+          'https://example.com/page https://a.example.net/one.jpg '
+          'https://b.example.net/two.jpg',
+        )!;
+        expect(found.media.name, 'one.jpg');
+      });
+
+      test('is text with the setting off', () {
+        expect(linked(cdn, external: false), isNull);
+      });
+
+      test('is only for text and notices', () {
+        final emote = _event({'msgtype': 'm.emote', 'body': cdn});
+        expect(linkedMediaIn(emote, cdn), isNull);
+        final file = _event({'msgtype': 'm.file', 'body': cdn});
+        expect(linkedMediaIn(file, cdn), isNull);
+      });
+
+      test('has an unknown size capped, so it can still preview', () {
+        final spec = linked(cdn)!.media;
+        expect(spec.size, isNull);
+        expect(spec.hasPreview, isTrue);
+      });
+    });
+
     test('a small encrypted image previews through the store', () {
       final media = mediaOf(
         _event({

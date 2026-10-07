@@ -51,11 +51,25 @@ void main() {
 
   testWidgets('the easter eggs box drives the flag', (tester) async {
     final c = await _pump(tester, now: _offSeason);
-    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isTrue);
+    expect(tester.widget<Checkbox>(find.byType(Checkbox).first).value, isTrue);
     await tester.tap(find.text('easter eggs'));
     await tester.pump();
     expect(c.easterEggs, isFalse);
-    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isFalse);
+    expect(tester.widget<Checkbox>(find.byType(Checkbox).first).value, isFalse);
+    await _done(tester, c);
+  });
+
+  testWidgets('the external content box drives its flag, on to begin with', (
+    tester,
+  ) async {
+    final c = await _pump(tester, now: _offSeason);
+    expect(tester.widget<Checkbox>(find.byType(Checkbox).last).value, isTrue);
+    await tester.tap(find.text('external content'));
+    await tester.pump();
+    expect(c.externalMedia, isFalse);
+    expect(tester.widget<Checkbox>(find.byType(Checkbox).last).value, isFalse);
+    // The easter eggs stay as they were.
+    expect(c.easterEggs, isTrue);
     await _done(tester, c);
   });
 

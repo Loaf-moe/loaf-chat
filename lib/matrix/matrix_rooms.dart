@@ -50,7 +50,7 @@ class _Wish {
 }
 
 class MatrixRooms extends ChangeNotifier implements Rooms {
-  MatrixRooms(this.client, {this._mediaRoot}) {
+  MatrixRooms(this.client, {this._mediaRoot, this.externalMedia}) {
     _hierarchy = MatrixHierarchy(
       client,
       onChange: () {
@@ -90,6 +90,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   late final List<StreamSubscription<Object?>> _subscriptions;
   var _disposed = false;
   final Directory? _mediaRoot;
+
+  /// Whether files linked on other sites are shown. Null: they are.
+  final ValueListenable<bool>? externalMedia;
 
   var _synced = false;
   double? _progress;
@@ -695,6 +698,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       room,
       you: me,
       member: (userId) => _member(room, userId),
+      externalMedia: externalMedia,
     );
   }
 

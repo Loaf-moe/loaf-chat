@@ -12,21 +12,29 @@ import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 /// Where a desktop build leaves the native library the app loads: `flutter
-/// build macos --debug` on a Mac; on Windows (CI), `flutter build windows`.
+/// build macos --debug` on a Mac, `flutter build windows` on Windows (CI); on
+/// Linux, what `tool/build-vodozemac` builds.
 (String, String) get _library => Platform.isWindows
     ? ('build/windows/x64/runner/Release/', 'vodozemac_bindings_dart.dll')
-    : ('build/macos/Build/Products/Debug/', 'libflutter_vodozemac.dylib');
+    : Platform.isMacOS
+    ? ('build/macos/Build/Products/Debug/', 'libflutter_vodozemac.dylib')
+    : ('build/vodozemac/', 'libvodozemac_bindings_dart.so');
+
+final _howToBuild = Platform.isWindows
+    ? 'run `flutter build windows`'
+    : Platform.isMacOS
+    ? 'run `mise exec -- flutter build macos --debug`'
+    : 'run `sh tool/build-vodozemac`';
 
 Future<void>? _loading;
 
-/// Loads vodozemac from the desktop build, once per test file.
+/// Loads vodozemac from its build, once per test file.
 Future<void> loadVodozemac() => _loading ??= () async {
   final (dir, file) = _library;
   if (!File('$dir$file').existsSync()) {
     fail(
-      'encryption tests need a desktop build: run '
-      '`mise exec -- flutter build macos --debug` once (on Windows, '
-      '`flutter build windows`), then test again',
+      'encryption tests need vodozemac built: $_howToBuild once, then test '
+      'again',
     );
   }
   await vod.init(libraryPath: dir);

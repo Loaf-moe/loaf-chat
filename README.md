@@ -4,9 +4,11 @@ A Matrix client for loaf.moe, shaped like a place you hang out.
 
 ## Running the tests
 
-Build the macOS app once with `mise exec -- flutter build macos --debug`,
-then run `mise exec -- flutter test`. Encryption tests load vodozemac's
-native library from that build, and fail saying so without it.
+Encryption tests load vodozemac's native library, and fail saying so without
+it. On macOS, build the app once with `mise exec -- flutter build macos
+--debug`. On Linux, build just the library once with `sh tool/build-vodozemac`
+(it needs `flutter pub get` first, and Rust). Then run
+`mise exec -- flutter test`.
 
 ## Building on Linux
 

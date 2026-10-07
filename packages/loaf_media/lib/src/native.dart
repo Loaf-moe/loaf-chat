@@ -26,6 +26,27 @@ abstract final class LoafMedia {
   static Future<void> openWithDefaultApp(String path) =>
       _channel.invokeMethod<void>('openWithDefaultApp', {'path': path});
 
+  /// Whether the clipboard holds a picture or files. It reads neither, so
+  /// asking is cheap and, on iOS, shows no "Allow Paste" prompt. The three
+  /// clipboard calls are for macOS, iOS and Linux, and carry a map since the
+  /// Linux plugin only takes calls that have arguments.
+  static Future<bool> clipboardHasFiles() async =>
+      await _channel.invokeMethod<bool>('clipboard.has', <String, Object?>{}) ??
+      false;
+
+  /// The picture on the clipboard as PNG bytes, or null when it holds none.
+  static Future<Uint8List?> clipboardImage() =>
+      _channel.invokeMethod<Uint8List>('clipboard.image', <String, Object?>{});
+
+  /// The paths of the files copied in a file manager. Empty when the
+  /// clipboard holds none, and always on iOS.
+  static Future<List<String>> clipboardFiles() async =>
+      await _channel.invokeListMethod<String>(
+        'clipboard.files',
+        <String, Object?>{},
+      ) ??
+      const [];
+
   /// Windows: decodes a picture Flutter's own codecs refuse (HEIC, AVIF)
   /// with WIC, at most [maxWidth] wide. Premultiplied RGBA, as
   /// `decodeImageFromPixels` takes it. Throws if WIC can't either.
