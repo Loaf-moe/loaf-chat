@@ -1,6 +1,5 @@
-# Every pull request and every push to main: the tests, on every desktop
-# platform, in parallel. Kept to the tests, so it answers in minutes; the
-# release builds are release.yml's.
+# Every pull request and every push to main: the tests, one runner per
+# platform. The release builds are release.yml's.
 #
 # Toolchains are set up the way release.yml sets them up, so what main
 # caches here a tag's release finds already there.
@@ -21,131 +20,112 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  analyze:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
-      - run: mise exec -- flutter pub get
-      - run: mise exec -- flutter analyze
-
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
-        # A third of the test files each: alone, a runner takes three to five
-        # minutes over them.
-        shard: [0, 1, 2]
-    name: test (${{ matrix.os }}, ${{ matrix.shard }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - id: pins
-        run: |
-          echo "flutter=$(sed -n 's/^flutter = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
-          echo "rust=$(sed -n 's/^rust = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
-          echo "vodozemac=$(sed -n '/^  flutter_vodozemac:/,/version:/s/^    version: "\(.*\)"/\1/p' pubspec.lock)" >> "$GITHUB_OUTPUT"
-      - if: runner.os != 'Windows'
-        uses: jdx/mise-action@v2
-      # mise's Flutter backend does not install on Windows.
-      - if: runner.os == 'Windows'
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ steps.pins.outputs.flutter }}
-          channel: stable
-          cache: true
-      - if: runner.os == 'Windows'
-        run: |
-          rustup toolchain install ${{ steps.pins.outputs.rust }} --profile minimal
-          rustup default ${{ steps.pins.outputs.rust }}
-      # mise-action keeps Flutter, not the packages it fetches.
-      - if: runner.os != 'Windows'
-        uses: actions/cache@v4
-        with:
-          path: ~/.pub-cache
-          key: pub-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
-          restore-keys: pub-${{ runner.os }}-
-      - run: ${{ runner.os != 'Windows' && 'mise exec -- ' || '' }}flutter pub get
-      # The encryption tests' native library. It changes only with
-      # vodozemac or Rust, so it is built once per pair.
-      - id: vodozemac
-        uses: actions/cache@v4
-        with:
-          path: |
-            build/vodozemac/*.so
-            build/vodozemac/*.dylib
-            build/vodozemac/*.dll
-          key: vodozemac-${{ runner.os }}-${{ steps.pins.outputs.vodozemac }}-rust${{ steps.pins.outputs.rust }}
-      - if: steps.vodozemac.outputs.cache-hit != 'true'
-        run: ${{ runner.os != 'Windows' && 'mise exec -- ' || '' }}sh tool/build-vodozemac
-      - run: >
-          ${{ runner.os != 'Windows' && 'mise exec -- ' || '' }}flutter test
-          --total-shards 3 --shard-index ${{ matrix.shard }}
-      - if: ${{ !cancelled() && matrix.shard == 0 }}
-        working-directory: packages/loaf_media
-        run: ${{ runner.os != 'Windows' && 'mise exec -- ' || '' }}flutter test
-
-  # The players' Rust: the shared streams crate, and each platform's own.
-  rust-linux:
+  linux:
     # The release's runner, for the release's GStreamer.
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - id: pins
+        run: |
+          echo "rust=$(sed -n 's/^rust = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+          echo "vodozemac=$(sed -n '/^  flutter_vodozemac:/,/version:/s/^    version: "\(.*\)"/\1/p' pubspec.lock)" >> "$GITHUB_OUTPUT"
+      # For the player's Rust. The image's LLVM brings libunwind-14-dev, which
+      # conflicts with the libunwind-dev GStreamer needs; as in release.yml,
+      # it goes first.
       - run: |
           sudo apt-get update
-          # The image's LLVM brings libunwind-14-dev, which conflicts with the
-          # libunwind-dev GStreamer needs; as in release.yml, it goes first.
           sudo apt-get remove -y libunwind-14-dev
           sudo apt-get install -y libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good \
             gstreamer1.0-libav
-      - id: pins
-        run: echo "rust=$(sed -n 's/^rust = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
-      - run: |
-          rustup toolchain install ${{ steps.pins.outputs.rust }} --profile minimal
-          rustup default ${{ steps.pins.outputs.rust }}
+      - uses: jdx/mise-action@v2
+      # mise-action keeps Flutter, not the packages it fetches.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-
+      - run: mise exec -- flutter pub get
+      - run: mise exec -- flutter analyze
+      # The encryption tests' native library. It changes only with
+      # vodozemac or Rust, so it is built once per pair.
+      - id: vodozemac
+        uses: actions/cache@v4
+        with:
+          path: build/vodozemac/*.so
+          key: vodozemac-${{ runner.os }}-${{ steps.pins.outputs.vodozemac }}-rust${{ steps.pins.outputs.rust }}
+      - if: steps.vodozemac.outputs.cache-hit != 'true'
+        run: mise exec -- sh tool/build-vodozemac
+      - if: ${{ !cancelled() }}
+        run: mise exec -- flutter test
+      - if: ${{ !cancelled() }}
+        working-directory: packages/loaf_media
+        run: mise exec -- flutter test
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             packages/loaf_media/linux/rust
             packages/loaf_media/rust/loaf_streams
-      - run: cargo test --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml
-      - run: cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml
+      - if: ${{ !cancelled() }}
+        run: mise exec -- cargo test --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml
+      - if: ${{ !cancelled() }}
+        run: mise exec -- cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml
 
-  rust-windows:
+  windows:
     runs-on: windows-latest
     timeout-minutes: 15
     defaults:
       run:
         shell: bash
     steps:
+      # Windows Server ships Media Foundation as a feature, off by default
+      # (every desktop Windows has it), and the player's tests need it. It
+      # takes minutes to turn on, so it does while everything else runs.
+      - shell: pwsh
+        run: >
+          Start-Process powershell -WindowStyle Hidden -ArgumentList
+          '-NoProfile', '-Command', 'Install-WindowsFeature Server-Media-Foundation'
       - uses: actions/checkout@v4
+      # mise pins both; its Flutter backend does not install on Windows, so
+      # the versions are read from mise.toml and installed directly.
       - id: pins
-        run: echo "rust=$(sed -n 's/^rust = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "flutter=$(sed -n 's/^flutter = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+          echo "rust=$(sed -n 's/^rust = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+          echo "vodozemac=$(sed -n '/^  flutter_vodozemac:/,/version:/s/^    version: "\(.*\)"/\1/p' pubspec.lock)" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.pins.outputs.flutter }}
+          channel: stable
+          cache: true
       - run: |
           rustup toolchain install ${{ steps.pins.outputs.rust }} --profile minimal
           rustup default ${{ steps.pins.outputs.rust }}
+      - run: flutter pub get
+      - id: vodozemac
+        uses: actions/cache@v4
+        with:
+          path: build/vodozemac/*.dll
+          key: vodozemac-${{ runner.os }}-${{ steps.pins.outputs.vodozemac }}-rust${{ steps.pins.outputs.rust }}
+      - if: steps.vodozemac.outputs.cache-hit != 'true'
+        run: sh tool/build-vodozemac
+      - if: ${{ !cancelled() }}
+        run: flutter test
+      - if: ${{ !cancelled() }}
+        working-directory: packages/loaf_media
+        run: flutter test
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             packages/loaf_media/windows/rust
             packages/loaf_media/rust/loaf_streams
-      - run: cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml
-      # Windows Server ships Media Foundation as a feature, off by default
-      # (every desktop Windows has it). It takes minutes to turn on, so it
-      # does while the tests compile.
-      - run: |
-          powershell -NoProfile -Command \
-            'Install-WindowsFeature Server-Media-Foundation | Out-Null' &
-          features=$!
-          manifest=packages/loaf_media/windows/rust/Cargo.toml
-          cargo test --locked --no-run --manifest-path "$manifest"
-          wait "$features"
-          cargo test --locked --manifest-path "$manifest"
+      - if: ${{ !cancelled() }}
+        run: cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml
+      - if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          while (-not (Get-WindowsFeature Server-Media-Foundation).Installed) {
+            Start-Sleep -Seconds 5
+          }
+          cargo test --locked --manifest-path packages/loaf_media/windows/rust/Cargo.toml

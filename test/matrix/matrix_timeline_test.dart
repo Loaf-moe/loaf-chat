@@ -923,6 +923,8 @@ void main() {
         ..toggleReaction(r'$m1', '🔥');
       await _settle();
       h.api.holdSend!.complete();
+      await _until(() => h.api.sent.isNotEmpty);
+      // Time for a second send, if one were coming.
       await _settle();
       expect(h.api.sent, hasLength(1));
       expect(h.api.redacted, isEmpty);
