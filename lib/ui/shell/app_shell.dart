@@ -30,6 +30,8 @@ import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
 import '../mock/mock_rooms.dart';
+import '../channel/timeline.dart' show messageUnavailable;
+import '../model/message_route.dart';
 import '../model/updater.dart';
 import '../platform.dart';
 import '../rooms/rooms.dart';
@@ -60,7 +62,13 @@ import 'user_bar.dart';
 const _wideBreakpoint = 900.0;
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, this.session, this.rooms, this.updater});
+  const AppShell({
+    super.key,
+    this.session,
+    this.rooms,
+    this.updater,
+    this.routes,
+  });
 
   /// Who is signed in, and how far this device is trusted. The app passes
   /// its one session; left out (tests, previews), the shell makes its own.
@@ -74,6 +82,10 @@ class AppShell extends StatefulWidget {
   /// its one updater, which outlives the shell. Left out, the mock plays an
   /// update that is ready and a real session has none.
   final Updater? updater;
+
+  /// Messages to open, as notifications are clicked or tapped. One that
+  /// comes before the first sync waits for it.
+  final Stream<MessageRoute>? routes;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -94,6 +106,12 @@ class _AppShellState extends State<AppShell> {
     profile: _rooms.profile,
     onError: _profileFailed,
   );
+  StreamSubscription<MessageRoute>? _routes;
+
+  /// A route that came before the rooms were synced: its room may not be
+  /// known yet, so it waits rather than say the message isn't there.
+  MessageRoute? _heldRoute;
+
   late final _calls = CallController(
     me: currentUser,
     rings: mockRings,
@@ -115,9 +133,17 @@ class _AppShellState extends State<AppShell> {
     _calls.addListener(_onChange);
     _session.addListener(_onSessionChange);
     _updater.addListener(_onChange);
+    _routes = widget.routes?.listen(_follow);
   }
 
-  void _onChange() => setState(() {});
+  void _onChange() {
+    final held = _heldRoute;
+    if (held != null && _rooms.synced) {
+      _heldRoute = null;
+      _follow(held);
+    }
+    setState(() {});
+  }
 
   /// A presence or status write the server refused: the profile has already
   /// put things back, so a toast says to try again.
@@ -137,6 +163,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    unawaited(_routes?.cancel());
     _session.removeListener(_onSessionChange);
     _updater.removeListener(_onChange);
     if (widget.updater == null) _updater.dispose();
@@ -329,6 +356,11 @@ class _AppShellState extends State<AppShell> {
       // chosen but not synced yet, and a choice kept under it would never
       // be the one [_channel] reads, so every tap here would do nothing.
       _open(_placeId, id);
+      // A conversation left back in history opens at its newest again:
+      // choosing a channel is asking for what is happening there now.
+      if (channel.kind != ChannelKind.voice && _can(RoomAbility.messages)) {
+        _rooms.timeline(id)?.showNewest();
+      }
       // A computer connects on click; a phone shows the lobby first, since a
       // stray tap there should never open a live mic.
       if (channel.kind == ChannelKind.voice &&
@@ -442,9 +474,15 @@ class _AppShellState extends State<AppShell> {
       _open(id, _channel?.id);
       return;
     }
-    final space = _spaces
-        .where((s) => s.allChannels.any((c) => c.id == id && c.joined))
-        .firstOrNull;
+    // The space on screen wins when it has the room: a room can sit in
+    // several spaces, and moving you out of this one would be a surprise.
+    final here =
+        !_home && _space.allChannels.any((c) => c.id == id && c.joined);
+    final space = here
+        ? _spaces.firstWhere((s) => s.id == _placeId)
+        : _spaces
+              .where((s) => s.allChannels.any((c) => c.id == id && c.joined))
+              .firstOrNull;
     if (space != null) {
       _open(space.id, id);
     } else if (_rooms.homeRooms.any((r) => r.id == id)) {
@@ -452,6 +490,27 @@ class _AppShellState extends State<AppShell> {
     } else {
       _open(id, null);
     }
+  }
+
+  /// Opens the message [route] names. Its room opens where [_goTo] puts
+  /// it, then the conversation brings the message into view. A room you
+  /// are not in has nothing to open, so you stay where you are.
+  void _follow(MessageRoute route) {
+    if (!mounted) return;
+    if (!_rooms.synced) {
+      _heldRoute = route;
+      return;
+    }
+    final id = route.roomId;
+    final joined = !_spaces.any((s) => s.id == id) && _joinedIds.contains(id);
+    final timeline = joined ? _rooms.timeline(id) : null;
+    if (timeline == null) {
+      showToast(context, messageUnavailable);
+      return;
+    }
+    setState(() => _goTo(id));
+    _scaffoldKey.currentState?.closeDrawer();
+    timeline.jumpTo(route.eventId);
   }
 
   Future<void> _addSpace() async {
