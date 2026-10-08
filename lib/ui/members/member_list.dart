@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
+import '../window/window_chrome.dart';
 import 'presence.dart';
 import 'presence_dot.dart';
 import 'role_colors.dart';
@@ -64,27 +65,34 @@ class MemberList extends StatelessWidget {
       color: tokens.sidebar,
       // Background runs edge to edge; only the list keeps clear of the
       // status bar and home indicator, matching the navigation drawer.
-      child: SafeArea(
-        left: false,
-        child: ListView(
-          padding: const EdgeInsets.only(bottom: LoafSpace.x4),
-          children: [
-            if (groups.admins.isNotEmpty)
-              _Section(
-                title: 'Admins',
-                members: groups.admins,
-                tokens: tokens,
-                onOpen: onOpen,
+      child: Column(
+        children: [
+          const WindowBand(),
+          Expanded(
+            child: SafeArea(
+              left: false,
+              child: ListView(
+                padding: const EdgeInsets.only(bottom: LoafSpace.x4),
+                children: [
+                  if (groups.admins.isNotEmpty)
+                    _Section(
+                      title: 'Admins',
+                      members: groups.admins,
+                      tokens: tokens,
+                      onOpen: onOpen,
+                    ),
+                  if (groups.members.isNotEmpty)
+                    _Section(
+                      title: 'Members',
+                      members: groups.members,
+                      tokens: tokens,
+                      onOpen: onOpen,
+                    ),
+                ],
               ),
-            if (groups.members.isNotEmpty)
-              _Section(
-                title: 'Members',
-                members: groups.members,
-                tokens: tokens,
-                onOpen: onOpen,
-              ),
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }

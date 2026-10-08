@@ -13,6 +13,7 @@ import '../shell/channel_list.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
+import '../window/window_chrome.dart';
 
 /// An answer on its way to the server.
 enum Answering { accepting, declining }
@@ -50,28 +51,40 @@ class InvitePreview extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              height: 56,
-              padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: tokens.border)),
-              ),
-              child: Row(
-                children: [
-                  if (onOpenNavigation != null)
-                    TopBarButton(
-                      icon: LucideIcons.menu,
-                      tooltip: 'Channels',
-                      onTap: onOpenNavigation,
+            WindowDragArea(
+              child: Container(
+                height: 56,
+                padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: tokens.border)),
+                ),
+                child: Row(
+                  children: [
+                    const WindowControls(WindowEdge.leading),
+                    if (onOpenNavigation != null)
+                      TopBarButton(
+                        icon: LucideIcons.menu,
+                        tooltip: 'Channels',
+                        onTap: onOpenNavigation,
+                      ),
+                    const SizedBox(width: LoafSpace.x1),
+                    Icon(
+                      LucideIcons.mailOpen,
+                      size: 18,
+                      color: tokens.textMuted,
                     ),
-                  const SizedBox(width: LoafSpace.x1),
-                  Icon(LucideIcons.mailOpen, size: 18, color: tokens.textMuted),
-                  const SizedBox(width: LoafSpace.x2),
-                  Text(
-                    'invite',
-                    style: loafBody(15, 600).copyWith(color: tokens.textStrong),
-                  ),
-                ],
+                    const SizedBox(width: LoafSpace.x2),
+                    Text(
+                      'invite',
+                      style: loafBody(
+                        15,
+                        600,
+                      ).copyWith(color: tokens.textStrong),
+                    ),
+                    const Spacer(),
+                    const WindowControls(WindowEdge.trailing),
+                  ],
+                ),
               ),
             ),
             Expanded(

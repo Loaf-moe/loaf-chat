@@ -11,6 +11,7 @@ import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
+import '../window/window_chrome.dart';
 import 'call_controller.dart';
 import 'call_controls.dart';
 import 'call_stage.dart';
@@ -102,35 +103,39 @@ class _Lobby extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          height: 56,
-          padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: tokens.border)),
-          ),
-          child: Row(
-            children: [
-              ?leading,
-              if (leading != null) const SizedBox(width: LoafSpace.x1),
-              Icon(LucideIcons.volume2, size: 18, color: tokens.textMuted),
-              const SizedBox(width: LoafSpace.x2),
-              Expanded(
-                child: Text(
-                  channel.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: loafBody(15, 600).copyWith(color: tokens.textStrong),
+        WindowDragArea(
+          child: Container(
+            height: 56,
+            padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: tokens.border)),
+            ),
+            child: Row(
+              children: [
+                const WindowControls(WindowEdge.leading),
+                ?leading,
+                if (leading != null) const SizedBox(width: LoafSpace.x1),
+                Icon(LucideIcons.volume2, size: 18, color: tokens.textMuted),
+                const SizedBox(width: LoafSpace.x2),
+                Expanded(
+                  child: Text(
+                    channel.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: loafBody(15, 600).copyWith(color: tokens.textStrong),
+                  ),
                 ),
-              ),
-              Text(
-                count == 0
-                    ? 'nobody here'
-                    : count == 1
-                    ? '1 person here'
-                    : '$count people here',
-                style: loafBody(13, 500).copyWith(color: tokens.textMuted),
-              ),
-            ],
+                Text(
+                  count == 0
+                      ? 'nobody here'
+                      : count == 1
+                      ? '1 person here'
+                      : '$count people here',
+                  style: loafBody(13, 500).copyWith(color: tokens.textMuted),
+                ),
+                const WindowControls(WindowEdge.trailing),
+              ],
+            ),
           ),
         ),
         Expanded(

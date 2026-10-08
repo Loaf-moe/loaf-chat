@@ -13,6 +13,7 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/count_label.dart';
 import '../widgets/loaf_avatar.dart';
+import '../window/window_chrome.dart';
 import 'channel_actions.dart';
 import 'user_bar.dart';
 
@@ -165,23 +166,27 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: tokens.border, width: 1)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              space.name,
-              style: loafDisplay(17, 600).copyWith(color: tokens.textStrong),
-              overflow: TextOverflow.ellipsis,
+    // The channel list never touches a window corner, so this only moves
+    // the window; the buttons live in the bars beside it.
+    return WindowDragArea(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: tokens.border, width: 1)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                space.name,
+                style: loafDisplay(17, 600).copyWith(color: tokens.textStrong),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-          if (menu)
-            Icon(LucideIcons.chevronDown, color: tokens.textMuted, size: 18),
-        ],
+            if (menu)
+              Icon(LucideIcons.chevronDown, color: tokens.textMuted, size: 18),
+          ],
+        ),
       ),
     );
   }

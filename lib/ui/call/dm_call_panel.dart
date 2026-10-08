@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../window/window_chrome.dart';
 import 'call_controller.dart';
 import 'call_view.dart';
 
@@ -45,16 +46,20 @@ class _DmCallPanelState extends State<DmCallPanel> {
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
     final expanded = widget.expanded;
-    final view = CallView(
-      calls: widget.calls,
-      compact: !expanded && _height < _gridFrom,
-      trailing: [
-        TopBarButton(
-          icon: expanded ? LucideIcons.minimize2 : LucideIcons.maximize2,
-          tooltip: expanded ? 'Shrink' : 'Expand',
-          onTap: widget.onToggleExpanded,
-        ),
-      ],
+    // It always sits under the channel header, which holds the window's
+    // corner, so the call's own bar must not draw a second set of buttons.
+    final view = WindowEdges.none(
+      child: CallView(
+        calls: widget.calls,
+        compact: !expanded && _height < _gridFrom,
+        trailing: [
+          TopBarButton(
+            icon: expanded ? LucideIcons.minimize2 : LucideIcons.maximize2,
+            tooltip: expanded ? 'Shrink' : 'Expand',
+            onTap: widget.onToggleExpanded,
+          ),
+        ],
+      ),
     );
     if (expanded) return view;
 

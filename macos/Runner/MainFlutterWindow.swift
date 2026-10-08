@@ -3,6 +3,7 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var updaterBridge: UpdaterBridge?
+  private var windowChrome: WindowChromeBridge?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -12,6 +13,8 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
     updaterBridge = UpdaterBridge(
       messenger: flutterViewController.engine.binaryMessenger)
+    windowChrome = WindowChromeBridge(
+      window: self, messenger: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }

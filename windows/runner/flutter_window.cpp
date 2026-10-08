@@ -27,6 +27,12 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  // Loaf draws its own title-bar buttons; the caption goes.
+  chrome_ = std::make_unique<WindowChrome>(
+      GetHandle(), flutter_controller_->engine()->messenger());
+  chrome_->AttachChild(flutter_controller_->view()->GetNativeWindow());
+  chrome_->Install();
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -40,6 +46,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  chrome_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -57,6 +64,13 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
         flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam,
                                                       lparam);
     if (result) {
+      return *result;
+    }
+  }
+
+  if (chrome_) {
+    if (std::optional<LRESULT> result =
+            chrome_->HandleMessage(hwnd, message, wparam, lparam)) {
       return *result;
     }
   }

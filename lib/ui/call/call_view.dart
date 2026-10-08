@@ -13,6 +13,7 @@ import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
 import '../widgets/loaf_button.dart';
 import '../widgets/toast.dart';
+import '../window/window_chrome.dart';
 import 'call_controller.dart';
 import 'call_controls.dart';
 import 'call_stage.dart';
@@ -262,75 +263,82 @@ class CallTopBar extends StatelessWidget {
     final tokens = LoafTokens.of(context);
     final status = callStatus(session.phase);
     final present = session.participants.where((p) => p.present).length + 1;
-    return Container(
-      height: compact ? 44 : 56,
-      padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: tokens.border)),
-      ),
-      child: Row(
-        children: [
-          ?leading,
-          if (leading != null) const SizedBox(width: LoafSpace.x1),
-          Icon(
-            session.direct ? LucideIcons.phone : LucideIcons.volume2,
-            size: 18,
-            color: tokens.textMuted,
-          ),
-          const SizedBox(width: LoafSpace.x2),
-          // The title and its marks share one flexible run, so the buttons
-          // after it stay pinned to the right edge whatever its length.
-          Expanded(
-            child: Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    session.target.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: loafBody(15, 600).copyWith(color: tokens.textStrong),
-                  ),
-                ),
-                if (status != null) ...[
-                  const SizedBox(width: LoafSpace.x2),
-                  if (session.phase == CallPhase.connecting) ...[
-                    SizedBox(
-                      width: 12,
-                      height: 12,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: tokens.textMuted,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                  ],
-                  Text(
-                    status,
-                    style: loafBody(13, 500).copyWith(
-                      color: session.phase == CallPhase.reconnecting
-                          ? tokens.idle
-                          : tokens.textMuted,
-                    ),
-                  ),
-                ],
-                if (calls.encrypted) ...[
-                  const SizedBox(width: LoafSpace.x2),
-                  _EncryptedMark(),
-                ],
-              ],
-            ),
-          ),
-          if (!isDesktop && !compact) ...[
-            Icon(LucideIcons.users, size: 16, color: tokens.textMuted),
-            const SizedBox(width: LoafSpace.x1),
-            Text(
-              '$present',
-              style: loafBody(13, 500).copyWith(color: tokens.textMuted),
+    return WindowDragArea(
+      child: Container(
+        height: compact ? 44 : 56,
+        padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: tokens.border)),
+        ),
+        child: Row(
+          children: [
+            const WindowControls(WindowEdge.leading),
+            ?leading,
+            if (leading != null) const SizedBox(width: LoafSpace.x1),
+            Icon(
+              session.direct ? LucideIcons.phone : LucideIcons.volume2,
+              size: 18,
+              color: tokens.textMuted,
             ),
             const SizedBox(width: LoafSpace.x2),
+            // The title and its marks share one flexible run, so the buttons
+            // after it stay pinned to the right edge whatever its length.
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      session.target.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: loafBody(
+                        15,
+                        600,
+                      ).copyWith(color: tokens.textStrong),
+                    ),
+                  ),
+                  if (status != null) ...[
+                    const SizedBox(width: LoafSpace.x2),
+                    if (session.phase == CallPhase.connecting) ...[
+                      SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: tokens.textMuted,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Text(
+                      status,
+                      style: loafBody(13, 500).copyWith(
+                        color: session.phase == CallPhase.reconnecting
+                            ? tokens.idle
+                            : tokens.textMuted,
+                      ),
+                    ),
+                  ],
+                  if (calls.encrypted) ...[
+                    const SizedBox(width: LoafSpace.x2),
+                    _EncryptedMark(),
+                  ],
+                ],
+              ),
+            ),
+            if (!isDesktop && !compact) ...[
+              Icon(LucideIcons.users, size: 16, color: tokens.textMuted),
+              const SizedBox(width: LoafSpace.x1),
+              Text(
+                '$present',
+                style: loafBody(13, 500).copyWith(color: tokens.textMuted),
+              ),
+              const SizedBox(width: LoafSpace.x2),
+            ],
+            ...trailing,
+            const WindowControls(WindowEdge.trailing),
           ],
-          ...trailing,
-        ],
+        ),
       ),
     );
   }

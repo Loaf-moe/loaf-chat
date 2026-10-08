@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../window/window_chrome.dart';
 import 'media_open.dart';
 
 class ImageViewer extends StatefulWidget {
@@ -84,35 +85,41 @@ class _Bar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0x99000000), Color(0x00000000)],
+    return WindowDragArea(
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0x99000000), Color(0x00000000)],
+          ),
         ),
-      ),
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.all(LoafSpace.x2),
-          child: Row(
-            children: [
-              const SizedBox(width: LoafSpace.x2),
-              Expanded(
-                child: SelectableText(media.name, style: style, maxLines: 1),
-              ),
-              TextButton.icon(
-                onPressed: () => saveMediaAs(context, media),
-                icon: const Icon(LucideIcons.download, color: Colors.white),
-                label: Text('Save as…', style: style),
-              ),
-              IconButton(
-                tooltip: 'Close (Esc)',
-                onPressed: () => Navigator.maybePop(context),
-                icon: const Icon(LucideIcons.x, color: Colors.white),
-              ),
-            ],
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.all(LoafSpace.x2),
+            child: Row(
+              children: [
+                // A full-window route outside every WindowEdges, so it holds
+                // both corners.
+                const WindowControls(WindowEdge.leading),
+                const SizedBox(width: LoafSpace.x2),
+                Expanded(
+                  child: SelectableText(media.name, style: style, maxLines: 1),
+                ),
+                TextButton.icon(
+                  onPressed: () => saveMediaAs(context, media),
+                  icon: const Icon(LucideIcons.download, color: Colors.white),
+                  label: Text('Save as…', style: style),
+                ),
+                IconButton(
+                  tooltip: 'Close (Esc)',
+                  onPressed: () => Navigator.maybePop(context),
+                  icon: const Icon(LucideIcons.x, color: Colors.white),
+                ),
+                const WindowControls(WindowEdge.trailing),
+              ],
+            ),
           ),
         ),
       ),
