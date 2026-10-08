@@ -280,6 +280,31 @@ void main() {
       expect(rig.got.map((a) => a.eventId), [r'$since']);
     });
 
+    test('a profile change is not a join', () async {
+      final client = await _client();
+      await _join(client);
+      final rig = await _rig(client);
+      await _deliver(client, [
+        _msg(r'$ada1', ts: _after),
+        {
+          ..._state('m.room.member', {
+            'membership': 'join',
+            'displayname': 'New',
+          }, key: _me),
+          'origin_server_ts': _after + 500,
+          'unsigned': {
+            'prev_content': {'membership': 'join', 'displayname': 'Old'},
+          },
+        },
+      ]);
+      await rig.reached(r'$ada1');
+      expect(rig.got.map((a) => a.eventId), [r'$ada1']);
+      // Still after your real join: the profile change moved nothing.
+      await _deliver(client, [_msg(r'$ada2', ts: _after + 200)]);
+      await rig.reached(r'$ada2');
+      expect(rig.got.map((a) => a.eventId), [r'$ada1', r'$ada2']);
+    });
+
     test('nothing arrives from an initial sync', () async {
       // Not yet synced: prevBatch is null, as during a sign-in's first sync.
       final client = await _client(firstSync: false);

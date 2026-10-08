@@ -48,9 +48,9 @@ class MatrixArrivals {
     if (client.getRoomById(event.room.id)?.membership != Membership.join) {
       return;
     }
-    if (event.type == EventTypes.RoomMember &&
-        event.stateKey == client.userID &&
-        event.content['membership'] == 'join') {
+    // Only a real arrival dates your start in the room: a name or avatar
+    // change is a join too, and would wrongly cut off messages before it.
+    if (isOwnJoin(event, client.userID)) {
       _joinedAt[event.room.id] = event.originServerTs;
     }
     if (event.senderId == client.userID) return;
