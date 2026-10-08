@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 
+import 'unread_fills.dart';
 import 'unread_rules.dart';
 import 'unread_tally.dart';
 
@@ -13,7 +14,13 @@ import 'unread_tally.dart';
 /// mentions-only room, and blind to mentions in an encrypted one. Syncs are
 /// applied one at a time, in order, since decrypting makes each one wait.
 class MatrixUnread {
-  MatrixUnread(this.client, {required this.onChange, this.file}) {
+  MatrixUnread(
+    this.client, {
+    required this.onChange,
+    this.file,
+    DateTime Function()? now,
+  }) {
+    _fills = UnreadFills(_fill, onSettled: _recheckHeld, now: now);
     // Syncs and the seed wait for what the last run saved.
     _queue = _load();
   }
@@ -35,26 +42,22 @@ class MatrixUnread {
   /// arrived late with a time before it.
   final _receipts = <String, ({String eventId, int ts})>{};
 
-  /// Rooms whose last fill failed. Their counts stay as they were and the
-  /// next sync tries again.
-  final _failed = <String>{};
-  final _filling = <String>{};
-
-  /// Rooms that needed a fill again while one was already out: a gap, or
-  /// your own message, that the fetch in flight may have missed.
-  final _refill = <String>{};
-
-  /// At most this many rooms fetch at once, so a launch with many unread
-  /// rooms doesn't fire every request together.
-  static const _parallelFills = 4;
-  final _fillQueue = <String>[];
+  /// Counts rooms from the server's history. A fill that fails leaves the
+  /// room's count as it was, and the sweep after a sync tries again.
+  late final UnreadFills _fills;
 
   /// Each room's key-arrival subscription, with the [Room] it listens to: a
   /// room left and joined again is a new object.
   final _keySubs = <String, ({Room room, StreamSubscription<String> sub})>{};
 
-  /// Rooms with a re-check of their locked messages already waiting.
-  final _rechecks = <String>{};
+  /// Rooms with a re-check of their locked messages already waiting, and the
+  /// sessions whose keys have come for it.
+  final _rechecks = <String, Set<String>>{};
+
+  /// Sessions whose keys came while their room was being filled, for the
+  /// re-check that waits on that fill: it may have read a message locked
+  /// just before the key came.
+  final _held = <String, Set<String>>{};
   Future<void> _queue = Future.value();
   var _disposed = false;
 
@@ -88,7 +91,7 @@ class MatrixUnread {
       if (joined.timeline?.limited == true) {
         // The server skipped messages; only it knows how many were unread.
         // The fill applies the receipt itself.
-        _scheduleFill(roomId);
+        _fills.schedule(roomId);
         continue;
       }
       final tally = _tallies.putIfAbsent(roomId, RoomTally.new);
@@ -97,7 +100,7 @@ class MatrixUnread {
           changed = true;
         }
       }
-      final own = _ownReceipt(room);
+      final own = ownReceipt(room);
       if (own != null) {
         final fresh = _receipts[roomId] != (eventId: own.eventId, ts: own.ts);
         // The by-time reading is what the gate guards against repeating. A
@@ -112,19 +115,11 @@ class MatrixUnread {
         }
       }
     }
-    // Fills that failed get another go now the server answers syncs again.
-    // Only those: a room mid-fill would otherwise be asked for again by
-    // every sync that lands, and never finish.
-    for (final roomId in [..._failed]) {
-      if (!_filling.contains(roomId) && !_fillQueue.contains(roomId)) {
-        _scheduleFill(roomId);
-      }
-    }
+    _fills.retryFailed();
     for (final roomId in update.rooms?.leave?.keys ?? const <String>[]) {
       _receipts.remove(roomId);
-      _failed.remove(roomId);
-      _fillQueue.remove(roomId);
-      _refill.remove(roomId);
+      _fills.forget(roomId);
+      _held.remove(roomId);
       _keySubs.remove(roomId)?.sub.cancel();
       if (_tallies.remove(roomId) != null) changed = true;
       _scheduleSave();
@@ -148,8 +143,8 @@ class MatrixUnread {
             // Saved tallies may hold locked messages, too.
             _watchKeys(room);
             if (_tallies.containsKey(room.id)) continue;
-            if (_hasNewMessages(room)) {
-              _scheduleFill(room.id);
+            if (hasNewMessages(room, client.userID)) {
+              _fills.schedule(room.id);
             } else {
               _tallies[room.id] = RoomTally();
             }
@@ -173,44 +168,67 @@ class MatrixUnread {
     _keySubs[room.id] = (
       room: room,
       sub: room.onSessionKeyReceived.stream.listen(
-        (_) => _recheckSoon(room.id),
+        (sessionId) => _recheckSoon(room.id, sessionId),
       ),
     );
   }
 
-  /// Queues one re-check of [roomId], behind the syncs already waiting. A
-  /// key backup brings many keys at once; they share it.
-  void _recheckSoon(String roomId) {
-    if (_disposed || !_rechecks.add(roomId)) return;
+  /// Queues one re-check of [roomId] for the key of [sessionId], behind the
+  /// syncs already waiting. A key backup brings many keys at once; they
+  /// share it.
+  void _recheckSoon(String roomId, String sessionId) {
+    if (_disposed) return;
+    final pending = _rechecks[roomId];
+    if (pending != null) {
+      pending.add(sessionId);
+      return;
+    }
+    _rechecks[roomId] = {sessionId};
     _queue = _queue
         .then((_) {
-          _rechecks.remove(roomId);
-          return _recheck(roomId);
+          final sessions = _rechecks.remove(roomId) ?? const <String>{};
+          return _recheck(roomId, sessions);
         })
         .catchError((Object e, StackTrace s) {
           Logs().w('[loaf] unread re-check failed', e, s);
         });
   }
 
-  /// Reads [roomId]'s locked messages again, now that a key came. A room
-  /// being filled is skipped, since the fill replaces its tally anyway.
-  Future<void> _recheck(String roomId) async {
-    if (_disposed || _filling.contains(roomId)) return;
+  /// A fill of [roomId] ended: re-checks for the keys that came during it.
+  void _recheckHeld(String roomId) {
+    for (final session in _held.remove(roomId) ?? const <String>{}) {
+      _recheckSoon(roomId, session);
+    }
+  }
+
+  /// Reads [roomId]'s messages locked under [sessions] again, now that their
+  /// keys came; the others can't have opened. A room being filled waits
+  /// for the fill, which replaces its tally and may have read a message
+  /// just before its key came.
+  Future<void> _recheck(String roomId, Set<String> sessions) async {
+    if (_disposed) return;
+    if (_fills.isFilling(roomId)) {
+      _held.putIfAbsent(roomId, () => {}).addAll(sessions);
+      return;
+    }
     final tally = _tallies[roomId];
     final room = client.getRoomById(roomId);
     if (tally == null || room == null) return;
     var changed = false;
     try {
-      for (final entry in tally.entries.where((e) => e.locked).toList()) {
+      for (final entry in tally.lockedUnder(sessions)) {
         final event = await _stored(room, entry.id);
         if (event == null) continue;
         final reread = await _entry(room, event);
         if (reread.locked) continue;
-        // A fill that landed meanwhile replaced this tally; it counted the
-        // message itself.
+        // A fill that landed meanwhile replaced this tally, and may have
+        // counted what is left of these locked. Look again at the new one.
         if (_disposed ||
-            _filling.contains(roomId) ||
+            _fills.isFilling(roomId) ||
             !identical(_tallies[roomId], tally)) {
+          for (final session in sessions) {
+            _recheckSoon(roomId, session);
+          }
           break;
         }
         if (tally.replace(reread)) changed = true;
@@ -235,43 +253,13 @@ class MatrixUnread {
     );
   }
 
-  void _scheduleFill(String roomId) {
-    if (_filling.contains(roomId)) {
-      _refill.add(roomId);
-      return;
-    }
-    if (_fillQueue.contains(roomId)) return;
-    _fillQueue.add(roomId);
-    _pump();
-  }
-
-  void _pump() {
-    while (!_disposed &&
-        _filling.length < _parallelFills &&
-        _fillQueue.isNotEmpty) {
-      final roomId = _fillQueue.removeAt(0);
-      _filling.add(roomId);
-      unawaited(
-        _fill(roomId).whenComplete(() {
-          _filling.remove(roomId);
-          if (_refill.remove(roomId)) {
-            _fillQueue.add(roomId);
-          }
-          _pump();
-        }),
-      );
-    }
-  }
-
   /// Counts [roomId] from the server's history, newest first, back to your
-  /// receipt, your own last message, or [RoomTally.cap] messages.
-  Future<void> _fill(String roomId) async {
+  /// receipt, your own last message, or [RoomTally.cap] messages. False
+  /// when the fetch failed and the room should be tried again.
+  Future<bool> _fill(String roomId) async {
     final room = client.getRoomById(roomId);
-    if (room == null) {
-      _failed.remove(roomId);
-      return;
-    }
-    final own = _ownReceipt(room);
+    if (room == null) return true;
+    final own = ownReceipt(room);
     final found = <TallyEntry>[];
     var capped = false;
     int? newestSeen;
@@ -292,7 +280,7 @@ class MatrixUnread {
           if (own != null && (event.eventId == own.eventId || ts <= own.ts)) {
             break pages;
           }
-          if (_isOwnJoin(event)) break pages;
+          if (isOwnJoin(event, client.userID)) break pages;
           if (!countsAsMessage(event)) continue;
           if (event.senderId == client.userID) break pages;
           if (found.length == RoomTally.cap) {
@@ -306,14 +294,12 @@ class MatrixUnread {
       }
     } on Object catch (e) {
       Logs().v('[loaf] unread fill for $roomId failed: $e');
-      _failed.add(roomId); // The next sync tries again.
-      return;
+      return false;
     }
-    if (_disposed) return;
+    if (_disposed) return true;
     if (client.getRoomById(roomId)?.membership != Membership.join) {
       // Left while the fetch was out: nothing to count.
-      _failed.remove(roomId);
-      return;
+      return true;
     }
     // Messages a sync counted while this fill was out are newer than
     // anything it saw; keep them.
@@ -326,14 +312,14 @@ class MatrixUnread {
     );
     _readReceipt(room, tally);
     // Remembered so the next sync doesn't apply this receipt a second time.
-    final current = _ownReceipt(room);
+    final current = ownReceipt(room);
     if (current != null) {
       _receipts[roomId] = (eventId: current.eventId, ts: current.ts);
     }
     _tallies[roomId] = tally;
-    _failed.remove(roomId);
     _scheduleSave();
     onChange();
+    return true;
   }
 
   Future<void> _load() async {
@@ -404,7 +390,7 @@ class MatrixUnread {
       final redacts = event.redacts;
       return redacts != null && tally.remove(redacts);
     }
-    if (_isOwnJoin(event)) {
+    if (isOwnJoin(event, client.userID)) {
       // What came before you joined was never yours to read.
       final had = !tally.isEmpty;
       tally.clear();
@@ -414,7 +400,7 @@ class MatrixUnread {
     if (event.senderId == client.userID) {
       // Sending in a room reads it, as the server counts it too. A fill in
       // flight would bring the older unreads back, so it runs again.
-      if (_filling.contains(room.id)) _scheduleFill(room.id);
+      if (_fills.isFilling(room.id)) _fills.schedule(room.id);
       final had = !tally.isEmpty;
       tally.clear();
       return had;
@@ -423,20 +409,12 @@ class MatrixUnread {
     return true;
   }
 
-  /// Whether [event] is you joining the room. A change of your name or
-  /// avatar is a join too, but with a join before it; that isn't one. With
-  /// no previous state to tell, any join of yours is taken as arriving.
-  bool _isOwnJoin(Event event) =>
-      event.type == EventTypes.RoomMember &&
-      event.stateKey == client.userID &&
-      event.content['membership'] == 'join' &&
-      event.prevContent?['membership'] != 'join';
-
   /// [event] as an unread entry: decrypted first where a key is here, so a
   /// mention in an encrypted room is seen.
   Future<TallyEntry> _entry(Room room, Event event) async {
     final shown = await _decrypted(event);
     final me = client.userID!;
+    final locked = shown.type == EventTypes.Encrypted;
     return TallyEntry(
       event.eventId,
       event.originServerTs.millisecondsSinceEpoch,
@@ -447,7 +425,8 @@ class MatrixUnread {
             .unsafeGetUserFromMemoryOrFallback(me)
             .calcDisplayname(),
       ),
-      locked: shown.type == EventTypes.Encrypted,
+      locked: locked,
+      session: locked ? event.content.tryGet<String>('session_id') : null,
     );
   }
 
@@ -462,42 +441,15 @@ class MatrixUnread {
     }
   }
 
-  /// Your latest read receipt in [room]: the later of the unthreaded ones
-  /// and those on the main timeline, which the SDK keeps apart. Receipts on
-  /// real threads are ignored, since Loaf shows thread replies inline and
-  /// reading a thread says nothing about the room.
-  LatestReceiptStateData? _ownReceipt(Room room) {
-    final state = room.receiptState;
-    final global = state.global.latestOwnReceipt;
-    final main = state.mainThread?.latestOwnReceipt;
-    if (global == null || main == null) return global ?? main;
-    return main.ts > global.ts ? main : global;
-  }
-
-  /// Whether the room's last event is a message from someone else that your
-  /// receipt doesn't cover. [Room.hasNewMessages] looks at unthreaded
-  /// receipts only.
-  bool _hasNewMessages(Room room) {
-    final last = room.lastEvent;
-    if (last == null ||
-        !countsAsMessage(last) ||
-        last.senderId == client.userID) {
-      return false;
-    }
-    final own = _ownReceipt(room);
-    return own == null ||
-        (own.eventId != last.eventId &&
-            own.ts < last.originServerTs.millisecondsSinceEpoch);
-  }
-
   /// Applies your current receipt in [room], changed or not.
   bool _readReceipt(Room room, RoomTally tally) {
-    final own = _ownReceipt(room);
+    final own = ownReceipt(room);
     return own != null && tally.readUpTo(own.eventId, own.ts);
   }
 
   void dispose() {
     _disposed = true;
+    _fills.dispose();
     for (final known in _keySubs.values) {
       known.sub.cancel();
     }

@@ -33,11 +33,13 @@ Event _event(
   String type = EventTypes.Message,
   Map<String, Object?> content = const {'msgtype': 'm.text', 'body': 'hi'},
   String sender = '@ada:example.com',
+  String? stateKey,
   Map<String, Object?>? unsigned,
 }) => Event(
   type: type,
   content: content,
   senderId: sender,
+  stateKey: stateKey,
   eventId: '\$e${_n++}',
   originServerTs: DateTime(2026),
   room: room,
@@ -248,6 +250,32 @@ void main() {
         content: {'ciphertext': 'x'},
       );
       expect(mentionsMe(event, userId: _me, displayName: 'Me'), isFalse);
+    });
+  });
+
+  group('isOwnJoin', () {
+    Event member(Room room, String membership, {String? was}) => _event(
+      room,
+      type: EventTypes.RoomMember,
+      content: {'membership': membership},
+      stateKey: _me,
+      unsigned: {
+        if (was != null) 'prev_content': {'membership': was},
+      },
+    );
+
+    test('your arrival is one, with or without a previous state', () {
+      final room = _room();
+      expect(isOwnJoin(member(room, 'join'), _me), isTrue);
+      expect(isOwnJoin(member(room, 'join', was: 'invite'), _me), isTrue);
+    });
+
+    test('a change of name, a leave and someone else are not', () {
+      final room = _room();
+      expect(isOwnJoin(member(room, 'join', was: 'join'), _me), isFalse);
+      expect(isOwnJoin(member(room, 'leave', was: 'join'), _me), isFalse);
+      expect(isOwnJoin(member(room, 'join'), '@ada:example.com'), isFalse);
+      expect(isOwnJoin(_event(room), _me), isFalse);
     });
   });
 }

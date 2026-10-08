@@ -104,4 +104,50 @@ void main() {
     expect(back.entries.single.mention, isTrue);
     expect(back.entries.single.locked, isTrue);
   });
+
+  test('a locked entry keeps its session through JSON', () {
+    final tally = RoomTally()
+      ..add(const TallyEntry(r'$a', 1, locked: true, session: 's1'));
+    final json = tally.toJson();
+    expect((json['e']! as List).single, [r'$a', 1, false, 's1']);
+    final back = RoomTally.fromJson(json).entries.single;
+    expect(back.locked, isTrue);
+    expect(back.session, 's1');
+  });
+
+  test('a file from before sessions loads locked, session unknown', () {
+    final back = RoomTally.fromJson({
+      'e': [
+        [r'$a', 1, false, true],
+      ],
+    }).entries.single;
+    expect(back.locked, isTrue);
+    expect(back.session, isNull);
+    // And writes back the way it came.
+    expect(back.toJson(), [r'$a', 1, false, true]);
+  });
+
+  test('an unlocked entry has no session in its JSON', () {
+    const entry = TallyEntry(r'$a', 1, mention: true);
+    expect(entry.toJson(), [r'$a', 1, true]);
+    final back = TallyEntry.fromJson(entry.toJson());
+    expect(back.locked, isFalse);
+    expect(back.session, isNull);
+  });
+
+  test('lockedUnder takes the locked entries a key could open', () {
+    final tally = RoomTally()
+      ..add(const TallyEntry(r'$open', 1))
+      ..add(const TallyEntry(r'$one', 2, locked: true, session: 's1'))
+      ..add(const TallyEntry(r'$two', 3, locked: true, session: 's2'))
+      // From an older file: any key might open it.
+      ..add(const TallyEntry(r'$old', 4, locked: true));
+    expect(tally.lockedUnder({'s1'}).map((e) => e.id), [r'$one', r'$old']);
+    expect(tally.lockedUnder({'s1', 's2'}).map((e) => e.id), [
+      r'$one',
+      r'$two',
+      r'$old',
+    ]);
+    expect(tally.lockedUnder({'other'}).map((e) => e.id), [r'$old']);
+  });
 }

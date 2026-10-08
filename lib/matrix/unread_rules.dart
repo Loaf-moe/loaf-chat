@@ -59,3 +59,38 @@ bool _containsWord(String text, String word) => RegExp(
   caseSensitive: false,
   unicode: true,
 ).hasMatch(text);
+
+/// Whether [event] is you joining the room. A change of your name or
+/// avatar is a join too, but with a join before it; that isn't one. With
+/// no previous state to tell, any join of yours is taken as arriving.
+bool isOwnJoin(Event event, String? userId) =>
+    event.type == EventTypes.RoomMember &&
+    event.stateKey == userId &&
+    event.content['membership'] == 'join' &&
+    event.prevContent?['membership'] != 'join';
+
+/// Your latest read receipt in [room]: the later of the unthreaded ones
+/// and those on the main timeline, which the SDK keeps apart. Receipts on
+/// real threads are ignored, since Loaf shows thread replies inline and
+/// reading a thread says nothing about the room.
+LatestReceiptStateData? ownReceipt(Room room) {
+  final state = room.receiptState;
+  final global = state.global.latestOwnReceipt;
+  final main = state.mainThread?.latestOwnReceipt;
+  if (global == null || main == null) return global ?? main;
+  return main.ts > global.ts ? main : global;
+}
+
+/// Whether the room's last event is a message from someone else that your
+/// receipt doesn't cover. [Room.hasNewMessages] looks at unthreaded
+/// receipts only.
+bool hasNewMessages(Room room, String? userId) {
+  final last = room.lastEvent;
+  if (last == null || !countsAsMessage(last) || last.senderId == userId) {
+    return false;
+  }
+  final own = ownReceipt(room);
+  return own == null ||
+      (own.eventId != last.eventId &&
+          own.ts < last.originServerTs.millisecondsSinceEpoch);
+}
