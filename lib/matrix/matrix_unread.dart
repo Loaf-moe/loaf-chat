@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 
+import 'unread_fills.dart';
 import 'unread_rules.dart';
 import 'unread_tally.dart';
 
@@ -13,7 +14,13 @@ import 'unread_tally.dart';
 /// mentions-only room, and blind to mentions in an encrypted one. Syncs are
 /// applied one at a time, in order, since decrypting makes each one wait.
 class MatrixUnread {
-  MatrixUnread(this.client, {required this.onChange, this.file}) {
+  MatrixUnread(
+    this.client, {
+    required this.onChange,
+    this.file,
+    DateTime Function()? now,
+  }) {
+    _fills = UnreadFills(_fill, now: now);
     // Syncs and the seed wait for what the last run saved.
     _queue = _load();
   }
@@ -35,19 +42,9 @@ class MatrixUnread {
   /// arrived late with a time before it.
   final _receipts = <String, ({String eventId, int ts})>{};
 
-  /// Rooms whose last fill failed. Their counts stay as they were and the
-  /// next sync tries again.
-  final _failed = <String>{};
-  final _filling = <String>{};
-
-  /// Rooms that needed a fill again while one was already out: a gap, or
-  /// your own message, that the fetch in flight may have missed.
-  final _refill = <String>{};
-
-  /// At most this many rooms fetch at once, so a launch with many unread
-  /// rooms doesn't fire every request together.
-  static const _parallelFills = 4;
-  final _fillQueue = <String>[];
+  /// Counts rooms from the server's history. A fill that fails leaves the
+  /// room's count as it was, and the sweep after a sync tries again.
+  late final UnreadFills _fills;
 
   /// Each room's key-arrival subscription, with the [Room] it listens to: a
   /// room left and joined again is a new object.
@@ -89,7 +86,7 @@ class MatrixUnread {
       if (joined.timeline?.limited == true) {
         // The server skipped messages; only it knows how many were unread.
         // The fill applies the receipt itself.
-        _scheduleFill(roomId);
+        _fills.schedule(roomId);
         continue;
       }
       final tally = _tallies.putIfAbsent(roomId, RoomTally.new);
@@ -113,19 +110,10 @@ class MatrixUnread {
         }
       }
     }
-    // Fills that failed get another go now the server answers syncs again.
-    // Only those: a room mid-fill would otherwise be asked for again by
-    // every sync that lands, and never finish.
-    for (final roomId in [..._failed]) {
-      if (!_filling.contains(roomId) && !_fillQueue.contains(roomId)) {
-        _scheduleFill(roomId);
-      }
-    }
+    _fills.retryFailed();
     for (final roomId in update.rooms?.leave?.keys ?? const <String>[]) {
       _receipts.remove(roomId);
-      _failed.remove(roomId);
-      _fillQueue.remove(roomId);
-      _refill.remove(roomId);
+      _fills.forget(roomId);
       _keySubs.remove(roomId)?.sub.cancel();
       if (_tallies.remove(roomId) != null) changed = true;
       _scheduleSave();
@@ -150,7 +138,7 @@ class MatrixUnread {
             _watchKeys(room);
             if (_tallies.containsKey(room.id)) continue;
             if (_hasNewMessages(room)) {
-              _scheduleFill(room.id);
+              _fills.schedule(room.id);
             } else {
               _tallies[room.id] = RoomTally();
             }
@@ -204,7 +192,7 @@ class MatrixUnread {
   /// keys came; the others can't have opened. A room being filled is
   /// skipped, since the fill replaces its tally anyway.
   Future<void> _recheck(String roomId, Set<String> sessions) async {
-    if (_disposed || _filling.contains(roomId)) return;
+    if (_disposed || _fills.isFilling(roomId)) return;
     final tally = _tallies[roomId];
     final room = client.getRoomById(roomId);
     if (tally == null || room == null) return;
@@ -218,7 +206,7 @@ class MatrixUnread {
         // A fill that landed meanwhile replaced this tally; it counted the
         // message itself.
         if (_disposed ||
-            _filling.contains(roomId) ||
+            _fills.isFilling(roomId) ||
             !identical(_tallies[roomId], tally)) {
           break;
         }
@@ -244,42 +232,12 @@ class MatrixUnread {
     );
   }
 
-  void _scheduleFill(String roomId) {
-    if (_filling.contains(roomId)) {
-      _refill.add(roomId);
-      return;
-    }
-    if (_fillQueue.contains(roomId)) return;
-    _fillQueue.add(roomId);
-    _pump();
-  }
-
-  void _pump() {
-    while (!_disposed &&
-        _filling.length < _parallelFills &&
-        _fillQueue.isNotEmpty) {
-      final roomId = _fillQueue.removeAt(0);
-      _filling.add(roomId);
-      unawaited(
-        _fill(roomId).whenComplete(() {
-          _filling.remove(roomId);
-          if (_refill.remove(roomId)) {
-            _fillQueue.add(roomId);
-          }
-          _pump();
-        }),
-      );
-    }
-  }
-
   /// Counts [roomId] from the server's history, newest first, back to your
-  /// receipt, your own last message, or [RoomTally.cap] messages.
-  Future<void> _fill(String roomId) async {
+  /// receipt, your own last message, or [RoomTally.cap] messages. False
+  /// when the fetch failed and the room should be tried again.
+  Future<bool> _fill(String roomId) async {
     final room = client.getRoomById(roomId);
-    if (room == null) {
-      _failed.remove(roomId);
-      return;
-    }
+    if (room == null) return true;
     final own = _ownReceipt(room);
     final found = <TallyEntry>[];
     var capped = false;
@@ -315,14 +273,12 @@ class MatrixUnread {
       }
     } on Object catch (e) {
       Logs().v('[loaf] unread fill for $roomId failed: $e');
-      _failed.add(roomId); // The next sync tries again.
-      return;
+      return false;
     }
-    if (_disposed) return;
+    if (_disposed) return true;
     if (client.getRoomById(roomId)?.membership != Membership.join) {
       // Left while the fetch was out: nothing to count.
-      _failed.remove(roomId);
-      return;
+      return true;
     }
     // Messages a sync counted while this fill was out are newer than
     // anything it saw; keep them.
@@ -340,9 +296,9 @@ class MatrixUnread {
       _receipts[roomId] = (eventId: current.eventId, ts: current.ts);
     }
     _tallies[roomId] = tally;
-    _failed.remove(roomId);
     _scheduleSave();
     onChange();
+    return true;
   }
 
   Future<void> _load() async {
@@ -423,7 +379,7 @@ class MatrixUnread {
     if (event.senderId == client.userID) {
       // Sending in a room reads it, as the server counts it too. A fill in
       // flight would bring the older unreads back, so it runs again.
-      if (_filling.contains(room.id)) _scheduleFill(room.id);
+      if (_fills.isFilling(room.id)) _fills.schedule(room.id);
       final had = !tally.isEmpty;
       tally.clear();
       return had;
@@ -509,6 +465,7 @@ class MatrixUnread {
 
   void dispose() {
     _disposed = true;
+    _fills.dispose();
     for (final known in _keySubs.values) {
       known.sub.cancel();
     }

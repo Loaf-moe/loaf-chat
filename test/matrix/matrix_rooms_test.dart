@@ -233,8 +233,8 @@ Future<Client> _client({_Api? api, bool firstSync = true}) async {
   return client;
 }
 
-Future<MatrixRooms> _rooms(Client client) async {
-  final rooms = MatrixRooms(client);
+Future<MatrixRooms> _rooms(Client client, {DateTime Function()? now}) async {
+  final rooms = MatrixRooms(client, now: now);
   addTearDown(rooms.dispose);
   await _settle();
   return rooms;
@@ -850,24 +850,38 @@ void main() {
       expect(channel(rooms, general).unread, RoomTally.cap + 1);
     });
 
-    test('a failed fill keeps the count and tries again next sync', () async {
-      final api = _Api()..failHistory = true;
-      final client = await _client(api: api);
-      final rooms = await _rooms(client);
-      await _bakery(client);
-      await _timeline(client, general, [_msg('before')]);
-      api.roomHistory[general] = [_msg('a'), _msg('b'), _msg('c')];
-      await _timeline(client, general, [
-        api.roomHistory[general]!.first,
-      ], limited: true);
-      await _settle();
-      expect(channel(rooms, general).unread, 1, reason: 'the old count stays');
+    test(
+      'a failed fill keeps the count and tries again after a wait',
+      () async {
+        final api = _Api()..failHistory = true;
+        final client = await _client(api: api);
+        var clock = DateTime(2030);
+        final rooms = await _rooms(client, now: () => clock);
+        await _bakery(client);
+        await _timeline(client, general, [_msg('before')]);
+        api.roomHistory[general] = [_msg('a'), _msg('b'), _msg('c')];
+        await _timeline(client, general, [
+          api.roomHistory[general]!.first,
+        ], limited: true);
+        await _settle();
+        expect(
+          channel(rooms, general).unread,
+          1,
+          reason: 'the old count stays',
+        );
 
-      api.failHistory = false;
-      await _timeline(client, general, const []);
-      await _settle();
-      expect(channel(rooms, general).unread, 3);
-    });
+        api.failHistory = false;
+        clock = clock.add(const Duration(seconds: 29));
+        await _timeline(client, general, const []);
+        await _settle();
+        expect(channel(rooms, general).unread, 1, reason: 'still backing off');
+
+        clock = clock.add(const Duration(seconds: 1));
+        await _timeline(client, general, const []);
+        await _settle();
+        expect(channel(rooms, general).unread, 3);
+      },
+    );
 
     test('messages that arrive during a fill are kept', () async {
       final api = _Api()..hold = Completer<void>();

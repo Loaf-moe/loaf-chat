@@ -52,7 +52,12 @@ class _Wish {
 }
 
 class MatrixRooms extends ChangeNotifier implements Rooms {
-  MatrixRooms(this.client, {this._mediaRoot, this.externalMedia}) {
+  MatrixRooms(
+    this.client, {
+    this._mediaRoot,
+    this.externalMedia,
+    @visibleForTesting this._now,
+  }) {
     _hierarchy = MatrixHierarchy(
       client,
       onChange: () {
@@ -88,6 +93,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// What is unread in each room, counted from the messages themselves.
   late final MatrixUnread _unread = MatrixUnread(
     client,
+    now: _now,
     // In the media root's parent, not in it: `MediaStore.evict` walks the
     // root and must never see this file.
     file: switch (_mediaRoot ?? _storageRoot()) {
@@ -112,6 +118,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   late final List<StreamSubscription<Object?>> _subscriptions;
   var _disposed = false;
   final Directory? _mediaRoot;
+
+  /// The clock the unread counts back off by; tests move it.
+  final DateTime Function()? _now;
 
   /// Whether files linked on other sites are shown. Null: they are.
   final ValueListenable<bool>? externalMedia;
