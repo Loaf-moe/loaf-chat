@@ -39,7 +39,8 @@ class NativeChime implements Chime {
   }
 }
 
-/// Counts plays: for tests, and the mock backend's previews.
+/// Counts plays: for tests only. The app, mock backend included, uses
+/// [NativeChime].
 class FakeChime implements Chime {
   int plays = 0;
 
