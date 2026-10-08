@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../channel/timeline_controller.dart';
+import '../model/arrival.dart';
 import '../model/media_source.dart';
 import '../rooms/rooms.dart';
 import '../settings/devices.dart';
@@ -99,6 +100,9 @@ class MockRooms extends ChangeNotifier implements Rooms {
   /// Spaces you have left this session are gone, the same way a left Home
   /// room is: [_membership] carries the space's own id as well as its
   /// channels'.
+  @override
+  Stream<Arrival> get arrivals => const Stream.empty();
+
   @override
   List<Space> get spaces => [
     for (final space in [...mockSpaces, ..._acceptedSpaces])

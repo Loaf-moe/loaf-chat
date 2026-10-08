@@ -13,6 +13,7 @@ import 'package:matrix/matrix.dart' hide Presence, Profile, Timeline;
 
 import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
+import '../ui/model/arrival.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/settings/devices.dart';
@@ -27,6 +28,7 @@ import 'matrix_media.dart';
 import 'matrix_profile.dart';
 import 'matrix_space_directory.dart';
 import 'matrix_timeline.dart';
+import 'matrix_arrivals.dart';
 import 'matrix_unread.dart';
 import 'media_store.dart';
 import 'unread_tally.dart';
@@ -75,6 +77,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _synced = client.prevBatch != null;
     _rebuild();
     _unread.seed();
+    // Built now, not on first listen: "launch" is when the rooms open.
+    _arrivals;
     // The status stream does not replay: a sync already under way when the
     // shell opens is read from its last value.
     final status = client.onSyncStatus.value;
@@ -83,6 +87,12 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   }
 
   final Client client;
+
+  /// The messages that may notify, from the moment the rooms open.
+  late final MatrixArrivals _arrivals = MatrixArrivals(client, now: _now);
+
+  @override
+  Stream<Arrival> get arrivals => _arrivals.stream;
 
   /// A space's children the SDK doesn't have state for: unjoined channels,
   /// and the children of an unjoined subspace. The hierarchy cache: the
@@ -1248,6 +1258,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     }
     _hierarchy.dispose();
     _unread.dispose();
+    _arrivals.dispose();
     _profile?.dispose();
     _devices?.dispose();
     _media?.dispose();

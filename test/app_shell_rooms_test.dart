@@ -28,6 +28,7 @@ import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/verifier.dart';
 import 'package:loaf_native/ui/settings/devices.dart';
 import 'package:loaf_native/ui/shell/profile.dart';
+import 'package:loaf_native/ui/model/arrival.dart';
 import 'package:loaf_native/ui/model/media_source.dart';
 import 'package:loaf_native/ui/widgets/avatar_images.dart';
 
@@ -86,6 +87,8 @@ final _invite = Invite(
 class _FakeRooms extends ChangeNotifier implements Rooms {
   _FakeRooms({this.spaces = const [], this.homeRooms = const []});
 
+  @override
+  Stream<Arrival> get arrivals => const Stream.empty();
   @override
   AvatarImages get avatarImages => const NoAvatarImages();
   @override
