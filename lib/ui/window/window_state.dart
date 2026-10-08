@@ -153,11 +153,20 @@ class WindowState {
     Map<Object?, Object?> m,
   ) {
     final fullscreen = m['fullscreen'] == true;
+    final maximized = m['maximized'] == true;
+    // The runner's messages cross a channel, so trust their shape no further
+    // than needed: a wrong type reads as absent rather than throwing.
+    final rawEnv = m['env'];
     final env = <String, String>{
-      for (final MapEntry(:key, :value)
-          in ((m['env'] as Map?) ?? const {}).entries)
-        '$key': '$value',
+      if (rawEnv is Map)
+        for (final MapEntry(:key, :value) in rawEnv.entries)
+          if (value != null) '$key': '$value',
     };
+    final wmName = m['wmName'];
+    final decorationLayout = m['decorationLayout'];
+    // Some compositors flag every edge of a maximized or fullscreen window
+    // as tiled; that is not a tiling WM, and GNOME or KDE keep their buttons.
+    final tiled = m['tiled'] == true && !maximized && !fullscreen;
     // A fullscreen window has no title bar to put buttons in, on any OS.
     final layout = fullscreen
         ? ButtonLayout.none
@@ -166,18 +175,20 @@ class WindowState {
             TargetPlatform.windows => ButtonLayout.windows,
             TargetPlatform.linux =>
               isTilingWm(
-                    wmName: m['wmName'] as String?,
+                    wmName: wmName is String ? wmName : null,
                     env: env,
-                    tiled: m['tiled'] == true,
+                    tiled: tiled,
                   )
                   ? ButtonLayout.none
                   : ButtonLayout.parseGtk(
-                      m['decorationLayout'] as String? ?? _gtkDefault,
+                      decorationLayout is String
+                          ? decorationLayout
+                          : _gtkDefault,
                     ),
             _ => ButtonLayout.none,
           };
     return WindowState(
-      maximized: m['maximized'] == true,
+      maximized: maximized,
       fullscreen: fullscreen,
       focused: m['focused'] != false,
       maxHovered: m['maxHovered'] == true,

@@ -46,7 +46,10 @@ class WindowChromeController extends ChangeNotifier {
   }
 
   Future<Object?> _onCall(MethodCall call) async {
-    if (call.method == 'stateChanged') _apply(call.arguments as Map?);
+    if (call.method == 'stateChanged') {
+      final args = call.arguments;
+      if (args is Map) _apply(args);
+    }
     return null;
   }
 

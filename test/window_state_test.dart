@@ -156,6 +156,52 @@ void main() {
       );
     });
 
+    test('Linux: a maximized window flagged tiled keeps its buttons', () {
+      expect(
+        WindowState.fromPlatform(TargetPlatform.linux, const {
+          'maximized': true,
+          'tiled': true,
+          'decorationLayout': ':close',
+          'env': {'XDG_CURRENT_DESKTOP': 'GNOME'},
+        }).layout,
+        const ButtonLayout(trailing: [_close]),
+      );
+    });
+
+    test('Linux: tiled and not maximized has no buttons', () {
+      expect(
+        WindowState.fromPlatform(TargetPlatform.linux, const {
+          'tiled': true,
+          'decorationLayout': ':close',
+          'env': {'XDG_CURRENT_DESKTOP': 'GNOME'},
+        }).layout.isEmpty,
+        isTrue,
+      );
+    });
+
+    test('fullscreen has no buttons on Linux or Windows', () {
+      for (final platform in [TargetPlatform.linux, TargetPlatform.windows]) {
+        expect(
+          WindowState.fromPlatform(platform, const {
+            'fullscreen': true,
+            'decorationLayout': ':close',
+          }).layout.isEmpty,
+          isTrue,
+          reason: '$platform',
+        );
+      }
+    });
+
+    test('wrong-typed values from the runner do not throw', () {
+      final s = WindowState.fromPlatform(TargetPlatform.linux, const {
+        'wmName': 3,
+        'env': 'x',
+        'decorationLayout': true,
+      });
+      // Read as absent: GTK's own default layout.
+      expect(s.layout, const ButtonLayout(trailing: [_min, _max, _close]));
+    });
+
     test('focused unless the runner says otherwise', () {
       expect(
         WindowState.fromPlatform(TargetPlatform.macOS, const {}).focused,
