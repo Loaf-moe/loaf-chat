@@ -20,7 +20,7 @@ class MatrixUnread {
     this.file,
     DateTime Function()? now,
   }) {
-    _fills = UnreadFills(_fill, now: now);
+    _fills = UnreadFills(_fill, onSettled: _recheckHeld, now: now);
     // Syncs and the seed wait for what the last run saved.
     _queue = _load();
   }
@@ -53,6 +53,11 @@ class MatrixUnread {
   /// Rooms with a re-check of their locked messages already waiting, and the
   /// sessions whose keys have come for it.
   final _rechecks = <String, Set<String>>{};
+
+  /// Sessions whose keys came while their room was being filled, for the
+  /// re-check that waits on that fill: it may have read a message locked
+  /// just before the key came.
+  final _held = <String, Set<String>>{};
   Future<void> _queue = Future.value();
   var _disposed = false;
 
@@ -114,6 +119,7 @@ class MatrixUnread {
     for (final roomId in update.rooms?.leave?.keys ?? const <String>[]) {
       _receipts.remove(roomId);
       _fills.forget(roomId);
+      _held.remove(roomId);
       _keySubs.remove(roomId)?.sub.cancel();
       if (_tallies.remove(roomId) != null) changed = true;
       _scheduleSave();
@@ -188,11 +194,23 @@ class MatrixUnread {
         });
   }
 
+  /// A fill of [roomId] ended: re-checks for the keys that came during it.
+  void _recheckHeld(String roomId) {
+    for (final session in _held.remove(roomId) ?? const <String>{}) {
+      _recheckSoon(roomId, session);
+    }
+  }
+
   /// Reads [roomId]'s messages locked under [sessions] again, now that their
-  /// keys came; the others can't have opened. A room being filled is
-  /// skipped, since the fill replaces its tally anyway.
+  /// keys came; the others can't have opened. A room being filled waits
+  /// for the fill, which replaces its tally and may have read a message
+  /// just before its key came.
   Future<void> _recheck(String roomId, Set<String> sessions) async {
-    if (_disposed || _fills.isFilling(roomId)) return;
+    if (_disposed) return;
+    if (_fills.isFilling(roomId)) {
+      _held.putIfAbsent(roomId, () => {}).addAll(sessions);
+      return;
+    }
     final tally = _tallies[roomId];
     final room = client.getRoomById(roomId);
     if (tally == null || room == null) return;
@@ -203,11 +221,14 @@ class MatrixUnread {
         if (event == null) continue;
         final reread = await _entry(room, event);
         if (reread.locked) continue;
-        // A fill that landed meanwhile replaced this tally; it counted the
-        // message itself.
+        // A fill that landed meanwhile replaced this tally, and may have
+        // counted what is left of these locked. Look again at the new one.
         if (_disposed ||
             _fills.isFilling(roomId) ||
             !identical(_tallies[roomId], tally)) {
+          for (final session in sessions) {
+            _recheckSoon(roomId, session);
+          }
           break;
         }
         if (tally.replace(reread)) changed = true;

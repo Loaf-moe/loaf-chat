@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/matrix_unread.dart';
 import 'package:matrix/matrix.dart';
 
@@ -16,6 +18,7 @@ var _n = 0;
 Future<void> _sync(
   Client client, [
   List<Map<String, Object?>> events = const [],
+  bool limited = false,
 ]) => client.handleSync(
   SyncUpdate.fromJson({
     'next_batch': 'b${_n++}',
@@ -44,12 +47,44 @@ Future<void> _sync(
                 },
             ],
           },
-          'timeline': {'events': events},
+          'timeline': {'events': events, if (limited) 'limited': true},
         },
       },
     },
   }),
 );
+
+/// A server whose `/messages` serves [history] a page at a time, newest
+/// first, and holds the second page until the test lets it go.
+class _HistoryApi extends FakeMatrixApi {
+  final history = <Map<String, Object?>>[];
+  final release = Completer<void>();
+  final secondAsked = Completer<void>();
+
+  @override
+  FutureOr<http.Response> mockIntercept(http.Request request) async {
+    if (request.method == 'GET' && request.url.path.endsWith('/messages')) {
+      final from = int.tryParse(request.url.queryParameters['from'] ?? '') ?? 0;
+      if (from > 0) {
+        secondAsked.complete();
+        await release.future;
+      }
+      final end = from + 1;
+      return http.Response(
+        jsonEncode({
+          'start': '$from',
+          'chunk': history.sublist(
+            from.clamp(0, history.length),
+            end.clamp(0, history.length),
+          ),
+          if (from == 0) 'end': '$end',
+        }),
+        200,
+      );
+    }
+    return super.mockIntercept(request);
+  }
+}
 
 void main() {
   test(
@@ -225,6 +260,68 @@ void main() {
     expect(after[0].locked, isFalse);
     expect(after[1].locked, isTrue);
     expect(after[1].session, second['session_id']);
+    expect(unread.of(_room).mentions, 1);
+  });
+
+  test('a key that arrives while the room is being filled still opens '
+      'what the fill counted locked', () async {
+    final api = _HistoryApi();
+    final mine = await cryptoClient(api: api);
+    final theirs = await cryptoClient(
+      api: FakeMatrixApi.currentApi,
+      asOther: true,
+    );
+    await theirs.updateUserDeviceKeys(additionalUsers: {me});
+    await _sync(theirs);
+    await _sync(mine);
+    final sealed = await theirs.encryption!.encryptGroupMessagePayload(_room, {
+      'msgtype': 'm.text',
+      'body': 'hey',
+      'm.mentions': {
+        'user_ids': [me],
+      },
+    });
+    final event = {
+      'type': EventTypes.Encrypted,
+      'sender': other,
+      'content': sealed,
+      'event_id': r'$sealed',
+      'origin_server_ts': 1700000001000,
+    };
+    api.history.add(event);
+
+    final unread = MatrixUnread(mine, onChange: () {});
+    addTearDown(unread.dispose);
+    final sub = mine.onSync.stream.listen(unread.apply);
+    addTearDown(sub.cancel);
+    // A gap: the server has to be asked. Its first page is read locked,
+    // and the fill waits on the second.
+    await _sync(mine, [event], true);
+    await api.secondAsked.future.timeout(const Duration(seconds: 5));
+
+    final sessionId = sealed['session_id'] as String;
+    final key = theirs.encryption!.keyManager
+        .getInboundGroupSession(_room, sessionId)!
+        .inboundGroupSession!
+        .exportAtFirstKnownIndex();
+    await mine.encryption!.keyManager.setInboundGroupSession(
+      _room,
+      sessionId,
+      theirs.identityKey,
+      {
+        'algorithm': AlgorithmTypes.megolmV1AesSha2,
+        'room_id': _room,
+        'session_id': sessionId,
+        'session_key': key,
+      },
+      forwarded: true,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    api.release.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await unread.idle;
+    expect(unread.of(_room).count, 1);
+    expect(unread.of(_room).entries.single.locked, isFalse);
     expect(unread.of(_room).mentions, 1);
   });
 }

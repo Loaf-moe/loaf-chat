@@ -5,12 +5,16 @@ import 'dart:async';
 /// tried again, but with a wait that grows, so a server that can't answer
 /// isn't asked afresh by every sync.
 class UnreadFills {
-  UnreadFills(this._fill, {DateTime Function()? now})
+  UnreadFills(this._fill, {this.onSettled, DateTime Function()? now})
     : _now = now ?? DateTime.now;
 
   /// Fetches one room. False when it failed and should be tried again.
   final Future<bool> Function(String roomId) _fill;
   final DateTime Function() _now;
+
+  /// Called when a room's fetch ends, worked or failed, and no further one
+  /// is waiting for it. For work that had to wait for the room to be free.
+  final void Function(String roomId)? onSettled;
 
   /// At most this many rooms fetch at once, so a launch with many unread
   /// rooms doesn't fire every request together.
@@ -69,6 +73,7 @@ class UnreadFills {
     _refill.remove(roomId);
   }
 
+  /// Stops starting fetches. Those out finish, but nothing follows them.
   void dispose() => _disposed = true;
 
   void _pump() {
@@ -82,6 +87,8 @@ class UnreadFills {
           _filling.remove(roomId);
           if (_refill.remove(roomId)) {
             _queue.add(roomId);
+          } else {
+            onSettled?.call(roomId);
           }
           _pump();
         }),
@@ -89,6 +96,10 @@ class UnreadFills {
     }
   }
 
+  /// Fetches [roomId] and keeps the books on how it went. The wait counts
+  /// failed attempts in a row, however each began: a refill or a fresh
+  /// schedule that fails doubles it too, since a room failing fast is
+  /// failing.
   Future<void> _run(String roomId) async {
     final ok = await _fill(roomId);
     if (ok) {
