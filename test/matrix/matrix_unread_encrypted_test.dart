@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:math';
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/matrix/matrix_unread.dart';
 import 'package:matrix/matrix.dart';
@@ -171,6 +175,31 @@ void main() {
       first['session_id'],
       second['session_id'],
     ]);
+
+    // The second key is put where a re-read would find it, but without the
+    // announcement that a key arrived. Only a re-check that looks at every
+    // locked message, and not just those under the first key's session,
+    // would open it.
+    final secondId = second['session_id'] as String;
+    final bytes = Uint8List.fromList(me.codeUnits);
+    final padded = Uint8List(32)..setRange(0, min(32, bytes.length), bytes);
+    await mine.database.storeInboundGroupSession(
+      _room,
+      secondId,
+      theirs.encryption!.keyManager
+          .getInboundGroupSession(_room, secondId)!
+          .inboundGroupSession!
+          .toPickleEncrypted(padded),
+      jsonEncode({
+        'algorithm': AlgorithmTypes.megolmV1AesSha2,
+        'room_id': _room,
+        'session_id': secondId,
+      }),
+      '{}',
+      '{}',
+      theirs.identityKey,
+      '{}',
+    );
 
     final sessionId = first['session_id'] as String;
     final key = theirs.encryption!.keyManager
