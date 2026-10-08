@@ -244,6 +244,16 @@ Future<MatrixRooms> _rooms(Client client) async {
 Future<void> _settle() =>
     Future<void>.delayed(const Duration(milliseconds: 50));
 
+/// Waits until [done], however long a busy machine takes: files and the
+/// database are real. Gives up after a while, and the expect that follows
+/// says what went wrong.
+Future<void> _until(bool Function() done) async {
+  final give = DateTime.now().add(const Duration(seconds: 10));
+  while (!done() && DateTime.now().isBefore(give)) {
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
 var _events = 0;
 
 Map<String, Object?> _state(
@@ -643,6 +653,15 @@ void main() {
         return (client, dir, files);
       }
 
+      /// What a run saved for the room, once it has. The file is written
+      /// aside and renamed into place, so one that is there is whole.
+      Map<String, Object?>? saved(Directory dir) {
+        final file = File('${dir.path}${Platform.pathSeparator}unread.json');
+        if (!file.existsSync()) return null;
+        final json = jsonDecode(file.readAsStringSync()) as Map;
+        return (json['rooms'] as Map)[general] as Map<String, Object?>?;
+      }
+
       test('a relaunch shows the counts before the server answers', () async {
         final api = _Api();
         final client = await _client(api: api);
@@ -657,16 +676,14 @@ void main() {
         final first = MatrixRooms(client, mediaRoot: files);
         await _bakery(client);
         await _timeline(client, general, [_msg('one'), _msg('two')]);
-        await _settle();
+        await _until(() => (saved(dir)?['e'] as List?)?.length == 2);
         first.dispose();
-        // Disposing writes the file; let it land.
-        await _settle();
 
         // The server is unreachable: only the saved counts can say 2.
         api.failHistory = true;
         final second = MatrixRooms(client, mediaRoot: files);
         addTearDown(second.dispose);
-        await _settle();
+        await _until(() => channel(second, general).unread == 2);
         expect(channel(second, general).unread, 2);
         expect(
           File('${dir.path}${Platform.pathSeparator}unread.json').existsSync(),
@@ -686,17 +703,18 @@ void main() {
           const [],
           ephemeral: [_receipt(r'$reaction-elsewhere', ts: 5000)],
         );
-        await _settle();
+        // Saved with the receipt it applied: what the relaunch starts from.
+        await _until(
+          () => (saved(dir)?['r'] as List?)?.first == r'$reaction-elsewhere',
+        );
         expect(channel(first, general).unread, 0);
         first.dispose();
-        await _settle();
 
         final second = MatrixRooms(client, mediaRoot: files);
         addTearDown(second.dispose);
-        await _settle();
         // Federation lag: it arrives late, stamped before the old receipt.
         await _timeline(client, general, [_msg('late', ts: 3000)]);
-        await _settle();
+        await _until(() => channel(second, general).unread == 1);
         expect(channel(second, general).unread, 1);
       });
 
