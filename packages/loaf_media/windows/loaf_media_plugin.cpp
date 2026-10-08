@@ -231,6 +231,13 @@ void LoafMediaPlugin::HandleMethodCall(
       return;
     }
     Status(*result, loaf_win_open(path->c_str()), "open");
+  } else if (method == "chime.play") {
+    const std::string* asset = StringArg(*args, "asset");
+    if (asset == nullptr) {
+      result->Error(kFailed, "no asset");
+      return;
+    }
+    Status(*result, loaf_win_chime_play(asset->c_str()), "chime");
   } else if (method == "image.decode") {
     DecodeImage(*args, std::move(result));
   } else {

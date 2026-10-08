@@ -12,7 +12,7 @@ use std::sync::Arc;
 use loaf_streams::{self as streams, Progress, Reader};
 
 use crate::player::{self, Frame, FrameCallback, Player};
-use crate::{shell, wic};
+use crate::{chime, shell, wic};
 
 const OK: i32 = 0;
 /// A panic was caught: a bug, reported rather than crashing the app.
@@ -352,6 +352,19 @@ pub unsafe extern "C" fn loaf_win_open(path: *const c_char) -> i32 {
         // SAFETY: forwarded from this function's contract.
         match unsafe { string(path) } {
             Ok(path) => status("open", shell::open(path)),
+            Err(e) => e,
+        }
+    })
+}
+
+/// # Safety
+/// [asset] is a NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn loaf_win_chime_play(asset: *const c_char) -> i32 {
+    guard(|| {
+        // SAFETY: forwarded from this function's contract.
+        match unsafe { string(asset) } {
+            Ok(asset) => status("chime", chime::play(asset)),
             Err(e) => e,
         }
     })
