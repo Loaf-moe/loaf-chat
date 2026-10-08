@@ -12,18 +12,25 @@ void main() {
     expect(NotificationSettings.fromJson('junk').sound, isTrue);
   });
 
-  test('a change is saved and read back', () async {
+  test('the file store reads back what it saved', () async {
     final dir = await Directory.systemTemp.createTemp('notify');
     addTearDown(() => dir.delete(recursive: true));
-    final store = FileNotificationStore(
-      File('${dir.path}/n/notifications.json'),
-    );
+    final file = File('${dir.path}/n/notifications.json');
+    await FileNotificationStore(file)
+        .save(const NotificationSettings(sound: false));
+    final back = await FileNotificationStore(file).load();
+    expect(back?.sound, isFalse);
+  });
+
+  test('a change goes to the store', () async {
+    // The memory store saves synchronously, so there is no write to wait on.
+    final store = MemoryNotificationStore();
     final controller = await NotificationController.load(
       store,
       chime: FakeChime(),
     );
     controller.setSound(false);
-    await pumpEventQueue();
+    expect(store.saved?.sound, isFalse);
     final again = await NotificationController.load(store, chime: FakeChime());
     expect(again.sound, isFalse);
   });
