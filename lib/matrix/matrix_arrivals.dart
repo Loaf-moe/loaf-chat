@@ -31,7 +31,12 @@ class MatrixArrivals {
     // The SDK sets `prevBatch` only after a sync is handled, so it is still
     // null for the events of a sign-in's first sync, which are all history.
     if (client.prevBatch == null) return;
-    if (event.room.membership != Membership.join) return;
+    // Ask the client, not the event: a room left in this sync is dropped from
+    // the client's list before its leave-section events are emitted, and
+    // those events keep the evicted Room, which still says join.
+    if (client.getRoomById(event.room.id)?.membership != Membership.join) {
+      return;
+    }
     if (event.senderId == client.userID) return;
     if (event.originServerTs.isBefore(_startedAt)) return;
     if (!countsAsMessage(event)) return;

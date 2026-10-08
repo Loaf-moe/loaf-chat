@@ -356,7 +356,42 @@ void main() {
       expect(rig.got.single.eventId, r'$plain');
     });
 
-    test('a room you have left does not notify', () async {
+    test('a room you have just left does not notify', () async {
+      final client = await _client();
+      await _join(client);
+      final rig = await _rig(client);
+      // The SDK drops a known room from its list before it emits that
+      // room's leave-section events, which then carry the evicted Room.
+      await _sync(
+        client,
+        rooms: {
+          'leave': {
+            _general: {
+              'timeline': {
+                'events': [
+                  {
+                    'type': 'm.room.member',
+                    'state_key': _me,
+                    'sender': _me,
+                    'content': {'membership': 'leave'},
+                    'event_id': r'$left',
+                    'origin_server_ts': _after,
+                  },
+                  _msg(r'$parting', ts: _after + 1000),
+                ],
+                'limited': false,
+                'prev_batch': 'p${_n++}',
+              },
+            },
+          },
+        },
+      );
+      await rig.reached(r'$parting');
+      expect(client.getRoomById(_general), isNull);
+      expect(rig.got, isEmpty);
+    });
+
+    test('a room you only know as left does not notify', () async {
       final client = await _client();
       await _join(client);
       final rig = await _rig(client);

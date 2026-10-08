@@ -94,15 +94,15 @@ class MockRooms extends ChangeNotifier implements Rooms {
   @override
   Member get me => currentUser;
 
+  @override
+  Stream<Arrival> get arrivals => const Stream.empty();
+
   /// With this session's reading applied, so badges recount. A left
   /// invite-only channel is dropped: only channels you could join in one
   /// tap are ever listed.
   /// Spaces you have left this session are gone, the same way a left Home
   /// room is: [_membership] carries the space's own id as well as its
   /// channels'.
-  @override
-  Stream<Arrival> get arrivals => const Stream.empty();
-
   @override
   List<Space> get spaces => [
     for (final space in [...mockSpaces, ..._acceptedSpaces])
