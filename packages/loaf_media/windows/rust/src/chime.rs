@@ -1,5 +1,7 @@
 //! The chime on Windows: PlaySound, which plays asynchronously and cuts
-//! off a chime still sounding when the next one starts.
+//! off a chime still sounding when the next one starts. SND_SYSTEM plays it
+//! as a system notification sound, at the system-sounds volume: the
+//! counterpart of Apple's alert volume.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -21,7 +23,9 @@ pub fn asset_path(exe: &Path, asset: &str) -> Option<PathBuf> {
 
 #[cfg(windows)]
 pub fn play(asset: &str) -> Result<(), String> {
-    use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT};
+    use windows::Win32::Media::Audio::{
+        PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT, SND_SYSTEM,
+    };
     use windows::core::HSTRING;
 
     let exe = std::env::current_exe().map_err(|e| format!("exe: {e}"))?;
@@ -29,7 +33,13 @@ pub fn play(asset: &str) -> Result<(), String> {
     let wide = HSTRING::from(path.as_os_str());
     // SAFETY: `wide` outlives the call; SND_ASYNC copies the name before
     // returning.
-    let ok = unsafe { PlaySoundW(&wide, None, SND_FILENAME | SND_ASYNC | SND_NODEFAULT) };
+    let ok = unsafe {
+        PlaySoundW(
+            &wide,
+            None,
+            SND_FILENAME | SND_ASYNC | SND_NODEFAULT | SND_SYSTEM,
+        )
+    };
     if ok.as_bool() {
         Ok(())
     } else {
