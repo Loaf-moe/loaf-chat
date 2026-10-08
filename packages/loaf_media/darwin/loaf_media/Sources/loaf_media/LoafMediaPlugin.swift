@@ -38,18 +38,14 @@ public final class LoafMediaPlugin: NSObject, FlutterPlugin {
     #endif
     let chime = Chime(path: { asset in
       let key = registrar.lookupKey(forAsset: asset)
-      // The key is relative to the bundle that holds Flutter's assets: the
-      // main bundle on iOS, App.framework on macOS. That one is opened by
-      // URL, not by bundle identifier: Bundle(identifier:) only finds bundles
-      // already loaded, and a debug build never loads App.framework (Dart
-      // runs from a kernel blob), so it would find nothing there.
-      #if os(iOS)
-        return Bundle.main.path(forResource: key, ofType: nil)
-      #else
-        return Bundle.main.privateFrameworksURL
-          .flatMap { Bundle(url: $0.appendingPathComponent("App.framework")) }?
-          .path(forResource: key, ofType: nil)
-      #endif
+      // On both platforms the key is relative to the main bundle's root
+      // (`Contents/Frameworks/App.framework/Resources/flutter_assets/...` on
+      // macOS, `Frameworks/App.framework/flutter_assets/...` on iOS), so it
+      // is joined to bundleURL. path(forResource:) would search only the
+      // bundle's Resources directory, and a bundle opened by identifier is
+      // missing in a debug build, which never loads App.framework.
+      let file = Bundle.main.bundleURL.appendingPathComponent(key).path
+      return FileManager.default.fileExists(atPath: file) ? file : nil
     })
     registrar.addMethodCallDelegate(
       LoafMediaPlugin(videos: videos, chime: chime), channel: channel)
