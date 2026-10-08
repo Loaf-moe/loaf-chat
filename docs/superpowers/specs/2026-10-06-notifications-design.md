@@ -116,12 +116,20 @@ uses. Several messages in the same second play the chime once.
 
 ## B. Jump to message
 
-A `Route(roomId, eventId)` selects the room's space (Home for DMs and rooms
-outside spaces) and opens the channel. The timeline loads around the event
-with `eventContextId`, scrolls it into view, and highlights it briefly.
-Scrolling down from there loads forward to the live end. A route to a room
-you've left, or an event the server won't return, opens the channel at its
-newest messages with a toast saying the message isn't available.
+A `MessageRoute(roomId, eventId)` (not `Route`, which Flutter already
+exports) selects the room's space (Home for DMs and rooms outside spaces;
+the space you are in when it has the room) and opens the channel. The
+timeline loads around the event with `eventContextId`, scrolls it into
+view, and highlights it briefly. Scrolling down from there loads forward to
+the live end. Sending from back in history returns to the newest messages
+first; reacting, editing or deleting catches up to live in place.
+
+An event the server won't return opens the channel at its newest messages
+with a toast saying the message isn't available. A route to a room you
+aren't in shows the same toast and stays where you are: there is no
+channel to open. A route that arrives before the first sync waits for it.
+
+Tapping a reply's quote jumps to the message it answers, the same way.
 
 ## C. The chime
 
@@ -143,7 +151,7 @@ A Dart interface:
 abstract interface class DesktopNotifications {
   Future<void> show(Notice notice);
   Future<void> withdraw(String roomId);
-  Stream<Route> get clicks;
+  Stream<MessageRoute> get clicks;
 }
 ```
 

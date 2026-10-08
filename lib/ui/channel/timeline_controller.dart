@@ -5,6 +5,8 @@
 /// further back.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:markdown/markdown.dart' as md;
 
@@ -13,7 +15,8 @@ import 'media_row.dart';
 import 'mentions.dart';
 import 'timeline.dart';
 
-export 'timeline.dart' show Attachment, ComposerMode, ComposerTarget, Timeline;
+export 'timeline.dart'
+    show Attachment, ComposerMode, ComposerTarget, Timeline, messageUnavailable;
 
 class TimelineController extends ChangeNotifier
     with ComposerAiming
@@ -48,7 +51,44 @@ class TimelineController extends ChangeNotifier
   @override
   void loadOlder() {}
   @override
-  Stream<String> get failures => const Stream.empty();
+  bool get canLoadNewer => false;
+  @override
+  bool get loadingNewer => false;
+  @override
+  bool get loadNewerFailed => false;
+  @override
+  void loadNewer() {}
+  @override
+  int get stretch => 0;
+  @override
+  void showNewest() {}
+
+  final _failures = StreamController<String>.broadcast();
+  @override
+  Stream<String> get failures => _failures.stream;
+
+  String? _jumpTarget;
+  @override
+  String? get jumpTarget => _jumpTarget;
+  @override
+  void jumpShown() => _jumpTarget = null;
+
+  /// Everything the mock has is loaded, so a message it lacks never was.
+  @override
+  void jumpTo(String messageId) {
+    if (!_messages.any((m) => m.id == messageId)) {
+      _failures.add(messageUnavailable);
+      return;
+    }
+    _jumpTarget = messageId;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_failures.close());
+    super.dispose();
+  }
 
   /// Nothing the mock sends can fail.
   @override

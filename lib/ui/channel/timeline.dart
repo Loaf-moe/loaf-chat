@@ -35,6 +35,10 @@ class ComposerTarget {
   final Message message;
 }
 
+/// What a jump to a message says when the message can't be had: deleted,
+/// never visible to you, in a room you are not in, or out of reach.
+const messageUnavailable = "that message isn't available";
+
 abstract interface class Timeline implements Listenable {
   /// Whose reactions are "mine", and whose messages may be edited.
   Member get you;
@@ -59,6 +63,42 @@ abstract interface class Timeline implements Listenable {
   /// Fetches the next stretch of history. Does nothing while a fetch is
   /// already running or once [canLoadOlder] is false.
   void loadOlder();
+
+  /// Whether there are messages newer than those loaded: the conversation
+  /// was opened at an older message and has not caught up with the live
+  /// end yet.
+  bool get canLoadNewer;
+
+  /// True while newer messages are being fetched.
+  bool get loadingNewer;
+
+  /// The last fetch of newer messages failed; [loadNewer] tries again.
+  bool get loadNewerFailed;
+
+  /// Fetches the next stretch towards the live end. Does nothing while a
+  /// fetch is already running or once [canLoadNewer] is false.
+  void loadNewer();
+
+  /// Counts one up each time the conversation reopens on another stretch
+  /// of history. The view starts its list over then, rather than keep a
+  /// scroll position that belonged to other messages.
+  int get stretch;
+
+  /// The message to bring into view and light up, until the view has done
+  /// so and called [jumpShown]. Set by [jumpTo] once the message is loaded.
+  String? get jumpTarget;
+
+  /// The view has shown [jumpTarget].
+  void jumpShown();
+
+  /// Brings [messageId] into view: at once when it is loaded, otherwise
+  /// once the conversation has reopened around it. One that can't be had
+  /// leaves the newest messages showing, and [failures] says so.
+  void jumpTo(String messageId);
+
+  /// Back to the newest messages, for a conversation opened further back.
+  /// Does nothing at the live end.
+  void showNewest();
 
   /// What went wrong with an action that has no row of its own to show it
   /// on: a reaction, an edit or a delete the server refused. Each is a

@@ -25,8 +25,17 @@ String _formatTime(DateTime time) {
   return '${two(time.hour)}:${two(time.minute)}';
 }
 
+/// A message jumped to: [key] goes on its row so the timeline can bring
+/// it into view, and while [lit] it glows.
+typedef JumpFocus = ({String id, GlobalKey key, bool lit});
+
 class MessageGroupTile extends StatelessWidget {
-  const MessageGroupTile({super.key, required this.group, this.controller});
+  const MessageGroupTile({
+    super.key,
+    required this.group,
+    this.controller,
+    this.focus,
+  });
 
   final MessageGroup group;
 
@@ -34,6 +43,9 @@ class MessageGroupTile extends StatelessWidget {
   /// hover and right-click on a computer. Left null, the tile is
   /// display-only.
   final Timeline? controller;
+
+  /// The message in this group that was jumped to, if any.
+  final JumpFocus? focus;
 
   @override
   Widget build(BuildContext context) {
@@ -80,29 +92,40 @@ class MessageGroupTile extends StatelessWidget {
 
   Widget _interactive(Message message) {
     final controller = this.controller;
+    final Widget row;
     // A locked message has nothing in it to copy, reply to or react to.
     if (controller == null || message.locked) {
       // Where this device can write, it is verified: the key never came.
-      return _MessageBody(
+      row = _MessageBody(
         key: ValueKey(message.id),
         message: message,
         keyNeverCame: controller?.writable ?? false,
         you: controller?.you.id,
       );
+    } else {
+      // Keyed, so a message keeps its own State (a video playing in it)
+      // when the list around it changes.
+      row = isDesktop
+          ? _PointerMessage(
+              key: ValueKey(message.id),
+              message: message,
+              controller: controller,
+            )
+          : _TouchMessage(
+              key: ValueKey(message.id),
+              message: message,
+              controller: controller,
+            );
     }
-    // Keyed, so a message keeps its own State (a video playing in it)
-    // when the list around it changes.
-    return isDesktop
-        ? _PointerMessage(
-            key: ValueKey(message.id),
-            message: message,
-            controller: controller,
-          )
-        : _TouchMessage(
-            key: ValueKey(message.id),
-            message: message,
-            controller: controller,
-          );
+    final focus = this.focus;
+    final focused = focus != null && focus.id == message.id;
+    // Wrapped whether focused or not: a row that gains a wrapper is
+    // reparented and loses its State (a video playing in it) as it is lit.
+    return _JumpGlow(
+      focusKey: focused ? focus.key : null,
+      lit: focused && focus.lit,
+      child: row,
+    );
   }
 }
 
@@ -134,9 +157,14 @@ class _MessageBody extends StatelessWidget {
     this.onDiscard,
     this.keyNeverCame = false,
     this.you,
+    this.onOpenReply,
   });
 
   final Message message;
+
+  /// Tapping the quote of what this replies to goes there. Null leaves the
+  /// quote display-only.
+  final VoidCallback? onOpenReply;
 
   /// Your user id, so mentions of you stand out.
   final String? you;
@@ -180,7 +208,8 @@ class _MessageBody extends StatelessWidget {
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (replyTo != null) _ReplyContext(replyTo: replyTo),
+        if (replyTo != null)
+          _ReplyContext(replyTo: replyTo, onTap: onOpenReply),
         if (message.media != null)
           MediaRow(
             key: ValueKey(message.id),
@@ -252,14 +281,15 @@ class _MessageBody extends StatelessWidget {
 }
 
 class _ReplyContext extends StatelessWidget {
-  const _ReplyContext({required this.replyTo});
+  const _ReplyContext({required this.replyTo, this.onTap});
 
   final Message replyTo;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
-    return Padding(
+    final quote = Padding(
       padding: const EdgeInsets.only(bottom: LoafSpace.x1),
       child: IntrinsicHeight(
         child: Row(
@@ -307,6 +337,17 @@ class _ReplyContext extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+    final onTap = this.onTap;
+    if (onTap == null) return quote;
+    // The quote is a way to what it answers: a pointer says so.
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: quote,
       ),
     );
   }
@@ -463,6 +504,9 @@ class _TouchMessageState extends State<_TouchMessage> {
         onAddReaction: _canReact ? (_) => _openSheet() : null,
         onRetry: () => widget.controller.retry(widget.message.id),
         onDiscard: () => widget.controller.discard(widget.message.id),
+        onOpenReply: widget.message.replyTo == null
+            ? null
+            : () => widget.controller.jumpTo(widget.message.replyTo!.id),
       ),
     ),
   );
@@ -626,6 +670,11 @@ class _PointerMessageState extends State<_PointerMessage> {
                   onSelectionChanged: (text) => _selection = text,
                   onRetry: () => widget.controller.retry(widget.message.id),
                   onDiscard: () => widget.controller.discard(widget.message.id),
+                  onOpenReply: widget.message.replyTo == null
+                      ? null
+                      : () => widget.controller.jumpTo(
+                          widget.message.replyTo!.id,
+                        ),
                 ),
               ),
             ),
@@ -664,6 +713,55 @@ class _Highlight extends StatelessWidget {
             ),
           ),
         ),
+        child,
+      ],
+    );
+  }
+}
+
+/// How long the glow takes to fade once the message has been seen.
+const _glowFade = Duration(milliseconds: 600);
+
+/// The accent wash behind a message jumped to, so the eye finds where it
+/// landed. Unlike [_Highlight] it is the accent, not the card: it marks a
+/// place rather than a pointer. Only the focused row ([focusKey] set) draws
+/// the wash; the rest wrap their row all the same, to keep it where it is
+/// in the tree.
+class _JumpGlow extends StatelessWidget {
+  const _JumpGlow({
+    required this.focusKey,
+    required this.lit,
+    required this.child,
+  });
+
+  final GlobalKey? focusKey;
+  final bool lit;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        if (focusKey != null)
+          if (focusKey != null)
+            Positioned(
+              key: focusKey,
+              left: -LoafSpace.x2,
+              right: -LoafSpace.x2,
+              top: -2,
+              bottom: -2,
+              child: AnimatedContainer(
+                key: const ValueKey('jump-glow'),
+                duration: _glowFade,
+                curve: LoafMotion.ease,
+                decoration: BoxDecoration(
+                  color: tokens.accent.withValues(alpha: lit ? 0.18 : 0),
+                  borderRadius: BorderRadius.circular(LoafRadius.md),
+                ),
+              ),
+            ),
         child,
       ],
     );

@@ -5,6 +5,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 // The SDK's own Timeline is the one wrapped here; the UI's is `ui.Timeline`.
@@ -60,7 +61,29 @@ class MatrixTimeline extends ChangeNotifier
   var _pageFailed = false;
   var _disposed = false;
   List<ui.Message>? _messages;
-  final _failures = StreamController<String>.broadcast();
+
+  /// What went wrong, as toasts. A jump can fail before the view that
+  /// would show it is up (a notification opening the app), so anything
+  /// said while nobody listens waits for the first listener.
+  late final _failures = StreamController<String>.broadcast(
+    onListen: _flushUnheard,
+  );
+  final _unheard = <String>[];
+
+  void _fail(String text) {
+    if (_disposed) return;
+    if (_failures.hasListener) {
+      _failures.add(text);
+    } else {
+      _unheard.add(text);
+    }
+  }
+
+  void _flushUnheard() {
+    final waiting = [..._unheard];
+    _unheard.clear();
+    waiting.forEach(_failures.add);
+  }
 
   /// Transactions this session sent and has not heard back about. The SDK
   /// keeps an echo "sending" across a relaunch, but nothing sends it then:
@@ -77,27 +100,90 @@ class MatrixTimeline extends ChangeNotifier
   /// not in the timeline yet.
   final _reacting = <(String, String)>{};
 
-  Future<void> _open() async {
-    _opening = true;
+  var _newerFailed = false;
+  Future<void>? _newer;
+  String? _jumpTarget;
+  var _stretch = 0;
+
+  /// Counts openings, so a slow one overtaken by a later jump is dropped.
+  var _openings = 0;
+
+  /// Opens the conversation at the live end, or around [at]. Reopening
+  /// keeps the messages on screen until the new ones are in.
+  Future<void> _open({String? at}) async {
+    final opening = ++_openings;
+    if (_timeline == null) _opening = true;
     _pageFailed = false;
+    _newerFailed = false;
     _changed();
+    Timeline? timeline;
     try {
-      final timeline = await room.getTimeline(
+      timeline = await room.getTimeline(
         limit: historyPage,
         onUpdate: _changed,
+        eventContextId: at,
       );
-      if (_disposed) {
-        timeline.cancelSubscriptions();
-        return;
-      }
-      _timeline = timeline;
     } on Object {
+      timeline = null;
+    }
+    if (_disposed || opening != _openings) {
+      timeline?.cancelSubscriptions();
+      return;
+    }
+    if (timeline == null && at != null) {
+      // Deleted, never yours to see, or out of reach: the newest messages
+      // are the nearest there is. Already there, you stay where you were.
+      _fail(ui.messageUnavailable);
+      if (_timeline == null || canLoadNewer) return _open();
+      _opening = false;
+      _changed();
+      return;
+    }
+    if (timeline == null) {
       // Offline, or the database had nothing to give: loading older
       // messages is how to try again.
       _pageFailed = true;
+    } else {
+      final previous = _timeline;
+      // The SDK aggregates a context chunk while its encrypted events are
+      // still locked, then decrypts them in place: an edit or reaction that
+      // was unreadable then counts for nothing until filed again. Redactions
+      // in the chunk are not applied by the SDK at all.
+      if (at != null) _file(timeline, timeline.events);
+      _timeline = timeline;
+      // Pages of the replaced timeline no longer speak for this one.
+      _newer = null;
+      _newerFailed = false;
+      if (previous != null) {
+        previous.cancelSubscriptions();
+        _stretch++;
+      }
+      _jumpTarget = at;
     }
     _opening = false;
     _changed();
+  }
+
+  /// Files events that arrived by paging rather than sync, as sync's own
+  /// handling would: each is aggregated onto what it relates to, then each
+  /// redaction is applied. The SDK's paging does neither. Redactions come
+  /// second, so one that arrives before the reaction it removes still wins.
+  /// Filing the same event twice is harmless.
+  void _file(Timeline timeline, Iterable<Event> arrived) {
+    final events = arrived.toList();
+    events.forEach(timeline.addAggregatedEvent);
+    for (final event in events) {
+      if (event.type != EventTypes.Redaction) continue;
+      final target = timeline.events
+          .where((e) => e.eventId == event.redacts)
+          .firstOrNull;
+      if (target == null) continue;
+      timeline.removeAggregatedEvent(target);
+      // A redacted reaction or edit has no row: only what it counted toward
+      // changes.
+      if (target.relationshipEventId != null) continue;
+      target.setRedactionEvent(event);
+    }
   }
 
   void _changed() {
@@ -340,7 +426,7 @@ class MatrixTimeline extends ChangeNotifier
       Future.sync(action).then<void>(
         (_) {},
         onError: (Object _) {
-          if (!_disposed) _failures.add(failure);
+          _fail(failure);
         },
       ),
     );
@@ -356,25 +442,29 @@ class MatrixTimeline extends ChangeNotifier
         : null;
     // A failure shows on the message itself, which stays to retry.
     unawaited(
-      _send(
-        (txid) => mentions.isEmpty
-            ? room.sendTextEvent(
-                body,
-                txid: txid,
-                inReplyTo: replyTo,
-                // Markdown goes as formatted_body HTML beside the plain body,
-                // as Element sends it; the SDK leaves the format off when
-                // there is nothing to format. A leading slash is still just
-                // text.
-                parseMarkdown: true,
-                parseCommands: false,
-              )
-            : room.sendEvent(
-                _mentioning(body, mentions, replyTo: replyTo),
-                txid: txid,
-                inReplyTo: replyTo,
-              ),
-      ).then<void>((_) {}, onError: (Object _) {}),
+      _toLive()
+          .then(
+            (_) => _send(
+              (txid) => mentions.isEmpty
+                  ? room.sendTextEvent(
+                      body,
+                      txid: txid,
+                      inReplyTo: replyTo,
+                      // Markdown goes as formatted_body HTML beside the plain
+                      // body, as Element sends it; the SDK leaves the format
+                      // off when there is nothing to format. A leading slash
+                      // is still just text.
+                      parseMarkdown: true,
+                      parseCommands: false,
+                    )
+                  : room.sendEvent(
+                      _mentioning(body, mentions, replyTo: replyTo),
+                      txid: txid,
+                      inReplyTo: replyTo,
+                    ),
+            ),
+          )
+          .then<void>((_) {}, onError: (Object _) {}),
     );
     aim(null);
   }
@@ -436,38 +526,47 @@ class MatrixTimeline extends ChangeNotifier
     // it, so the row goes and the toast says why.
     String? sending;
     unawaited(
-      _send((txid) {
-        sending = txid;
-        return LoafHttpClient.reportingUploads(
-          (sent, total) => _uploaded(txid, sent, total, file.bytes.length),
-          () => room.sendFileEvent(matrixFile, txid: txid, inReplyTo: replyTo),
-        );
-      }).then<void>(
-        (_) {},
-        onError: (Object error) {
-          if (_disposed) return;
-          // The SDK's own check stores its errcode as the enum rather than
-          // the string, so it reads back as M_UNKNOWN: known by its type.
-          final tooBig =
-              error is FileTooBigMatrixException ||
-              (error is MatrixException &&
-                  error.error == MatrixError.M_TOO_LARGE);
-          if (!tooBig) return;
-          _failures.add(
-            tooBigToSend(
-              file.name,
-              file.bytes.length,
-              error is FileTooBigMatrixException ? error.maxFileSize : null,
-            ),
-          );
-          final echo = sending == null ? null : _event(sending!);
-          if (echo != null && !echo.status.isSent) {
-            unawaited(
-              echo.cancelSend().then<void>((_) {}, onError: (Object _) {}),
-            );
-          }
-        },
-      ),
+      _toLive()
+          .then(
+            (_) => _send((txid) {
+              sending = txid;
+              return LoafHttpClient.reportingUploads(
+                (sent, total) =>
+                    _uploaded(txid, sent, total, file.bytes.length),
+                () => room.sendFileEvent(
+                  matrixFile,
+                  txid: txid,
+                  inReplyTo: replyTo,
+                ),
+              );
+            }),
+          )
+          .then<void>(
+            (_) {},
+            onError: (Object error) {
+              if (_disposed) return;
+              // The SDK's own check stores its errcode as the enum rather than
+              // the string, so it reads back as M_UNKNOWN: known by its type.
+              final tooBig =
+                  error is FileTooBigMatrixException ||
+                  (error is MatrixException &&
+                      error.error == MatrixError.M_TOO_LARGE);
+              if (!tooBig) return;
+              _fail(
+                tooBigToSend(
+                  file.name,
+                  file.bytes.length,
+                  error is FileTooBigMatrixException ? error.maxFileSize : null,
+                ),
+              );
+              final echo = sending == null ? null : _event(sending!);
+              if (echo != null && !echo.status.isSent) {
+                unawaited(
+                  echo.cancelSend().then<void>((_) {}, onError: (Object _) {}),
+                );
+              }
+            },
+          ),
     );
     aim(null);
   }
@@ -497,6 +596,7 @@ class MatrixTimeline extends ChangeNotifier
     final body = text.trim();
     final current = messages.where((m) => m.id == messageId).firstOrNull;
     if (current != null && body.isNotEmpty && body != current.body) {
+      _catchUpForWrite();
       // Whoever the message told already heard: an edit tells only the
       // people it newly names.
       final told = switch (_event(messageId)?.content['m.mentions']) {
@@ -527,35 +627,40 @@ class MatrixTimeline extends ChangeNotifier
 
   @override
   void toggleReaction(String messageId, String emoji) {
-    final event = _event(messageId);
-    final timeline = _timeline;
-    if (event == null || timeline == null) return;
+    if (_event(messageId) == null || _timeline == null) return;
     final key = (messageId, emoji);
     if (_reacting.contains(key)) return;
-    final mine = event
-        .aggregatedEvents(timeline, RelationshipTypes.reaction)
-        .where(
-          (r) =>
-              r.senderId == you.id && !_unsent(r) && _reactionKey(r) == emoji,
-        )
-        .firstOrNull;
-    // Still on its way, a reaction has no event id to take back yet.
-    if (mine != null && !mine.status.isSent) return;
     _reacting.add(key);
-    _attempt(
-      () =>
-          (mine == null
-                  ? _send(
-                      (txid) => room.sendReaction(messageId, emoji, txid: txid),
-                    )
-                  : room.redactEvent(mine.eventId))
-              .whenComplete(() => _reacting.remove(key)),
-      "couldn't react",
-    );
+    _attempt(() async {
+      try {
+        // Short of the live end, a reaction of yours may be newer than what
+        // is loaded: deciding to add or take back waits until it is not.
+        if (canLoadNewer) await _catchUp();
+        final timeline = _timeline;
+        if (_event(messageId) == null || timeline == null) return null;
+        final mine = _event(messageId)!
+            .aggregatedEvents(timeline, RelationshipTypes.reaction)
+            .where(
+              (r) =>
+                  r.senderId == you.id &&
+                  !_unsent(r) &&
+                  _reactionKey(r) == emoji,
+            )
+            .firstOrNull;
+        // Still on its way, a reaction has no event id to take back yet.
+        if (mine != null && !mine.status.isSent) return null;
+        return await (mine == null
+            ? _send((txid) => room.sendReaction(messageId, emoji, txid: txid))
+            : room.redactEvent(mine.eventId));
+      } finally {
+        _reacting.remove(key);
+      }
+    }, "couldn't react");
   }
 
   @override
   void delete(String messageId) {
+    _catchUpForWrite();
     _attempt(() => room.redactEvent(messageId), "couldn't delete that");
     if (target?.message.id == messageId) aim(null);
   }
@@ -600,6 +705,104 @@ class MatrixTimeline extends ChangeNotifier
 
   // ── History ────────────────────────────────────────────────────────────
 
+  /// Short of the live end: the SDK's timeline was opened around an older
+  /// message, and hears nothing live until it has paged forward to now.
+  @override
+  bool get canLoadNewer => _timeline?.canRequestFuture ?? false;
+
+  @override
+  bool get loadingNewer => _newer != null;
+
+  @override
+  bool get loadNewerFailed => _newerFailed;
+
+  @override
+  void loadNewer() {
+    if (_opening || _newer != null || !canLoadNewer) return;
+    unawaited(_pageNewer());
+  }
+
+  /// One page towards the live end, shared by whoever asks while it runs.
+  /// The SDK clears its own "requesting" flag only on success, so after a
+  /// failure it is cleared here, or no page would ever be asked for again.
+  Future<void> _pageNewer() => _newer ??= () async {
+    final timeline = _timeline!;
+    // A reopen can replace the timeline while this page is out. Its outcome
+    // is then no business of the new one.
+    bool current() => identical(_timeline, timeline);
+    _newerFailed = false;
+    _changed();
+    try {
+      final had = timeline.events.length;
+      await timeline.requestFuture(historyCount: historyPage);
+      // New events go in at the front. A limited sync can have emptied the
+      // timeline meanwhile, which would make the count negative.
+      _file(
+        timeline,
+        timeline.events.take(math.max(0, timeline.events.length - had)),
+      );
+    } on Object {
+      timeline.isRequestingFuture = false;
+      if (current()) _newerFailed = true;
+    } finally {
+      if (current()) {
+        _newer = null;
+        _changed();
+      }
+    }
+  }();
+
+  /// Pages forward to the live end, so a reaction, edit or deletion lands
+  /// in a timeline that hears it, without losing your place. Stops at a
+  /// failed page, or one that moved the forward token nowhere: the write has
+  /// gone either way, and scrolling down tries again. Events are no measure
+  /// of a page: one of only reactions adds none to the list.
+  Future<void> _catchUp() async {
+    while (!_disposed && canLoadNewer) {
+      final before = _timeline?.chunk.nextBatch;
+      await _pageNewer();
+      if (_newerFailed || _timeline?.chunk.nextBatch == before) return;
+    }
+  }
+
+  void _catchUpForWrite() {
+    if (canLoadNewer) unawaited(_catchUp());
+  }
+
+  /// Back to the live end before sending. A timeline opened further back
+  /// hears nothing new, so the message would never show, and sending is
+  /// talking now: the newest messages are where to be.
+  Future<void> _toLive() => canLoadNewer ? _open() : Future<void>.value();
+
+  // ── Jumping ────────────────────────────────────────────────────────────
+
+  @override
+  int get stretch => _stretch;
+
+  @override
+  String? get jumpTarget => _jumpTarget;
+
+  // Nothing to redraw: the view has already drawn it.
+  @override
+  void jumpShown() => _jumpTarget = null;
+
+  @override
+  void jumpTo(String messageId) {
+    if (_event(messageId) != null) {
+      _jumpTarget = messageId;
+      _changed();
+      return;
+    }
+    unawaited(_open(at: messageId));
+  }
+
+  @override
+  void showNewest() {
+    if (!canLoadNewer) return;
+    _jumpTarget = null;
+    unawaited(_open());
+  }
+
   @override
   void loadOlder() {
     if (_opening || _paging) return;
@@ -612,11 +815,18 @@ class MatrixTimeline extends ChangeNotifier
     _paging = true;
     _pageFailed = false;
     _changed();
+    final had = timeline.events.length;
     unawaited(
       timeline
           .requestHistory(historyCount: historyPage)
           .then<void>(
-            (_) {},
+            (_) {
+              // Sync and the database file their own relations. A fragment
+              // is paged from the server, which the SDK leaves unfiled.
+              if (timeline.isFragmentedTimeline) {
+                _file(timeline, timeline.events.skip(had));
+              }
+            },
             onError: (Object _) {
               _pageFailed = true;
             },

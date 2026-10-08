@@ -31,6 +31,24 @@ class _Timeline extends ChangeNotifier with ComposerAiming implements Timeline {
   @override
   Stream<String> get failures => const Stream.empty();
   @override
+  bool get canLoadNewer => false;
+  @override
+  bool get loadingNewer => false;
+  @override
+  bool get loadNewerFailed => false;
+  @override
+  void loadNewer() {}
+  @override
+  int get stretch => 0;
+  @override
+  String? get jumpTarget => null;
+  @override
+  void jumpShown() {}
+  @override
+  void jumpTo(String messageId) {}
+  @override
+  void showNewest() {}
+  @override
   void loadOlder() {}
   @override
   void send(String text, {List<Mention> mentions = const []}) {}

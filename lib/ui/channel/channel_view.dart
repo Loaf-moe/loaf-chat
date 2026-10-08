@@ -143,12 +143,16 @@ class ChannelView extends StatelessWidget {
                   fit: StackFit.expand,
                   children: [
                     const SakuraPetals(),
-                    // Keyed by the conversation, so switching rooms starts a
-                    // fresh list that listens to the room it shows.
-                    _Timeline(
-                      key: ObjectKey(timeline),
-                      controller: timeline!,
-                      onRead: onRead,
+                    // Keyed by the conversation and the stretch of it
+                    // loaded: switching rooms, or reopening on other
+                    // messages, starts a fresh list.
+                    ListenableBuilder(
+                      listenable: timeline!,
+                      builder: (context, _) => _Timeline(
+                        key: ValueKey((timeline, timeline!.stretch)),
+                        controller: timeline!,
+                        onRead: onRead,
+                      ),
                     ),
                   ],
                 ),
@@ -357,6 +361,17 @@ class _Timeline extends StatefulWidget {
 /// The "older messages" line at the top of the list.
 const _olderKey = ValueKey('older');
 
+/// The bottom "newer messages" line.
+const _newerKey = ValueKey('newer');
+
+/// The sliver the list grows from. After a jump, the jumped-to message's
+/// group starts it, and newer messages fill in below without moving what
+/// is on screen. Otherwise it holds the whole conversation.
+const _centerKey = ValueKey('center');
+
+/// How long a message jumped to stays lit before it fades.
+const _litFor = Duration(milliseconds: 1600);
+
 /// Stable as the list grows: a group only ever gains messages at its end,
 /// so its first message names it.
 Key _keyOf(TimelineEntry entry) => switch (entry) {
@@ -378,22 +393,42 @@ class _TimelineState extends State<_Timeline> {
   /// read when you come back instead.
   bool _unreadWhileAway = false;
   late final AppLifecycleListener _lifecycle;
+  final _focusKey = GlobalKey();
+
+  /// Short of the live end when last heard from. What lands at the bottom
+  /// then is a page coming in, not a message arriving.
+  late bool _short;
+
+  /// The stretch this State was built for. A notify that bumps it is for
+  /// the State that replaces this one, which must find its jump target.
+  late final int _stretch;
+
+  /// The message the list grows from, once one has been jumped to.
+  String? _split;
+
+  /// Whether the message jumped to is still lit.
+  bool _lit = false;
+  Timer? _unlight;
 
   @override
   void initState() {
     super.initState();
     _lastId = widget.controller.messages.lastOrNull?.id;
+    _short = widget.controller.canLoadNewer;
+    _stretch = widget.controller.stretch;
     widget.controller.addListener(_onMessages);
-    _scroll.addListener(_maybeLoadOlder);
+    _scroll.addListener(_maybeLoadMore);
     _failures = widget.controller.failures.listen((text) {
       if (mounted) showToast(context, text);
     });
     _lifecycle = AppLifecycleListener(onResume: _onResume);
     _checkFilled();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeReveal());
   }
 
   @override
   void dispose() {
+    _unlight?.cancel();
     _lifecycle.dispose();
     widget.controller.removeListener(_onMessages);
     unawaited(_failures.cancel());
@@ -404,27 +439,84 @@ class _TimelineState extends State<_Timeline> {
   /// A new newest message: yours brings you back down to it, even if you
   /// had scrolled up to reread something; someone else's does not yank you
   /// around, but is read if you are looking, or once you are back. Older
-  /// messages paging in above change neither.
+  /// messages paging in above, and newer pages paging in below a jump,
+  /// change neither.
   void _onMessages() {
-    final last = widget.controller.messages.lastOrNull;
-    final arrived = last != null && last.id != _lastId;
+    final controller = widget.controller;
+    if (controller.stretch != _stretch) return;
+    final last = controller.messages.lastOrNull;
+    final paged = _short;
+    final atNewest = _scroll.hasClients && _scroll.position.extentBefore < 4;
+    _short = controller.canLoadNewer;
+    // The last page to land at the live end: the conversation caught up
+    // while you read it, with nothing new to tell you so.
+    final caughtUp = paged && !controller.canLoadNewer;
+    final arrived = last != null && last.id != _lastId && !paged;
     _lastId = last?.id;
     setState(() {});
     _checkFilled();
+    _maybeReveal();
+    if (caughtUp) _read();
     if (!arrived) return;
-    if (last.author.id == widget.controller.you.id) {
+    if (atNewest && _split != null && last.author.id != controller.you.id) {
+      // After a jump new messages grow below the split, out of view: stay
+      // at the newest end rather than leave them below the fold.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scroll.hasClients) {
+          _scroll.jumpTo(_scroll.position.minScrollExtent);
+        }
+      });
+    }
+    if (last.author.id == controller.you.id) {
       if (_scroll.hasClients) {
+        // The newest end: below any jump's split, so not always offset 0.
         _scroll.animateTo(
-          0,
+          _scroll.position.minScrollExtent,
           duration: LoafMotion.normal,
           curve: LoafMotion.ease,
         );
       }
-    } else if (_looking) {
+    } else {
+      _read();
+    }
+  }
+
+  /// Read now if you are looking, else once you are back.
+  void _read() {
+    if (_looking) {
       widget.onRead?.call();
     } else {
       _unreadWhileAway = true;
     }
+  }
+
+  /// Brings the message jumped to into view and lights it. One that draws
+  /// no row (deleted, a reaction, an edit) is let go with a word on it: the
+  /// conversation is already open around where it was.
+  void _maybeReveal() {
+    final controller = widget.controller;
+    final target = controller.jumpTarget;
+    if (!mounted || target == null || controller.stretch != _stretch) return;
+    controller.jumpShown();
+    if (!controller.messages.any((m) => m.id == target)) {
+      showToast(context, messageUnavailable);
+      return;
+    }
+    _unlight?.cancel();
+    setState(() {
+      _split = target;
+      _lit = true;
+    });
+    // Split there, the target sits at offset 0, so it is built: go there,
+    // then centre it once it is laid out.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      _scroll.jumpTo(0);
+      _centre();
+    });
+    _unlight = Timer(_litFor, () {
+      if (mounted) setState(() => _lit = false);
+    });
   }
 
   void _onResume() {
@@ -456,63 +548,159 @@ class _TimelineState extends State<_Timeline> {
     }
   }
 
+  /// Centres the focused row once it is laid out. A group builds all its
+  /// rows, so the row exists whenever its group does.
+  void _centre() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _focusKey.currentContext;
+      if (!mounted || context == null) return;
+      unawaited(Scrollable.ensureVisible(context, alignment: 0.5));
+    });
+    // A jump that moved nothing lays out nothing: ask for the next frame.
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
+  void _maybeLoadMore() {
+    _maybeLoadOlder();
+    _maybeLoadNewer();
+  }
+
+  /// Within a screen of the newest message loaded, short of the live end:
+  /// fetch more. The list is reversed, so the newest end is the near end.
+  void _maybeLoadNewer() {
+    final timeline = widget.controller;
+    if (!timeline.canLoadNewer ||
+        timeline.loadingNewer ||
+        timeline.loadNewerFailed ||
+        !_scroll.hasClients) {
+      return;
+    }
+    final position = _scroll.position;
+    if (position.extentBefore < position.viewportDimension) {
+      timeline.loadNewer();
+    }
+  }
+
   /// A short conversation never scrolls, so nothing would ask for more:
   /// check once each change has been laid out.
   void _checkFilled() => WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (mounted) _maybeLoadOlder();
+    if (mounted) _maybeLoadMore();
   });
 
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final entries = groupTimeline(controller.messages).reversed.toList();
+    final split = _split;
+    final at = split == null
+        ? -1
+        : entries.indexWhere(
+            (e) => e is MessageGroup && e.messages.any((m) => m.id == split),
+          );
+    // Newest first in both: [newer] runs down from the split, [older] up.
+    final newer = entries.sublist(0, at < 0 ? 0 : at).reversed.toList();
+    final older = entries.sublist(at < 0 ? 0 : at);
     final top = controller.loadingOlder
-        ? const _OlderLine(failed: false)
+        ? const _PageLine(newer: false, failed: false)
         : controller.loadOlderFailed
-        ? _OlderLine(failed: true, onRetry: controller.loadOlder)
+        ? _PageLine(newer: false, failed: true, onRetry: controller.loadOlder)
         : null;
-    // The list matches its children by key, not by place: a new message
+    final bottom = controller.loadingNewer
+        ? const _PageLine(newer: true, failed: false)
+        : controller.loadNewerFailed
+        ? _PageLine(newer: true, failed: true, onRetry: controller.loadNewer)
+        : null;
+    // With no split row (no jump, or one not drawn), the newer sliver sits at negative
+    // offsets, out of sight: the bottom line leads the centre sliver instead.
+    final lead = at < 0 && bottom != null ? 1 : 0;
+    final belowSplit = newer.isNotEmpty || (bottom != null && lead == 0);
+    // Each list matches its children by key, not by place: a new message
     // shifts every entry along one, and each must keep its own State (a
     // video playing in it) rather than take its neighbour's.
-    final indexOf = <Key, int>{
-      for (var i = 0; i < entries.length; i++) _keyOf(entries[i]): i,
-      if (top != null) _olderKey: entries.length,
+    final newerIndex = <Key, int>{
+      for (var i = 0; i < newer.length; i++) _keyOf(newer[i]): i,
+      if (bottom != null && lead == 0) _newerKey: newer.length,
     };
-    return ListView.builder(
+    final olderIndex = <Key, int>{
+      if (lead == 1) _newerKey: 0,
+      for (var i = 0; i < older.length; i++) _keyOf(older[i]): i + lead,
+      if (top != null) _olderKey: older.length + lead,
+    };
+    return CustomScrollView(
       controller: _scroll,
       reverse: true,
-      padding: const EdgeInsets.symmetric(
-        horizontal: LoafSpace.x4,
-        vertical: LoafSpace.x2,
-      ),
-      itemCount: entries.length + (top == null ? 0 : 1),
-      findChildIndexCallback: (key) => indexOf[key],
-      itemBuilder: (context, index) {
-        if (index == entries.length) {
-          return KeyedSubtree(key: _olderKey, child: top!);
-        }
-        final entry = entries[index];
-        return KeyedSubtree(
-          key: _keyOf(entry),
-          child: switch (entry) {
-            DaySeparator() => _DaySeparatorTile(entry: entry),
-            CallEntry() => _CallLineTile(message: entry.message),
-            MessageGroup() => Padding(
-              padding: const EdgeInsets.only(bottom: LoafSpace.x4),
-              child: MessageGroupTile(group: entry, controller: controller),
+      center: _centerKey,
+      slivers: [
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(
+            LoafSpace.x4,
+            0,
+            LoafSpace.x4,
+            belowSplit ? LoafSpace.x2 : 0,
+          ),
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => index == newer.length
+                  ? KeyedSubtree(key: _newerKey, child: bottom!)
+                  : _entry(newer[index]),
+              childCount: newer.length + (bottom == null || lead == 1 ? 0 : 1),
+              findChildIndexCallback: (key) => newerIndex[key],
             ),
-          },
-        );
+          ),
+        ),
+        SliverPadding(
+          key: _centerKey,
+          padding: EdgeInsets.fromLTRB(
+            LoafSpace.x4,
+            LoafSpace.x2,
+            LoafSpace.x4,
+            belowSplit ? 0 : LoafSpace.x2,
+          ),
+          sliver: SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => index < lead
+                  ? KeyedSubtree(key: _newerKey, child: bottom!)
+                  : index - lead == older.length
+                  ? KeyedSubtree(key: _olderKey, child: top!)
+                  : _entry(older[index - lead]),
+              childCount: lead + older.length + (top == null ? 0 : 1),
+              findChildIndexCallback: (key) => olderIndex[key],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _entry(TimelineEntry entry) {
+    final split = _split;
+    return KeyedSubtree(
+      key: _keyOf(entry),
+      child: switch (entry) {
+        DaySeparator() => _DaySeparatorTile(entry: entry),
+        CallEntry() => _CallLineTile(message: entry.message),
+        MessageGroup() => Padding(
+          padding: const EdgeInsets.only(bottom: LoafSpace.x4),
+          child: MessageGroupTile(
+            group: entry,
+            controller: widget.controller,
+            focus: split != null && entry.messages.any((m) => m.id == split)
+                ? (id: split, key: _focusKey, lit: _lit)
+                : null,
+          ),
+        ),
       },
     );
   }
 }
 
 /// The top of a conversation while older messages are on their way, or
-/// when fetching them failed.
-class _OlderLine extends StatelessWidget {
-  const _OlderLine({required this.failed, this.onRetry});
+/// the bottom while newer ones are; or, at either end, that fetching them
+/// failed.
+class _PageLine extends StatelessWidget {
+  const _PageLine({required this.newer, required this.failed, this.onRetry});
 
+  final bool newer;
   final bool failed;
   final VoidCallback? onRetry;
 
@@ -527,7 +715,10 @@ class _OlderLine extends StatelessWidget {
             ? Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text("couldn't load older messages · ", style: quiet),
+                  Text(
+                    "couldn't load ${newer ? 'newer' : 'older'} messages · ",
+                    style: quiet,
+                  ),
                   InkWell(
                     onTap: onRetry,
                     borderRadius: BorderRadius.circular(LoafRadius.sm),
@@ -538,7 +729,10 @@ class _OlderLine extends StatelessWidget {
                   ),
                 ],
               )
-            : Text('loading older messages', style: quiet),
+            : Text(
+                'loading ${newer ? 'newer' : 'older'} messages',
+                style: quiet,
+              ),
       ),
     );
   }

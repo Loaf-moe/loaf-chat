@@ -8,7 +8,9 @@ import 'package:loaf_native/ui/auth/homeserver.dart';
 import 'package:loaf_native/ui/auth/loaf_session.dart';
 import 'package:loaf_native/ui/auth/sign_in_state.dart';
 import 'package:loaf_native/ui/channel/composer.dart';
-import 'package:loaf_native/ui/channel/timeline.dart';
+import 'package:loaf_native/ui/channel/channel_view.dart';
+import 'package:loaf_native/ui/channel/timeline_controller.dart';
+import 'package:loaf_native/ui/model/message_route.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
 import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/mock/mock_homeserver.dart';
@@ -117,8 +119,11 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   void loadMembers(String roomId) => membersAsked.add(roomId);
 
+  /// The conversations it can open, by room.
+  final timelines = <String, Timeline>{};
+
   @override
-  Timeline? timeline(String roomId) => null;
+  Timeline? timeline(String roomId) => timelines[roomId];
 
   @override
   Future<void> accept(Invite invite) => answer!.future;
@@ -187,6 +192,7 @@ Future<_Session> _pump(
   _FakeRooms rooms, {
   Size size = const Size(1440, 900),
   bool settle = true,
+  Stream<MessageRoute>? routes,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -198,7 +204,7 @@ Future<_Session> _pump(
       theme: loafLightTheme(),
       darkTheme: loafDarkTheme(),
       themeMode: ThemeMode.dark,
-      home: AppShell(session: session, rooms: () => rooms),
+      home: AppShell(session: session, rooms: () => rooms, routes: routes),
     ),
   );
   // A spinner never settles.
@@ -591,6 +597,137 @@ void main() {
       expect(find.text("couldn't join. try again?"), findsOneWidget);
       expect(find.byType(CircularProgressIndicator), findsNothing);
       expect(find.text('accept'), findsOneWidget);
+    });
+  });
+
+  group('following a route to a message', () {
+    /// Twenty messages in [roomId], ids `<roomId>-0` to `-19`.
+    TimelineController conversation(String roomId) => TimelineController([
+      for (var i = 0; i < 20; i++)
+        Message(
+          id: '$roomId-$i',
+          author: i.isEven ? _me : _mod,
+          sentAt: DateTime(2026, 10, 6, 9, i),
+          body: '$roomId says $i',
+        ),
+    ], you: _me);
+
+    _FakeRooms withConversations({List<Space>? spaces}) {
+      final rooms = _FakeRooms(
+        spaces: spaces ?? [_bakery()],
+        homeRooms: const [_dm],
+      )..abilities = {RoomAbility.answerInvites, RoomAbility.messages};
+      for (final id in ['!general', '!dm']) {
+        rooms.timelines[id] = conversation(id);
+      }
+      addTearDown(() {
+        for (final t in rooms.timelines.values) {
+          (t as TimelineController).dispose();
+        }
+      });
+      return rooms;
+    }
+
+    Finder header(String name) => find.descendant(
+      of: find.byType(ChannelView),
+      matching: find.text(name),
+    );
+
+    testWidgets('opens the channel in its space, at the message', (
+      tester,
+    ) async {
+      final routes = StreamController<MessageRoute>();
+      addTearDown(routes.close);
+      final rooms = withConversations();
+      await _pump(tester, rooms, routes: routes.stream);
+
+      routes.add(const MessageRoute('!general', '!general-3'));
+      await tester.pumpAndSettle();
+      expect(header('general'), findsOneWidget);
+      expect(rooms.timelines['!general']!.jumpTarget, isNull); // Shown.
+      expect(find.byKey(const ValueKey('jump-glow')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('a DM opens in Home', (tester) async {
+      final routes = StreamController<MessageRoute>();
+      addTearDown(routes.close);
+      final rooms = withConversations();
+      await _pump(tester, rooms, routes: routes.stream);
+      await tester.tap(find.byKey(const ValueKey('space-!bakery')));
+      await tester.pumpAndSettle();
+
+      routes.add(const MessageRoute('!dm', '!dm-2'));
+      await tester.pumpAndSettle();
+      // "Moddy" also names the other author, so the header is no proof;
+      // a message only this conversation has is.
+      expect(find.text('!dm says 2'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('a room you are not in says so, and stays put', (tester) async {
+      final routes = StreamController<MessageRoute>();
+      addTearDown(routes.close);
+      final rooms = withConversations();
+      await _pump(tester, rooms, routes: routes.stream);
+      routes.add(const MessageRoute('!dm', '!dm-2'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 2));
+
+      routes.add(const MessageRoute('!left', r'$any'));
+      await tester.pumpAndSettle();
+      expect(find.text(messageUnavailable), findsOneWidget);
+      // "Moddy" also names the other author, so the header is no proof;
+      // a message only this conversation has is.
+      expect(find.text('!dm says 2'), findsOneWidget);
+    });
+
+    testWidgets('a route before the first sync waits for it', (tester) async {
+      final routes = StreamController<MessageRoute>();
+      addTearDown(routes.close);
+      final rooms = withConversations()..synced = false;
+      await _pump(tester, rooms, routes: routes.stream, settle: false);
+
+      routes.add(const MessageRoute('!general', '!general-3'));
+      await tester.pump();
+      expect(find.text(messageUnavailable), findsNothing);
+
+      rooms
+        ..synced = true
+        ..update();
+      await tester.pumpAndSettle();
+      expect(header('general'), findsOneWidget);
+      expect(find.byKey(const ValueKey('jump-glow')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('a room in the space you are in stays there', (tester) async {
+      final routes = StreamController<MessageRoute>();
+      addTearDown(routes.close);
+      final second = Space(
+        id: '!second',
+        name: 'Second',
+        color: const Color(0xFF4E9E76),
+        members: const [_me],
+        categories: [
+          ChannelCategory('', const [Channel(id: '!general', name: 'general')]),
+        ],
+      );
+      final rooms = withConversations(spaces: [_bakery(), second]);
+      await _pump(tester, rooms, routes: routes.stream);
+      await tester.tap(find.byKey(const ValueKey('space-!second')));
+      await tester.pumpAndSettle();
+
+      routes.add(const MessageRoute('!general', '!general-3'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(ChannelList),
+          matching: find.text('Second'),
+        ),
+        findsOneWidget,
+      );
+      await tester.pump(const Duration(seconds: 2));
     });
   });
 }
