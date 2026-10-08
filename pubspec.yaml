@@ -79,6 +79,7 @@ flutter:
 
   assets:
     - assets/mock/media/
+    - assets/sounds/
 
   fonts:
     # Lora and Outfit are variable fonts: pubspec weights do not instance a

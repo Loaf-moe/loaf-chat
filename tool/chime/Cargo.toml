@@ -1,0 +1,8 @@
+[package]
+name = "chime"
+edition = "2024"
+rust-version = "1.92"
+publish = false
+description = "Synthesizes Loaf Chat's message chime: assets/sounds/chime.wav and ios/Runner/chime.caf"
+
+[dependencies]
