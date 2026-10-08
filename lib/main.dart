@@ -9,6 +9,8 @@ import 'ui/model/updater.dart';
 import 'ui/mock/mock_session.dart';
 import 'ui/platform.dart';
 import 'ui/rooms/rooms.dart';
+import 'ui/model/chime.dart';
+import 'ui/settings/notification_settings.dart';
 import 'ui/theme/appearance.dart';
 import 'ui/theme/loaf_theme.dart';
 import 'ui/window/window_chrome.dart';
@@ -21,6 +23,7 @@ final themeMode = ValueNotifier<ThemeMode>(ThemeMode.dark);
 
 /// Which theme the app wears. Lives as long as the app, like [themeMode].
 late final AppearanceController appearance;
+late final NotificationController notifications;
 
 /// The app talks to a real homeserver; `--dart-define=LOAF_BACKEND=mock`
 /// plays the mock instead, for previews and the debug levers.
@@ -50,6 +53,12 @@ Future<void> main() async {
         ? MemoryAppearanceStore()
         : await FileAppearanceStore.inSupportDirectory(),
   );
+  notifications = await NotificationController.load(
+    backend == 'mock'
+        ? MemoryNotificationStore()
+        : await FileNotificationStore.inSupportDirectory(),
+    chime: NativeChime(),
+  );
   // The stored session restores from disk before the first frame, so a
   // signed-in app never flashes the sign-in screen.
   if (backend == 'mock') {
@@ -75,46 +84,49 @@ class LoafApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => AppearanceScope(
     controller: appearance,
-    child: ListenableBuilder(
-      listenable: Listenable.merge([appearance, themeMode]),
-      builder: (context, _) {
-        final mode = themeMode.value;
-        // 日本 has one palette, so it fills both slots and Ctrl+T leaves it be.
-        final nihon = appearance.effective == LoafThemeId.nihon;
-        return MaterialApp(
-          title: 'Loaf Chat',
-          debugShowCheckedModeBanner: false,
-          theme: nihon ? loafNihonTheme() : loafLightTheme(),
-          darkTheme: nihon ? loafNihonTheme() : loafDarkTheme(),
-          themeMode: mode,
-          builder: (context, child) =>
-              WindowChrome(controller: windowChrome, child: child!),
-          home: CallbackShortcuts(
-            bindings: {
-              // Ctrl+T flips the palette. This exists so both themes get looked
-              // at during design; it is not a product feature.
-              const SingleActivator(
-                LogicalKeyboardKey.keyT,
-                control: true,
-              ): () {
-                themeMode.value = mode == ThemeMode.dark
-                    ? ThemeMode.light
-                    : ThemeMode.dark;
+    child: NotificationScope(
+      controller: notifications,
+      child: ListenableBuilder(
+        listenable: Listenable.merge([appearance, themeMode]),
+        builder: (context, _) {
+          final mode = themeMode.value;
+          // 日本 has one palette, so it fills both slots and Ctrl+T leaves it be.
+          final nihon = appearance.effective == LoafThemeId.nihon;
+          return MaterialApp(
+            title: 'Loaf Chat',
+            debugShowCheckedModeBanner: false,
+            theme: nihon ? loafNihonTheme() : loafLightTheme(),
+            darkTheme: nihon ? loafNihonTheme() : loafDarkTheme(),
+            themeMode: mode,
+            builder: (context, child) =>
+                WindowChrome(controller: windowChrome, child: child!),
+            home: CallbackShortcuts(
+              bindings: {
+                // Ctrl+T flips the palette. This exists so both themes get looked
+                // at during design; it is not a product feature.
+                const SingleActivator(
+                  LogicalKeyboardKey.keyT,
+                  control: true,
+                ): () {
+                  themeMode.value = mode == ThemeMode.dark
+                      ? ThemeMode.light
+                      : ThemeMode.dark;
+                },
               },
-            },
-            // Sign-in or the app, as the session says. The debug menu's levers
-            // move between them.
-            child: Focus(
-              autofocus: true,
-              child: SessionRoot(
-                session: session,
-                rooms: newRooms,
-                updater: updater,
+              // Sign-in or the app, as the session says. The debug menu's levers
+              // move between them.
+              child: Focus(
+                autofocus: true,
+                child: SessionRoot(
+                  session: session,
+                  rooms: newRooms,
+                  updater: updater,
+                ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     ),
   );
 }
