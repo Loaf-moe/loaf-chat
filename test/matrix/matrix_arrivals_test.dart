@@ -246,6 +246,40 @@ void main() {
       expect(rig.got.map((a) => a.eventId), [r'$new']);
     });
 
+    test('a room joined mid-session is quiet about its history', () async {
+      final client = await _client();
+      await _join(client);
+      final rig = await _rig(client);
+      const fresh = '!fresh:example.com';
+      await _sync(
+        client,
+        rooms: {
+          'join': {
+            fresh: {
+              'timeline': {
+                'events': [
+                  // Sent after launch but before you joined: history.
+                  _msg(r'$before', ts: _after),
+                  {
+                    ..._state('m.room.member', {
+                      'membership': 'join',
+                    }, key: _me),
+                    'origin_server_ts': _after + 1000,
+                  },
+                  _msg(r'$since', ts: _after + 2000),
+                ],
+                'limited': false,
+                'prev_batch': 'p${_n++}',
+              },
+            },
+          },
+        },
+      );
+      await rig.reached(r'$since');
+      expect(rig.seen, contains(r'$before'));
+      expect(rig.got.map((a) => a.eventId), [r'$since']);
+    });
+
     test('nothing arrives from an initial sync', () async {
       // Not yet synced: prevBatch is null, as during a sign-in's first sync.
       final client = await _client(firstSync: false);

@@ -16,6 +16,7 @@ class MatrixArrivals {
   MatrixArrivals(this.client, {DateTime Function()? now})
     : _startedAt = (now ?? DateTime.now)() {
     _sub = client.onTimelineEvent.stream.listen(_on);
+    _synced = client.onSync.stream.listen((_) => _settle());
   }
 
   final Client client;
@@ -23,6 +24,16 @@ class MatrixArrivals {
   /// Messages sent before this are the backlog a launch catches up on.
   final DateTime _startedAt;
   late final StreamSubscription<Event> _sub;
+  late final StreamSubscription<SyncUpdate> _synced;
+
+  /// Messages that passed every test but one: they wait for the end of
+  /// their sync, when the room's state is whole. See [_settle].
+  final _pending = <Event>[];
+
+  /// When your latest join event, seen this session, was sent, by room. Not
+  /// read from the room's state: the SDK keeps a partial room's own member
+  /// event out of it.
+  final _joinedAt = <String, DateTime>{};
   final _arrivals = StreamController<Arrival>.broadcast();
 
   Stream<Arrival> get stream => _arrivals.stream;
@@ -37,15 +48,37 @@ class MatrixArrivals {
     if (client.getRoomById(event.room.id)?.membership != Membership.join) {
       return;
     }
+    if (event.type == EventTypes.RoomMember &&
+        event.stateKey == client.userID &&
+        event.content['membership'] == 'join') {
+      _joinedAt[event.room.id] = event.originServerTs;
+    }
     if (event.senderId == client.userID) return;
     if (event.originServerTs.isBefore(_startedAt)) return;
     if (!countsAsMessage(event)) return;
     if (!client.pushruleEvaluator.match(event).notify) return;
-    _arrivals.add(Arrival(roomId: event.room.id, eventId: event.eventId));
+    _pending.add(event);
+  }
+
+  /// A room joined after launch delivers messages sent before you joined,
+  /// but after launch: they are its history. Your join event dates the start
+  /// of what is yours, but it comes in the timeline after that history, so
+  /// the verdict waits for the end of the sync. A room whose join this
+  /// session never saw has nothing to compare, and is let through.
+  void _settle() {
+    final events = List.of(_pending);
+    _pending.clear();
+    for (final event in events) {
+      final joined = _joinedAt[event.room.id];
+      if (joined != null && event.originServerTs.isBefore(joined)) continue;
+      _arrivals.add(Arrival(roomId: event.room.id, eventId: event.eventId));
+    }
   }
 
   void dispose() {
     unawaited(_sub.cancel());
+    unawaited(_synced.cancel());
+    _pending.clear();
     unawaited(_arrivals.close());
   }
 }
