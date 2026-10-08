@@ -1,12 +1,14 @@
 /// One unread message: its id, when it was sent (ms since epoch), whether
 /// it mentions you, and whether it was still encrypted when counted, so it
-/// can be looked at again once its key arrives.
+/// can be looked at again once its key arrives. A locked message names the
+/// Megolm [session] it waits on, so only that session's key reopens it.
 class TallyEntry {
   const TallyEntry(
     this.id,
     this.ts, {
     this.mention = false,
     this.locked = false,
+    this.session,
   });
 
   final String id;
@@ -14,18 +16,25 @@ class TallyEntry {
   final bool mention;
   final bool locked;
 
+  /// The Megolm session id this locked message is encrypted under. Null when
+  /// unlocked, or when it was counted before sessions were recorded.
+  final String? session;
+
+  /// A locked entry writes its session where `true` used to be, so files
+  /// from before sessions were recorded still load, as locked under none.
   List<Object> toJson() => [
     id,
     ts,
     if (mention || locked) mention,
-    if (locked) locked,
+    if (locked) session ?? true,
   ];
 
   factory TallyEntry.fromJson(List<Object?> json) => TallyEntry(
     json[0]! as String,
     json[1]! as int,
     mention: json.length > 2 && json[2] == true,
-    locked: json.length > 3 && json[3] == true,
+    locked: json.length > 3 && (json[3] == true || json[3] is String),
+    session: json.length > 3 && json[3] is String ? json[3] as String : null,
   );
 }
 
@@ -92,6 +101,14 @@ class RoomTally {
     _entries.removeWhere((e) => e.id == eventId);
     return _entries.length != before;
   }
+
+  /// The locked entries a key for one of [sessions] could open: those
+  /// under such a session, and those under an unknown one, which came from
+  /// a file older than the recording of sessions.
+  List<TallyEntry> lockedUnder(Set<String> sessions) => [
+    for (final e in _entries)
+      if (e.locked && (e.session == null || sessions.contains(e.session))) e,
+  ];
 
   /// Swaps the entry with [entry]'s id for [entry], in place. Whether there
   /// was one.

@@ -119,4 +119,83 @@ void main() {
       expect(changes, greaterThan(before));
     },
   );
+
+  test('a key opens only the messages locked under its session', () async {
+    final mine = await cryptoClient();
+    final theirs = await cryptoClient(
+      api: FakeMatrixApi.currentApi,
+      asOther: true,
+    );
+    await theirs.updateUserDeviceKeys(additionalUsers: {me});
+    await _sync(theirs);
+    await _sync(mine);
+    Future<Map<String, Object?>> seal(String body) =>
+        theirs.encryption!.encryptGroupMessagePayload(_room, {
+          'msgtype': 'm.text',
+          'body': body,
+          'm.mentions': {
+            'user_ids': [me],
+          },
+        });
+    final first = await seal('one');
+    // A new outbound session, as a rotation would make.
+    await theirs.encryption!.keyManager.clearOrUseOutboundGroupSession(
+      _room,
+      wipe: true,
+    );
+    final second = await seal('two');
+    expect(second['session_id'], isNot(first['session_id']));
+
+    final unread = MatrixUnread(mine, onChange: () {});
+    addTearDown(unread.dispose);
+    final sub = mine.onSync.stream.listen(unread.apply);
+    addTearDown(sub.cancel);
+    await _sync(mine, [
+      for (final (id, content, ts) in [
+        (r'$one', first, 1700000001000),
+        (r'$two', second, 1700000002000),
+      ])
+        {
+          'type': EventTypes.Encrypted,
+          'sender': other,
+          'content': content,
+          'event_id': id,
+          'origin_server_ts': ts,
+        },
+    ]);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    await unread.idle;
+    final locked = unread.of(_room).entries;
+    expect(locked.map((e) => e.locked), [true, true]);
+    expect(locked.map((e) => e.session), [
+      first['session_id'],
+      second['session_id'],
+    ]);
+
+    final sessionId = first['session_id'] as String;
+    final key = theirs.encryption!.keyManager
+        .getInboundGroupSession(_room, sessionId)!
+        .inboundGroupSession!
+        .exportAtFirstKnownIndex();
+    await mine.encryption!.keyManager.setInboundGroupSession(
+      _room,
+      sessionId,
+      theirs.identityKey,
+      {
+        'algorithm': AlgorithmTypes.megolmV1AesSha2,
+        'room_id': _room,
+        'session_id': sessionId,
+        'session_key': key,
+      },
+      forwarded: true,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    await unread.idle;
+    final after = unread.of(_room).entries;
+    expect(after.map((e) => e.id), [r'$one', r'$two']);
+    expect(after[0].locked, isFalse);
+    expect(after[1].locked, isTrue);
+    expect(after[1].session, second['session_id']);
+    expect(unread.of(_room).mentions, 1);
+  });
 }

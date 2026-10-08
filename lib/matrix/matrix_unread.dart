@@ -53,8 +53,9 @@ class MatrixUnread {
   /// room left and joined again is a new object.
   final _keySubs = <String, ({Room room, StreamSubscription<String> sub})>{};
 
-  /// Rooms with a re-check of their locked messages already waiting.
-  final _rechecks = <String>{};
+  /// Rooms with a re-check of their locked messages already waiting, and the
+  /// sessions whose keys have come for it.
+  final _rechecks = <String, Set<String>>{};
   Future<void> _queue = Future.value();
   var _disposed = false;
 
@@ -173,35 +174,43 @@ class MatrixUnread {
     _keySubs[room.id] = (
       room: room,
       sub: room.onSessionKeyReceived.stream.listen(
-        (_) => _recheckSoon(room.id),
+        (sessionId) => _recheckSoon(room.id, sessionId),
       ),
     );
   }
 
-  /// Queues one re-check of [roomId], behind the syncs already waiting. A
-  /// key backup brings many keys at once; they share it.
-  void _recheckSoon(String roomId) {
-    if (_disposed || !_rechecks.add(roomId)) return;
+  /// Queues one re-check of [roomId] for the key of [sessionId], behind the
+  /// syncs already waiting. A key backup brings many keys at once; they
+  /// share it.
+  void _recheckSoon(String roomId, String sessionId) {
+    if (_disposed) return;
+    final pending = _rechecks[roomId];
+    if (pending != null) {
+      pending.add(sessionId);
+      return;
+    }
+    _rechecks[roomId] = {sessionId};
     _queue = _queue
         .then((_) {
-          _rechecks.remove(roomId);
-          return _recheck(roomId);
+          final sessions = _rechecks.remove(roomId) ?? const <String>{};
+          return _recheck(roomId, sessions);
         })
         .catchError((Object e, StackTrace s) {
           Logs().w('[loaf] unread re-check failed', e, s);
         });
   }
 
-  /// Reads [roomId]'s locked messages again, now that a key came. A room
-  /// being filled is skipped, since the fill replaces its tally anyway.
-  Future<void> _recheck(String roomId) async {
+  /// Reads [roomId]'s messages locked under [sessions] again, now that their
+  /// keys came; the others can't have opened. A room being filled is
+  /// skipped, since the fill replaces its tally anyway.
+  Future<void> _recheck(String roomId, Set<String> sessions) async {
     if (_disposed || _filling.contains(roomId)) return;
     final tally = _tallies[roomId];
     final room = client.getRoomById(roomId);
     if (tally == null || room == null) return;
     var changed = false;
     try {
-      for (final entry in tally.entries.where((e) => e.locked).toList()) {
+      for (final entry in tally.lockedUnder(sessions)) {
         final event = await _stored(room, entry.id);
         if (event == null) continue;
         final reread = await _entry(room, event);
@@ -437,6 +446,7 @@ class MatrixUnread {
   Future<TallyEntry> _entry(Room room, Event event) async {
     final shown = await _decrypted(event);
     final me = client.userID!;
+    final locked = shown.type == EventTypes.Encrypted;
     return TallyEntry(
       event.eventId,
       event.originServerTs.millisecondsSinceEpoch,
@@ -447,7 +457,8 @@ class MatrixUnread {
             .unsafeGetUserFromMemoryOrFallback(me)
             .calcDisplayname(),
       ),
-      locked: shown.type == EventTypes.Encrypted,
+      locked: locked,
+      session: locked ? event.content.tryGet<String>('session_id') : null,
     );
   }
 
