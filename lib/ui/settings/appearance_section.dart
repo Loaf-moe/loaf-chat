@@ -10,6 +10,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/appearance.dart';
 import '../theme/loaf_theme.dart';
+import 'settings_controls.dart';
 
 class AppearanceSection extends StatelessWidget {
   const AppearanceSection({super.key, required this.controller});
@@ -25,7 +26,7 @@ class AppearanceSection extends StatelessWidget {
       return ListView(
         padding: const EdgeInsets.all(LoafSpace.x6),
         children: [
-          _Label(tokens: tokens, label: 'theme'),
+          SettingsLabel(label: 'theme'),
           for (final id in LoafThemeId.values) ...[
             _ThemeRow(
               id: id,
@@ -43,15 +44,15 @@ class AppearanceSection extends StatelessWidget {
             ),
           ],
           const SizedBox(height: LoafSpace.x6),
-          _Check(
+          SettingsCheck(
             title: 'easter eggs',
             detail: 'the occasional surprise.',
             value: controller.easterEggs,
             onChanged: controller.setEasterEggs,
           ),
           const SizedBox(height: LoafSpace.x4),
-          _Label(tokens: tokens, label: 'media'),
-          _Check(
+          SettingsLabel(label: 'media'),
+          SettingsCheck(
             title: 'external content',
             detail:
                 'show pictures and video hosted on other sites. fetching '
@@ -63,25 +64,6 @@ class AppearanceSection extends StatelessWidget {
         ],
       );
     },
-  );
-}
-
-class _Label extends StatelessWidget {
-  const _Label({required this.tokens, required this.label});
-
-  final LoafTokens tokens;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: LoafSpace.x2),
-    child: Text(
-      label.toUpperCase(),
-      style: loafBody(
-        11,
-        600,
-      ).copyWith(color: tokens.textMuted, letterSpacing: 0.04 * 11),
-    ),
   );
 }
 
@@ -160,66 +142,4 @@ class _Swatch extends StatelessWidget {
       decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
     ),
   );
-}
-
-class _Check extends StatelessWidget {
-  const _Check({
-    required this.title,
-    required this.detail,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String title;
-  final String detail;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = LoafTokens.of(context);
-    return MergeSemantics(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(LoafRadius.lg),
-        onTap: () => onChanged(!value),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Checkbox(
-                value: value,
-                activeColor: tokens.accent,
-                checkColor: tokens.textOnAccent,
-                onChanged: (v) => onChanged(v ?? true),
-              ),
-              const SizedBox(width: LoafSpace.x2),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: LoafSpace.x2),
-                    Text(
-                      title,
-                      style: loafBody(
-                        15,
-                        600,
-                      ).copyWith(color: tokens.textStrong),
-                    ),
-                    Text(
-                      detail,
-                      style: loafBody(
-                        13,
-                        400,
-                      ).copyWith(color: tokens.textMuted),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }

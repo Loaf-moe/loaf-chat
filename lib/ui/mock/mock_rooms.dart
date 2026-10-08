@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../channel/timeline_controller.dart';
+import '../model/arrival.dart';
 import '../model/media_source.dart';
 import '../rooms/rooms.dart';
 import '../settings/devices.dart';
@@ -92,6 +93,9 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   @override
   Member get me => currentUser;
+
+  @override
+  Stream<Arrival> get arrivals => const Stream.empty();
 
   /// With this session's reading applied, so badges recount. A left
   /// invite-only channel is dropped: only channels you could join in one

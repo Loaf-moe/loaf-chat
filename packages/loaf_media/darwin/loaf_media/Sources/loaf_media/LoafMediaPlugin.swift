@@ -11,14 +11,16 @@ import LoafMediaCore
 
 /// The native half of `package:loaf_media`: Quick Look, on macOS the
 /// default app, the clipboard's pictures and files, and the inline video
-/// player. The other ends are
+/// player, and the chime. The other ends are
 /// `lib/src/native.dart`, `lib/src/streams.dart` and `lib/src/video.dart`.
 public final class LoafMediaPlugin: NSObject, FlutterPlugin {
   private let quickLook = QuickLook()
   private let videos: VideoViewFactory
+  private let chime: Chime
 
-  private init(videos: VideoViewFactory) {
+  private init(videos: VideoViewFactory, chime: Chime) {
     self.videos = videos
+    self.chime = chime
   }
 
   public static func register(with registrar: FlutterPluginRegistrar) {
@@ -34,7 +36,19 @@ public final class LoafMediaPlugin: NSObject, FlutterPlugin {
     #else
       let videos = VideoViewFactory(channel: channel)
     #endif
-    registrar.addMethodCallDelegate(LoafMediaPlugin(videos: videos), channel: channel)
+    let chime = Chime(path: { asset in
+      let key = registrar.lookupKey(forAsset: asset)
+      // On both platforms the key is relative to the main bundle's root
+      // (`Contents/Frameworks/App.framework/Resources/flutter_assets/...` on
+      // macOS, `Frameworks/App.framework/flutter_assets/...` on iOS), so it
+      // is joined to bundleURL. path(forResource:) would search only the
+      // bundle's Resources directory, and a bundle opened by identifier is
+      // missing in a debug build, which never loads App.framework.
+      let file = Bundle.main.bundleURL.appendingPathComponent(key).path
+      return FileManager.default.fileExists(atPath: file) ? file : nil
+    })
+    registrar.addMethodCallDelegate(
+      LoafMediaPlugin(videos: videos, chime: chime), channel: channel)
     registrar.register(videos, withId: "moe.loaf.chat/video")
   }
 
@@ -90,6 +104,17 @@ public final class LoafMediaPlugin: NSObject, FlutterPlugin {
       #else
         result(false)
       #endif
+    case "chime.play":
+      guard let asset = arguments?["asset"] as? String else {
+        result(Self.badArguments(call))
+        return
+      }
+      do {
+        try chime.play(asset: asset)
+        result(nil)
+      } catch {
+        result(FlutterError(code: "chime-failed", message: "\(error)", details: nil))
+      }
     case "quickLook":
       guard let path = arguments?["path"] as? String else {
         result(Self.failure("no path to look at"))

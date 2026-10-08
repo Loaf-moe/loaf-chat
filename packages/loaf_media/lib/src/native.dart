@@ -1,6 +1,6 @@
 /// Each platform's own way of showing a file. The native ends are
-/// `darwin/loaf_media/Sources/loaf_media/LoafMediaPlugin.swift` and
-/// `windows/loaf_media_plugin.cpp`.
+/// `darwin/loaf_media/Sources/loaf_media/LoafMediaPlugin.swift`,
+/// `linux/loaf_media_plugin.cc` and `windows/loaf_media_plugin.cpp`.
 library;
 
 import 'package:dbus/dbus.dart';
@@ -25,6 +25,12 @@ abstract final class LoafMedia {
   /// with none set asks which app to use, as Explorer does.
   static Future<void> openWithDefaultApp(String path) =>
       _channel.invokeMethod<void>('openWithDefaultApp', {'path': path});
+
+  /// Plays a sound bundled as the Flutter asset [asset], through the
+  /// platform's own player: System Sound Services, GStreamer or PlaySound.
+  /// Returns once it has started.
+  static Future<void> playChime(String asset) =>
+      _channel.invokeMethod<void>('chime.play', {'asset': asset});
 
   /// Whether the clipboard holds a picture or files. It reads neither, so
   /// asking is cheap and, on iOS, shows no "Allow Paste" prompt. The three

@@ -23,3 +23,5 @@ pub mod wic;
 
 #[cfg(windows)]
 pub mod ffi;
+
+pub mod chime;

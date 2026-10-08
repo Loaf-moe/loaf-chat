@@ -66,6 +66,10 @@ int32_t loaf_win_default_app_name(const char* extension, char* out,
 // Opens [path] (UTF-8) as Explorer would.
 int32_t loaf_win_open(const char* path);
 
+// Plays the Flutter asset [asset] ("assets/sounds/chime.wav") with
+// PlaySound; returns once started.
+int32_t loaf_win_chime_play(const char* asset);
+
 // Decodes with WIC, at most [max_width] wide unless it is 0, to
 // premultiplied RGBA. NULL if WIC can't; else free with loaf_win_image_free.
 void* loaf_win_decode_image(const uint8_t* bytes, size_t len,

@@ -135,6 +135,14 @@ static gboolean bool_arg(FlValue* args, const char* key) {
          fl_value_get_bool(value);
 }
 
+static FlMethodResponse* chime_play(FlValue* args) {
+  const gchar* asset = string_arg(args, "asset");
+  if (asset == nullptr) {
+    return error_response("no asset");
+  }
+  return status_response(loaf_rs_chime_play(asset), "chime.play");
+}
+
 static FlMethodResponse* stream_call(const gchar* method, FlValue* args) {
   const gchar* id = string_arg(args, "id");
   if (id == nullptr) {
@@ -326,6 +334,8 @@ static void method_call_cb(FlMethodChannel* channel, FlMethodCall* method_call,
     response = clipboard_image();
   } else if (g_str_equal(method, "clipboard.files")) {
     response = clipboard_files();
+  } else if (g_str_equal(method, "chime.play")) {
+    response = chime_play(args);
   } else if (g_str_has_prefix(method, "stream.")) {
     response = stream_call(method, args);
   } else if (g_str_equal(method, "video.create")) {

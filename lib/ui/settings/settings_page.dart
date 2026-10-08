@@ -27,12 +27,15 @@ import '../model/updater.dart';
 import 'about_section.dart';
 import 'account_section.dart';
 import 'appearance_section.dart';
+import 'notification_settings.dart';
+import 'notifications_section.dart';
 import 'devices.dart';
 import 'devices_section.dart';
 
 enum SettingsSection {
   account('account', LucideIcons.circleUser),
   appearance('appearance', LucideIcons.palette),
+  notifications('notifications', LucideIcons.bell),
   devices('devices', LucideIcons.monitorSmartphone),
   about('about', LucideIcons.info);
 
@@ -125,6 +128,8 @@ class _SettingsModalState extends State<SettingsModal> {
   List<SettingsSection> get _sections => [
     SettingsSection.account,
     if (AppearanceScope.maybeOf(context) != null) SettingsSection.appearance,
+    if (NotificationScope.maybeOf(context) != null)
+      SettingsSection.notifications,
     if (widget.devices != null) SettingsSection.devices,
     SettingsSection.about,
   ];
@@ -445,6 +450,12 @@ class _Detail extends StatelessWidget {
     // backstop.
     SettingsSection.appearance => switch (AppearanceScope.maybeOf(context)) {
       final controller? => AppearanceSection(controller: controller),
+      null => AccountSection(profile: profile, me: me, editable: editable),
+    },
+    SettingsSection.notifications => switch (NotificationScope.maybeOf(
+      context,
+    )) {
+      final controller? => NotificationsSection(controller: controller),
       null => AccountSection(profile: profile, me: me, editable: editable),
     },
     // Only offered with devices to show; the null check is the backstop.
