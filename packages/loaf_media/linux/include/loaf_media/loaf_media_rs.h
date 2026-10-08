@@ -18,6 +18,10 @@ extern "C" {
 // gst_init and registers loafsrc; idempotent.
 int32_t loaf_rs_init(void);
 
+// Plays the Flutter asset [asset] (a key like "assets/sounds/chime.wav")
+// on a thread of its own; returns once queued. Starts GStreamer itself.
+int32_t loaf_rs_chime_play(const char* asset);
+
 // [total] is -1 while unknown.
 int32_t loaf_rs_stream_begin(const char* id, const char* path,
                              int64_t received, int64_t total);

@@ -10,6 +10,7 @@
 
 use std::sync::OnceLock;
 
+pub mod chime;
 pub mod ffi;
 pub mod player;
 pub mod source;

@@ -65,6 +65,20 @@ pub extern "C" fn loaf_rs_init() -> i32 {
 }
 
 /// # Safety
+/// [asset] is a NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn loaf_rs_chime_play(asset: *const c_char) -> i32 {
+    guard(|| {
+        // SAFETY: forwarded from this function's contract.
+        let asset = match unsafe { string(asset) } {
+            Ok(a) => a,
+            Err(e) => return e,
+        };
+        status("chime", crate::chime::play(asset))
+    })
+}
+
+/// # Safety
 /// [id] and [path] are NUL-terminated strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn loaf_rs_stream_begin(
