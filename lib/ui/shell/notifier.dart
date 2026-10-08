@@ -33,10 +33,10 @@ class Notifier {
     required this.openRoom,
     bool Function()? focused,
     bool? desktop,
-    DateTime Function()? now,
+    Duration Function()? elapsed,
   }) : _focused = focused ?? _resumed,
        _desktop = desktop ?? isDesktop,
-       _now = now ?? DateTime.now {
+       _elapsed = elapsed ?? _clock {
     _sub = arrivals.listen(_on);
   }
 
@@ -47,12 +47,17 @@ class Notifier {
   final String? Function() openRoom;
   final bool Function() _focused;
   final bool _desktop;
-  final DateTime Function() _now;
+  final Duration Function() _elapsed;
   late final StreamSubscription<Arrival> _sub;
 
-  /// When the chime last played: messages within a second of it are the
-  /// same moment, and get one chime.
-  DateTime? _lastChime;
+  /// A monotonic clock for the throttle: the wall clock can step backwards,
+  /// which would hold the chime back until it caught up.
+  static final Stopwatch _stopwatch = Stopwatch()..start();
+  static Duration _clock() => _stopwatch.elapsed;
+
+  /// When the chime last played, on that clock: messages within a second of
+  /// it are the same moment, and get one chime.
+  Duration? _lastChime;
 
   /// The same test the channel view uses before it marks anything read.
   static bool _resumed() {
@@ -81,9 +86,9 @@ class Notifier {
 
   void _chime() {
     if (!soundOn()) return;
-    final now = _now();
+    final now = _elapsed();
     final last = _lastChime;
-    if (last != null && now.difference(last) < const Duration(seconds: 1)) {
+    if (last != null && now - last < const Duration(seconds: 1)) {
       return;
     }
     _lastChime = now;

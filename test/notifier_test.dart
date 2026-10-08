@@ -51,7 +51,7 @@ void main() {
     var sound = true;
     var focused = true;
     String? open;
-    var now = DateTime(2026, 10, 7, 12);
+    var elapsed = Duration.zero;
 
     Notifier make() => Notifier(
       arrivals: arrivals.stream,
@@ -60,7 +60,7 @@ void main() {
       openRoom: () => open,
       focused: () => focused,
       desktop: true,
-      now: () => now,
+      elapsed: () => elapsed,
     );
 
     setUp(() {
@@ -69,13 +69,13 @@ void main() {
       sound = true;
       focused = true;
       open = '!open';
-      now = DateTime(2026, 10, 7, 12);
+      elapsed = Duration.zero;
     });
 
+    var id = 0;
+
     Future<void> arrive(String room) async {
-      arrivals.add(
-        Arrival(roomId: room, eventId: '\$${now.microsecondsSinceEpoch}'),
-      );
+      arrivals.add(Arrival(roomId: room, eventId: '\$${id++}'));
       await pumpEventQueue();
     }
 
@@ -114,7 +114,7 @@ void main() {
       addTearDown(n.dispose);
       for (var i = 0; i < 5; i++) {
         await arrive('!other');
-        now = now.add(const Duration(milliseconds: 150));
+        elapsed += const Duration(milliseconds: 150);
       }
       expect(chime.plays, 1);
     });
@@ -123,7 +123,21 @@ void main() {
       final n = make();
       addTearDown(n.dispose);
       await arrive('!other');
-      now = now.add(const Duration(seconds: 1));
+      elapsed += const Duration(seconds: 1);
+      await arrive('!other');
+      expect(chime.plays, 2);
+    });
+
+    test('after a burst it chimes again once a second has passed', () async {
+      final n = make();
+      addTearDown(n.dispose);
+      for (var i = 0; i < 5; i++) {
+        await arrive('!other');
+        elapsed += const Duration(milliseconds: 150);
+      }
+      expect(chime.plays, 1);
+      // 750 ms in; the burst began at 0, so 250 ms more makes a second.
+      elapsed += const Duration(milliseconds: 250);
       await arrive('!other');
       expect(chime.plays, 2);
     });
