@@ -20,6 +20,10 @@ final class InlineVideo {
   private let channel: FlutterMethodChannel
   private let loader: ResourceLoader?
   private var playing: NSKeyValueObservation?
+  private var muting: NSKeyValueObservation?
+  /// Whether the player was last known to be playing. Buffering keeps it,
+  /// so a stall does not give up the audio session and take it back.
+  private var wasPlaying = false
   private var readiness: NSKeyValueObservation?
 
   init(view: Int64, id: String, mimeType: String?, channel: FlutterMethodChannel) {
@@ -37,8 +41,13 @@ final class InlineVideo {
     }
     player = AVPlayer(playerItem: item)
     playing = player.observe(\.timeControlStatus) { [weak self] player, _ in
+      self?.reportAudio()
       guard player.timeControlStatus == .playing else { return }
       self?.send("video.playing")
+    }
+    // The player controls' own mute button changes this.
+    muting = player.observe(\.isMuted) { [weak self] _, _ in
+      self?.reportAudio()
     }
     guard let item else {
       // A view must be returned whatever happens; Dart offers Open instead.
@@ -72,6 +81,25 @@ final class InlineVideo {
     player.pause()
   }
 
+  /// Tells the audio session where this player stands, on the main thread.
+  private func reportAudio() {
+    #if os(iOS)
+      switch player.timeControlStatus {
+      case .playing: wasPlaying = true
+      case .paused: wasPlaying = false
+      default: break
+      }
+      let (view, playing, muted) = (view, wasPlaying, player.isMuted)
+      if Thread.isMainThread {
+        AudioSession.shared.report(view: view, playing: playing, muted: muted)
+      } else {
+        DispatchQueue.main.async {
+          AudioSession.shared.report(view: view, playing: playing, muted: muted)
+        }
+      }
+    #endif
+  }
+
   /// When the view goes: nothing keeps playing or reading behind it.
   func tearDown() {
     player.pause()
@@ -79,7 +107,19 @@ final class InlineVideo {
     playing = nil
     readiness?.invalidate()
     readiness = nil
+    muting?.invalidate()
+    muting = nil
     player.replaceCurrentItem(with: nil)
+    #if os(iOS)
+      // Removal, not a report: a stale report must not outlive the view.
+      wasPlaying = false
+      let view = view
+      if Thread.isMainThread {
+        AudioSession.shared.remove(view: view)
+      } else {
+        DispatchQueue.main.async { AudioSession.shared.remove(view: view) }
+      }
+    #endif
   }
 }
 
