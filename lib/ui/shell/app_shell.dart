@@ -30,6 +30,7 @@ import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
 import '../mock/mock_rooms.dart';
+import 'notifier.dart';
 import '../channel/timeline.dart' show messageUnavailable;
 import '../model/message_route.dart';
 import '../model/updater.dart';
@@ -47,6 +48,7 @@ import '../model/media_source.dart';
 import '../widgets/avatar_images.dart';
 import '../widgets/toast.dart';
 import '../window/window_chrome.dart';
+import '../settings/notification_settings.dart';
 import '../settings/settings_page.dart';
 import 'app_notice.dart';
 import 'channel_actions.dart';
@@ -121,6 +123,24 @@ class _AppShellState extends State<AppShell> {
     onRecord: _onCallRecord,
   );
 
+  Notifier? _notifier;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Not in initState: the scope is an inherited widget. The closures read
+    // the controller live, so a later toggle needs no rebuild.
+    final notifications = NotificationScope.maybeOf(context);
+    if (_notifier == null && notifications != null) {
+      _notifier = Notifier(
+        arrivals: _rooms.arrivals,
+        chime: notifications.chime,
+        soundOn: () => notifications.sound,
+        openRoom: () => _openMessagesRoom,
+      );
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -165,6 +185,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _notifier?.dispose();
     unawaited(_routes?.cancel());
     _session.removeListener(_onSessionChange);
     _updater.removeListener(_onChange);
@@ -1019,15 +1040,32 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  /// The invite on screen in place of a channel, if any. Shared by
+  /// [_buildMain] and [_openMessagesRoom] so the two can't drift.
+  Invite? get _previewedInvite =>
+      _home ? _invites.where((i) => i.id == _previewInvite).firstOrNull : null;
+
+  /// The channel whose messages are on screen right now, which is being
+  /// read, so its new messages don't chime. Null for an invite preview, a
+  /// voice channel page, the nothing-here or syncing face, and a channel
+  /// that can't show messages yet. Mirrors where [_buildMain] builds a
+  /// message view.
+  String? get _openMessagesRoom {
+    final channel = _channel;
+    if (_previewedInvite != null || channel == null) return null;
+    if (!_can(RoomAbility.messages) || channel.kind == ChannelKind.voice) {
+      return null;
+    }
+    return channel.id;
+  }
+
   Widget _buildMain({required bool wide}) {
     final channel = _channel;
     final openNavigation = wide
         ? null
         : () => _scaffoldKey.currentState?.openDrawer();
 
-    final invite = _home
-        ? _invites.where((i) => i.id == _previewInvite).firstOrNull
-        : null;
+    final invite = _previewedInvite;
     if (invite != null) {
       final (answeringId, answering) = _answering ?? ('', null);
       return InvitePreview(
