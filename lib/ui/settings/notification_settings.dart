@@ -133,6 +133,12 @@ class NotificationScope extends InheritedNotifier<NotificationController> {
     required super.child,
   }) : super(notifier: controller);
 
+  /// The controller without depending on the scope: the caller is not
+  /// rebuilt when a setting changes. For code that reads the controller
+  /// live, as the shell's notifier does.
+  static NotificationController? find(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<NotificationScope>()?.notifier;
+
   static NotificationController? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<NotificationScope>()?.notifier;
 }

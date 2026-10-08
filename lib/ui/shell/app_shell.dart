@@ -129,8 +129,9 @@ class _AppShellState extends State<AppShell> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     // Not in initState: the scope is an inherited widget. The closures read
-    // the controller live, so a later toggle needs no rebuild.
-    final notifications = NotificationScope.maybeOf(context);
+    // the controller live, so `find` takes no dependency and a toggle never
+    // rebuilds the shell.
+    final notifications = NotificationScope.find(context);
     if (_notifier == null && notifications != null) {
       _notifier = Notifier(
         arrivals: _rooms.arrivals,
