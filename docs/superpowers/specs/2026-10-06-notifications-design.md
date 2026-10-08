@@ -138,10 +138,13 @@ synthesizes a soft, distinct two-note chime and writes
 `assets/sounds/chime.wav` and `ios/Runner/chime.caf`. The outputs are
 checked in; the tool regenerates them.
 
-The app plays it through each platform's own player: `AVAudioPlayer` on
-macOS and iOS (ambient category, so it never interrupts other audio or
-ignores the silent switch), GStreamer on Linux (already a dependency for
-video), `PlaySound` on Windows.
+The app plays it through each platform's own player: System Sound
+Services (`AudioServicesPlaySystemSound`) on macOS and iOS, Apple's player
+for short alert sounds. It never touches the app's audio session, mixes
+with other audio rather than interrupting it, plays at the alert volume,
+and on iOS never sounds while the ring/silent switch is on silent,
+whatever the rest of the app is playing. Linux plays it with GStreamer
+(already a dependency for video), Windows with `PlaySound`.
 
 ## D. Desktop notifications
 
