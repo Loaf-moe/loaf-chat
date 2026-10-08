@@ -383,13 +383,6 @@ class _AvatarRow extends StatelessWidget {
               me.name,
               style: loafDisplay(20, 600).copyWith(color: tokens.textStrong),
             ),
-            if (editable) ...[
-              const SizedBox(height: 2),
-              Text(
-                "any picture, it's shrunk to fit",
-                style: loafBody(11, 400).copyWith(color: tokens.textMuted),
-              ),
-            ],
           ],
         ),
       ),

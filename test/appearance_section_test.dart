@@ -75,17 +75,17 @@ void main() {
 
   testWidgets('says so while the season overrides the pick', (tester) async {
     final c = await _pump(tester, now: _inSeason);
-    expect(find.textContaining('until Nov 6'), findsOneWidget);
+    expect(find.textContaining('to use your pick'), findsOneWidget);
 
     c.setEasterEggs(false);
     await tester.pump();
-    expect(find.textContaining('until Nov 6'), findsNothing);
+    expect(find.textContaining('to use your pick'), findsNothing);
     await _done(tester, c);
   });
 
   testWidgets('no override note out of season', (tester) async {
     final c = await _pump(tester, now: _offSeason);
-    expect(find.textContaining('until Nov 6'), findsNothing);
+    expect(find.textContaining('to use your pick'), findsNothing);
     await _done(tester, c);
   });
 }

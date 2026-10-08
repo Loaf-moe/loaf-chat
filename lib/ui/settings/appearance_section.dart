@@ -37,7 +37,7 @@ class AppearanceSection extends StatelessWidget {
           if (controller.seasonOverrides) ...[
             const SizedBox(height: LoafSpace.x1),
             Text(
-              '${LoafThemeId.nihon.label} is on for the season, until Nov 6. '
+              'an easter egg is dressing things up right now. '
               'turn off easter eggs to use your pick.',
               style: muted,
             ),
@@ -45,9 +45,7 @@ class AppearanceSection extends StatelessWidget {
           const SizedBox(height: LoafSpace.x6),
           _Check(
             title: 'easter eggs',
-            detail:
-                'seasonal surprises, like ${LoafThemeId.nihon.label} '
-                'from Oct 16 to Nov 6.',
+            detail: 'the occasional surprise.',
             value: controller.easterEggs,
             onChanged: controller.setEasterEggs,
           ),
@@ -56,9 +54,9 @@ class AppearanceSection extends StatelessWidget {
           _Check(
             title: 'external content',
             detail:
-                'show pictures, video and files that a bridge links to on '
-                'other sites, like Discord. fetching them tells those sites '
-                'your address. never used in encrypted rooms.',
+                'show pictures and video hosted on other sites. fetching '
+                'them tells those sites your address. never used in '
+                'encrypted rooms.',
             value: controller.externalMedia,
             onChanged: controller.setExternalMedia,
           ),

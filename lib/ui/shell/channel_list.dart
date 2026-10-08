@@ -97,7 +97,7 @@ class _ChannelListState extends State<ChannelList> {
         left: false,
         child: Column(
           children: [
-            _Header(space: widget.space, tokens: tokens, menu: !widget.home),
+            _Header(space: widget.space, tokens: tokens),
             _SearchField(tokens: tokens),
             Expanded(
               child: ListView(
@@ -152,40 +152,28 @@ class _ChannelListState extends State<ChannelList> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({
-    required this.space,
-    required this.tokens,
-    required this.menu,
-  });
+  const _Header({required this.space, required this.tokens});
 
   final Space space;
   final LoafTokens tokens;
-
-  /// A space has a menu behind its name; Home has none to offer.
-  final bool menu;
 
   @override
   Widget build(BuildContext context) {
     // The channel list never touches a window corner, so this only moves
     // the window; the buttons live in the bars beside it.
     return WindowDragArea(
+      // The channel header's height, so the two dividers meet in one line.
       child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: tokens.border, width: 1)),
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                space.name,
-                style: loafDisplay(17, 600).copyWith(color: tokens.textStrong),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (menu)
-              Icon(LucideIcons.chevronDown, color: tokens.textMuted, size: 18),
-          ],
+        child: Text(
+          space.name,
+          style: loafDisplay(17, 600).copyWith(color: tokens.textStrong),
+          overflow: TextOverflow.ellipsis,
         ),
       ),
     );
@@ -539,7 +527,7 @@ class _ChannelEntry extends StatelessWidget {
 
     return Padding(
       key: ValueKey('channel-${channel.id}'),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -739,7 +727,7 @@ class _InviteEntry extends StatelessWidget {
           );
     return Padding(
       key: ValueKey('invite-${invite.id}'),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
       child: Material(
         color: selected ? tokens.card : Colors.transparent,
         borderRadius: BorderRadius.circular(LoafRadius.md),
