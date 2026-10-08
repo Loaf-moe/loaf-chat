@@ -240,7 +240,9 @@ class WindowBand extends StatelessWidget {
     final trailing = WindowChrome.buttonsAt(context, WindowEdge.trailing);
     if (leading.isEmpty && trailing.isEmpty) return const SizedBox.shrink();
     // The rail is 76pt: the dots fit exactly, and pills (Linux with its
-    // buttons on the left) shrink to fit rather than overflow.
+    // buttons on the left) shrink to fit rather than overflow. Each side
+    // gets the whole width when it is alone; a spacer beside it would halve
+    // that and scale the buttons down with it.
     return WindowDragArea(
       child: SizedBox(
         height: WindowMetrics.band,
@@ -249,18 +251,23 @@ class WindowBand extends StatelessWidget {
           child: Row(
             children: [
               if (leading.isNotEmpty)
-                const Flexible(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: WindowControls(WindowEdge.leading, inBand: true),
+                const Expanded(
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: WindowControls(WindowEdge.leading, inBand: true),
+                    ),
                   ),
                 ),
-              const Spacer(),
               if (trailing.isNotEmpty)
-                const Flexible(
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: WindowControls(WindowEdge.trailing, inBand: true),
+                const Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: WindowControls(WindowEdge.trailing, inBand: true),
+                    ),
                   ),
                 ),
             ],
@@ -336,16 +343,17 @@ class _TrafficLightsState extends State<_TrafficLights> {
                     duration: LoafMotion.fast,
                     width: 12,
                     height: 12,
+                    // Coloured whenever the window is focused, as a Mac's
+                    // are: grey dots at rest read as a "more" menu, not as
+                    // the window's buttons.
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: _hover
+                      color: focused || _hover
                           ? switch (b) {
                               WindowButton.close => tokens.accent,
                               WindowButton.minimize => tokens.idle,
                               WindowButton.maximize => tokens.online,
                             }
-                          : focused
-                          ? tokens.textMuted.withValues(alpha: 0.55)
                           : tokens.border,
                     ),
                     child: _hover

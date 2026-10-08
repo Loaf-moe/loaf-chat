@@ -242,6 +242,28 @@ void main() {
   );
 
   testWidgets(
+    "a rail-wide band draws a Mac's dots at full size",
+    variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+    (tester) async {
+      _fakeRunner(tester);
+      await _pump(
+        tester,
+        const Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(width: LoafShell.railWidth, child: WindowBand()),
+        ),
+      );
+      await tester.pump();
+      // On screen, not layout size: a squeezed FittedBox shrinks the dots
+      // by transform and leaves their layout size alone.
+      expect(
+        tester.getRect(find.byKey(const ValueKey('window-close'))).size,
+        const Size(12, 12),
+      );
+    },
+  );
+
+  testWidgets(
     'Windows reports the maximize button to the runner',
     variant: TargetPlatformVariant.only(TargetPlatform.windows),
     (tester) async {
