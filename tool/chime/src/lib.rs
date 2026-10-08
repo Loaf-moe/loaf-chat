@@ -6,8 +6,8 @@ use std::f64::consts::TAU;
 
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const LENGTH_S: f64 = 0.9;
-/// Full scale × this is the loudest sample: a chime, not an alarm.
-pub const PEAK: f64 = 0.35;
+/// Full scale × this is the loudest sample: about −12 dBFS, a soft chime.
+pub const PEAK: f64 = 0.25;
 
 struct Note {
     hz: f64,
@@ -16,11 +16,11 @@ struct Note {
 }
 
 const NOTES: [Note; 2] = [
-    Note { hz: 880.0, start_s: 0.0, decay_s: 0.16 },
-    Note { hz: 1318.51, start_s: 0.11, decay_s: 0.26 },
+    Note { hz: 659.25, start_s: 0.0, decay_s: 0.22 },
+    Note { hz: 987.77, start_s: 0.11, decay_s: 0.35 },
 ];
-const ATTACK_S: f64 = 0.006;
-const OVERTONE: f64 = 0.18;
+const ATTACK_S: f64 = 0.015;
+const OVERTONE: f64 = 0.05;
 const FADE_S: f64 = 0.03;
 
 /// The chime as 16-bit samples, peak-normalised to [PEAK].
@@ -110,8 +110,9 @@ mod tests {
         let s = samples();
         assert_eq!(s.len(), (SAMPLE_RATE as f64 * LENGTH_S) as usize);
         let peak = s.iter().map(|v| v.unsigned_abs()).max().unwrap_or(0);
-        let target = (PEAK * i16::MAX as f64) as u16;
-        assert!(peak <= target && peak + 2 >= target, "peak {peak} vs {target}");
+        // Same rounding as samples(), so the loudest sample lands exactly here.
+        let target = (PEAK * i16::MAX as f64).round() as u16;
+        assert_eq!(peak, target);
     }
 
     #[test]
