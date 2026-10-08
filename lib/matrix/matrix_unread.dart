@@ -95,7 +95,7 @@ class MatrixUnread {
           changed = true;
         }
       }
-      final own = _ownReceipt(room);
+      final own = ownReceipt(room);
       if (own != null) {
         final fresh = _receipts[roomId] != (eventId: own.eventId, ts: own.ts);
         // The by-time reading is what the gate guards against repeating. A
@@ -137,7 +137,7 @@ class MatrixUnread {
             // Saved tallies may hold locked messages, too.
             _watchKeys(room);
             if (_tallies.containsKey(room.id)) continue;
-            if (_hasNewMessages(room)) {
+            if (hasNewMessages(room, client.userID)) {
               _fills.schedule(room.id);
             } else {
               _tallies[room.id] = RoomTally();
@@ -238,7 +238,7 @@ class MatrixUnread {
   Future<bool> _fill(String roomId) async {
     final room = client.getRoomById(roomId);
     if (room == null) return true;
-    final own = _ownReceipt(room);
+    final own = ownReceipt(room);
     final found = <TallyEntry>[];
     var capped = false;
     int? newestSeen;
@@ -259,7 +259,7 @@ class MatrixUnread {
           if (own != null && (event.eventId == own.eventId || ts <= own.ts)) {
             break pages;
           }
-          if (_isOwnJoin(event)) break pages;
+          if (isOwnJoin(event, client.userID)) break pages;
           if (!countsAsMessage(event)) continue;
           if (event.senderId == client.userID) break pages;
           if (found.length == RoomTally.cap) {
@@ -291,7 +291,7 @@ class MatrixUnread {
     );
     _readReceipt(room, tally);
     // Remembered so the next sync doesn't apply this receipt a second time.
-    final current = _ownReceipt(room);
+    final current = ownReceipt(room);
     if (current != null) {
       _receipts[roomId] = (eventId: current.eventId, ts: current.ts);
     }
@@ -369,7 +369,7 @@ class MatrixUnread {
       final redacts = event.redacts;
       return redacts != null && tally.remove(redacts);
     }
-    if (_isOwnJoin(event)) {
+    if (isOwnJoin(event, client.userID)) {
       // What came before you joined was never yours to read.
       final had = !tally.isEmpty;
       tally.clear();
@@ -387,15 +387,6 @@ class MatrixUnread {
     tally.add(await _entry(room, event));
     return true;
   }
-
-  /// Whether [event] is you joining the room. A change of your name or
-  /// avatar is a join too, but with a join before it; that isn't one. With
-  /// no previous state to tell, any join of yours is taken as arriving.
-  bool _isOwnJoin(Event event) =>
-      event.type == EventTypes.RoomMember &&
-      event.stateKey == client.userID &&
-      event.content['membership'] == 'join' &&
-      event.prevContent?['membership'] != 'join';
 
   /// [event] as an unread entry: decrypted first where a key is here, so a
   /// mention in an encrypted room is seen.
@@ -429,37 +420,9 @@ class MatrixUnread {
     }
   }
 
-  /// Your latest read receipt in [room]: the later of the unthreaded ones
-  /// and those on the main timeline, which the SDK keeps apart. Receipts on
-  /// real threads are ignored, since Loaf shows thread replies inline and
-  /// reading a thread says nothing about the room.
-  LatestReceiptStateData? _ownReceipt(Room room) {
-    final state = room.receiptState;
-    final global = state.global.latestOwnReceipt;
-    final main = state.mainThread?.latestOwnReceipt;
-    if (global == null || main == null) return global ?? main;
-    return main.ts > global.ts ? main : global;
-  }
-
-  /// Whether the room's last event is a message from someone else that your
-  /// receipt doesn't cover. [Room.hasNewMessages] looks at unthreaded
-  /// receipts only.
-  bool _hasNewMessages(Room room) {
-    final last = room.lastEvent;
-    if (last == null ||
-        !countsAsMessage(last) ||
-        last.senderId == client.userID) {
-      return false;
-    }
-    final own = _ownReceipt(room);
-    return own == null ||
-        (own.eventId != last.eventId &&
-            own.ts < last.originServerTs.millisecondsSinceEpoch);
-  }
-
   /// Applies your current receipt in [room], changed or not.
   bool _readReceipt(Room room, RoomTally tally) {
-    final own = _ownReceipt(room);
+    final own = ownReceipt(room);
     return own != null && tally.readUpTo(own.eventId, own.ts);
   }
 
