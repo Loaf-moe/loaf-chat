@@ -6,12 +6,13 @@ import 'package:loaf_native/matrix/unread_fills.dart';
 /// Fills that wait for the test to answer them, and a clock it moves.
 class _Rig {
   _Rig() {
-    fills = UnreadFills(_fill, now: () => clock);
+    fills = UnreadFills(_fill, onSettled: settled.add, now: () => clock);
   }
 
   late final UnreadFills fills;
   var clock = DateTime(2030);
   final started = <String>[];
+  final settled = <String>[];
   final _open = <String, Completer<bool>>{};
 
   Future<bool> _fill(String roomId) {
@@ -140,5 +141,45 @@ void main() {
     rig.fills.retryFailed();
     rig.fills.retryFailed();
     expect(rig.started, ['a', 'a']);
+  });
+
+  test('a refill that fails counts toward the wait like any other', () async {
+    final rig = _Rig();
+    rig.fills.schedule('a');
+    rig.fills.schedule('a'); // Out already: a refill follows.
+    await rig.finish('a', ok: false); // 30 s.
+    expect(rig.started, ['a', 'a']);
+    await rig.finish('a', ok: false); // The refill fails too: 60 s.
+    rig.pass(const Duration(seconds: 59));
+    rig.fills.retryFailed();
+    expect(rig.started.length, 2);
+    rig.pass(const Duration(seconds: 1));
+    rig.fills.retryFailed();
+    expect(rig.started.length, 3);
+  });
+
+  test('disposing stops the queue from starting anything more', () async {
+    final rig = _Rig();
+    for (final id in ['a', 'b', 'c', 'd', 'e']) {
+      rig.fills.schedule(id);
+    }
+    rig.fills.dispose();
+    await rig.finish('a');
+    expect(rig.started, ['a', 'b', 'c', 'd']);
+    rig.fills.schedule('f');
+    expect(rig.started.length, 4);
+  });
+
+  test('a room is settled when its fetches end, worked or failed', () async {
+    final rig = _Rig();
+    rig.fills.schedule('a');
+    rig.fills.schedule('a'); // A refill: not settled until it ends too.
+    await rig.finish('a', ok: false);
+    expect(rig.settled, isEmpty);
+    await rig.finish('a');
+    expect(rig.settled, ['a']);
+    rig.fills.schedule('b');
+    await rig.finish('b', ok: false);
+    expect(rig.settled, ['a', 'b']);
   });
 }
