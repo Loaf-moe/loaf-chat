@@ -30,6 +30,18 @@ final class WindowChromeBridge: NSObject {
           forName: name, object: window, queue: .main
         ) { [weak self] _ in self?.sendState() })
     }
+    // The will* notifications fire before styleMask flips, so the state they
+    // send says what is about to be true; the did* ones then confirm it.
+    let transitions: [(Notification.Name, Bool)] = [
+      (NSWindow.willEnterFullScreenNotification, true),
+      (NSWindow.willExitFullScreenNotification, false),
+    ]
+    for (name, fullscreen) in transitions {
+      observers.append(
+        NotificationCenter.default.addObserver(
+          forName: name, object: window, queue: .main
+        ) { [weak self] _ in self?.sendState(fullscreen: fullscreen) })
+    }
   }
 
   deinit {
@@ -80,17 +92,17 @@ final class WindowChromeBridge: NSObject {
     }
   }
 
-  private func state(of window: NSWindow) -> [String: Any] {
+  private func state(of window: NSWindow, fullscreen: Bool? = nil) -> [String: Any] {
     [
       "maximized": window.isZoomed,
-      "fullscreen": window.styleMask.contains(.fullScreen),
+      "fullscreen": fullscreen ?? window.styleMask.contains(.fullScreen),
       "focused": window.isKeyWindow,
     ]
   }
 
-  private func sendState() {
+  private func sendState(fullscreen: Bool? = nil) {
     guard let window else { return }
-    channel.invokeMethod("stateChanged", arguments: state(of: window))
+    channel.invokeMethod("stateChanged", arguments: state(of: window, fullscreen: fullscreen))
   }
 
   /// Does what the person set in System Settings › Desktop & Dock for a

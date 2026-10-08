@@ -221,3 +221,13 @@ narrow.
   double-click and fullscreen.
 - **Linux / Windows:** CI builds them. Hand checks on GNOME, KDE and sway
   are Chris's. Windows is unverified until someone runs it.
+
+## Known limitations
+
+- Modal dialogs put a barrier over the whole window, Loaf's controls and
+  drag bars included, so while one is open the window cannot be moved,
+  minimized or closed from the chrome.
+- Keyboard close still works: ⌘W and ⌘Q on macOS, Alt+F4 on Windows and
+  Linux.
+- A root overlay above the navigator would fix it, but it reverses the
+  "fold into columns" decision, so the choice is left to Chris.
