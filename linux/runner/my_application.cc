@@ -39,6 +39,11 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));
 
+  // Loaf draws its own title-bar buttons; GTK's bar goes. Before realize:
+  // on X11 the titlebar swap re-creates the GdkWindow under Flutter's GL
+  // context.
+  window_chrome_attach(window, view);
+
   // Show the window when Flutter renders.
   // Requires the view to be realized so we can start rendering.
   g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
@@ -46,9 +51,6 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
-
-  // Loaf draws its own title-bar buttons; GTK's bar goes.
-  window_chrome_attach(window, view);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
