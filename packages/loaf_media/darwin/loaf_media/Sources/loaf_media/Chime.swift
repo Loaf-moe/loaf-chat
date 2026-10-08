@@ -33,6 +33,21 @@ final class Chime {
       let status = AudioServicesCreateSystemSoundID(
         URL(fileURLWithPath: file) as CFURL, &id)
       guard status == kAudioServicesNoError else { throw Failure.unplayable(status) }
+      #if os(macOS)
+        // A system sound follows the "Play user interface sound effects"
+        // box by default and goes silent when it is off. Loaf's own Sound
+        // setting is the switch for this chime, as it is for Messages and
+        // Mail, so opt out of that box. A failure only costs that opt-out,
+        // so log it and still play.
+        var notUI: UInt32 = 0
+        let optOut = AudioServicesSetProperty(
+          kAudioServicesPropertyIsUISound,
+          UInt32(MemoryLayout<SystemSoundID>.size), &id,
+          UInt32(MemoryLayout<UInt32>.size), &notUI)
+        if optOut != kAudioServicesNoError {
+          NSLog("loaf_media: chime could not opt out of UI sound setting (%d)", optOut)
+        }
+      #endif
       sounds[asset] = id
       sound = id
     }

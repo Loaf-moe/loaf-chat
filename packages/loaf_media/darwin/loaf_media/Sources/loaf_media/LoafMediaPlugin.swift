@@ -38,9 +38,9 @@ public final class LoafMediaPlugin: NSObject, FlutterPlugin {
     #endif
     let chime = Chime(path: { asset in
       let key = registrar.lookupKey(forAsset: asset)
-      // iOS keeps Flutter's assets in the main bundle. macOS keeps them in
-      // App.framework (bundle id io.flutter.flutter.app), which the key is
-      // relative to; checked against a debug build, where the main bundle's
+      // The key is relative to the bundle that holds Flutter's assets: the
+      // main bundle on iOS, and on macOS App.framework (bundle id
+      // io.flutter.flutter.app); checked against a debug build, where the main bundle's
       // own Resources has no flutter_assets and only that bundle resolves.
       #if os(iOS)
         return Bundle.main.path(forResource: key, ofType: nil)
