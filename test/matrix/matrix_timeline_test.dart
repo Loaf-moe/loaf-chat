@@ -155,18 +155,23 @@ Future<Client> _client(_Api api, {String path = inMemoryDatabasePath}) async {
   return client;
 }
 
-/// Lets the SDK's streams and the fake server deliver.
-Future<void> _settle() =>
-    Future<void>.delayed(const Duration(milliseconds: 50));
-
-/// Waits until [done], for tests on a database file: a slow disk (a CI
-/// runner's) can take longer than [_settle].
+/// Waits until [done]. The SDK answers through real timers, a database and
+/// the fake server, so how long that takes is the machine's: a runner
+/// testing many files at once can take far longer than a laptop. Gives up
+/// after a while, and the expect that follows says what went wrong.
 Future<void> _until(bool Function() done) async {
   final give = DateTime.now().add(const Duration(seconds: 10));
   while (!done() && DateTime.now().isBefore(give)) {
-    await _settle();
+    await Future<void>.delayed(const Duration(milliseconds: 5));
   }
 }
+
+/// Time for something that should not happen to show itself, before a
+/// test says it didn't. Only ever before such a check: on a slow machine
+/// that check is weaker, never wrong. Anything a test waits *for* is
+/// [_until].
+Future<void> _settle() =>
+    Future<void>.delayed(const Duration(milliseconds: 50));
 
 var _n = 0;
 var _clock = 1700000000000;
@@ -281,6 +286,10 @@ class _Harness {
   MatrixTimeline get timeline => rooms.timeline(_roomId)! as MatrixTimeline;
   List<Message> get messages => timeline.messages;
   Message byBody(String body) => messages.firstWhere((m) => m.body == body);
+
+  /// The status of the row reading [body], if there is one yet.
+  MessageStatus? statusOf(String body) =>
+      messages.where((m) => m.body == body).firstOrNull?.status;
 }
 
 /// A signed-in client whose room has [events], and its timeline opened.
@@ -299,7 +308,6 @@ Future<_Harness> _open(
   h.timeline; // Opens it.
   // Loaded, however long a busy runner takes, before any test looks.
   await _until(() => !h.timeline.loadingOlder);
-  await _settle();
   return h;
 }
 
@@ -576,7 +584,7 @@ void main() {
       var heard = 0;
       h.timeline.addListener(() => heard++);
       await _sync(h.client, [_text('two')]);
-      await _settle();
+      await _until(() => h.messages.length == 2);
       expect(h.messages.map((m) => m.body), ['one', 'two']);
       expect(heard, greaterThan(0));
     });
@@ -588,13 +596,13 @@ void main() {
       final api = h.api..holdSend = Completer<void>();
       h.timeline.send('  fresh bread  ');
       // The echo lands before the server has answered.
-      await _settle();
+      await _until(() => h.messages.length == 2);
       final echo = h.messages.last;
       expect(echo.body, 'fresh bread');
       expect(echo.author.id, _me);
       expect(echo.status, MessageStatus.sending);
       api.holdSend!.complete();
-      await _settle();
+      await _until(() => h.messages.last.status == MessageStatus.sent);
       expect(h.messages.last.status, MessageStatus.sent);
       expect(api.sent.single.$1, 'm.room.message');
       expect(api.sent.single.$2['body'], 'fresh bread');
@@ -604,7 +612,7 @@ void main() {
       final h = await _open([_text('hi')]);
       h.timeline.send('/leave');
       h.timeline.send('2 * 3 * 4');
-      await _settle();
+      await _until(() => h.api.sent.length == 2);
       expect(h.api.sent.map((s) => s.$2['body']), ['/leave', '2 * 3 * 4']);
       expect(h.api.sent.map((s) => s.$2['format']), [null, null]);
       expect(h.client.getRoomById(_roomId)!.membership, Membership.join);
@@ -615,7 +623,7 @@ void main() {
       h.timeline.send('**fresh** bread, `hot` ~~cold~~');
       h.timeline.send('> quoted\n\n- one\n- two');
       h.timeline.send('see [the menu](https://loaf.moe/menu)');
-      await _settle();
+      await _until(() => h.api.sent.length == 3);
       final sent = h.api.sent.map((s) => s.$2).toList();
       expect(sent.map((c) => c['body']), [
         '**fresh** bread, `hot` ~~cold~~',
@@ -649,7 +657,7 @@ void main() {
           ),
         ],
       );
-      await _settle();
+      await _until(() => h.api.sent.isNotEmpty);
       final content = h.api.sent.single.$2;
       // The plain body keeps the names as typed: no markdown links in it.
       expect(content['body'], '@Ada and @me, see #kitchen');
@@ -677,7 +685,7 @@ void main() {
           Mention(kind: MentionKind.person, id: '@ada:loaf.moe', label: '@Ada'),
         ],
       );
-      await _settle();
+      await _until(() => h.api.sent.isNotEmpty);
       final content = h.api.sent.single.$2;
       expect((content['m.mentions']! as Map)['user_ids'], [
         '@ada:loaf.moe',
@@ -699,7 +707,11 @@ void main() {
       final h = await _open([_text('question', id: r'$q')]);
       h.timeline.startReply(h.byBody('question'));
       h.timeline.send('answer');
-      await _settle();
+      await _until(
+        () =>
+            h.api.sent.isNotEmpty &&
+            h.messages.any((m) => m.body == 'answer' && m.replyTo != null),
+      );
       final content = h.api.sent.single.$2;
       expect((content['m.relates_to']! as Map)['m.in_reply_to'], {
         'event_id': r'$q',
@@ -716,7 +728,11 @@ void main() {
           bytes: Uint8List.fromList(utf8.encode('rye, water, salt')),
         ),
       );
-      await _settle();
+      await _until(
+        () => h.messages.any(
+          (m) => m.media?.name == 'notes.txt' && m.status == MessageStatus.sent,
+        ),
+      );
       final content = h.api.sent.single.$2;
       expect(content['msgtype'], MessageTypes.File);
       expect(content['body'], 'notes.txt');
@@ -736,7 +752,7 @@ void main() {
         ),
       );
       expect(h.timeline.target, isNull);
-      await _settle();
+      await _until(() => h.api.sent.isNotEmpty);
       final content = h.api.sent.single.$2;
       expect(content['msgtype'], MessageTypes.Image);
       expect((content['m.relates_to']! as Map)['m.in_reply_to'], {
@@ -766,6 +782,7 @@ void main() {
           Attachment(name: 'big.bin', bytes: Uint8List.fromList([1, 2, 3])),
         );
         expect(await said, "big.bin is 3 B, over this server's 2 B limit");
+        await _until(() => h.messages.every((m) => m.media?.name != 'big.bin'));
         await _settle();
         expect(h.api.uploads, 0);
         expect(h.api.sent, isEmpty);
@@ -786,6 +803,7 @@ void main() {
           Attachment(name: 'big.bin', bytes: Uint8List.fromList([1, 2, 3])),
         );
         expect(await said, 'big.bin (3 B) is too big for this server');
+        await _until(() => h.messages.every((m) => m.media?.name != 'big.bin'));
         await _settle();
         expect(h.api.uploads, 1, reason: 'not sent again and again');
         expect(h.api.sent, isEmpty);
@@ -822,7 +840,7 @@ void main() {
       addTearDown(rooms.dispose);
       final h = _Harness(api, client, rooms);
       h.timeline;
-      await _settle();
+      await _until(() => !h.timeline.loadingOlder);
 
       h.timeline.sendFile(
         Attachment(name: 'stuck.bin', bytes: Uint8List.fromList([1, 2, 3])),
@@ -844,13 +862,13 @@ void main() {
       final h = await _open([_text('hi')]);
       h.api.refuseSend = true;
       h.timeline.send('rejected');
-      await _settle();
+      await _until(() => h.statusOf('rejected') == MessageStatus.failed);
       final failed = h.byBody('rejected');
       expect(failed.status, MessageStatus.failed);
 
       h.api.refuseSend = false;
       h.timeline.retry(failed.id);
-      await _settle();
+      await _until(() => h.statusOf('rejected') == MessageStatus.sent);
       expect(h.byBody('rejected').status, MessageStatus.sent);
       expect(h.api.sent.map((s) => s.$2['body']), ['rejected']);
     });
@@ -859,9 +877,9 @@ void main() {
       final h = await _open([_text('hi')]);
       h.api.refuseSend = true;
       h.timeline.send('rejected');
-      await _settle();
+      await _until(() => h.statusOf('rejected') == MessageStatus.failed);
       h.timeline.discard(h.byBody('rejected').id);
-      await _settle();
+      await _until(() => h.messages.length == 1);
       expect(h.messages.map((m) => m.body), ['hi']);
     });
 
@@ -872,11 +890,11 @@ void main() {
       await _sync(client, [_text('hi')]);
       final rooms = MatrixRooms(client);
       final timeline = rooms.timeline(_roomId)!;
-      await _settle();
+      await _until(() => !timeline.loadingOlder);
       timeline
         ..send('late')
         ..toggleReaction(timeline.messages.first.id, '🔥');
-      await _settle();
+      await _until(() => timeline.messages.length == 2);
       rooms.dispose();
       api.holdSend!.complete();
       await _settle();
@@ -887,20 +905,22 @@ void main() {
     test('toggles your own reaction on and off', () async {
       final h = await _open([_text('bread', id: r'$m1')]);
       h.timeline.toggleReaction(r'$m1', '🔥');
-      await _settle();
+      // Done with, not only shown: a reaction still on its way has nothing
+      // to take back, and a tap on it does nothing.
+      await _until(() => h.api.sent.isNotEmpty && h.timeline.settled);
       expect(h.api.sent.single.$1, 'm.reaction');
       final pill = h.messages.single.reactions.single;
       expect((pill.emoji, pill.count, pill.mine), ('🔥', 1, true));
 
       h.timeline.toggleReaction(r'$m1', '🔥');
-      await _settle();
+      await _until(() => h.api.redacted.isNotEmpty);
       expect(h.api.redacted, hasLength(1));
       // Gone once the redaction comes back down a sync.
       await _sync(h.client, [
         _event('m.room.redaction', {}, sender: _me)
           ..['redacts'] = h.api.redacted.single,
       ]);
-      await _settle();
+      await _until(() => h.messages.single.reactions.isEmpty);
       expect(h.messages.single.reactions, isEmpty);
     });
 
@@ -910,7 +930,7 @@ void main() {
         _reaction(r'$m1', '🔥'),
       ]);
       h.timeline.toggleReaction(r'$m1', '🔥');
-      await _settle();
+      await _until(() => h.api.sent.isNotEmpty);
       expect(h.api.redacted, isEmpty);
       final pill = h.messages.single.reactions.single;
       expect((pill.count, pill.mine), (2, true));
@@ -939,7 +959,9 @@ void main() {
       h.timeline.failures.listen(failures.add);
       h.api.refuseSend = true;
       h.timeline.toggleReaction(r'$m1', '🔥');
-      await _settle();
+      await _until(
+        () => failures.isNotEmpty && h.messages.single.reactions.isEmpty,
+      );
       expect(h.messages.single.reactions, isEmpty);
       expect(failures, ["couldn't react"]);
     });
@@ -950,7 +972,9 @@ void main() {
       h.timeline.failures.listen(failures.add);
       h.api.failSend = true;
       h.timeline.toggleReaction(r'$m1', '🔥');
-      await _settle();
+      await _until(
+        () => failures.isNotEmpty && h.messages.single.reactions.isEmpty,
+      );
       expect(h.messages.single.reactions, isEmpty);
       expect(failures, ["couldn't react"]);
     });
@@ -961,7 +985,9 @@ void main() {
       final h = await _open([_text('helo', id: r'$m1', sender: _me)]);
       h.timeline.startEdit(h.byBody('helo'));
       h.timeline.saveEdit(r'$m1', 'hello');
-      await _settle();
+      await _until(
+        () => h.api.sent.isNotEmpty && h.messages.single.body == 'hello',
+      );
       final content = h.api.sent.single.$2;
       expect(content['m.new_content'], containsPair('body', 'hello'));
       expect(content['m.relates_to'], {
@@ -987,7 +1013,9 @@ void main() {
       h.timeline.failures.listen(failures.add);
       h.api.refuseSend = true;
       h.timeline.saveEdit(r'$m1', 'hello');
-      await _settle();
+      await _until(
+        () => failures.isNotEmpty && h.messages.single.body == 'helo',
+      );
       final m = h.messages.single;
       expect((m.body, m.edited), ('helo', false));
       expect(failures, ["couldn't save that edit"]);
@@ -999,7 +1027,9 @@ void main() {
       h.timeline.failures.listen(failures.add);
       h.api.failSend = true;
       h.timeline.saveEdit(r'$m1', 'hello');
-      await _settle();
+      await _until(
+        () => failures.isNotEmpty && h.messages.single.body == 'helo',
+      );
       final m = h.messages.single;
       expect((m.body, m.edited), ('helo', false));
       expect(failures, ["couldn't save that edit"]);
@@ -1011,7 +1041,7 @@ void main() {
       final h = await _open([_text('hi')]);
       h.api.refuseSend = true;
       h.timeline.send('rejected');
-      await _settle();
+      await _until(() => h.statusOf('rejected') == MessageStatus.failed);
       final failed = h.byBody('rejected');
 
       h.api
@@ -1020,8 +1050,10 @@ void main() {
       h.timeline
         ..retry(failed.id)
         ..retry(failed.id);
-      await _settle();
+      await _until(() => h.statusOf('rejected') == MessageStatus.sending);
       h.api.holdSend!.complete();
+      await _until(() => h.statusOf('rejected') == MessageStatus.sent);
+      // Time for a second send, if one were coming.
       await _settle();
       expect(h.api.sent.map((s) => s.$2['body']), ['rejected']);
       expect(h.byBody('rejected').status, MessageStatus.sent);
@@ -1055,7 +1087,7 @@ void main() {
         addTearDown(rooms.dispose);
         final h = _Harness(api, client, rooms);
         h.timeline;
-        await _settle();
+        await _until(() => !h.timeline.loadingOlder);
 
         Message notes() =>
             h.messages.firstWhere((m) => m.media?.name == 'notes.txt');
@@ -1064,7 +1096,13 @@ void main() {
         h.timeline.sendFile(
           Attachment(name: 'notes.txt', bytes: Uint8List.fromList([1, 2, 3])),
         );
-        await _settle();
+        await _until(
+          () => h.messages.any(
+            (m) =>
+                m.media?.name == 'notes.txt' &&
+                m.status == MessageStatus.failed,
+          ),
+        );
         expect(notes().status, MessageStatus.failed);
         expect(notes().uploaded, isNull);
 
@@ -1073,14 +1111,22 @@ void main() {
           ..refuseSend = false
           ..holdSend = Completer<void>();
         h.timeline.retry(notes().id);
-        await _settle();
+        await _until(
+          () =>
+              notes().status == MessageStatus.sending &&
+              notes().uploaded == 1.0,
+        );
         expect(notes().status, MessageStatus.sending);
         expect(notes().uploaded, 1.0);
 
         h.api.holdSend!.complete();
-        await _settle();
+        await _until(() => notes().status == MessageStatus.sent);
         expect(notes().status, MessageStatus.sent);
         expect(notes().uploaded, isNull);
+        // The row reads sent before the SDK has finished: once sent, it
+        // drops the copy it kept to resend from, the last thing it does.
+        await _until(() => media.listSync().isEmpty);
+        expect(media.listSync(), isEmpty);
       },
     );
   });
@@ -1089,12 +1135,12 @@ void main() {
     test('redacts, and the message goes when that syncs back', () async {
       final h = await _open([_text('oops', id: r'$m1', sender: _me)]);
       h.timeline.delete(r'$m1');
-      await _settle();
+      await _until(() => h.api.redacted.isNotEmpty);
       expect(h.api.redacted, [r'$m1']);
       await _sync(h.client, [
         _event('m.room.redaction', {}, sender: _me)..['redacts'] = r'$m1',
       ]);
-      await _settle();
+      await _until(() => h.messages.isEmpty);
       expect(h.messages, isEmpty);
     });
 
@@ -1104,7 +1150,7 @@ void main() {
       h.timeline.failures.listen(failures.add);
       h.api.refuseRedact = true;
       h.timeline.delete(r'$m1');
-      await _settle();
+      await _until(() => failures.isNotEmpty);
       expect(h.messages.single.body, 'oops');
       expect(failures, ["couldn't delete that"]);
     });
@@ -1129,7 +1175,7 @@ void main() {
       expect(h.timeline.canLoadOlder, isTrue);
       h.timeline.loadOlder();
       expect(h.timeline.loadingOlder, isTrue);
-      await _settle();
+      await _until(() => !h.timeline.loadingOlder);
       expect(h.timeline.loadingOlder, isFalse);
       expect(h.messages.map((m) => m.body), ['oldest', 'older', 'recent']);
       expect(h.timeline.canLoadOlder, isFalse);
@@ -1140,9 +1186,11 @@ void main() {
       // No create event and no `end`: the server has nothing further.
       h.api.history.add({'chunk': [], 'start': 'p1'});
       h.timeline.loadOlder();
-      await _settle();
+      await _until(() => !h.timeline.loadingOlder);
       expect(h.timeline.canLoadOlder, isFalse);
       h.timeline.loadOlder();
+      // Time for a request, if one were going; with no page left to
+      // answer it, the fake server would throw.
       await _settle();
       expect(h.api.history, isEmpty);
     });
@@ -1151,7 +1199,7 @@ void main() {
       final h = await _open([_text('recent')], prevBatch: 'p1');
       h.api.refuseHistory = true;
       h.timeline.loadOlder();
-      await _settle();
+      await _until(() => !h.timeline.loadingOlder);
       expect(h.timeline.loadOlderFailed, isTrue);
       expect(h.timeline.loadingOlder, isFalse);
 
@@ -1159,7 +1207,7 @@ void main() {
         ..refuseHistory = false
         ..history.add(page());
       h.timeline.loadOlder();
-      await _settle();
+      await _until(() => !h.timeline.loadingOlder);
       expect(h.timeline.loadOlderFailed, isFalse);
       expect(h.messages.first.body, 'oldest');
     });
@@ -1174,7 +1222,7 @@ void main() {
       final timeline = rooms.timeline(_roomId)!;
       expect(timeline.loadingOlder, isTrue);
       expect(timeline.messages, isEmpty);
-      await _settle();
+      await _until(() => !timeline.loadingOlder);
       expect(timeline.loadingOlder, isFalse);
       expect(timeline.messages.single.body, 'hi');
     });
@@ -1186,7 +1234,7 @@ void main() {
       () async {
         final h = await _open([_text('one'), _text('two', id: r'$last')]);
         h.rooms.markRead(_roomId);
-        await _settle();
+        await _until(() => h.api.markers.isNotEmpty);
         final marker = h.api.markers.single;
         expect(marker['m.fully_read'], r'$last');
         // Public: the person you are talking to sees you have read it.
@@ -1198,15 +1246,17 @@ void main() {
       final h = await _open([_text('one', id: r'$1')]);
       h.api.holdMarkers = Completer<void>();
       h.rooms.markRead(_roomId);
-      await _settle();
+      await _until(() => h.api.markers.isNotEmpty);
       await _sync(h.client, [_text('two', id: r'$2')]);
+      await _until(() => h.messages.length == 2);
       h.rooms
         ..markRead(_roomId)
         ..markRead(_roomId);
+      // Time for another receipt to go out, if one were not waiting.
       await _settle();
       expect(h.api.markers, hasLength(1));
       h.api.holdMarkers!.complete();
-      await _settle();
+      await _until(() => h.api.markers.length >= 2);
       expect(h.api.markers.map((m) => m['m.fully_read']), [r'$1', r'$2']);
     });
 
@@ -1245,7 +1295,7 @@ void main() {
       final h = await _open([_text('one', id: r'$1')]);
       h.api.holdSend = Completer<void>();
       h.timeline.send('mine');
-      await _settle();
+      await _until(() => h.statusOf('mine') == MessageStatus.sending);
       h.rooms.markRead(_roomId);
       await _settle();
       expect(h.api.markers, isEmpty);
@@ -1263,8 +1313,7 @@ void main() {
     final first = await _client(api, path: path);
     await _sync(first, [_text('kept')]);
     final firstRooms = MatrixRooms(first);
-    firstRooms.timeline(_roomId)!;
-    await _settle();
+    await _until(() => !firstRooms.timeline(_roomId)!.loadingOlder);
     firstRooms.timeline(_roomId)!.send('unsent');
     await _until(
       () =>
@@ -1306,8 +1355,7 @@ void main() {
     );
     await _sync(first, [_text('kept')]);
     final firstRooms = MatrixRooms(first);
-    firstRooms.timeline(_roomId)!;
-    await _settle();
+    await _until(() => !firstRooms.timeline(_roomId)!.loadingOlder);
     firstRooms.timeline(_roomId)!.send('in flight');
     await _until(
       () =>

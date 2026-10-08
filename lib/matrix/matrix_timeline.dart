@@ -91,6 +91,11 @@ class MatrixTimeline extends ChangeNotifier
   /// retried or discarded rather than dimmed for ever.
   final _inFlight = <String>{};
 
+  /// Transactions [retry] is sending again. A first send can still be
+  /// finishing after its echo already reads failed; it neither stops a
+  /// retry nor ends one.
+  final _resending = <String>{};
+
   /// How much of each file upload has gone, 0 to 1, by transaction id. The
   /// SDK keeps no such figure, so it comes from [LoafHttpClient].
   final _uploads = <String, double>{};
@@ -99,6 +104,11 @@ class MatrixTimeline extends ChangeNotifier
   /// tap while one is on its way would otherwise add it twice: its echo is
   /// not in the timeline yet.
   final _reacting = <(String, String)>{};
+
+  /// Whether everything this session sent has been answered. A row can
+  /// read sent, or a pill yours, a moment before the SDK is done with it.
+  @visibleForTesting
+  bool get settled => _inFlight.isEmpty && _reacting.isEmpty;
 
   var _newerFailed = false;
   Future<void>? _newer;
@@ -411,6 +421,7 @@ class MatrixTimeline extends ChangeNotifier
     return send(txid)
         .then((id) => id ?? (throw StateError('not sent: $txid')))
         .whenComplete(() {
+          if (_resending.contains(txid)) return;
           _inFlight.remove(txid);
           _uploads.remove(txid);
           _changed();
@@ -671,11 +682,12 @@ class MatrixTimeline extends ChangeNotifier
     if (event == null || !_unsent(event)) return;
     // A second tap while the first resend is on its way: the event still
     // reads failed until the SDK moves it on, but is already being sent.
-    if (_inFlight.contains(event.eventId)) return;
+    if (_resending.contains(event.eventId)) return;
     // The SDK resends only what it has marked failed; one left sending by
     // a quit app is failed in all but name.
     event.status = EventStatus.error;
     final txid = event.eventId;
+    _resending.add(txid);
     _inFlight.add(txid);
     // A file goes up again whole, under the same transaction id: its row
     // says how far, as on the first try.
@@ -689,6 +701,7 @@ class MatrixTimeline extends ChangeNotifier
         (sent, total) => _uploaded(txid, sent, total, size),
         event.sendAgain,
       ).then<void>((_) {}, onError: (Object _) {}).whenComplete(() {
+        _resending.remove(txid);
         _inFlight.remove(txid);
         _uploads.remove(txid);
         _changed();
