@@ -277,6 +277,19 @@ VoidCallback _action(WindowChromeController c, WindowButton b) => switch (b) {
   WindowButton.close => c.close,
 };
 
+/// What a screen reader (and a pill's tooltip) calls a button. A Mac's
+/// green dot zooms, so it says so; elsewhere it maximizes or restores.
+String _label(WindowButton b, {required bool maximized}) => switch (b) {
+  WindowButton.close => 'Close window',
+  WindowButton.minimize => 'Minimize window',
+  WindowButton.maximize =>
+    maximized
+        ? 'Restore window'
+        : defaultTargetPlatform == TargetPlatform.macOS
+        ? 'Zoom window'
+        : 'Maximize window',
+};
+
 /// A Mac's three dots, in Loaf's palette: quiet at rest, coloured with
 /// their glyphs while the pointer is over any of them.
 class _TrafficLights extends StatefulWidget {
@@ -311,36 +324,42 @@ class _TrafficLightsState extends State<_TrafficLights> {
           children: [
             for (final (i, b) in widget.buttons.indexed) ...[
               if (i > 0) const SizedBox(width: LoafSpace.x2),
-              GestureDetector(
-                key: ValueKey('window-${b.name}'),
+              Semantics(
+                button: true,
+                label: _label(b, maximized: widget.controller.state.maximized),
+                excludeSemantics: true,
                 onTap: _action(widget.controller, b),
-                child: AnimatedContainer(
-                  duration: LoafMotion.fast,
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _hover
-                        ? switch (b) {
-                            WindowButton.close => tokens.accent,
-                            WindowButton.minimize => tokens.idle,
-                            WindowButton.maximize => tokens.online,
-                          }
-                        : focused
-                        ? tokens.textMuted.withValues(alpha: 0.55)
-                        : tokens.border,
+                child: GestureDetector(
+                  key: ValueKey('window-${b.name}'),
+                  onTap: _action(widget.controller, b),
+                  child: AnimatedContainer(
+                    duration: LoafMotion.fast,
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _hover
+                          ? switch (b) {
+                              WindowButton.close => tokens.accent,
+                              WindowButton.minimize => tokens.idle,
+                              WindowButton.maximize => tokens.online,
+                            }
+                          : focused
+                          ? tokens.textMuted.withValues(alpha: 0.55)
+                          : tokens.border,
+                    ),
+                    child: _hover
+                        ? Icon(
+                            switch (b) {
+                              WindowButton.close => LucideIcons.x,
+                              WindowButton.minimize => LucideIcons.minus,
+                              WindowButton.maximize => LucideIcons.plus,
+                            },
+                            size: 8,
+                            color: tokens.textOnAccent,
+                          )
+                        : null,
                   ),
-                  child: _hover
-                      ? Icon(
-                          switch (b) {
-                            WindowButton.close => LucideIcons.x,
-                            WindowButton.minimize => LucideIcons.minus,
-                            WindowButton.maximize => LucideIcons.plus,
-                          },
-                          size: 8,
-                          color: tokens.textOnAccent,
-                        )
-                      : null,
                 ),
               ),
             ],
@@ -462,25 +481,37 @@ class _PillState extends State<_Pill> {
     final rest = widget.state.focused
         ? tokens.textMuted
         : tokens.textMuted.withValues(alpha: 0.5);
+    final label = _label(widget.button, maximized: widget.state.maximized);
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: LoafMotion.fast,
-          width: 32,
-          height: 28,
-          decoration: BoxDecoration(
-            color: hover
-                ? (close ? tokens.accent : tokens.card)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(LoafRadius.md),
-          ),
-          child: Icon(
-            icon,
-            size: 16,
-            color: hover && close ? tokens.textOnAccent : rest,
+      // The tooltip's own semantics are off: the button already says it.
+      child: Tooltip(
+        message: label,
+        excludeFromSemantics: true,
+        child: Semantics(
+          button: true,
+          label: label,
+          excludeSemantics: true,
+          onTap: widget.onTap,
+          child: GestureDetector(
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: LoafMotion.fast,
+              width: 32,
+              height: 28,
+              decoration: BoxDecoration(
+                color: hover
+                    ? (close ? tokens.accent : tokens.card)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(LoafRadius.md),
+              ),
+              child: Icon(
+                icon,
+                size: 16,
+                color: hover && close ? tokens.textOnAccent : rest,
+              ),
+            ),
           ),
         ),
       ),

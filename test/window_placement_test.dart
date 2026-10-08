@@ -200,6 +200,29 @@ void main() {
     },
   );
 
+  testWidgets(
+    'the buttons are named for a screen reader',
+    variant: TargetPlatformVariant({
+      TargetPlatform.macOS,
+      TargetPlatform.windows,
+    }),
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      await _pump(tester, const Size(1440, 900), const AppShell());
+      expect(find.bySemanticsLabel('Close window'), findsOneWidget);
+      expect(find.bySemanticsLabel('Minimize window'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel(
+          defaultTargetPlatform == TargetPlatform.macOS
+              ? 'Zoom window'
+              : 'Maximize window',
+        ),
+        findsOneWidget,
+      );
+      semantics.dispose();
+    },
+  );
+
   group('a DM call', () {
     // The call panel sits under the channel header, which holds the corner;
     // a second set of buttons mid-window would be the bug.
