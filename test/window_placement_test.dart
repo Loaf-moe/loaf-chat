@@ -199,4 +199,76 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  group('a DM call', () {
+    // The call panel sits under the channel header, which holds the corner;
+    // a second set of buttons mid-window would be the bug.
+    Future<void> startDmCall(WidgetTester tester, {bool narrow = false}) async {
+      if (narrow) {
+        await tester.tap(find.byIcon(LucideIcons.menu));
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.byKey(SpacesRail.homeKey));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(ChannelList),
+          matching: find.text('Mika Rye'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Start a voice call'));
+      // Not pumpAndSettle: ringing pulses forever.
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byKey(const ValueKey('dm-call-panel')), findsOneWidget);
+    }
+
+    void expectOneCloseAtTop(WidgetTester tester) {
+      expect(find.byKey(_close), findsOneWidget);
+      expect(
+        tester.getRect(find.byKey(_close)).top,
+        lessThan(WindowMetrics.band),
+      );
+      expect(tester.takeException(), isNull);
+    }
+
+    testWidgets(
+      'macOS wide: one set of buttons, not one under the header too',
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      (tester) async {
+        await _pump(tester, const Size(1440, 900), const AppShell());
+        await startDmCall(tester);
+        expectOneCloseAtTop(tester);
+        await tester.tap(find.byTooltip('Expand'));
+        await tester.pump(const Duration(milliseconds: 300));
+        expectOneCloseAtTop(tester);
+        await tester.pump(CallController.ringTimeout);
+      },
+    );
+
+    testWidgets(
+      'Windows wide: one set of buttons, not one under the header too',
+      variant: TargetPlatformVariant.only(TargetPlatform.windows),
+      (tester) async {
+        await _pump(tester, const Size(1440, 900), const AppShell());
+        await startDmCall(tester);
+        expectOneCloseAtTop(tester);
+        await tester.tap(find.byTooltip('Expand'));
+        await tester.pump(const Duration(milliseconds: 300));
+        expectOneCloseAtTop(tester);
+        await tester.pump(CallController.ringTimeout);
+      },
+    );
+
+    testWidgets(
+      'narrow: one set of buttons, not one under the header too',
+      variant: TargetPlatformVariant.only(TargetPlatform.macOS),
+      (tester) async {
+        await _pump(tester, const Size(600, 800), const AppShell());
+        await startDmCall(tester, narrow: true);
+        expectOneCloseAtTop(tester);
+        await tester.pump(CallController.ringTimeout);
+      },
+    );
+  });
 }
