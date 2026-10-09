@@ -745,23 +745,22 @@ class _JumpGlow extends StatelessWidget {
       clipBehavior: Clip.none,
       children: [
         if (focusKey != null)
-          if (focusKey != null)
-            Positioned(
-              key: focusKey,
-              left: -LoafSpace.x2,
-              right: -LoafSpace.x2,
-              top: -2,
-              bottom: -2,
-              child: AnimatedContainer(
-                key: const ValueKey('jump-glow'),
-                duration: _glowFade,
-                curve: LoafMotion.ease,
-                decoration: BoxDecoration(
-                  color: tokens.accent.withValues(alpha: lit ? 0.18 : 0),
-                  borderRadius: BorderRadius.circular(LoafRadius.md),
-                ),
+          Positioned(
+            key: focusKey,
+            left: -LoafSpace.x2,
+            right: -LoafSpace.x2,
+            top: -2,
+            bottom: -2,
+            child: AnimatedContainer(
+              key: const ValueKey('jump-glow'),
+              duration: _glowFade,
+              curve: LoafMotion.ease,
+              decoration: BoxDecoration(
+                color: tokens.accent.withValues(alpha: lit ? 0.18 : 0),
+                borderRadius: BorderRadius.circular(LoafRadius.md),
               ),
             ),
+          ),
         child,
       ],
     );
