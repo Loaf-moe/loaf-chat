@@ -46,13 +46,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
+      # Builds, signs through Apple's cloud with the same key as iOS, and
+      # notarizes: no provisioning profile secret.
       - run: >
-          mise exec -- flutter build macos --release
-          --build-name=${{ needs.version.outputs.name }}
-          --build-number=${{ needs.version.outputs.build }}
-          --dart-define=LOAF_BUILD=${{ needs.version.outputs.build }}
-          --dart-define=LOAF_VERSION=${{ needs.version.outputs.name }}
-      - run: tool/release/macos.sh "${{ needs.version.outputs.name }}" dist
+          tool/release/macos.sh "${{ needs.version.outputs.name }}"
+          "${{ needs.version.outputs.build }}" dist
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
