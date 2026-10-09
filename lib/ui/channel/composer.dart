@@ -532,6 +532,8 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
                   child: TextField(
                     controller: _controller,
                     focusNode: _focus,
+                    // Sentence case, as every other app's message field does.
+                    textCapitalization: TextCapitalization.sentences,
                     contextMenuBuilder: _contextMenu,
                     minLines: 1,
                     maxLines: 5,
