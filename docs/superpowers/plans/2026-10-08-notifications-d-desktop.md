@@ -2932,6 +2932,43 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 The hand test is in Task 12.
 
+### Task 9b: The macOS release signs through Apple's cloud, as iOS does
+
+Chris, 2026-10-08: "You do it. We already did this. It's the same profile." iOS already signs in CI with the App Store Connect key: `tool/release/ios.sh` archives the app, then runs `xcodebuild -exportArchive -allowProvisioningUpdates -authenticationKey…`. The macOS release moves to the same pattern:
+- **No `MACOS_PROVISION_PROFILE` secret**, and nobody clicks through developer.apple.com.
+- **Xcode's automatic signing** enables Communication Notifications on `moe.loaf.chat.ios` and makes the Developer ID profile itself.
+- **Task 9 has already put the entitlement** in both `DebugProfile.entitlements` and `Release.entitlements`, and set the Runner target to Automatic signing with team `6W2A5N37N3` in every configuration.
+
+**Files:**
+- Modify: `tool/release/macos.sh` (rewrite its build and sign half), `.github/workflows/release.yml` (the macOS job)
+- Create: `tool/release/macos-export.plist`
+
+**What the new `macos.sh` does, in order:**
+1. **Fail fast on missing secrets.** Like `ios.sh`, check for `NOTARY_KEY_P8`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`, `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD` and `SPARKLE_PRIVATE_KEY`. Write the key to a work directory that a `trap` removes.
+2. **Import the Developer ID certificate as before**, through the script's own keychain. The DMG still has to be signed with `codesign`, and the export may use the local certificate rather than mint a cloud one.
+3. **Configure the build:** `mise exec -- flutter build macos --release --config-only` with the build name and number and both `--dart-define`s. Move these flags from `release.yml` into the script, and pass the version and build in as arguments, the same as `ios.sh`.
+4. **Archive:** `xcodebuild archive -workspace macos/Runner.xcworkspace -scheme Runner -configuration Release -destination 'generic/platform=macOS' -archivePath "$work/Runner.xcarchive"`.
+   - **Signing decision:** first try the archive unsigned (`CODE_SIGNING_ALLOWED=NO`), as `ios.sh` does, then inspect what the export produces (step 6).
+   - If the exported app is missing the sandbox entitlements, sign the archive instead: add `-allowProvisioningUpdates` and the three `-authenticationKey…` flags to the archive command, and drop `CODE_SIGNING_ALLOWED=NO`.
+   - Say which one you chose, and why, in a comment.
+5. **Export:** `xcodebuild -exportArchive -exportOptionsPlist tool/release/macos-export.plist -exportPath "$work/export" -allowProvisioningUpdates` plus the three `-authenticationKey…` flags. `macos-export.plist` contains `method` `developer-id`, `signingStyle` `automatic` and `teamID` `6W2A5N37N3`. Run `plutil -lint` on it first, as `ios.sh` does with its plist.
+6. **Gates that fail the release.** Run these on `$work/export/Loaf Chat.app`, one `codesign -d --entitlements - --xml` read each. Never ship an app that would lose its data or crash at launch.
+   - `com.apple.security.app-sandbox` is true.
+   - `com.apple.developer.usernotifications.communication` is true.
+   - `com.apple.security.temporary-exception.mach-lookup.global-name` is present. It's the Sparkle exception already in `Release.entitlements`.
+   - `get-task-allow` is absent.
+   - `Contents/embedded.provisionprofile` exists.
+   - `codesign --verify --deep --strict` passes.
+   - Sparkle's `Downloader.xpc` still carries its own entitlements (`com.apple.security.network.client`). Compare with `codesign -d --entitlements -` on the same XPC in the built archive.
+   - The signing authority is `Developer ID Application`.
+7. **DMG, notarization, staple and appcast:** unchanged from today. They operate on the exported app.
+
+`release.yml`'s macOS job runs only `tool/release/macos.sh <version> <build> dist`. Drop the separate `flutter build` step and the `MACOS_PROVISION_PROFILE` env line.
+
+- [ ] **Step 1: Prove it locally first, with no notarization and nothing launched.** Run steps 3 to 6 on this Mac. Xcode's account supplies `-allowProvisioningUpdates`, so you can skip the API-key flags locally, or pass them if the key is to hand. Record every gate's output. If the unsigned-archive route fails a gate, switch to the signed route and record that too. **Never launch the exported app.** It shares data with Chris's installed copy.
+- [ ] **Step 2:** Write `macos.sh`, `macos-export.plist` and the `release.yml` change. Run `bash -n tool/release/macos.sh`. Check that `actionlint` passes, if it's available.
+- [ ] **Step 3:** Commit (`build(release): sign the macOS release through Apple's cloud, with communication notifications`). The real proof is the tagged release run; the controller watches it.
+
 ### Task 10: Windows: `packages/loaf_notify` and the Rust crate `loaf_notify_win`
 
 **Files:**
