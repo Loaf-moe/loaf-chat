@@ -28,6 +28,10 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INSendMessageIntent</string>
+	</array>
 	<key>SUFeedURL</key>
 	<string>https://get.loaf.moe/appcast.xml</string>
 	<key>SUPublicEDKey</key>
