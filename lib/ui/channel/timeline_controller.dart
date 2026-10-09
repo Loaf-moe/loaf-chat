@@ -211,8 +211,14 @@ class TimelineController extends ChangeNotifier
       RegExp('<([^>]*)>'),
       (m) => '&lt;${m[1]}&gt;',
     );
+    // A lone newline is a line break, as the SDK's convertLinebreaks makes
+    // it; markdown alone would fold it into a space.
+    final linked = linkMentions(
+      escaped,
+      mentions,
+    ).replaceAll(RegExp(r'(?<!\n)\n(?!\n)'), '  \n');
     return md.markdownToHtml(
-      linkMentions(escaped, mentions),
+      linked,
       extensionSet: md.ExtensionSet.gitHubFlavored,
     );
   }
