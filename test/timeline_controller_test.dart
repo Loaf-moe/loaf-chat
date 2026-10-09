@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:loaf_native/ui/channel/mentions.dart';
 import 'package:loaf_native/ui/channel/message_actions.dart';
 import 'package:loaf_native/ui/channel/timeline_controller.dart';
 import 'package:loaf_native/ui/mock/fixtures.dart';
@@ -155,6 +156,18 @@ void main() {
     expect(c.messages.last.body, 'missed call');
     expect(c.messages.last.callLine, CallLine.missed);
     expect(c.messages.last.author, _them);
+  });
+
+  test('a message with a mention keeps its line breaks', () {
+    final c = TimelineController([_msg('1', _them)], you: _you);
+    addTearDown(c.dispose);
+    const sam = Mention(kind: MentionKind.person, id: '@them', label: '@them');
+
+    c.send('@them hi\n@them\n\nbye', mentions: [sam]);
+
+    final html = c.messages.last.formatted!;
+    expect(html, contains('hi<br />'));
+    expect(html, contains('</p>\n<p>bye'));
   });
 
   group('jumping', () {
