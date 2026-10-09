@@ -60,7 +60,7 @@
 - **Ids.**
   - Windows: the AUMID is `moe.loaf.chat`. It is already set on the process (`windows/runner/main.cpp`) and on the installer's shortcut. Register it under `HKCU\Software\Classes\AppUserModelId\moe.loaf.chat`.
   - Linux: the desktop entry and icon are `moe.loaf.chat`.
-  - macOS: the bundle id is `moe.loaf.chat.ios` (release, the same App ID as iOS) and `moe.loaf.chat.ios.dev` (Debug/Profile), after Task 8b; it was `moe.loaf.native`. The team is `6W2A5N37N3`.
+  - macOS: the bundle id is `moe.loaf.chat.ios`, for every build: the same App ID as iOS, after Task 8b. It was `moe.loaf.native`. The team is `6W2A5N37N3`.
 - **Portal facts, checked in xdg-desktop-portal's `desktop-portal/notification.c` on 2026-10-08:**
   - `version` is `min(backend version, 2)`.
   - `sound` is dropped when the backend's version is 1, and must be `('file-descriptor', h)` on a **sealable memfd**.
@@ -2578,208 +2578,20 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ### Task 8b: The macOS bundle id becomes `moe.loaf.chat.ios` (branch `chore/macos-bundle-id`)
 
-Chris decided this on 2026-10-08. macOS shares the iOS App ID `moe.loaf.chat.ios`, a fixed App Store Connect record, so Task 9's capability and profile are registered on the unified id. This is its own branch, cut from `main` and merged before Task 9. `feat/desktop-notices` is then rebased onto it.
+Chris decided on 2026-10-08: "Just change the damn identifier." Every macOS build (Debug, Profile and Release) becomes `moe.loaf.chat.ios`, the iOS App ID. **Nothing is moved.** The new id gets a new container, so the Mac app starts signed out once, and signing in plus the recovery key restores the account. This is its own branch, cut from `main` and merged before Task 9, and then `feat/desktop-notices` is rebased onto it.
 
-**Facts checked by the controller on 2026-10-08:**
-- **Sparkle 2.10 accepts an update across an id change.**
-  - `SUUpdateValidator.m` passes an update when **either** the EdDSA signature **or** Apple code signing is valid. The designated requirement embeds the identifier, so code signing fails, but EdDSA passes as long as `SUPublicEDKey` is unchanged.
-  - `SUInstaller.m:81` finds the new app by filename (`Loaf Chat.app`) before it tries the bundle id.
-  - `AppInstaller.m:451` compares the installed host with itself.
-- **macOS App Data protection blocks reading another app's container.** Even the controller's own shell gets "Operation not permitted" on `~/Library/Containers/moe.loaf.native`. The sandbox also confines the app to its own container.
-  - The new app therefore needs `com.apple.security.temporary-exception.files.home-relative-path.read-only` for `/Library/Containers/moe.loaf.native/`. Temporary exceptions are allowed for Developer ID, and `Release.entitlements` already carries a mach-lookup one for Sparkle.
-  - It also needs to be signed by the same team, `6W2A5N37N3`, so the App Data check passes without a prompt.
-- **`path_provider`'s support directory on macOS** is `~/Library/Containers/<bundle id>/Data/Library/Application Support/<bundle id>/`, which holds `loaf.sqlite` (and `-wal`/`-shm`), `appearance.json`, `notifications.json`, and so on.
-- **The SSO scheme stays `moe.loaf.native`.** It is its own constant (`lib/matrix/sso_browser.dart:40`) and is pinned by `test/release/ios_identity_test.dart`.
-
-**Rulings (controller):**
-- Debug and Profile builds get **`moe.loaf.chat.ios.dev`**, and never migrate. A debug build on the release id would copy Chris's live account into the new container, leaving two diverging copies of one Olm account. The release would then find that stale copy and skip its own move. A separate dev id also ends the "debug build shares data" hazard. The debug build signs in fresh once, which needs Chris for the SSO step.
-- The move **copies**, never deletes: the old container is left in place. It runs only when the running bundle id is exactly `moe.loaf.chat.ios`, and only when the new support directory has no `loaf.sqlite`. It copies into a temporary sibling directory and then renames it into place, so an interrupted copy leaves nothing half-done.
+**Facts the controller checked:**
+- **Sparkle 2.10 updates across the id change.** It accepts an update when either the EdDSA signature or Apple code signing is valid (`SUUpdateValidator.m`), and it finds the new app by filename first (`SUInstaller.m:81`). `SUPublicEDKey` must stay as it is.
+- **The SSO scheme stays `moe.loaf.native`.** It's a constant of its own (`lib/matrix/sso_browser.dart:40`), and `test/release/ios_identity_test.dart` pins it.
 
 **Files:**
-- Modify: `macos/Runner/Configs/AppInfo.xcconfig`: `PRODUCT_BUNDLE_IDENTIFIER = moe.loaf.chat.ios`
-- Modify: `macos/Runner.xcodeproj/project.pbxproj`:
-  - In the Runner target's **Debug** and **Profile** configurations, set `PRODUCT_BUNDLE_IDENTIFIER = moe.loaf.chat.ios.dev;`, which overrides the xcconfig.
-  - Set all three RunnerTests configurations to `moe.loaf.chat.ios.RunnerTests`.
-  - Add `ContainerMove.swift` to the Runner target's Sources, and `ContainerMoveTests.swift` to RunnerTests.
-- Create: `macos/Runner/ContainerMove.swift`
-- Modify: `macos/Runner/AppDelegate.swift`, to call the move in `applicationWillFinishLaunching`, before the Flutter engine and Dart start.
-- Modify: `macos/Runner/Release.entitlements`, to add the read-only exception.
-- Create: `macos/RunnerTests/ContainerMoveTests.swift`
+- Modify: `macos/Runner/Configs/AppInfo.xcconfig`, to set `PRODUCT_BUNDLE_IDENTIFIER = moe.loaf.chat.ios`
+- Modify: `macos/Runner.xcodeproj/project.pbxproj`, to set the three RunnerTests configurations to `moe.loaf.chat.ios.RunnerTests`
 - Create: `test/release/macos_identity_test.dart`
 
-- [ ] **Step 1: Make the worktree.** Cut it from `origin/main` into `.claude/worktrees/macos-bundle-id` on `chore/macos-bundle-id`. Copy vodozemac into it, and run `mise trust`.
+- [ ] **Step 1: Make the worktree.** Create `.claude/worktrees/macos-bundle-id` on `chore/macos-bundle-id`, branched from `origin/main`. Copy vodozemac into it and run `mise trust`.
 
-- [ ] **Step 2: Write the failing Swift tests.** Create `macos/RunnerTests/ContainerMoveTests.swift`. The module name is the Runner product's, which is probably `Loaf_Chat`; check `PRODUCT_MODULE_NAME` or the generated header. Use `@testable import` with it.
-
-```swift
-import XCTest
-@testable import Loaf_Chat
-
-final class ContainerMoveTests: XCTestCase {
-  private var root: URL!
-  private var old: URL!
-  private var new: URL!
-
-  override func setUpWithError() throws {
-    root = FileManager.default.temporaryDirectory
-      .appendingPathComponent("container-move-\(UUID().uuidString)")
-    old = root.appendingPathComponent("old/moe.loaf.native")
-    new = root.appendingPathComponent("new/moe.loaf.chat.ios")
-    try FileManager.default.createDirectory(at: old, withIntermediateDirectories: true)
-  }
-
-  override func tearDownWithError() throws {
-    try? FileManager.default.removeItem(at: root)
-  }
-
-  private func write(_ name: String, in dir: URL, _ text: String = "x") throws {
-    try text.write(to: dir.appendingPathComponent(name), atomically: true, encoding: .utf8)
-  }
-
-  func testCopiesEverythingWhenTheNewPlaceIsEmpty() throws {
-    try write("loaf.sqlite", in: old, "db")
-    try write("loaf.sqlite-wal", in: old)
-    try write("appearance.json", in: old)
-    XCTAssertEqual(ContainerMove.copy(from: old, to: new), .copied)
-    XCTAssertEqual(try String(contentsOf: new.appendingPathComponent("loaf.sqlite")), "db")
-    XCTAssertTrue(FileManager.default.fileExists(atPath: new.appendingPathComponent("loaf.sqlite-wal").path))
-    XCTAssertTrue(FileManager.default.fileExists(atPath: new.appendingPathComponent("appearance.json").path))
-    // The old place is left as it was.
-    XCTAssertTrue(FileManager.default.fileExists(atPath: old.appendingPathComponent("loaf.sqlite").path))
-  }
-
-  func testLeavesADatabaseAlreadyThereAlone() throws {
-    try write("loaf.sqlite", in: old, "old")
-    try FileManager.default.createDirectory(at: new, withIntermediateDirectories: true)
-    try write("loaf.sqlite", in: new, "mine")
-    XCTAssertEqual(ContainerMove.copy(from: old, to: new), .alreadyThere)
-    XCTAssertEqual(try String(contentsOf: new.appendingPathComponent("loaf.sqlite")), "mine")
-  }
-
-  func testNothingToMoveWithoutAnOldDatabase() throws {
-    try write("appearance.json", in: old)
-    XCTAssertEqual(ContainerMove.copy(from: old, to: new), .nothingToMove)
-    XCTAssertFalse(FileManager.default.fileExists(atPath: new.path))
-  }
-
-  func testAnUnreadableOldPlaceFailsWithoutLeavingAHalfCopy() throws {
-    try write("loaf.sqlite", in: old)
-    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: old.path)
-    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: old.path) }
-    XCTAssertEqual(ContainerMove.copy(from: old, to: new), .failed)
-    XCTAssertFalse(FileManager.default.fileExists(atPath: new.path))
-  }
-}
-```
-
-Run: `xcodebuild test -workspace macos/Runner.xcworkspace -scheme Runner -configuration Debug -only-testing:RunnerTests/ContainerMoveTests`. Run `mise exec -- flutter build macos --debug --config-only` first if the workspace needs Flutter's generated files. Expected: a compile failure, because `ContainerMove` doesn't exist. If the Debug build can't be signed because the dev App ID isn't set up yet, add `CODE_SIGNING_ALLOWED=NO` for this test run only, and say so in the report.
-
-- [ ] **Step 3: Implement.** Create `macos/Runner/ContainerMove.swift`:
-
-```swift
-import Foundation
-
-/// Brings the account over from the app's old bundle id, once. Until
-/// 2026-10 the Mac app was `moe.loaf.native`; its database, session and
-/// keys live in that id's container. The first launch as
-/// `moe.loaf.chat.ios` copies them into its own, before Dart opens the
-/// database. A copy, not a move: the old container stays as it was.
-enum ContainerMove {
-  enum Outcome: Equatable { case copied, alreadyThere, nothingToMove, failed }
-
-  static let oldId = "moe.loaf.native"
-  static let newId = "moe.loaf.chat.ios"
-
-  /// Only the release id moves anything: a debug build is a separate
-  /// device (`moe.loaf.chat.ios.dev`), and copying a live account into it
-  /// would leave two copies of one set of keys.
-  static func runIfNeeded() {
-    guard Bundle.main.bundleIdentifier == newId,
-      let home = realHome(),
-      let support = FileManager.default.urls(
-        for: .applicationSupportDirectory, in: .userDomainMask
-      ).first
-    else { return }
-    let old = home
-      .appendingPathComponent("Library/Containers/\(oldId)/Data/Library/Application Support/\(oldId)")
-    let outcome = copy(from: old, to: support.appendingPathComponent(newId))
-    if outcome == .failed { NSLog("[loaf] could not bring the account over from \(oldId)") }
-  }
-
-  /// The user's real home: inside the sandbox NSHomeDirectory() is the
-  /// container.
-  private static func realHome() -> URL? {
-    guard let entry = getpwuid(getuid()), let dir = entry.pointee.pw_dir else { return nil }
-    return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
-  }
-
-  static func copy(from old: URL, to new: URL) -> Outcome {
-    let files = FileManager.default
-    if files.fileExists(atPath: new.appendingPathComponent("loaf.sqlite").path) {
-      return .alreadyThere
-    }
-    // An unreadable old place is a failure, not "nothing to move": the
-    // sandbox exception or App Data protection said no.
-    guard (try? old.checkResourceIsReachable()) == true else { return .nothingToMove }
-    let items: [URL]
-    do {
-      items = try files.contentsOfDirectory(at: old, includingPropertiesForKeys: nil)
-    } catch {
-      return .failed
-    }
-    guard items.contains(where: { $0.lastPathComponent == "loaf.sqlite" }) else {
-      return .nothingToMove
-    }
-    let staging = new.deletingLastPathComponent()
-      .appendingPathComponent(".\(new.lastPathComponent).moving-\(UUID().uuidString)")
-    do {
-      try files.createDirectory(at: staging, withIntermediateDirectories: true)
-      for item in items {
-        try files.copyItem(at: item, to: staging.appendingPathComponent(item.lastPathComponent))
-      }
-      if files.fileExists(atPath: new.path) {
-        // Something made the directory without a database (a settings
-        // file, say): what is moving in wins, file by file.
-        for item in try files.contentsOfDirectory(at: staging, includingPropertiesForKeys: nil) {
-          let target = new.appendingPathComponent(item.lastPathComponent)
-          if files.fileExists(atPath: target.path) { try files.removeItem(at: target) }
-          try files.moveItem(at: item, to: target)
-        }
-        try files.removeItem(at: staging)
-      } else {
-        try files.moveItem(at: staging, to: new)
-      }
-      return .copied
-    } catch {
-      try? files.removeItem(at: staging)
-      return .failed
-    }
-  }
-}
-```
-
-The unreadable-directory test expects `.failed`. If `checkResourceIsReachable` returns true on a 000 directory, and `contentsOfDirectory` throws, the code above returns `.failed`. Make sure that's the path taken. In `AppDelegate.swift`, add:
-
-```swift
-  override func applicationWillFinishLaunching(_ notification: Notification) {
-    // Before Dart starts and opens the database.
-    ContainerMove.runIfNeeded()
-    super.applicationWillFinishLaunching(notification)
-  }
-```
-
-Check that `FlutterAppDelegate` declares `applicationWillFinishLaunching`. If it doesn't, drop `override` and the `super` call. In `macos/Runner/Release.entitlements`, add:
-
-```xml
-	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
-	<array>
-		<string>/Library/Containers/moe.loaf.native/</string>
-	</array>
-```
-
-Change the ids in `AppInfo.xcconfig` and `project.pbxproj` as listed in Files.
-
-- [ ] **Step 4: Pin the identity in a Dart test.** Create `test/release/macos_identity_test.dart`, in the style of `ios_identity_test.dart`:
+- [ ] **Step 2: Write the failing test.** Create `test/release/macos_identity_test.dart`:
 
 ```dart
 import 'dart:io';
@@ -2787,43 +2599,38 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('the Mac app is moe.loaf.chat.ios, and debug builds a separate device', () {
+  test('the Mac app is moe.loaf.chat.ios, the same App ID as iOS', () {
     expect(File('macos/Runner/Configs/AppInfo.xcconfig').readAsStringSync(),
         contains('PRODUCT_BUNDLE_IDENTIFIER = moe.loaf.chat.ios\n'));
     final project = File('macos/Runner.xcodeproj/project.pbxproj').readAsStringSync();
-    expect('PRODUCT_BUNDLE_IDENTIFIER = moe.loaf.chat.ios.dev;'.allMatches(project).length, 2,
-        reason: 'Debug and Profile');
     expect(project.contains('moe.loaf.native'), isFalse);
-  });
-
-  test('a release may read the old container, to bring the account over', () {
-    expect(File('macos/Runner/Release.entitlements').readAsStringSync(),
-        contains('<string>/Library/Containers/moe.loaf.native/</string>'));
   });
 }
 ```
 
-- [ ] **Step 5: Run everything.**
-  - The Swift tests: expected PASS.
-  - `mise exec -- flutter test`: expected all pass, including `ios_identity_test` unchanged.
-  - `mise exec -- flutter build macos --debug`, then `defaults read "$PWD/build/macos/Build/Products/Debug/Loaf Chat.app/Contents/Info.plist" CFBundleIdentifier`: expected `moe.loaf.chat.ios.dev`.
+Run `mise exec -- flutter test test/release/macos_identity_test.dart`. Expected: FAIL.
+
+- [ ] **Step 3: Change the ids** listed under Files.
+
+- [ ] **Step 4: Run the checks.**
+  - `mise exec -- flutter test`: everything passes, including `ios_identity_test` unchanged.
+  - `mise exec -- flutter build macos --debug`, then read `CFBundleIdentifier` from the built app's `Info.plist`: expected `moe.loaf.chat.ios`.
   - `mise exec -- flutter analyze`.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 5: Commit.**
 
 ```nu
 git branch --show-current   # chore/macos-bundle-id
 git add macos test/release/macos_identity_test.dart
-git commit -m "chore(macos): the bundle id becomes moe.loaf.chat.ios, bringing the account over from moe.loaf.native
+git commit -m "chore(macos): the bundle id becomes moe.loaf.chat.ios
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 7 (controller):**
+- [ ] **Step 6 (controller):**
   - Merge into `main` the same way as Part 0, and rebase `feat/desktop-notices` onto it.
-  - Update the memory `debug-build-shares-data`: the debug build is now a separate device, `moe.loaf.chat.ios.dev`.
-  - The move is only proven by the first real update. Chris updates through Sparkle, and should find himself signed in with his history. **If the move fails, the app starts signed out.** Signing in again and entering the recovery key restores the account. Tell Chris this before he updates.
-  - Also: never install the iPhone TestFlight build on this Mac ("Designed for iPad"). It now shares the bundle id, and so the container.
+  - Update the memory `debug-build-shares-data`: the shared id is now `moe.loaf.chat.ios`.
+  - It ships with D's release. Tell Chris it signs him out once.
 
 ### Task 9: macOS: `NotifyBridge.swift`, communication notifications, and signing
 
@@ -3103,7 +2910,7 @@ fi
   - Run `bash -n tool/release/macos.sh` as a syntax check.
 
 - [ ] **Step 6 (Chris, by hand): the capability, then the release profile.**
-  1. **Before Step 3:** on developer.apple.com, go to Identifiers, open `moe.loaf.chat.ios`, tick **Communication Notifications**, and save. Xcode's automatic signing registers `moe.loaf.chat.ios.dev` for debug builds on the first `-allowProvisioningUpdates` build, with the capability its entitlements ask for. If it can't, tick it on that App ID by hand too.
+  1. **Before Step 3:** on developer.apple.com, go to Identifiers, open `moe.loaf.chat.ios`, tick **Communication Notifications**, and save.
   2. Go to Profiles, add one, and choose **Developer ID**. Pick App ID `moe.loaf.chat.ios` and the Developer ID Application certificate. Name it `Loaf Chat Developer ID`, then download it.
   3. In Nushell:
 
@@ -3946,7 +3753,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 This follows the handoff's "Hand-testing D" steps. **Chris supplies a fresh mochi token. Never ask for or handle mochi's password.**
 
 1. Rebuild the throwaway sender: an untracked `flutter test` file, with `openClient(databasePath: <scratchpad>/mochi.sqlite)`, `vod.init(libraryPath: 'build/vodozemac/')`, `client.init(newToken:, newUserID: '@hermes:loaf.moe', newDeviceID: <the token's device>, newHomeserver: Uri.parse('https://matrix.loaf.moe'))`, `client.updateUserDeviceKeys()`, and `room.sendTextEvent(…)` into `!brDPkxPs30Snk1wS0q:loaf.moe`.
-2. After Task 8b, the debug build is its own device (`moe.loaf.chat.ios.dev`, with its own container). Its first launch needs Chris to sign in through SSO, and to enter the recovery key so it can read the encrypted DM. Then run `pgrep -fl "Loaf Chat"`, and quit the installed copy through its menu: both apps share the display name, and computer-use needs the debug one frontmost. Then run `mise exec -- flutter run -d macos` in the background, logging to the scratchpad. Get full-screen computer-use approval.
+2. The debug build is `moe.loaf.chat.ios` after Task 8b, with a fresh container. Its first launch needs Chris to sign in through SSO and enter the recovery key. Run `pgrep -fl "Loaf Chat"`, quit the installed copy through its menu, then run `mise exec -- flutter run -d macos` in the background, logging to the scratchpad. Get full-screen computer-use approval.
 3. Check these, with screenshots of each:
    - On first open the permission prompt appears. Allow it.
    - Background the app, with another app frontmost, and send from mochi. A communication notification appears with mochi's picture and name, and its body is the text. The debug build carries the entitlement (Task 9, Step 3), so a plain banner with the app icon is a **failure**.
