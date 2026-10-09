@@ -8,7 +8,7 @@
 PRODUCT_NAME = Loaf Chat
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = moe.loaf.native
+PRODUCT_BUNDLE_IDENTIFIER = moe.loaf.chat.ios
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 moe.loaf. All rights reserved.
