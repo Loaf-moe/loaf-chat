@@ -13,6 +13,7 @@ import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../model/chime.dart';
+import '../model/desktop_notifications.dart';
 
 @immutable
 class NotificationSettings {
@@ -130,15 +131,18 @@ class NotificationController extends ChangeNotifier {
   NotificationController({
     required this._store,
     required this.chime,
+    this.desktop,
     this._settings = const NotificationSettings(),
   });
 
   static Future<NotificationController> load(
     NotificationStore store, {
     required Chime chime,
+    DesktopNotifications? desktop,
   }) async => NotificationController(
     store: store,
     chime: chime,
+    desktop: desktop,
     settings: await store.load() ?? const NotificationSettings(),
   );
 
@@ -148,6 +152,10 @@ class NotificationController extends ChangeNotifier {
   /// What plays the sound, here so Settings can preview it and the shell can
   /// play it from the same place.
   final Chime chime;
+
+  /// The desktop's notifications, for the shell to show and Settings to ask
+  /// after; null on phones, in the mock, and in tests that leave it out.
+  final DesktopNotifications? desktop;
 
   bool get sound => _settings.sound;
 
