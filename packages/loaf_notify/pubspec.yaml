@@ -1,0 +1,17 @@
+name: loaf_notify
+description: "Windows toasts for Loaf Chat's desktop notifications."
+publish_to: none
+
+environment:
+  sdk: ^3.13.4
+  flutter: '>=3.3.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      windows:
+        pluginClass: LoafNotifyPluginCApi

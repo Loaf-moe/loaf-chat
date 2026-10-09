@@ -495,6 +495,13 @@ packages:
       relative: true
     source: path
     version: "0.0.0"
+  loaf_notify:
+    dependency: "direct main"
+    description:
+      path: "packages/loaf_notify"
+      relative: true
+    source: path
+    version: "0.0.0"
   logging:
     dependency: transitive
     description:

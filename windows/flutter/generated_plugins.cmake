@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   desktop_webview_window
   file_selector_windows
   loaf_media
+  loaf_notify
   share_plus
   url_launcher_windows
   window_to_front
