@@ -50,6 +50,8 @@ class FdoNotifications implements DesktopNotifications {
   StreamSubscription<DBusSignal>? _invoked;
   StreamSubscription<DBusSignal>? _closed;
 
+  /// Only a success is kept: a server that isn't up yet (session start,
+  /// a dunst restart) must be asked again next time.
   Future<Set<String>> _capabilities() => _caps ??= _server
       .callMethod(
         _name,
@@ -57,7 +59,11 @@ class FdoNotifications implements DesktopNotifications {
         const [],
         replySignature: DBusSignature('as'),
       )
-      .then((r) => r.returnValues.single.asStringArray().toSet());
+      .then((r) => r.returnValues.single.asStringArray().toSet())
+      .catchError((Object e) {
+        _caps = null;
+        throw e;
+      });
 
   void _listen() {
     _invoked ??=

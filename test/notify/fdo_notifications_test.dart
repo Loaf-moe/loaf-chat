@@ -173,7 +173,25 @@ void main() {
   });
 
   test('no server at all: nothing throws, and the chime still plays', () async {
-    await make().show(_notice());
+    final logged = <Object>[];
+    final n = FdoNotifications(
+      chime: chime,
+      soundFile: '/app/chime.wav',
+      bus: appSide,
+      log: logged.add,
+    );
+    await n.show(_notice());
+    await n.show(_notice());
+    expect(chime.plays, 2);
+    expect(logged, hasLength(1), reason: 'logged once');
+  });
+
+  test('a server that arrives late is used by the next show', () async {
+    final n = make();
+    await n.show(_notice());
     expect(chime.plays, 1);
+    final s = await serve(['actions', 'body']);
+    await n.show(_notice(sound: false));
+    expect(s.notified, hasLength(1));
   });
 }
