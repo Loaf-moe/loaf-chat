@@ -4,12 +4,15 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 // The SDK has a Presence and a Timeline of its own; loaf's are the ones the
 // UI draws.
 import 'package:matrix/matrix.dart' hide Presence, Profile, Timeline;
+import 'package:path_provider/path_provider.dart';
 
 import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
@@ -90,6 +93,43 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   /// The messages that may notify, from the moment the rooms open.
   late final MatrixArrivals _arrivals = MatrixArrivals(client, now: _now);
+
+  /// The thumbnail the rail draws, from the SDK's file store or the server,
+  /// written once to the temp directory under a hash of its uri. A slow
+  /// server gives no picture rather than a late notification.
+  @override
+  Future<String?> noticeAvatar(AvatarRef ref) async {
+    final mxc = Uri.tryParse(ref.value);
+    if (mxc == null || !mxc.isScheme('mxc')) return null;
+    try {
+      final bytes = await MxcThumbnail(
+        client,
+        mxc,
+        avatarBuckets[1],
+      ).bytes().timeout(const Duration(seconds: 2));
+      final dir = Directory(
+        '${(await getTemporaryDirectory()).path}'
+        '${Platform.pathSeparator}loaf-notice-avatars',
+      );
+      await dir.create(recursive: true);
+      final name = sha256.convert(utf8.encode(ref.value)).toString();
+      final file = File(
+        '${dir.path}${Platform.pathSeparator}$name.${_imageExtension(bytes)}',
+      );
+      if (!await file.exists()) await file.writeAsBytes(bytes, flush: true);
+      return file.path;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Windows reads a toast's picture by its extension.
+  static String _imageExtension(Uint8List b) {
+    if (b.length > 3 && b[0] == 0x89 && b[1] == 0x50) return 'png';
+    if (b.length > 2 && b[0] == 0xFF && b[1] == 0xD8) return 'jpg';
+    if (b.length > 3 && b[0] == 0x47 && b[1] == 0x49) return 'gif';
+    return 'webp';
+  }
 
   @override
   Stream<Arrival> get arrivals => _arrivals.stream;

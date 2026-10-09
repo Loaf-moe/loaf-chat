@@ -85,6 +85,9 @@ final _invite = Invite(
 /// Rooms as a real backend has them in phase 2: plain models, and only
 /// invites can be answered.
 class _FakeRooms extends ChangeNotifier implements Rooms {
+  @override
+  Future<String?> noticeAvatar(AvatarRef ref) async => null;
+
   _FakeRooms({this.spaces = const [], this.homeRooms = const []});
 
   @override

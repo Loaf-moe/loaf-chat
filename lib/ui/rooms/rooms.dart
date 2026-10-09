@@ -155,4 +155,8 @@ abstract interface class Rooms implements Listenable {
   SpaceDirectory get directory;
 
   void dispose();
+
+  /// [ref]'s picture as a file, for a desktop notification to show; null
+  /// when there is none to be had within a moment.
+  Future<String?> noticeAvatar(AvatarRef ref);
 }

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_arrivals.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
+import 'package:loaf_native/ui/model/models.dart' show AvatarRef;
 import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -485,6 +486,144 @@ void main() {
       await _deliver(client, [_msg(r'$late')]);
       await rig.reached(r'$late');
       expect(rig.got, isEmpty);
+    });
+  });
+
+  group('what an arrival carries', () {
+    /// Delivers [events] into #general and returns the one arrival.
+    Future<Arrival> arriveOne(
+      Client client,
+      List<Map<String, Object?>> events,
+      String id,
+    ) async {
+      final rig = await _rig(client);
+      await _deliver(client, events);
+      await _until(() => rig.got.isNotEmpty);
+      expect(rig.got.map((a) => a.eventId), [id]);
+      return rig.got.single;
+    }
+
+    Event event(Client client, String type, Map<String, Object?> content) =>
+        Event.fromJson({
+          'type': type,
+          'sender': _ada,
+          'content': content,
+          'event_id': '\$e${_n++}',
+          'origin_server_ts': _after,
+        }, client.getRoomById(_general)!);
+
+    test('an arrival carries the sender, their picture and the text', () async {
+      final client = await _client();
+      await _join(client);
+      final a = await arriveOne(client, [
+        {
+          ..._state('m.room.member', {
+            'membership': 'join',
+            'displayname': 'Ada',
+            'avatar_url': 'mxc://loaf.moe/ada',
+          }, key: _ada),
+          'sender': _ada,
+          'origin_server_ts': _before,
+        },
+        {
+          ..._msg(r'$hello'),
+          'content': {'msgtype': 'm.text', 'body': 'hello **there**'},
+        },
+      ], r'$hello');
+      expect(a.senderId, _ada);
+      expect(a.senderName, 'Ada');
+      expect(a.senderAvatar, const AvatarRef('mxc://loaf.moe/ada'));
+      expect(a.kind, ArrivalKind.text);
+      expect(a.text, 'hello there');
+    });
+
+    test('a reply carries its own text, not the quote', () async {
+      final client = await _client();
+      await _join(client);
+      final a = await arriveOne(client, [
+        {
+          ..._msg(r'$reply'),
+          'content': {
+            'msgtype': 'm.text',
+            'body': '> <@bob:example.com> earlier\n\nmy answer',
+            'm.relates_to': {
+              'm.in_reply_to': {'event_id': r'$earlier'},
+            },
+          },
+        },
+      ], r'$reply');
+      expect(a.text, 'my answer');
+    });
+
+    test('an undecryptable message reads as encrypted', () async {
+      final client = await _client();
+      await _join(client);
+      // A room rule makes the event notify whatever the default rules say
+      // about encrypted events.
+      await _sync(
+        client,
+        accountData: [
+          {
+            'type': 'm.push_rules',
+            'content': {
+              'global': {
+                'room': [
+                  {
+                    'rule_id': _general,
+                    'default': false,
+                    'enabled': true,
+                    'actions': ['notify'],
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      );
+      final a = await arriveOne(client, [
+        {
+          'type': 'm.room.encrypted',
+          'sender': _ada,
+          'content': {
+            'algorithm': 'm.megolm.v1.aes-sha2',
+            'ciphertext': 'AwgAEnAv',
+            'device_id': 'ADEVICE',
+            'sender_key': 'senderkey',
+            'session_id': 'nosuchsession',
+          },
+          'event_id': r'$secret',
+          'origin_server_ts': _after,
+        },
+      ], r'$secret');
+      expect(a.kind, ArrivalKind.encrypted);
+    });
+
+    test('pictures, stickers and files are told apart', () async {
+      final client = await _client();
+      await _join(client);
+      ArrivalKind kind(String type, Map<String, Object?> c) =>
+          arrivalKind(event(client, type, c));
+      expect(
+        kind('m.room.message', {'msgtype': 'm.image', 'body': 'x.png'}),
+        ArrivalKind.picture,
+      );
+      expect(kind('m.sticker', {'body': 'wave'}), ArrivalKind.picture);
+      expect(
+        kind('m.room.message', {'msgtype': 'm.file', 'body': 'x.pdf'}),
+        ArrivalKind.file,
+      );
+      expect(
+        kind('m.room.message', {'msgtype': 'm.video', 'body': 'x.mp4'}),
+        ArrivalKind.file,
+      );
+      expect(
+        kind('m.room.message', {'msgtype': 'm.audio', 'body': 'x.ogg'}),
+        ArrivalKind.file,
+      );
+      expect(
+        kind('m.room.message', {'msgtype': 'm.notice', 'body': 'hi'}),
+        ArrivalKind.text,
+      );
     });
   });
 }

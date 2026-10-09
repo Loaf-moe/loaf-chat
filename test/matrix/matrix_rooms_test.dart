@@ -1970,6 +1970,14 @@ void main() {
     });
   });
 
+  test('a non-mxc avatar has no notice picture', () async {
+    final rooms = await _rooms(await _client());
+    expect(
+      await rooms.noticeAvatar(const AvatarRef('https://x/y.png')),
+      isNull,
+    );
+  });
+
   group('spaces', () {
     /// An `m.space.child` state event, for a `/hierarchy` chunk's
     /// `children_state`.
