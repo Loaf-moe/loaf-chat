@@ -28,6 +28,11 @@ import 'matrix_media.dart';
 /// How many events one page of history asks for.
 const historyPage = 50;
 
+/// How far a write from back in history pages forward before it stops: 500
+/// events. Past that you stay where you are; the write has gone either way,
+/// and its result shows once you scroll down to the live end.
+const catchUpPages = 10;
+
 class MatrixTimeline extends ChangeNotifier
     with ui.ComposerAiming
     implements ui.Timeline {
@@ -769,9 +774,11 @@ class MatrixTimeline extends ChangeNotifier
   /// in a timeline that hears it, without losing your place. Stops at a
   /// failed page, or one that moved the forward token nowhere: the write has
   /// gone either way, and scrolling down tries again. Events are no measure
-  /// of a page: one of only reactions adds none to the list.
+  /// of a page: one of only reactions adds none to the list. Stops, too,
+  /// after [catchUpPages], so a jump years back doesn't page through them.
   Future<void> _catchUp() async {
-    while (!_disposed && canLoadNewer) {
+    for (var page = 0; page < catchUpPages; page++) {
+      if (_disposed || !canLoadNewer) return;
       final before = _timeline?.chunk.nextBatch;
       await _pageNewer();
       if (_newerFailed || _timeline?.chunk.nextBatch == before) return;
