@@ -3601,6 +3601,65 @@ git commit -m "feat(notify): Windows toasts in packages/loaf_notify
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
+### Task 10b: Windows without C++: Dart over `dart:ffi` into the Rust crate
+
+Chris, 2026-10-09: "Everything must be Dart or Rust. I must approve all new languages." He then approved Swift too. The C++ plugin glue from Task 10 (commit `dc91217`) comes out, and so does its CMake. The Rust crate `loaf_notify_win` and its tests stay. Dart calls the crate directly:
+- the crate is built as a DLL by a **Dart build hook**;
+- Dart binds it with `@Native`;
+- clicks come back through `NativeCallable.listener`.
+
+Windows no longer uses the `moe.loaf.chat/notify` method channel. That channel stays macOS-only, served by `NotifyBridge.swift`.
+
+**Facts:** Flutter here is 3.47.5. Build hooks (`hook/build.dart`, `package:hooks`, `package:code_assets`) are supported, and `hooks` 2.2.0 and `code_assets` 2.1.0 are already in the pub cache.
+
+**Files:**
+- **Delete:**
+  - `packages/loaf_notify/windows/loaf_notify_plugin.cpp`, `loaf_notify_plugin.h` and `loaf_notify_plugin_c_api.cpp`;
+  - `packages/loaf_notify/windows/include/` (both headers);
+  - `packages/loaf_notify/windows/CMakeLists.txt`;
+  - the `flutter: plugin:` section of `packages/loaf_notify/pubspec.yaml`.
+
+  Run `flutter pub get` afterwards, so `windows/flutter/generated_plugin_registrant.cc` and `generated_plugins.cmake` lose the plugin again. They should match `main`.
+- **Move:** `packages/loaf_notify/windows/rust/` to `packages/loaf_notify/rust/`, since it no longer belongs to a Windows plugin folder. Update the CI line's path to match.
+- **Modify, `Cargo.toml`:** set `crate-type = ["cdylib", "rlib"]`. Add the `windows` feature `Win32_System_WinRT` for `RoInitialize`. Drop `Win32_UI_Shell` and `Win32_UI_WindowsAndMessaging` if nothing still uses them.
+- **Modify, `src/ffi.rs`:** clicks from a WinRT thread reach Dart through `NativeCallable.listener`, which runs **asynchronously**. Strings must therefore outlive the call.
+  - Pass each id as `CString::into_raw`.
+  - Add `loaf_notify_string_free(*mut c_char)`. Dart calls it after copying each string.
+  - Before every WinRT call (`new`, `register`, `show`, `withdraw`, `blocked`), make sure the calling thread has an apartment: call `RoInitialize(RO_INIT_MULTITHREADED)` and treat `RPC_E_CHANGED_MODE` as fine. The Dart thread is not the runner's COM-initialised main thread.
+  - Drop anything that only served the C++ (`openSettings` was C++; Dart does it now).
+- **Create, `packages/loaf_notify/hook/build.dart`:** when the target OS isn't Windows, add no assets. On Windows:
+  - run `cargo build --release --locked --manifest-path rust/Cargo.toml --target-dir <the hook's shared output dir>/cargo`;
+  - add a `CodeAsset` with `package: 'loaf_notify'`, `name: 'loaf_notify_win.dart'`, `linkMode: DynamicLoadingBundled()`, and `file` pointing at `release/loaf_notify_win.dll`;
+  - declare the Rust sources as dependencies, so edits rebuild.
+  
+  Check the `hooks` and `code_assets` 2.x API in the pub cache before writing it: `build(args, (input, output) async {…})`, `input.config.code.targetOS`, `output.assets.code.add`.
+- **Create, `packages/loaf_notify/lib/loaf_notify.dart`:** `@Native` bindings with `assetId: 'package:loaf_notify/loaf_notify_win.dart'` for every `ffi.rs` export. Also create a small Dart class, `ToastNotifier`, that owns the `NativeCallable.listener`. It copies and frees the click strings, and exposes `Stream<(String, String)> clicks`. All its methods return an `int` status or a `bool`.
+- **Create, `lib/notify/windows_notifications.dart`:** `WindowsDesktopNotifications implements DesktopNotifications`, over an injectable `ToastApi` interface. The real implementation wraps `ToastNotifier`, so tests need no DLL. The behaviour is the channel contract's Windows half:
+  - `prepare` registers the AUMID name and icon. A failure is logged and swallowed.
+  - `show` calls into Rust, then **always** plays the chime itself when `notice.sound` is true. Windows can't attach it.
+  - `withdraw` and `blocked` call into Rust; `blocked` is true only on status 1.
+  - `openSystemSettings` launches `ms-settings:notifications` with `url_launcher`, which is already a dependency.
+  - `clicks` comes from `ToastNotifier.clicks` as `MessageRoute`s.
+  - Nothing throws. Failures are logged once.
+- **Test, `test/notify/windows_notifications_test.dart`:** over a fake `ToastApi`, cover:
+  - show sends the title, body, ids and avatar path, and chimes when the notice has sound;
+  - a failing show still chimes and logs once;
+  - blocked;
+  - withdraw;
+  - a click becomes a route;
+  - openSystemSettings uses the injected launcher.
+- **Test, Rust:** the existing toast tests stay. Add a test that `loaf_notify_string_free(null)` is safe.
+- **Modify, `lib/notify/pick_notifications.dart`** (Task 11): Windows gets `WindowsDesktopNotifications`. `ChannelDesktopNotifications` is macOS only. Update its library doc, which names Windows.
+
+**Checks:**
+- `cargo test`, plus `cargo check` and `clippy -D warnings` for `x86_64-pc-windows-msvc` (see Global Constraints for the toolchain PATH).
+- `dart analyze packages/loaf_notify`.
+- `flutter test` and `flutter analyze`.
+- `flutter build macos --debug` still succeeds, with the hook adding nothing on macOS.
+- `git grep -n -I -E '\.(cpp|cc|h)\b' -- packages/loaf_notify` finds nothing.
+
+The first Windows build is the release run.
+
 ### Task 11: Pick the implementation, and wire clicks to the shell
 
 **Files:**
