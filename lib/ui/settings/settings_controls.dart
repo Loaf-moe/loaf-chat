@@ -34,6 +34,7 @@ class SettingsCheck extends StatelessWidget {
     required this.detail,
     required this.value,
     required this.onChanged,
+    this.enabled = true,
   });
 
   final String title;
@@ -41,13 +42,16 @@ class SettingsCheck extends StatelessWidget {
   final bool value;
   final ValueChanged<bool> onChanged;
 
+  /// Off, the row is greyed and ignores taps; its value still shows.
+  final bool enabled;
+
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
-    return MergeSemantics(
+    final row = MergeSemantics(
       child: InkWell(
         borderRadius: BorderRadius.circular(LoafRadius.lg),
-        onTap: () => onChanged(!value),
+        onTap: enabled ? () => onChanged(!value) : null,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
           child: Row(
@@ -57,7 +61,7 @@ class SettingsCheck extends StatelessWidget {
                 value: value,
                 activeColor: tokens.accent,
                 checkColor: tokens.textOnAccent,
-                onChanged: (v) => onChanged(v ?? true),
+                onChanged: enabled ? (v) => onChanged(v ?? true) : null,
               ),
               const SizedBox(width: LoafSpace.x2),
               Expanded(
@@ -87,5 +91,6 @@ class SettingsCheck extends StatelessWidget {
         ),
       ),
     );
+    return enabled ? row : Opacity(opacity: 0.5, child: row);
   }
 }
