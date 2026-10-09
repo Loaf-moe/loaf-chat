@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import 'mention_pill.dart';
 import 'message_markup.dart';
 
 /// Opens a link from a message in the system's own browser (or mail app),
@@ -157,9 +158,36 @@ class _MessageTextState extends State<MessageText> {
       final mine = mention == widget.you;
       style = style.copyWith(
         color: mine ? tokens.accent : tokens.textStrong,
-        backgroundColor: mine ? tokens.accentSoft : tokens.border,
         fontWeight: FontWeight.w600,
         fontVariations: const [FontVariation('wght', 600)],
+      );
+      // A span's backgroundColor is a square hugging the glyphs; a pill needs
+      // room around the name and round ends, so it is a box set in the line.
+      if (run.spoiler == null) {
+        return WidgetSpan(
+          alignment: PlaceholderAlignment.baseline,
+          baseline: TextBaseline.alphabetic,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: mine ? tokens.accentSoft : tokens.borderStrong,
+              borderRadius: BorderRadius.circular(mentionPillRadius),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: mentionPillPadX),
+              // The pill's height is the name's line box, its glyphs centred.
+              child: Text(
+                run.text,
+                style: style.copyWith(height: mentionPillHeight),
+                textHeightBehavior: const TextHeightBehavior(
+                  leadingDistribution: TextLeadingDistribution.even,
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+      style = style.copyWith(
+        backgroundColor: mine ? tokens.accentSoft : tokens.borderStrong,
       );
     }
 

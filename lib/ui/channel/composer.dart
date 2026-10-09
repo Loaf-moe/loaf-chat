@@ -5,6 +5,7 @@ library;
 
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderEditable;
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -14,6 +15,7 @@ import '../widgets/loaf_avatar.dart';
 import '../widgets/toast.dart';
 import 'attach.dart';
 import 'media_row.dart';
+import 'mention_pill.dart';
 import 'mentions.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
@@ -89,8 +91,12 @@ class Composer extends StatefulWidget {
 }
 
 class _ComposerState extends State<Composer> with WidgetsBindingObserver {
-  final _controller = TextEditingController();
+  final _controller = _MentionController();
   final _focus = FocusNode();
+  final _fieldKey = GlobalKey();
+
+  /// The field's own scroll, past five lines: the pills move with it.
+  final _fieldScroll = ScrollController();
   bool _hasText = false;
   ComposerTarget? _target;
 
@@ -129,6 +135,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     if (_target case ComposerTarget(mode: ComposerMode.edit, :final message)) {
       _controller.text = message.body;
       _picked = mentionsOf(message);
+      _controller.mentions = _picked;
       _hasText = message.body.trim().isNotEmpty;
     }
     _controller.addListener(() {
@@ -257,6 +264,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
           spaced ? label : '$label ',
         );
         _picked = [..._picked, candidate.mention];
+        _controller.mentions = _picked;
         _controller.value = TextEditingValue(
           text: text,
           selection: TextSelection.collapsed(offset: start + label.length + 1),
@@ -421,6 +429,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     if (text.trim().isEmpty) return;
     timeline.send(text, mentions: mentions);
     _picked = const [];
+    _controller.mentions = const [];
     _controller.clear();
   }
 
@@ -444,9 +453,11 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
 
     if (next?.mode == ComposerMode.edit) {
       _picked = mentionsOf(next!.message);
+      _controller.mentions = _picked;
       _controller.text = next.message.body;
     } else if (wasEditing) {
       _picked = const [];
+      _controller.mentions = const [];
       _controller.clear();
     }
     if (next != null) _focus.requestFocus();
@@ -460,6 +471,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     _focus.removeListener(_suggest);
     _controller.dispose();
     _focus.dispose();
+    _fieldScroll.dispose();
     super.dispose();
   }
 
@@ -490,6 +502,14 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     required bool hasTarget,
     required bool editing,
   }) {
+    // An explicit line height keeps the field's height independent of
+    // whatever the theme's bodyLarge happens to be. The pill painter lays
+    // out with this same style, so it lands on the field's words.
+    final fieldStyle = loafBody(
+      _textSize,
+      400,
+      height: _textHeight,
+    ).copyWith(color: tokens.textBody);
     final field = Container(
       decoration: BoxDecoration(
         color: tokens.card,
@@ -529,36 +549,62 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
                 onPointerDown: (_) => _lookAtClipboard(),
                 child: Actions(
                   actions: {PasteTextIntent: _PasteAction(_pasteFiles)},
-                  child: TextField(
-                    controller: _controller,
-                    focusNode: _focus,
-                    // Sentence case, as every other app's message field does.
-                    textCapitalization: TextCapitalization.sentences,
-                    contextMenuBuilder: _contextMenu,
-                    minLines: 1,
-                    maxLines: 5,
-                    // An explicit line height keeps the field's height
-                    // independent of whatever the theme's bodyLarge happens to be.
-                    style: loafBody(
-                      _textSize,
-                      400,
-                      height: _textHeight,
-                    ).copyWith(color: tokens.textBody),
-                    decoration: InputDecoration(
-                      // Collapsed so the field is exactly its line box and the
-                      // padding above does the centring. Left to itself the
-                      // decorator adds its own vertical padding, which is what
-                      // pushed this text off the icons' centreline.
-                      isCollapsed: true,
-                      border: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                      hintText: 'Message ${widget.prefix}${widget.channelName}',
-                      hintStyle: loafBody(
-                        _textSize,
-                        400,
-                        height: _textHeight,
-                      ).copyWith(color: tokens.textMuted),
-                    ),
+                  child: Stack(
+                    // A pill at the very start or end reaches past the text.
+                    clipBehavior: Clip.none,
+                    children: [
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: CustomPaint(
+                            painter: _PillPainter(
+                              controller: _controller,
+                              field: _fieldKey,
+                              scroll: _fieldScroll,
+                              height:
+                                  MediaQuery.textScalerOf(context)
+                                      .scale(_textSize) *
+                                  mentionPillHeight,
+                              // Over the field's own fill, not the page's, where
+                              // borderStrong all but disappears.
+                              color: Color.alphaBlend(
+                                tokens.textStrong.withValues(alpha: 0.16),
+                                tokens.card,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      TextField(
+                        key: _fieldKey,
+                        scrollController: _fieldScroll,
+                        controller: _controller,
+                        focusNode: _focus,
+                        // Sentence case, as every other app's message field does.
+                        textCapitalization: TextCapitalization.sentences,
+                        contextMenuBuilder: _contextMenu,
+                        minLines: 1,
+                        maxLines: 5,
+                        // An explicit line height keeps the field's height
+                        // independent of whatever the theme's bodyLarge happens to be.
+                        style: fieldStyle,
+                        decoration: InputDecoration(
+                          // Collapsed so the field is exactly its line box and the
+                          // padding above does the centring. Left to itself the
+                          // decorator adds its own vertical padding, which is what
+                          // pushed this text off the icons' centreline.
+                          isCollapsed: true,
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.zero,
+                          hintText:
+                              'Message ${widget.prefix}${widget.channelName}',
+                          hintStyle: loafBody(
+                            _textSize,
+                            400,
+                            height: _textHeight,
+                          ).copyWith(color: tokens.textMuted),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -1020,4 +1066,171 @@ class _SendButtonState extends State<_SendButton> {
       ),
     );
   }
+}
+
+/// The field's controller, which sets each picked mention in the pill's
+/// colour and weight. The pill's rounded, padded box is not drawn by the text
+/// (a span's background is a square, and anything that padded the glyphs
+/// would shift the cursor and the offsets) but behind the field, by
+/// [_PillPainter], from [pillRanges].
+class _MentionController extends TextEditingController {
+  List<Mention> mentions = const [];
+
+  /// Where each picked mention sits in the text. None while the keyboard has
+  /// text under composition: it is not settled, and the plain span is used.
+  List<TextRange> get pillRanges {
+    if (value.composing.isValid && !value.composing.isCollapsed) {
+      return const [];
+    }
+    final labels = {for (final m in mentionsIn(text, mentions)) m.label};
+    if (labels.isEmpty) return const [];
+    final pattern = RegExp(
+      (labels.toList()..sort((a, b) => b.length.compareTo(a.length)))
+          .map(RegExp.escape)
+          .join('|'),
+    );
+    return [
+      for (final m in pattern.allMatches(text))
+        TextRange(start: m.start, end: m.end),
+    ];
+  }
+
+  TextSpan spanFor(TextStyle? style, Color pillColor) {
+    final ranges = pillRanges;
+    if (ranges.isEmpty) return TextSpan(style: style, text: text);
+    final pill = (style ?? const TextStyle()).copyWith(
+      color: pillColor,
+      fontWeight: FontWeight.w600,
+    );
+    // The spaces either side are widened, so the pill's box has room to
+    // stand off from the words around it. The characters are the same, so
+    // nothing in the text or its offsets moves.
+    final room = (style ?? const TextStyle()).copyWith(
+      letterSpacing: mentionPillPadX,
+    );
+    final spans = <InlineSpan>[];
+    var at = 0;
+    for (final r in ranges) {
+      final before = r.start - 1 >= at && text[r.start - 1] == ' ';
+      final head = before ? r.start - 1 : r.start;
+      if (head > at) spans.add(TextSpan(text: text.substring(at, head)));
+      if (before) spans.add(TextSpan(text: ' ', style: room));
+      spans.add(TextSpan(text: r.textInside(text), style: pill));
+      at = r.end;
+      if (at < text.length && text[at] == ' ') {
+        spans.add(TextSpan(text: ' ', style: room));
+        at++;
+      }
+    }
+    if (at < text.length) spans.add(TextSpan(text: text.substring(at)));
+    return TextSpan(style: style, children: spans);
+  }
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    if (pillRanges.isEmpty) {
+      return super.buildTextSpan(
+        context: context,
+        style: style,
+        withComposing: withComposing,
+      );
+    }
+    return spanFor(style, LoafTokens.of(context).textStrong);
+  }
+}
+
+/// Draws the rounded box behind each picked mention, from the field's own
+/// layout, so the box sits on the words however they are laid out.
+///
+/// The ends come from caret positions, which sit exactly at the first and
+/// last glyph. Selection boxes do not: at a line break the engine reports a
+/// box running on past the name. Only a mention wrapped across lines uses the
+/// boxes, for its middle.
+class _PillPainter extends CustomPainter {
+  _PillPainter({
+    required this.controller,
+    required this.field,
+    required this.scroll,
+    required this.color,
+    required this.height,
+  }) : super(repaint: Listenable.merge([controller, scroll]));
+
+  final _MentionController controller;
+
+  /// The field's [TextField], to find its [RenderEditable] under.
+  final GlobalKey field;
+  final ScrollController scroll;
+  final Color color;
+
+  /// The pill's height: [mentionPillHeight] of the field's scaled font size,
+  /// as in the timeline.
+  final double height;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final ranges = controller.pillRanges;
+    if (ranges.isEmpty) return;
+    final render = _editable();
+    // Not laid out yet: the next frame has it.
+    if (render == null || !render.hasSize) return;
+    final paint = Paint()..color = color;
+    for (final r in ranges) {
+      final boxes = render.getBoxesForSelection(
+        TextSelection(baseOffset: r.start, extentOffset: r.end),
+      );
+      if (boxes.isEmpty) continue;
+      // Upstream, so a name ending a wrapped line ends on that line.
+      final start = render.getLocalRectForCaret(TextPosition(offset: r.start));
+      final end = render.getLocalRectForCaret(
+        TextPosition(offset: r.end, affinity: TextAffinity.upstream),
+      );
+      for (var i = 0; i < boxes.length; i++) {
+        final box = boxes[i];
+        final left = i == 0 ? start.left : box.left;
+        final right = i == boxes.length - 1 ? end.left : box.right;
+        // Centred on the line, out past the glyphs by the room the spaces
+        // either side were widened by.
+        final middle = box.toRect().center.dy;
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTRB(
+              left - mentionPillPadX,
+              middle - height / 2,
+              right + mentionPillPadX,
+              middle + height / 2,
+            ),
+            const Radius.circular(mentionPillRadius),
+          ),
+          paint,
+        );
+      }
+    }
+  }
+
+  RenderEditable? _editable() {
+    RenderEditable? found;
+    void visit(Element e) {
+      if (found != null) return;
+      final r = e.renderObject;
+      if (r is RenderEditable) {
+        found = r;
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    field.currentContext?.visitChildElements(visit);
+    return found;
+  }
+
+  @override
+  bool shouldRepaint(_PillPainter old) =>
+      old.color != color ||
+      old.height != height ||
+      old.field != field ||
+      old.scroll != scroll;
 }

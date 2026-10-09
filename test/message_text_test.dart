@@ -203,10 +203,17 @@ void main() {
       body: 'you and Ada',
     );
     final tokens = loafLightTheme().extension<LoafTokens>()!;
-    expect(_spanOf(tester, 'you').style!.backgroundColor, tokens.accentSoft);
-    expect(_spanOf(tester, 'Ada').style!.backgroundColor, tokens.border);
-    // A pill names someone; it is not a link to follow.
-    expect(_spanOf(tester, 'Ada').recognizer, isNull);
+    Color? fill(String name) {
+      final box = tester.widget<DecoratedBox>(
+        find
+            .ancestor(of: find.text(name), matching: find.byType(DecoratedBox))
+            .first,
+      );
+      return (box.decoration as BoxDecoration).color;
+    }
+
+    expect(fill('you'), tokens.accentSoft);
+    expect(fill('Ada'), tokens.borderStrong);
   });
 
   test('a quote of a message reads as one line of its text', () {

@@ -13,6 +13,16 @@ Run _only(List<Run> runs, String text) =>
     runs.singleWhere((r) => r.text == text);
 
 void main() {
+  test('a permalink to any @ id is a mention, with or without a server', () {
+    expect(
+      mentionOf(Uri.parse('https://matrix.to/#/@ada:loaf.moe')),
+      '@ada:loaf.moe',
+    );
+    expect(mentionOf(Uri.parse('https://matrix.to/#/@ada')), '@ada');
+    expect(mentionOf(Uri.parse('https://matrix.to/#/@')), isNull);
+    expect(mentionOf(Uri.parse('https://matrix.to/#/!room:loaf.moe')), isNull);
+  });
+
   group('formatted body', () {
     test('bold, italic, strikethrough, underline and inline code', () {
       final runs = _runs(
