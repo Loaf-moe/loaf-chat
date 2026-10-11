@@ -48,7 +48,7 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 ## Deferred from phase 2, to place later
 
 - ~~**Unjoined channels from `/hierarchy`**, and joining a space's category subspaces and suggested channels (phase 5, with joining).~~ Done in phase 5.
-- **Voice occupancy avatars** need a `VoIP` instance to read MatrixRTC memberships (phase 7).
+- ~~**Voice occupancy avatars** need a `VoIP` instance to read MatrixRTC memberships (phase 7).~~ Done: `lib/matrix/call_members.dart` reads Element Call's `org.matrix.msc3401.call.member` state; the SDK's `VoIP` reads a different event.
 - ~~**Avatar images** (`mxc` thumbnails) for spaces, rooms and people (phase 6 or 9). Initials on a colour until then.~~ Done in phase 6.
 - ~~**Presence of others** is `Presence.unknown` until phase 6.~~ Done in phase 6.
 - **Marking read on opening** waits for read markers (phase 3); until then a real room's unread count stays after reading it elsewhere only until the next sync.

@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
+import 'package:loaf_native/matrix/call_members.dart';
 import 'package:loaf_native/matrix/loaf_http_client.dart';
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
@@ -69,11 +70,13 @@ Future<Client> openClient({
     sendTimelineEventTimeout: sendTimeout ?? const Duration(seconds: 30),
     // The SDK keeps only a room list's state in memory for rooms not open.
     // These are what the channel list and member list read on top of that:
-    // a channel's topic and lock, and who is an admin or moderator.
+    // a channel's topic and lock, who is an admin or moderator, and who is
+    // in a voice channel.
     importantStateEvents: {
       EventTypes.RoomTopic,
       EventTypes.RoomJoinRules,
       EventTypes.RoomPowerLevels,
+      callMemberType,
     },
     // The 7 emoji only: the spec draws no QR, and a client that names no
     // method can take part in no verification at all.

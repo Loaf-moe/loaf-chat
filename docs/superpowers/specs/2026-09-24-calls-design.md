@@ -35,6 +35,12 @@ onto MatrixRTC when it is wired; they are not implemented here.
 **Voice channels never ring and never send an `m.rtc.notification`.** The only
 sign of life is occupant avatars under the channel.
 
+**Occupancy is what membership state says.** A client that dies without
+emptying its membership stays listed until the membership's `expires` runs
+out, as it does in Element Call: loaf.moe's homeserver has no delayed events
+(MSC4140) to clear it sooner. A channel you have not joined lists nobody,
+since `/hierarchy` carries no state.
+
 ## 1. The model
 
 **One call at a time.** Joining a voice channel, starting a DM call, or

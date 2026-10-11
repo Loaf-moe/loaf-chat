@@ -46,6 +46,10 @@ class _Api extends FakeMatrixApi {
   /// When set, the display name every profile answers with.
   String? profileName;
 
+  /// What asking a room for one member's event answers, by user id. The
+  /// fake's own answer for anyone else is a ban.
+  final memberEvents = <String, Map<String, Object?>>{};
+
   /// Each space's `/hierarchy` pages, in order, keyed by space id.
   final hierarchyPages = <String, List<Map<String, Object?>>>{};
 
@@ -68,6 +72,14 @@ class _Api extends FakeMatrixApi {
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
     final path = request.url.path;
+    if (request.method == 'GET' && path.contains('/state/m.room.member/')) {
+      await hold?.future;
+      final member =
+          memberEvents[Uri.decodeComponent(
+            path.split('/state/m.room.member/')[1],
+          )];
+      if (member != null) return http.Response(jsonEncode(member), 200);
+    }
     if (profileName != null &&
         request.method == 'GET' &&
         path.contains('/profile/')) {
@@ -2270,5 +2282,247 @@ void main() {
     expect(late.media.store, isNull);
     const media = Media(kind: MediaKind.image, name: 'a.png', ref: 'x');
     expect(late.media.preview(media, 300), isNull);
+  });
+
+  group('who is in a voice channel', () {
+    const oven = '!oven:example.com';
+    const ada = '@ada:example.com';
+    const hour = 3600000;
+    final noon = DateTime.utc(2026, 10, 11, 12);
+    final noonMs = noon.millisecondsSinceEpoch;
+
+    Channel channel(MatrixRooms rooms, String id) => rooms.spaces
+        .expand((s) => s.categories)
+        .expand((c) => c.channels)
+        .firstWhere((c) => c.id == id);
+
+    /// [sender]'s call membership as Element Call writes it, or their
+    /// leaving when [left].
+    Map<String, Object?> membership({
+      String sender = ada,
+      bool left = false,
+      int expires = 4 * hour,
+    }) => {
+      'type': 'org.matrix.msc3401.call.member',
+      'state_key': '_${sender}_DEVICE_m.call',
+      'sender': sender,
+      'content': left
+          ? const <String, Object?>{}
+          : {
+              'application': 'm.call',
+              'call_id': '',
+              'device_id': 'DEVICE',
+              'expires': expires,
+              'focus_active': {'type': 'livekit'},
+              'scope': 'm.room',
+            },
+      'event_id': '\$c${_events++}',
+      'origin_server_ts': noonMs - hour,
+    };
+
+    /// [user]'s place in the room, as their member event says it.
+    Map<String, Object?> member({
+      String user = ada,
+      String membership = 'join',
+    }) => _state(
+      'm.room.member',
+      {
+        'membership': membership,
+        'displayname': 'Ada',
+        'avatar_url': 'mxc://x/a',
+      },
+      key: user,
+      sender: user,
+    );
+
+    Future<void> state(
+      Client client,
+      String roomId,
+      List<Map<String, Object?>> events,
+    ) => _sync(client, {
+      'join': {
+        roomId: {
+          'state': {'events': events},
+        },
+      },
+    });
+
+    test('someone joining the call is listed under the channel', () async {
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+
+      await state(client, oven, [member(), membership()]);
+      await _settle();
+
+      expect(channel(rooms, oven).occupants.map((m) => m.id), [ada]);
+    });
+
+    test('someone who has left the room is not listed', () async {
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+
+      await state(client, oven, [member(membership: 'leave'), membership()]);
+      await _settle();
+
+      expect(channel(rooms, oven).occupants, isEmpty);
+    });
+
+    test('someone the room has not loaded is named once it has', () async {
+      final api = _Api()
+        ..memberEvents[ada] = {'membership': 'join', 'displayname': 'Countess'};
+      final client = await _client(api: api);
+      // No sync follows the answer: only its arriving can name them.
+      client.backgroundSync = false;
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+      // Whatever the space's arrival sets going is done before she joins.
+      await _settle();
+      api.hold = Completer<void>();
+
+      await state(client, oven, [membership()]);
+      await _settle();
+      expect(channel(rooms, oven).occupants.single.name, isNot('Countess'));
+      api.hold!.complete();
+      await _until(
+        () => channel(rooms, oven).occupants.firstOrNull?.name == 'Countess',
+      );
+
+      expect(channel(rooms, oven).occupants.single.name, 'Countess');
+    });
+
+    test('someone the server says is not in the room is dropped', () async {
+      // The fake answers a ban for anyone it is not told about.
+      final client = await _client(api: _Api());
+      // No sync follows the answer: only its arriving can drop them.
+      client.backgroundSync = false;
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+      await state(client, oven, [membership()]);
+
+      await _until(() => channel(rooms, oven).occupants.isEmpty);
+
+      expect(channel(rooms, oven).occupants, isEmpty);
+    });
+
+    test('someone leaving the call is no longer listed', () async {
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+      await state(client, oven, [member(), membership()]);
+      await _settle();
+      expect(channel(rooms, oven).occupants, hasLength(1));
+
+      await state(client, oven, [membership(left: true)]);
+      await _settle();
+
+      expect(channel(rooms, oven).occupants, isEmpty);
+    });
+
+    test('an occupant carries their name and picture', () async {
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+
+      await state(client, oven, [member(), membership()]);
+      await _settle();
+
+      final occupant = channel(rooms, oven).occupants.single;
+      expect(occupant.name, 'Ada');
+      expect(occupant.avatar, const AvatarRef('mxc://x/a'));
+    });
+
+    test('an occupant goes when their membership expires', () async {
+      var clock = noon;
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => clock);
+      await _bakery(client);
+      // Sent an hour ago, so this runs out 200 ms from noon.
+      await state(client, oven, [member(), membership(expires: hour + 200)]);
+      await _settle();
+      expect(channel(rooms, oven).occupants, hasLength(1));
+
+      clock = noon.add(const Duration(seconds: 1));
+      await _until(() => channel(rooms, oven).occupants.isEmpty);
+
+      expect(channel(rooms, oven).occupants, isEmpty);
+    });
+
+    test('a text channel lists nobody, whatever its state says', () async {
+      const general = '!general:example.com';
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+
+      await state(client, general, [member(), membership()]);
+      await _settle();
+
+      expect(channel(rooms, general).occupants, isEmpty);
+    });
+
+    test('occupants are there on the next launch', () async {
+      final dir = await Directory.systemTemp.createTemp('loaf-occupants');
+      addTearDown(() => dir.delete(recursive: true));
+      final path = '${dir.path}${Platform.pathSeparator}loaf.sqlite';
+      final first = await openClient(
+        httpClient: FakeMatrixApi(),
+        databasePath: path,
+      );
+      await first.init(
+        newToken: 'abcd',
+        newHomeserver: Uri.parse('https://fakeServer.notExisting'),
+        newUserID: _me,
+        newDeviceID: 'GHTYAJCE',
+        newDeviceName: 'loaf on test',
+      );
+      await _bakery(first);
+      await state(first, oven, [member(), membership()]);
+      await first.dispose();
+
+      final second = await openClient(
+        httpClient: FakeMatrixApi(),
+        databasePath: path,
+      );
+      addTearDown(second.dispose);
+      await second.init(waitForFirstSync: false);
+      final rooms = await _rooms(second, now: () => noon);
+
+      expect(channel(rooms, oven).occupants.map((m) => m.id), [ada]);
+    });
+
+    test('a membership stored by a build that kept none in memory '
+        'is listed', () async {
+      final dir = await Directory.systemTemp.createTemp('loaf-occupants');
+      addTearDown(() => dir.delete(recursive: true));
+      final path = '${dir.path}${Platform.pathSeparator}loaf.sqlite';
+      final old = await openClient(
+        httpClient: FakeMatrixApi(),
+        databasePath: path,
+      );
+      // As before call memberships were among the state kept in memory.
+      old.importantStateEvents.remove('org.matrix.msc3401.call.member');
+      await old.init(
+        newToken: 'abcd',
+        newHomeserver: Uri.parse('https://fakeServer.notExisting'),
+        newUserID: _me,
+        newDeviceID: 'GHTYAJCE',
+        newDeviceName: 'loaf on test',
+      );
+      await _bakery(old);
+      await state(old, oven, [member(), membership()]);
+      await old.dispose();
+
+      final client = await openClient(
+        httpClient: FakeMatrixApi(),
+        databasePath: path,
+      );
+      addTearDown(client.dispose);
+      await client.init(waitForFirstSync: false);
+      final rooms = await _rooms(client, now: () => noon);
+      await _until(() => channel(rooms, oven).occupants.isNotEmpty);
+
+      expect(channel(rooms, oven).occupants.map((m) => m.id), [ada]);
+    });
   });
 }

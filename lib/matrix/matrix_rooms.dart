@@ -21,6 +21,7 @@ import '../ui/shell/profile.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
 import '../ui/widgets/avatar_images.dart';
+import 'call_members.dart';
 import 'matrix_avatar_images.dart';
 import 'matrix_hierarchy.dart';
 import 'matrix_devices.dart';
@@ -72,6 +73,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       // `SyncStatus.finished` would miss those.
       client.onSync.stream.listen(_onSync),
       client.onSyncStatus.stream.listen(_onStatus),
+      client.onRoomState.stream.listen(_onRoomState),
     ];
     // A restored session has synced before; its rooms are already here.
     _synced = client.prevBatch != null;
@@ -84,6 +86,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final status = client.onSyncStatus.value;
     if (status != null) _onStatus(status);
     unawaited(_loadMe());
+    unawaited(_loadStoredCalls());
   }
 
   final Client client;
@@ -129,8 +132,12 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   var _disposed = false;
   final Directory? _mediaRoot;
 
-  /// The clock the unread counts back off by; tests move it.
+  /// The clock the unread counts back off by, and call memberships run out
+  /// by; tests move it.
   final DateTime Function()? _now;
+
+  /// Fires when the next call membership runs out, since no sync says so.
+  Timer? _callExpiry;
 
   /// Whether files linked on other sites are shown. Null: they are.
   final ValueListenable<bool>? externalMedia;
@@ -304,6 +311,39 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _rebuild();
   }
 
+  /// The member event of someone in a call, fetched because the room had
+  /// not loaded it: it names them, or says they are not in the room. No sync
+  /// follows it.
+  void _onRoomState(({String roomId, StrippedStateEvent state}) update) {
+    if (update.state.type != EventTypes.RoomMember) return;
+    final room = client.getRoomById(update.roomId);
+    if (room == null || !_isVoice(room)) return;
+    if (!_call(room).userIds.contains(update.state.stateKey)) return;
+    _rebuild();
+  }
+
+  /// Call memberships synced before they were among the state kept in
+  /// memory sit where the SDK loads them only for a room that is opened.
+  Future<void> _loadStoredCalls() async {
+    var found = false;
+    for (final room in client.rooms.toList()) {
+      if (_disposed) return;
+      if (room.membership != Membership.join || !_isVoice(room)) continue;
+      final stored = await client.database.getUnimportantRoomEventStatesForRoom(
+        const [],
+        room,
+      );
+      for (final event in stored) {
+        final key = event.stateKey;
+        if (event.type != callMemberType || key == null) continue;
+        if (room.getState(callMemberType, key) != null) continue;
+        room.setState(event);
+        found = true;
+      }
+    }
+    if (found && !_disposed) _rebuild();
+  }
+
   void _onStatus(SyncStatusUpdate update) {
     if (_synced) return;
     final progress = update.status == SyncStatus.processing
@@ -384,6 +424,16 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     for (final room in client.rooms) {
       if (room.membership == Membership.invite) _loadInvite(room);
     }
+    final expiries = [
+      for (final room in joined.values)
+        if (_isVoice(room)) ?_call(room).nextExpiry,
+    ]..sort();
+    _callExpiry?.cancel();
+    _callExpiry = expiries.isEmpty
+        ? null
+        : Timer(expiries.first.difference((_now ?? DateTime.now)()), () {
+            if (!_disposed) _rebuild();
+          });
     _notify();
   }
 
@@ -563,11 +613,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   }
 
   Channel _channel(Room room, {bool home = false}) {
-    final type = room
-        .getState(EventTypes.RoomCreate)
-        ?.content
-        .tryGet<String>('type');
-    final kind = _voiceTypes.contains(type)
+    final kind = _isVoice(room)
         ? ChannelKind.voice
         : !home
         ? ChannelKind.text
@@ -602,6 +648,12 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       favouriteOrder: favourite?.order,
       lowPriority: room.isLowPriority,
       lastActivity: room.latestEventReceivedTime,
+      occupants: kind == ChannelKind.voice
+          ? [
+              for (final id in _call(room).userIds)
+                if (!_notInRoom(room, id)) _member(room, id),
+            ]
+          : const [],
     );
     final wish = _wishes[room.id];
     if (wish == null) return channel;
@@ -613,6 +665,23 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       joined: wish.joined,
     );
   }
+
+  bool _isVoice(Room room) => _voiceTypes.contains(
+    room.getState(EventTypes.RoomCreate)?.content.tryGet<String>('type'),
+  );
+
+  /// Whether the room knows [userId] to be out of it. Someone it has not
+  /// loaded counts as in: [_member] asks for them, and [_onRoomState] hears.
+  bool _notInRoom(Room room, String userId) {
+    final member = room.getState(EventTypes.RoomMember, userId);
+    return member != null && member.asUser(room).membership != Membership.join;
+  }
+
+  ({List<String> userIds, DateTime? nextExpiry}) _call(Room room) =>
+      callOccupancy(
+        (room.states[callMemberType]?.values ?? const []).whereType<Event>(),
+        (_now ?? DateTime.now)(),
+      );
 
   /// Whoever the room has in memory; [loadMembers] fills in the rest.
   List<Member> _members(Room room) => [
@@ -1250,6 +1319,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   @override
   void dispose() {
     _disposed = true;
+    _callExpiry?.cancel();
     for (final s in _subscriptions) {
       unawaited(s.cancel());
     }
