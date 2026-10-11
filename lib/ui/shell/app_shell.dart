@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../call/call_controller.dart';
+import '../call/call_sounds.dart';
 import '../call/connected_call_bar.dart';
 import '../call/dm_call_panel.dart';
 import '../call/incoming_call_card.dart';
@@ -137,6 +138,7 @@ class _AppShellState extends State<AppShell> {
   late final Calls _calls = _rooms.calls ?? _mockCalls!;
 
   Notifier? _notifier;
+  CallSounds? _callSounds;
 
   @override
   void didChangeDependencies() {
@@ -151,6 +153,13 @@ class _AppShellState extends State<AppShell> {
         chime: notifications.chime,
         soundOn: () => notifications.sound,
         openRoom: () => _openMessagesRoom,
+      );
+    }
+    if (_callSounds == null && notifications != null) {
+      _callSounds = CallSounds(
+        _calls,
+        notifications.chime,
+        soundOn: () => notifications.sound,
       );
     }
   }
@@ -225,6 +234,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     _notifier?.dispose();
+    _callSounds?.dispose();
     unawaited(_routes?.cancel());
     _session.removeListener(_onSessionChange);
     _updater.removeListener(_onChange);

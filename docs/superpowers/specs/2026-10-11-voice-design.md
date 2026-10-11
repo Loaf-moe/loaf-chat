@@ -196,6 +196,13 @@ from the LiveKit participant with the matching identity.
 **Mute and deafen.** Mute stops the microphone track being sent. Deafen stops
 every remote audio track being played, and mutes.
 
+**Sounds.** Going live in a call plays Element Call's join sound, and a live
+call ending plays its leave sound. While live, the number of other people
+rising or falling plays the same two. As in Element Call, nothing plays for a
+change in a call of more than eight people, and the same sound plays at most
+once in half a second. The app's one sound switch silences them. The files and
+their licences are listed in `assets/SOURCES.md`.
+
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
 it is given a `CallMedia`, and `main.dart` gives it one on Linux. On other
 platforms a voice channel still reads "voice chat isn't available yet".

@@ -30,6 +30,12 @@ class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   @override
   String? pinned;
 
+  /// Puts the call as [session] has it, as a backend's own events would.
+  void show(CallSession? session) {
+    this.session = session;
+    notifyListeners();
+  }
+
   @override
   bool joinable(Channel channel) => canJoin;
 
