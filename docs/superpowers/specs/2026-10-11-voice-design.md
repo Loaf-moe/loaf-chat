@@ -186,6 +186,16 @@ at 4 disconnects.
 membership cannot be emptied, the disconnect still happens and the membership
 runs out at its `expires`.
 
+**Membership lifetime.** Loaf Chat's own membership lasts ten minutes and is
+written again every five, so a device that dies without leaving is listed for
+ten minutes at most. Each refresh sets `expires` to the time since the
+membership began plus ten minutes. Element Call's rule adds a whole expiry per
+refresh, which runs further ahead of the clock each time; its four-hour
+memberships on loaf.moe reach sixteen and thirty-two hours that way. If the
+homeserver takes no writes for more than five minutes, the membership lapses
+and other clients stop listing this device until a write succeeds; a failed
+refresh is tried again every fifteen seconds.
+
 **Quitting leaves.** Closing the window, SIGINT and SIGTERM each leave the
 call first, waiting at most three seconds before the app ends anyway.
 
@@ -240,9 +250,10 @@ platforms a voice channel still reads "voice chat isn't available yet".
 
 - **Ghosts.** A client that dies without emptying its membership stays listed
   until `expires`. Element Call leans on delayed events to clear these, and
-  the homeserver has none. Loaf Chat leaves when it is quit, and empties a
+  the homeserver has none. Loaf Chat leaves when it is quit, empties a
   membership its own device left behind (a crash, a kill, the power going)
-  when it next launches.
+  when it next launches, and writes memberships that run out in ten minutes
+  either way.
 - **One SFU.** Members who publish to a different call server are listed but
   not heard.
 - **No reconnect UI beyond LiveKit's own.** A dropped connection shows

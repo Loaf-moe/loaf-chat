@@ -12,7 +12,10 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 const _me = '@test:fakeServer.notExisting';
 const _device = 'GHTYAJCE';
 const _room = '!oven:example.com';
-const _hour = 3600000;
+const _minute = 60000;
+
+/// The expiry the quick timings keep: the default.
+const _expiry = 10 * _minute;
 final _server = Uri.parse('https://calls.example.com');
 final _noon = DateTime.utc(2026, 10, 11, 12);
 
@@ -125,12 +128,13 @@ OwnCallMembership _membership(
   Client client,
   Room room, {
   void Function()? onLost,
+  DateTime Function()? now,
 }) {
   final membership = OwnCallMembership(
     client,
     room,
     _server,
-    now: () => _noon,
+    now: now ?? () => _noon,
     timings: _quick,
     onLost: onLost,
   );
@@ -158,7 +162,7 @@ void main() {
       'scope': 'm.room',
       'device_id': _device,
       'membershipID': '$_me:$_device',
-      'expires': 4 * _hour,
+      'expires': 10 * _minute,
       'm.call.intent': 'audio',
       'focus_active': {'type': 'livekit', 'focus_selection': 'multi_sfu'},
       'foci_preferred': [
@@ -194,35 +198,37 @@ void main() {
     });
   }
 
-  test('the first refresh is due five seconds short of an hour', () {
-    const timings = CallMembershipTimings();
-
+  test('the next refresh comes five seconds short of five minutes on', () {
     expect(
-      timings.refreshAt(_noon, 1),
-      _noon.add(const Duration(minutes: 59, seconds: 55)),
+      const CallMembershipTimings().refreshAfter,
+      const Duration(minutes: 4, seconds: 55),
     );
   });
 
-  test('each later refresh is due an hour after the one before', () {
-    const timings = CallMembershipTimings();
-
-    expect(
-      timings.refreshAt(_noon, 3).difference(timings.refreshAt(_noon, 2)),
-      const Duration(hours: 1),
-    );
-  });
-
-  test('a refresh lasts four hours longer than the write before', () async {
+  test('a refresh expires ten minutes after the moment it is written, '
+      'however late that is', () async {
     final api = _Api();
     final (client, room) = await _joined(api);
+    var clock = _noon;
 
-    await _membership(client, room).join();
-    await _until(() => api.writes.length >= 3);
+    await _membership(client, room, now: () => clock).join();
+    clock = _noon.add(const Duration(minutes: 7));
+    await _until(() => api.writes.length >= 2);
 
-    expect(
-      [for (final write in api.writes.take(3)) write.content['expires']],
-      [4 * _hour, 8 * _hour, 12 * _hour],
-    );
+    expect(api.writes[1].content['expires'], 7 * _minute + _expiry);
+  });
+
+  test('refreshes keep their pace when the clock leaps ahead', () async {
+    final api = _Api();
+    final (client, room) = await _joined(api);
+    var clock = _noon;
+
+    await _membership(client, room, now: () => clock).join();
+    clock = _noon.add(const Duration(hours: 2));
+    // Three refreshes' worth, at one every 150 ms.
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+
+    expect(api.writes.length, inInclusiveRange(3, 5));
   });
 
   test(
@@ -268,7 +274,7 @@ void main() {
     expect(api.writes.single.content.containsKey('created_ts'), isFalse);
   });
 
-  group('a refresh is tried again, the same, after', () {
+  group('a refresh is tried again after', () {
     final failures = <String, http.Response?>{
       'a dropped connection': null,
       'a server fault': http.Response('oops', 502),
@@ -286,7 +292,7 @@ void main() {
         api.answers.add(failure);
         await _until(() => api.writes.length >= 3);
 
-        expect(api.writes[2].content['expires'], 8 * _hour);
+        expect(api.writes[2].content['expires'], _expiry);
       });
     }
   });

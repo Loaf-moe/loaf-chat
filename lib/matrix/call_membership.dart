@@ -12,14 +12,15 @@ import 'call_members.dart';
 /// When a membership is written again, and how long a failed write waits.
 class CallMembershipTimings {
   const CallMembershipTimings({
-    this.expiry = const Duration(hours: 4),
-    this.refreshEvery = const Duration(hours: 1),
+    this.expiry = const Duration(minutes: 10),
+    this.refreshEvery = const Duration(minutes: 5),
     this.headroom = const Duration(seconds: 5),
-    this.retryRefreshIn = const Duration(minutes: 1),
+    this.retryRefreshIn = const Duration(seconds: 15),
     this.retryLeaveIn = const Duration(seconds: 2),
   });
 
-  /// How much longer each write says the membership lasts.
+  /// How long a membership lasts past the write that last refreshed it. A
+  /// device that dies without leaving stays listed this long.
   final Duration expiry;
   final Duration refreshEvery;
 
@@ -28,9 +29,8 @@ class CallMembershipTimings {
   final Duration retryRefreshIn;
   final Duration retryLeaveIn;
 
-  /// When refresh number [n] is due for a membership that began at [joined].
-  DateTime refreshAt(DateTime joined, int n) =>
-      joined.add(refreshEvery * n).subtract(headroom);
+  /// How long after a write the next refresh is sent.
+  Duration get refreshAfter => refreshEvery - headroom;
 }
 
 /// The state key of this device's call membership in [room].
@@ -82,14 +82,14 @@ class OwnCallMembership {
   Future<void> join() async {
     _written = true;
     try {
-      await _write(_content(1, created: null));
+      await _write(_content(Duration.zero, created: null));
     } on MatrixException {
       // Refused: nothing was stored.
       _written = false;
       rethrow;
     }
-    final joined = _joined = _now();
-    _schedule(1, timings.refreshAt(joined, 1).difference(joined));
+    _joined = _now();
+    _schedule(timings.refreshAfter);
   }
 
   /// Says this device has left. Gives up after a few failed tries; the
@@ -116,32 +116,32 @@ class OwnCallMembership {
 
   void dispose() => _timer?.cancel();
 
-  void _schedule(int n, Duration after) {
+  void _schedule(Duration after) {
     _timer?.cancel();
-    _timer = Timer(after, () => unawaited(_refresh(n)));
+    _timer = Timer(after, () => unawaited(_refresh()));
   }
 
-  Future<void> _refresh(int n) async {
+  Future<void> _refresh() async {
     final joined = _joined;
     if (joined == null) return;
     try {
-      await _write(_content(n + 1, created: _created(joined)));
+      await _write(
+        _content(_now().difference(joined), created: _created(joined)),
+      );
     } on MatrixException catch (e) {
       if (e.error != MatrixError.M_LIMIT_EXCEEDED) {
         _joined = null;
         onLost?.call();
         return;
       }
-      if (_joined != null) _schedule(n, timings.retryRefreshIn);
+      if (_joined != null) _schedule(timings.retryRefreshIn);
       return;
     } on Exception {
       // A dropped connection, or a 5xx, which the SDK throws bare.
-      if (_joined != null) _schedule(n, timings.retryRefreshIn);
+      if (_joined != null) _schedule(timings.retryRefreshIn);
       return;
     }
-    if (_joined == null) return;
-    final due = timings.refreshAt(joined, n + 1).difference(_now());
-    _schedule(n + 1, due.isNegative ? Duration.zero : due);
+    if (_joined != null) _schedule(timings.refreshAfter);
   }
 
   /// When the membership began: the server's time on the first write once a
@@ -157,13 +157,17 @@ class OwnCallMembership {
     return joined.millisecondsSinceEpoch;
   }
 
-  Map<String, Object?> _content(int writes, {required int? created}) => {
+  /// What this device writes [since] the membership began. Its `expires`
+  /// counts from that beginning, so it is always one expiry from now: not
+  /// Element Call's whole expiry per refresh, which runs further ahead of
+  /// the clock each time.
+  Map<String, Object?> _content(Duration since, {required int? created}) => {
     'application': 'm.call',
     'call_id': '',
     'scope': 'm.room',
     'device_id': _client.deviceID,
     'membershipID': '${_client.userID}:${_client.deviceID}',
-    'expires': timings.expiry.inMilliseconds * writes,
+    'expires': (since + timings.expiry).inMilliseconds,
     'm.call.intent': 'audio',
     'focus_active': {'type': 'livekit', 'focus_selection': 'multi_sfu'},
     'foci_preferred': [
