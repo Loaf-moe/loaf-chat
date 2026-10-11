@@ -56,6 +56,16 @@ class MicrophoneUnavailable implements Exception {
   String toString() => 'MicrophoneUnavailable: $detail';
 }
 
+/// The speaker chosen could not be played on.
+class SpeakerUnavailable implements Exception {
+  const SpeakerUnavailable(this.detail);
+
+  final String detail;
+
+  @override
+  String toString() => 'SpeakerUnavailable: $detail';
+}
+
 abstract interface class CallMedia {
   /// Joins the call at [url] with [jwt], sending nothing yet. Throws
   /// [CallMediaUnreachable].
@@ -78,6 +88,29 @@ abstract interface class CallConnection implements Listenable {
 
   /// Stops or resumes playing everyone else.
   Future<void> setDeafened(bool deafened);
+
+  /// The device the microphone is taken from, by its id. Null is the
+  /// system's default.
+  String? get microphone;
+
+  /// The device everyone else is played on, by its id. Null is the system's
+  /// default.
+  String? get speaker;
+
+  /// An event whenever a microphone or a speaker may have come or gone.
+  Stream<void> get deviceChanges;
+
+  /// Takes the microphone from the device with [id] from now on, or from
+  /// the system's default: for null, and for a device the machine does not
+  /// have as of this call. Throws [MicrophoneUnavailable] when one being
+  /// sent does not reopen; it is then no longer sent.
+  Future<void> setMicrophoneDevice(String? id);
+
+  /// Plays everyone else on the device with [id] from now on, or on the
+  /// system's default: for null, and for a device the machine does not
+  /// have as of this call. Throws [SpeakerUnavailable], playing on as
+  /// before.
+  Future<void> setSpeakerDevice(String? id);
 
   Future<void> disconnect();
 }

@@ -1,11 +1,58 @@
-/// A call's media over LiveKit: the one file that touches `livekit_client`.
+/// A call's media and the machine's audio devices over LiveKit: the one
+/// file that touches `livekit_client`.
 library;
 
 import 'package:connectivity_plus_platform_interface/connectivity_plus_platform_interface.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:livekit_client/livekit_client.dart';
 
 import '../matrix/call_media.dart';
+import '../ui/settings/voice_settings.dart';
+
+/// Muting switches the microphone off and leaves it open.
+const _capture = AudioCaptureOptions(stopAudioCaptureOnMute: false);
+
+/// [id] where [devices] has it, else the first: the one WebRTC opens when
+/// told none.
+String? _present(List<MediaDevice> devices, String? id) =>
+    devices.any((device) => device.deviceId == id)
+    ? id
+    : devices.firstOrNull?.deviceId;
+
+class LiveKitAudioDevices implements AudioDevices {
+  const LiveKitAudioDevices();
+
+  @override
+  Future<List<AudioDevice>> microphones() =>
+      _listed(Hardware.instance.audioInputs);
+
+  @override
+  Future<List<AudioDevice>> speakers() =>
+      _listed(Hardware.instance.audioOutputs);
+
+  @override
+  Stream<void> get changes => Hardware.instance.onDeviceChange.stream;
+
+  static Future<List<AudioDevice>> _listed(
+    Future<List<MediaDevice>> Function() list,
+  ) async {
+    final List<MediaDevice> devices;
+    try {
+      devices = await list();
+    } on PlatformException {
+      // The machine would not say: nothing to choose from but the default.
+      return const [];
+    }
+    return [
+      for (final device in devices)
+        // On Linux the system's default is listed a second time, under this
+        // prefix.
+        if (!device.label.startsWith('default: '))
+          AudioDevice(device.deviceId, device.label),
+    ];
+  }
+}
 
 class LiveKitMedia implements CallMedia {
   const LiveKitMedia();
@@ -20,9 +67,7 @@ class LiveKitMedia implements CallMedia {
         // As Element Call publishes, so that either end hears the other the
         // same way.
         defaultAudioPublishOptions: AudioPublishOptions(dtx: true, red: false),
-        defaultAudioCaptureOptions: AudioCaptureOptions(
-          stopAudioCaptureOnMute: false,
-        ),
+        defaultAudioCaptureOptions: _capture,
       ),
     );
     try {
@@ -72,6 +117,27 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
   late final EventsListener<RoomEvent> _events;
   var _deafened = false;
 
+  /// The devices chosen, by id. Null: the system's default.
+  String? _microphone;
+  String? _speaker;
+
+  /// The devices the microphone is open from and the speaker was last set
+  /// to, by id. Null when neither has happened.
+  String? _opened;
+  String? _playing;
+
+  @override
+  String? get microphone => _opened == _microphone ? _microphone : null;
+
+  @override
+  String? get speaker => _playing == _speaker ? _speaker : null;
+
+  @override
+  Stream<void> get deviceChanges => Hardware.instance.onDeviceChange.stream;
+
+  LocalAudioTrack? get _track =>
+      _room.localParticipant?.audioTrackPublications.firstOrNull?.track;
+
   @override
   CallLink get link => switch (_room.connectionState) {
     ConnectionState.connected => CallLink.connected,
@@ -101,10 +167,70 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
 
   @override
   Future<void> setMicrophone(bool on) async {
+    final local = _room.localParticipant;
+    if (local == null) return;
     try {
-      await _room.localParticipant?.setMicrophoneEnabled(on);
+      final track = _track;
+      if (!on || track != null) {
+        // A muted microphone stays open on the device it had, so one chosen
+        // meanwhile is opened now.
+        if (on) await _reopen(track!);
+        await local.setMicrophoneEnabled(on);
+        return;
+      }
+      final id = _present(await Hardware.instance.audioInputs(), _microphone);
+      await local.setMicrophoneEnabled(
+        true,
+        audioCaptureOptions: _capture.copyWith(deviceId: id),
+      );
+      _opened = id;
     } on TrackCreateException catch (e) {
       throw MicrophoneUnavailable(e.toString());
+    } on PlatformException catch (e) {
+      throw MicrophoneUnavailable(e.toString());
+    }
+  }
+
+  @override
+  Future<void> setMicrophoneDevice(String? id) async {
+    _microphone = id;
+    final track = _track;
+    // Reopening a muted microphone would send it until it is switched off
+    // again; [setMicrophone] reopens it on the way to unmuting.
+    if (track == null || track.muted) return;
+    try {
+      await _reopen(track);
+    } on TrackCreateException catch (e) {
+      throw MicrophoneUnavailable(e.toString());
+    } on PlatformException catch (e) {
+      throw MicrophoneUnavailable(e.toString());
+    }
+  }
+
+  /// Opens the microphone again from the device chosen, when that is not
+  /// the one it is open from.
+  Future<void> _reopen(LocalAudioTrack track) async {
+    final id = _present(await Hardware.instance.audioInputs(), _microphone);
+    if (id == null || id == _opened) return;
+    // Closed before the next is opened, so a failure leaves none open.
+    _opened = null;
+    await track.restartTrack(track.currentOptions.copyWith(deviceId: id));
+    _opened = id;
+  }
+
+  @override
+  Future<void> setSpeakerDevice(String? id) async {
+    _speaker = id;
+    try {
+      final devices = await Hardware.instance.audioOutputs();
+      final device =
+          devices.where((device) => device.deviceId == id).firstOrNull ??
+          devices.firstOrNull;
+      if (device == null || device.deviceId == _playing) return;
+      await Hardware.instance.selectAudioOutput(device);
+      _playing = device.deviceId;
+    } on PlatformException catch (e) {
+      throw SpeakerUnavailable(e.toString());
     }
   }
 

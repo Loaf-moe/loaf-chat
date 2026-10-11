@@ -11,6 +11,7 @@ import 'package:matrix/matrix.dart' hide CallParticipant, CallSession;
 
 import '../ui/call/calls.dart';
 import '../ui/model/models.dart';
+import '../ui/settings/voice_settings.dart';
 import 'call_access.dart';
 import 'call_media.dart';
 import 'call_members.dart';
@@ -25,10 +26,12 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     this._media, {
     required this._occupants,
     required this._me,
+    this._voice,
     DateTime Function()? now,
     this._timings = const CallMembershipTimings(),
   }) : _now = now ?? DateTime.now {
     _sync = _client.onSync.stream.listen((_) => _onSync());
+    _voice?.addListener(_changedDevices);
     _clearLeftBehind();
   }
 
@@ -36,6 +39,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   final CallMedia _media;
   final List<CallOccupant> Function(Room room) _occupants;
   final Member Function() _me;
+
+  /// The microphone and the speaker chosen. Null: the system's defaults.
+  final ValueListenable<VoiceSettings>? _voice;
   final DateTime Function() _now;
   final CallMembershipTimings _timings;
   late final StreamSubscription<SyncUpdate> _sync;
@@ -183,13 +189,16 @@ class MatrixCalls extends ChangeNotifier implements Calls {
 
     final live = _live = _Live(room, connection!, membership!);
     connection.addListener(_onMedia);
+    live.deviceChanges = connection.deviceChanges.listen(
+      (_) => _changedDevices(),
+    );
     _session = _session!.copyWith(
       phase: CallPhase.live,
       startedAt: _now(),
       participants: _participants(room, connection),
     );
     _notify();
-    _applyAudio(live);
+    _applyAudio(live, devices: true);
   }
 
   /// Takes the live call out of this object's hands, for [_end] to finish.
@@ -197,6 +206,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     final live = _live;
     _live = null;
     live?.connection.removeListener(_onMedia);
+    unawaited(live?.deviceChanges.cancel());
     return live;
   }
 
@@ -361,9 +371,16 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     if (live != null) _applyAudio(live);
   }
 
+  /// Another device was chosen, or the machine's devices changed.
+  void _changedDevices() {
+    final live = _live;
+    if (live != null) _applyAudio(live, devices: true);
+  }
+
   /// Brings what [live] sends and plays in line with [muted] and
-  /// [deafened] as they stand when its turn comes.
-  void _applyAudio(_Live live) {
+  /// [deafened] as they stand when its turn comes; with [devices], first
+  /// the microphone and the speaker it uses in line with those chosen.
+  void _applyAudio(_Live live, {bool devices = false}) {
     final before = _audioApplied;
     final applied = Completer<void>();
     _audioApplied = applied.future;
@@ -371,6 +388,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       await before;
       try {
         if (!identical(live, _live)) return;
+        if (devices) await _applyDevices(live.connection);
         await live.connection.setDeafened(deafened);
         await live.connection.setMicrophone(!muted);
       } on MicrophoneUnavailable {
@@ -381,6 +399,23 @@ class MatrixCalls extends ChangeNotifier implements Calls {
         applied.complete();
       }
     }());
+  }
+
+  Future<void> _applyDevices(CallConnection connection) async {
+    final voice = _voice?.value;
+    try {
+      await connection.setSpeakerDevice(voice?.speaker?.id);
+    } on SpeakerUnavailable catch (e, s) {
+      // The call plays on where it did.
+      Logs().w("[loaf] couldn't play the call on the speaker chosen", e, s);
+    }
+    if (micBlocked) {
+      // Another microphone may open where the last did not. Still muted:
+      // unmuting is yours to do.
+      micBlocked = false;
+      _notify();
+    }
+    await connection.setMicrophoneDevice(voice?.microphone?.id);
   }
 
   @override
@@ -397,6 +432,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   void dispose() {
     _disposed = true;
     _attempt++;
+    _voice?.removeListener(_changedDevices);
     unawaited(_sync.cancel());
     unawaited(_end(_detach()));
     super.dispose();
@@ -461,6 +497,8 @@ class _Live {
   final Room room;
   final CallConnection connection;
   final OwnCallMembership membership;
+
+  late final StreamSubscription<void> deviceChanges;
 
   /// Whether a sync has shown this device's membership since it was
   /// written. Until then its absence means nothing.

@@ -18,6 +18,7 @@ import '../ui/model/arrival.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/settings/devices.dart';
+import '../ui/settings/voice_settings.dart';
 import '../ui/shell/profile.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
@@ -63,6 +64,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     this.client, {
     this._mediaRoot,
     this._callMedia,
+    this._voice,
     this.externalMedia,
     @visibleForTesting this._now,
   }) {
@@ -139,6 +141,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   /// What carries a call's audio. Null: this build has no calls.
   final CallMedia? _callMedia;
+
+  /// The microphone and the speaker a call uses. Null: the system's
+  /// defaults.
+  final ValueListenable<VoiceSettings>? _voice;
   MatrixCalls? _calls;
 
   @override
@@ -148,6 +154,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       media,
       occupants: _occupants,
       me: () => me,
+      voice: _voice,
       now: _now,
     ),
     null => null,

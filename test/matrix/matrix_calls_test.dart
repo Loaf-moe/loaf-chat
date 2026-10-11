@@ -10,6 +10,7 @@ import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/ui/call/calls.dart';
 import 'package:loaf_native/ui/model/models.dart';
+import 'package:loaf_native/ui/settings/voice_settings.dart';
 // The SDK's own call module has classes of the same names.
 import 'package:matrix/matrix.dart' hide CallParticipant, CallSession;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -135,18 +136,29 @@ class _Logged implements CallMedia {
   final CallMedia _inner;
   final List<String> _log;
 
+  /// Each time a connection was told which device to use.
+  final deviceSets = <String>[];
+
+  /// The connection made last.
+  CallConnection? last;
+
   @override
   Future<CallConnection> connect(Uri url, String jwt) async {
     _log.add('connected');
-    return _LoggedConnection(await _inner.connect(url, jwt), _log);
+    return last = _LoggedConnection(
+      await _inner.connect(url, jwt),
+      _log,
+      deviceSets,
+    );
   }
 }
 
 class _LoggedConnection implements CallConnection {
-  _LoggedConnection(this._inner, this._log);
+  _LoggedConnection(this._inner, this._log, this._deviceSets);
 
   final CallConnection _inner;
   final List<String> _log;
+  final List<String> _deviceSets;
 
   @override
   Future<void> disconnect() {
@@ -164,6 +176,24 @@ class _LoggedConnection implements CallConnection {
   Future<void> setMicrophone(bool on) => _inner.setMicrophone(on);
   @override
   Future<void> setDeafened(bool deafened) => _inner.setDeafened(deafened);
+  @override
+  String? get microphone => _inner.microphone;
+  @override
+  String? get speaker => _inner.speaker;
+  @override
+  Stream<void> get deviceChanges => _inner.deviceChanges;
+  @override
+  Future<void> setMicrophoneDevice(String? id) {
+    _deviceSets.add('microphone');
+    return _inner.setMicrophoneDevice(id);
+  }
+
+  @override
+  Future<void> setSpeakerDevice(String? id) {
+    _deviceSets.add('speaker');
+    return _inner.setSpeakerDevice(id);
+  }
+
   @override
   void addListener(VoidCallback listener) => _inner.addListener(listener);
   @override
@@ -245,8 +275,15 @@ class _World {
   final server = InMemoryCallServer(_mediaUrl);
   final network = ValueNotifier(CallLink.connected);
   final quality = ValueNotifier(CallQuality.good);
+
+  /// The microphone and the speaker chosen in settings.
+  final voice = ValueNotifier(const VoiceSettings());
   late final Client client;
   late final Calls calls;
+  late final _Logged _media;
+
+  /// This device's connection to the call it joined last.
+  CallConnection get connection => _media.last!;
 
   /// Signs in, joins the voice rooms, and opens the calls. [microphone] is
   /// whether this device has one; [already] is state the oven has before
@@ -255,6 +292,8 @@ class _World {
     bool microphone = true,
     bool encrypted = false,
     List<Map<String, Object?>> already = const [],
+    ValueListenable<Set<String>>? present,
+    Set<String> broken = const {},
   }) async {
     client = await openClient(
       httpClient: api,
@@ -278,17 +317,21 @@ class _World {
         if (room == _oven) ...already,
       ]);
     }
+    _media = _Logged(
+      InMemoryCallMedia(
+        server,
+        network: network,
+        quality: quality,
+        microphone: microphone,
+        present: present,
+        broken: broken,
+      ),
+      log,
+    );
     final rooms = MatrixRooms(
       client,
-      callMedia: _Logged(
-        InMemoryCallMedia(
-          server,
-          network: network,
-          quality: quality,
-          microphone: microphone,
-        ),
-        log,
-      ),
+      callMedia: _media,
+      voice: voice,
       now: () => _noon,
     );
     addTearDown(rooms.dispose);
@@ -327,12 +370,16 @@ Future<_World> _open({
   bool microphone = true,
   bool encrypted = false,
   List<Map<String, Object?>> already = const [],
+  ValueListenable<Set<String>>? present,
+  Set<String> broken = const {},
 }) async {
   final world = _World();
   await world.open(
     microphone: microphone,
     encrypted: encrypted,
     already: already,
+    present: present,
+    broken: broken,
   );
   return world;
 }
@@ -583,6 +630,211 @@ void main() {
       world.calls.toggleMute();
 
       expect(world.calls.deafened, isFalse);
+    });
+  });
+
+  group('your devices', () {
+    const rode = AudioDevice('rode', 'RODE NT-USB');
+    const sony = AudioDevice('sony', 'WH-1000XM3');
+    const desk = AudioDevice('desk', 'Desk Speakers');
+
+    test('a call uses the microphone and the speaker chosen', () async {
+      final world = await _open();
+      world.voice.value = const VoiceSettings(microphone: rode, speaker: desk);
+
+      await world.join();
+      await _until(() => world.connection.speaker != null);
+
+      expect(world.connection.microphone, 'rode');
+      expect(world.connection.speaker, 'desk');
+    });
+
+    test('with nothing chosen, a call uses the system default', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      expect(world.connection.microphone, isNull);
+      expect(world.connection.speaker, isNull);
+    });
+
+    test('the microphone chosen is in place before it is sent', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      world.voice.value = const VoiceSettings(microphone: rode);
+      String? sentFrom;
+      watcher.addListener(() {
+        if (watcher.peers[_mine]?.muted == false) {
+          sentFrom ??= world.connection.microphone;
+        }
+      });
+
+      await world.join();
+      await _until(() => sentFrom != null);
+
+      expect(sentFrom, 'rode');
+    });
+
+    test('choosing another microphone during a call switches to it', () async {
+      final world = await _open();
+      world.voice.value = const VoiceSettings(microphone: rode);
+      await world.join();
+      await _until(() => world.connection.microphone == 'rode');
+
+      world.voice.value = const VoiceSettings(microphone: sony);
+      await _until(() => world.connection.microphone == 'sony');
+
+      expect(world.connection.microphone, 'sony');
+    });
+
+    test('choosing another speaker during a call switches to it', () async {
+      final world = await _open();
+      await world.join();
+
+      world.voice.value = const VoiceSettings(speaker: desk);
+      await _until(() => world.connection.speaker == 'desk');
+
+      expect(world.connection.speaker, 'desk');
+    });
+
+    test(
+      'going back to the system default during a call switches to it',
+      () async {
+        final world = await _open();
+        world.voice.value = const VoiceSettings(microphone: rode);
+        await world.join();
+        await _until(() => world.connection.microphone == 'rode');
+
+        world.voice.value = const VoiceSettings();
+        await _until(() => world.connection.microphone == null);
+
+        expect(world.connection.microphone, isNull);
+      },
+    );
+
+    test('a chosen microphone that goes away gives way to the system '
+        'default', () async {
+      final present = ValueNotifier({'rode'});
+      final world = await _open(present: present);
+      world.voice.value = const VoiceSettings(microphone: rode);
+      await world.join();
+      await _until(() => world.connection.microphone == 'rode');
+
+      present.value = {};
+      await _until(() => world.connection.microphone == null);
+
+      expect(world.connection.microphone, isNull);
+    });
+
+    test('a chosen speaker that goes away gives way to the system '
+        'default', () async {
+      final present = ValueNotifier({'desk'});
+      final world = await _open(present: present);
+      world.voice.value = const VoiceSettings(speaker: desk);
+      await world.join();
+      await _until(() => world.connection.speaker == 'desk');
+
+      present.value = {};
+      await _until(() => world.connection.speaker == null);
+
+      expect(world.connection.speaker, isNull);
+    });
+
+    test('a chosen microphone that comes back is used again', () async {
+      final present = ValueNotifier(<String>{});
+      final world = await _open(present: present);
+      final watcher = await world.watcher();
+      world.voice.value = const VoiceSettings(microphone: rode);
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      present.value = {'rode'};
+      await _until(() => world.connection.microphone == 'rode');
+
+      expect(world.connection.microphone, 'rode');
+    });
+
+    test('a speaker that cannot be played on leaves your microphone '
+        'sent', () async {
+      final world = await _open(broken: {'desk'});
+      final watcher = await world.watcher();
+      world.voice.value = const VoiceSettings(speaker: desk);
+
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      expect(watcher.peers[_mine]?.muted, isFalse);
+      expect(world.calls.session?.phase, CallPhase.live);
+    });
+
+    test('a microphone that does not open on being chosen mutes you and '
+        'says it is blocked', () async {
+      final world = await _open(broken: {'sony'});
+      final watcher = await world.watcher();
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      world.voice.value = const VoiceSettings(microphone: sony);
+      await _until(() => world.calls.micBlocked);
+
+      expect(world.calls.micBlocked, isTrue);
+      expect(world.calls.muted, isTrue);
+      expect(watcher.peers[_mine]?.muted, isTrue);
+    });
+
+    test('choosing another microphone lifts the block, still muted', () async {
+      final world = await _open(broken: {'sony'});
+      world.voice.value = const VoiceSettings(microphone: sony);
+      await world.join();
+      await _until(() => world.calls.micBlocked);
+
+      world.voice.value = const VoiceSettings(microphone: rode);
+      await _until(() => !world.calls.micBlocked);
+
+      expect(world.calls.micBlocked, isFalse);
+      expect(world.calls.muted, isTrue);
+    });
+
+    test('unmuting after the block is lifted sends the microphone', () async {
+      final world = await _open(broken: {'sony'});
+      final watcher = await world.watcher();
+      world.voice.value = const VoiceSettings(microphone: sony);
+      await world.join();
+      await _until(() => world.calls.micBlocked);
+      world.voice.value = const VoiceSettings(microphone: rode);
+      await _until(() => !world.calls.micBlocked);
+
+      world.calls.toggleMute();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      expect(watcher.peers[_mine]?.muted, isFalse);
+    });
+
+    test('muting leaves the devices alone', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+      world._media.deviceSets.clear();
+
+      world.calls.toggleMute();
+      await _until(() => watcher.peers[_mine]?.muted == true);
+
+      expect(world._media.deviceSets, isEmpty);
+    });
+
+    test('a choice made outside a call is used by the next one', () async {
+      final world = await _open();
+      await world.join();
+      await world.calls.leave();
+
+      world.voice.value = const VoiceSettings(microphone: sony);
+      await world.join();
+      await _until(() => world.connection.microphone == 'sony');
+
+      expect(world.connection.microphone, 'sony');
     });
   });
 

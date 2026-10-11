@@ -16,6 +16,7 @@ separate work.
 - Sending and hearing audio.
 - Mute, deafen, who is speaking, who is muted.
 - The call staying joined while you look at other channels.
+- Choosing the microphone and the speaker.
 - Linux desktop.
 
 **Out:**
@@ -26,7 +27,7 @@ separate work.
 | Camera and screen sharing | The Linux libwebrtc build encodes and decodes in software only; needs its own research |
 | DM calls and ringing | Roadmap phase 8 |
 | macOS, iOS, Windows, Android | Each needs microphone permissions and its own check by hand; iOS also needs the audio session shared with `loaf_media` |
-| Choosing microphone and speaker, voice settings | Follows once joining is solid |
+| Echo cancellation, noise suppression and gain switches | Follows device choice |
 | Per-person volume | `livekit_client` has no volume call; `flutter_webrtc` has one per track |
 | Calls whose members publish to another homeserver's SFU | loaf.moe has one SFU |
 | Element Call's `matrix_2_0` mode | Needs sticky events (MSC4354), which the homeserver does not have |
@@ -221,6 +222,29 @@ amber a weak one; no bars in red one barely there; no bars in amber
 reconnecting. The rating is LiveKit's own for this device. Hovering, or
 tapping on a phone, says which.
 
+**Devices.** Settings has a voice section listing the machine's microphones
+and speakers, each under a "system default" entry. The choice is kept in
+`voice.json` in the app's support directory, as the device's id and label. A
+call opens the chosen microphone and plays on the chosen speaker, and a
+choice made during a call is applied at once: an unmuted microphone is
+reopened from the new device, a muted one when it is next unmuted. A chosen
+device the machine does not have is listed as "not connected" and the call
+uses the system default until it is back. The list is read again whenever
+the section opens and, once it has been opened, whenever WebRTC reports a
+change.
+
+A live call applies the choice again whenever WebRTC reports a change, so a
+device that goes away mid-call gives way to the system default and one that
+comes back is taken up. A speaker that cannot be set is logged and the call
+plays on where it did. A microphone that does not open mutes you and shows
+as blocked; the block lifts at the next choice or change of devices, and
+unmuting is left to you.
+
+On Linux a device's id is its name, so two identical devices cannot be told
+apart, and a device the system renames reads as not connected. WebRTC lists
+the system default there a second time as `default: <name>`; that entry is
+left out of the list and is what "system default" opens.
+
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
 it is given a `CallMedia`, and `main.dart` gives it one on Linux. On other
 platforms a voice channel still reads "voice chat isn't available yet".
@@ -256,6 +280,10 @@ platforms a voice channel still reads "voice chat isn't available yet".
   either way.
 - **One SFU.** Members who publish to a different call server are listed but
   not heard.
+- **Device loss is unchecked by hand.** Moving playback to another speaker
+  while someone is talking, and what WebRTC does on Linux when a device in
+  use goes away (whether it reports the change at all), are written from
+  `livekit_client` and `flutter_webrtc` source.
 - **No reconnect UI beyond LiveKit's own.** A dropped connection shows
   "reconnecting…" while LiveKit retries, then "couldn't connect".
 

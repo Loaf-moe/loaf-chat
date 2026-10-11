@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -18,14 +19,16 @@ class InMemoryCallServer {
   }
 }
 
-/// One device's way to an [InMemoryCallServer]: its [network] and whether it
-/// has a [microphone].
+/// One device's way to an [InMemoryCallServer]: its [network], whether it
+/// has a [microphone], and which audio devices it has by id.
 class InMemoryCallMedia implements CallMedia {
   InMemoryCallMedia(
     this.server, {
     ValueListenable<CallLink>? network,
     ValueListenable<CallQuality>? quality,
     this.microphone = true,
+    this.present,
+    this.broken = const {},
   }) : network = network ?? ValueNotifier(CallLink.connected),
        quality = quality ?? ValueNotifier(CallQuality.good);
 
@@ -35,6 +38,12 @@ class InMemoryCallMedia implements CallMedia {
   /// How the server rates this device's link.
   final ValueListenable<CallQuality> quality;
   final bool microphone;
+
+  /// The ids of the audio devices this machine has. Null: any id asked for.
+  final ValueListenable<Set<String>>? present;
+
+  /// The ids of devices this machine has but cannot open.
+  final Set<String> broken;
 
   @override
   Future<CallConnection> connect(Uri url, String jwt) async {
@@ -53,6 +62,7 @@ class InMemoryCallMedia implements CallMedia {
     (server._rooms[room] ??= []).add(connection);
     network.addListener(connection._notify);
     quality.addListener(connection._notify);
+    present?.addListener(connection._devicesChanged);
     server._changed(room);
     return connection;
   }
@@ -77,8 +87,24 @@ class _Connection extends ChangeNotifier implements CallConnection {
   final InMemoryCallMedia _media;
   final String _identity;
   final String _room;
+  final _deviceChanges = StreamController<void>.broadcast();
   var _microphone = false;
   var _gone = false;
+
+  @override
+  String? microphone;
+
+  @override
+  String? speaker;
+
+  @override
+  Stream<void> get deviceChanges => _deviceChanges.stream;
+
+  void _devicesChanged() => _deviceChanges.add(null);
+
+  /// [id] if this machine has that device, else the default.
+  String? _present(String? id) =>
+      _media.present?.value.contains(id) ?? true ? id : null;
 
   void _notify() {
     if (!_gone) notifyListeners();
@@ -105,6 +131,9 @@ class _Connection extends ChangeNotifier implements CallConnection {
     if (on && !_media.microphone) {
       throw const MicrophoneUnavailable('this device has none');
     }
+    if (on && _media.broken.contains(microphone)) {
+      throw MicrophoneUnavailable("$microphone doesn't open");
+    }
     _microphone = on;
     _media.server._changed(_room);
   }
@@ -113,11 +142,32 @@ class _Connection extends ChangeNotifier implements CallConnection {
   Future<void> setDeafened(bool deafened) async {}
 
   @override
+  Future<void> setMicrophoneDevice(String? id) async {
+    microphone = _present(id);
+    if (_microphone && _media.broken.contains(microphone)) {
+      _microphone = false;
+      _media.server._changed(_room);
+      throw MicrophoneUnavailable("$microphone doesn't open");
+    }
+  }
+
+  @override
+  Future<void> setSpeakerDevice(String? id) async {
+    final device = _present(id);
+    if (_media.broken.contains(device)) {
+      throw SpeakerUnavailable("$device doesn't open");
+    }
+    speaker = device;
+  }
+
+  @override
   Future<void> disconnect() async {
     if (_gone) return;
     _gone = true;
     _media.network.removeListener(_notify);
     _media.quality.removeListener(_notify);
+    _media.present?.removeListener(_devicesChanged);
+    await _deviceChanges.close();
     _media.server._rooms[_room]?.remove(this);
     _media.server._changed(_room);
   }
