@@ -1499,6 +1499,7 @@ class _AppShellState extends State<AppShell> {
               child: ChannelList(
                 space: _space,
                 call: _heardCall,
+                myId: _me.id,
                 selectedChannelId: _channel?.id ?? '',
                 onSelect: _selectChannel,
                 onAction: _channelAction,

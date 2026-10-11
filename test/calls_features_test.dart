@@ -177,6 +177,19 @@ void main() {
       expect(find.byType(Slider), findsOneWidget);
     });
 
+    testWidgets(
+      "someone's tile menu divides the volume from the actions",
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester, _tileActions(VoiceOnlyCalls()), voice: _voice());
+
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(PopupMenuDivider), findsOneWidget);
+      },
+    );
+
     testWidgets('your own tile offers none', variant: _desktop, (tester) async {
       await _pump(
         tester,

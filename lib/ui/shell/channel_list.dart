@@ -1,16 +1,21 @@
 /// The middle column: a space's categories and channels.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../call/call_tile.dart';
+import '../call/volume_slider.dart';
 import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
+import '../settings/voice_settings.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/action_menu.dart';
 import '../widgets/count_label.dart';
 import '../widgets/loaf_avatar.dart';
 import '../widgets/speaking_ring.dart';
@@ -34,9 +39,13 @@ class ChannelList extends StatefulWidget {
     this.onNewMessage,
     this.allowedActions,
     this.call,
+    required this.myId,
   });
 
   final Space space;
+
+  /// Your own user id: your row under a voice channel has no menu.
+  final String myId;
 
   /// The call you are in: its channel, and how each of its people is heard,
   /// you among them. Null in no call, or one that is not connected.
@@ -140,6 +149,7 @@ class _ChannelListState extends State<ChannelList> {
                       allowedActions: widget.allowedActions,
                       ringingId: widget.ringingId,
                       call: widget.call,
+                      myId: widget.myId,
                       home: widget.home,
                       onReorder: widget.home && category.name == 'favourites'
                           ? widget.onReorderFavourites
@@ -300,6 +310,7 @@ class _CategorySection extends StatelessWidget {
     this.allowedActions,
     this.ringingId,
     this.call,
+    required this.myId,
     this.home = false,
     this.onReorder,
     this.onAdd,
@@ -312,6 +323,7 @@ class _CategorySection extends StatelessWidget {
   final VoidCallback? onAdd;
   final String? ringingId;
   final ({String channelId, List<TileInfo> people})? call;
+  final String myId;
   final bool collapsed;
   final String? selectedChannelId;
   final LoafTokens tokens;
@@ -333,6 +345,7 @@ class _CategorySection extends StatelessWidget {
             channel.earlier.any((c) => c.id == selectedChannelId),
         ringing: channel.id == ringingId,
         people: channel.id == call?.channelId ? call!.people : const [],
+        myId: myId,
         tokens: tokens,
         home: home,
         longPressActions: longPressActions,
@@ -488,6 +501,7 @@ class _ChannelEntry extends StatelessWidget {
     this.allowedActions,
     this.ringing = false,
     this.people = const [],
+    required this.myId,
     this.home = false,
     this.longPressActions = true,
   });
@@ -500,6 +514,7 @@ class _ChannelEntry extends StatelessWidget {
   /// How each person in this channel's call is heard, when it is the call
   /// you are in. Empty otherwise.
   final List<TileInfo> people;
+  final String myId;
 
   /// A Home row: its actions include favourite and low priority.
   final bool home;
@@ -645,6 +660,7 @@ class _ChannelEntry extends StatelessWidget {
                       heard: people
                           .where((person) => person.id == member.id)
                           .firstOrNull,
+                      you: member.id == myId,
                       tokens: tokens,
                     ),
                 ],
@@ -663,18 +679,61 @@ class _Occupant extends StatelessWidget {
     super.key,
     required this.member,
     required this.heard,
+    required this.you,
     required this.tokens,
   });
 
   final Member member;
   final TileInfo? heard;
+  final bool you;
   final LoafTokens tokens;
+
+  /// Their volume: a menu at [position] on a computer, a sheet on a phone.
+  Future<void> _openMenu(
+    BuildContext context,
+    VoiceController voice, {
+    Offset? position,
+  }) async {
+    final name = Text(
+      member.name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: loafBody(13, 600).copyWith(color: tokens.textMuted),
+    );
+    if (position != null) {
+      await showActionMenu<void>(
+        context,
+        position: position,
+        leading: [
+          _MenuHeading(child: name),
+          VolumeMenuEntry(voice: voice, id: member.id),
+        ],
+        items: const [],
+      );
+    } else {
+      await showActionSheet<void>(
+        context,
+        header: (context) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            name,
+            VolumeSlider(voice: voice, id: member.id),
+          ],
+        ),
+        items: const [],
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final speaking = heard?.speaking ?? false;
     final deafened = heard?.deafened ?? false;
     final muted = heard?.muted ?? false;
+    // Your own sound is never played to you, so there is nothing to set.
+    // Found, not watched: whether the app keeps voice settings never
+    // changes while it runs.
+    final voice = you ? null : VoiceScope.find(context);
     return Semantics(
       label: [
         member.name,
@@ -685,36 +744,104 @@ class _Occupant extends StatelessWidget {
       // One node a row, not one for the whole list of people.
       container: true,
       excludeSemantics: true,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(
-          children: [
-            SpeakingRing(
-              speaking: speaking,
-              child: _MemberAvatar(member: member, size: 20),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                member.name,
-                overflow: TextOverflow.ellipsis,
-                style: loafBody(13, 400).copyWith(color: tokens.textMuted),
-              ),
-            ),
-            if (deafened || muted)
-              Padding(
-                padding: const EdgeInsets.only(left: 6, right: LoafSpace.x3),
-                child: Icon(
-                  deafened ? LucideIcons.headphoneOff : LucideIcons.micOff,
-                  size: 14,
-                  color: tokens.textMuted,
+      // A screen reader has no right-click; it opens the menu where the
+      // row is.
+      onLongPress: voice == null
+          ? null
+          : () {
+              final box = context.findRenderObject()! as RenderBox;
+              unawaited(
+                _openMenu(
+                  context,
+                  voice,
+                  position: isDesktop
+                      ? box.localToGlobal(Offset(0, box.size.height))
+                      : null,
                 ),
-              ),
-          ],
+              );
+            },
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          // Long press on a phone, right-click on a computer, as for a
+          // channel's own actions.
+          onLongPress: !isDesktop && voice != null
+              ? () {
+                  HapticFeedback.mediumImpact();
+                  unawaited(_openMenu(context, voice));
+                }
+              : null,
+          onSecondaryTapUp: isDesktop && voice != null
+              ? (details) => unawaited(
+                  _openMenu(context, voice, position: details.globalPosition),
+                )
+              : null,
+          hoverColor: tokens.card.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(LoafRadius.md),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              children: [
+                SpeakingRing(
+                  speaking: speaking,
+                  child: _MemberAvatar(member: member, size: 20),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    member.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+                  ),
+                ),
+                if (deafened || muted)
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      left: 6,
+                      right: LoafSpace.x3,
+                    ),
+                    child: Icon(
+                      deafened ? LucideIcons.headphoneOff : LucideIcons.micOff,
+                      size: 14,
+                      color: tokens.textMuted,
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
+}
+
+/// A line of plain text heading a menu.
+class _MenuHeading extends PopupMenuEntry<void> {
+  const _MenuHeading({required this.child});
+
+  final Widget child;
+
+  @override
+  double get height => 28;
+
+  @override
+  bool represents(void value) => false;
+
+  @override
+  State<_MenuHeading> createState() => _MenuHeadingState();
+}
+
+class _MenuHeadingState extends State<_MenuHeading> {
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(
+      LoafSpace.x3,
+      LoafSpace.x2,
+      LoafSpace.x3,
+      0,
+    ),
+    child: widget.child,
+  );
 }
 
 /// Marks a channel you can join with one tap. Not a separate button: the

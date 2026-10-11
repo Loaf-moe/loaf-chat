@@ -16,6 +16,7 @@ import '../widgets/loaf_button.dart';
 import '../widgets/toast.dart';
 import '../window/window_chrome.dart';
 import 'calls.dart';
+import 'volume_slider.dart';
 import 'call_controls.dart';
 import 'call_health.dart';
 import 'call_stage.dart';
@@ -155,7 +156,10 @@ Future<void> showTileActions(
     action = await showActionMenu(
       context,
       position: position,
-      leading: [if (voice != null) _VolumeEntry(voice: voice, id: info.id)],
+      leading: [
+        if (voice != null)
+          VolumeMenuEntry<_TileAction>(voice: voice, id: info.id),
+      ],
       items: items,
     );
   } else {
@@ -163,7 +167,7 @@ Future<void> showTileActions(
       context,
       header: voice == null
           ? null
-          : (context) => _VolumeSlider(voice: voice, id: info.id),
+          : (context) => VolumeSlider(voice: voice, id: info.id),
       items: items,
     );
   }
@@ -175,78 +179,6 @@ Future<void> showTileActions(
       calls.pin(null);
     case null:
   }
-}
-
-/// Per-person volume. Local only: it changes what you hear, not them.
-class _VolumeSlider extends StatefulWidget {
-  const _VolumeSlider({required this.voice, required this.id});
-
-  final VoiceController voice;
-  final String id;
-
-  @override
-  State<_VolumeSlider> createState() => _VolumeSliderState();
-}
-
-class _VolumeSliderState extends State<_VolumeSlider> {
-  late double _value = widget.voice.volumeOf(widget.id);
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = LoafTokens.of(context);
-    return Row(
-      children: [
-        Icon(LucideIcons.volume1, size: 18, color: tokens.textMuted),
-        Expanded(
-          child: Slider(
-            value: _value,
-            max: VoiceSettings.maxVolume,
-            // Steps of five in a hundred, so that 100% can be dragged to.
-            divisions: 40,
-            onChanged: (v) {
-              setState(() => _value = v);
-              widget.voice.setVolume(widget.id, v);
-            },
-          ),
-        ),
-        SizedBox(
-          width: 44,
-          child: Text(
-            '${(_value * 100).round()}%',
-            textAlign: TextAlign.end,
-            style: loafBody(13, 500).copyWith(color: tokens.textBody),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _VolumeEntry extends PopupMenuEntry<_TileAction> {
-  const _VolumeEntry({required this.voice, required this.id});
-
-  final VoiceController voice;
-  final String id;
-
-  @override
-  double get height => 48;
-
-  @override
-  bool represents(_TileAction? value) => false;
-
-  @override
-  State<_VolumeEntry> createState() => _VolumeEntryState();
-}
-
-class _VolumeEntryState extends State<_VolumeEntry> {
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 240,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
-      child: _VolumeSlider(voice: widget.voice, id: widget.id),
-    ),
-  );
 }
 
 class CallTopBar extends StatelessWidget {

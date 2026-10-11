@@ -1,7 +1,11 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/call/call_tile.dart';
+import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/model/models.dart';
+import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/widgets/speaking_ring.dart';
@@ -35,25 +39,49 @@ const _space = Space(
   ],
 );
 
+const _computer = TargetPlatformVariant({TargetPlatform.linux});
+const _phone = TargetPlatformVariant({TargetPlatform.iOS});
+
 /// The list while you are in the oven's call with [people] as they are, or
-/// in no call.
-Future<void> _pump(WidgetTester tester, {List<TileInfo>? people}) async {
+/// in no call; under [voice] when the app has voice settings.
+Future<void> _pump(
+  WidgetTester tester, {
+  List<TileInfo>? people,
+  VoiceController? voice,
+}) async {
   tester.view.physicalSize = const Size(400, 900);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(
-    MaterialApp(
-      theme: loafLightTheme(),
-      home: Scaffold(
-        body: ChannelList(
-          space: _space,
-          selectedChannelId: '',
-          onSelect: (_) {},
-          call: people == null ? null : (channelId: '!oven', people: people),
-        ),
+  final Widget app = MaterialApp(
+    theme: loafLightTheme(),
+    home: Scaffold(
+      body: ChannelList(
+        space: _space,
+        selectedChannelId: '',
+        onSelect: (_) {},
+        myId: _you.id,
+        call: people == null ? null : (channelId: '!oven', people: people),
       ),
     ),
   );
+  await tester.pumpWidget(
+    voice == null ? app : VoiceScope(controller: voice, child: app),
+  );
+  await tester.pumpAndSettle();
+}
+
+VoiceController _voice({VoiceSettings saved = const VoiceSettings()}) {
+  final voice = VoiceController(
+    store: MemoryVoiceStore(),
+    devices: MemoryAudioDevices(),
+    settings: saved,
+  );
+  addTearDown(voice.dispose);
+  return voice;
+}
+
+Future<void> _rightClick(WidgetTester tester, Finder row) async {
+  await tester.tap(row, buttons: kSecondaryButton);
   await tester.pumpAndSettle();
 }
 
@@ -182,5 +210,116 @@ void main() {
     expect(said(_ada), 'ada, speaking');
     expect(said(_bo), 'bo, muted');
     semantics.dispose();
+  });
+
+  group('the menu on someone listed', () {
+    testWidgets(
+      'opens on a right-click, with their volume where it was '
+      'set',
+      variant: _computer,
+      (tester) async {
+        await _pump(
+          tester,
+          voice: _voice(saved: VoiceSettings(volumes: {_ada.id: 0.5})),
+        );
+
+        await _rightClick(tester, _row('!oven', _ada));
+
+        expect(tester.widget<Slider>(find.byType(Slider)).value, 0.5);
+      },
+    );
+
+    testWidgets('says whose it is', variant: _computer, (tester) async {
+      await _pump(tester, voice: _voice());
+
+      await _rightClick(tester, _row('!oven', _bo));
+
+      // Once in the row, once heading the menu.
+      expect(find.text('bo'), findsNWidgets(2));
+    });
+
+    testWidgets('sets their volume when dragged', variant: _computer, (
+      tester,
+    ) async {
+      final voice = _voice();
+      await _pump(tester, voice: voice);
+      await _rightClick(tester, _row('!oven', _ada));
+
+      await tester.drag(find.byType(Slider), const Offset(-60, 0));
+      await tester.pumpAndSettle();
+
+      expect(voice.volumeOf(_ada.id), lessThan(1));
+      expect(voice.volumeOf(_bo.id), 1);
+    });
+
+    testWidgets('does not open on yourself', variant: _computer, (
+      tester,
+    ) async {
+      await _pump(tester, voice: _voice());
+
+      await _rightClick(tester, _row('!oven', _you));
+
+      expect(find.byType(Slider), findsNothing);
+    });
+
+    testWidgets(
+      'does not open where the app keeps no voice settings',
+      variant: _computer,
+      (tester) async {
+        await _pump(tester);
+
+        await _rightClick(tester, _row('!oven', _ada));
+
+        expect(find.byType(Slider), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'opens for someone in a voice channel you are not in',
+      variant: _computer,
+      (tester) async {
+        await _pump(tester, voice: _voice());
+
+        await _rightClick(tester, _row('!kiln', _ada));
+
+        expect(find.byType(Slider), findsOneWidget);
+      },
+    );
+
+    testWidgets('of a name and a slider has no divider', variant: _computer, (
+      tester,
+    ) async {
+      await _pump(tester, voice: _voice());
+
+      await _rightClick(tester, _row('!oven', _ada));
+
+      expect(find.byType(PopupMenuDivider), findsNothing);
+    });
+
+    testWidgets('is offered to a screen reader, but not on your own row', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      await _pump(tester, voice: _voice());
+
+      bool offered(Member member) => tester
+          .getSemantics(_row('!oven', member))
+          .getSemanticsData()
+          .hasAction(SemanticsAction.longPress);
+      expect(offered(_ada), isTrue);
+      expect(offered(_you), isFalse);
+      semantics.dispose();
+    });
+
+    testWidgets('opens on a long press on a phone', variant: _phone, (
+      tester,
+    ) async {
+      await _pump(tester, voice: _voice());
+
+      await tester.longPress(_row('!oven', _ada));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Slider), findsOneWidget);
+    });
   });
 }

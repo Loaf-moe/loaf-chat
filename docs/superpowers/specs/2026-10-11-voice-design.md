@@ -259,8 +259,9 @@ during a call reopens the microphone as a change of device does: at once
 when unmuted, at the next unmute when muted. `livekit_client` also asks for
 typing-noise detection and voice isolation; the Linux plugin reads neither.
 
-**Volume.** Someone's tile offers a slider from nothing to twice as loud as
-they are sent. The number is kept by user id in `voice.json`, so it holds
+**Volume.** Someone's tile, and their row under a voice channel in the
+channel list (a right-click, or a long press on a phone), offer a slider
+from nothing to twice as loud as they are sent. The number is kept by user id in `voice.json`, so it holds
 across calls and launches, and applies to every device that person is in
 the call on, including one that joins later. `livekit_client` has no call
 for it; the call goes to `flutter_webrtc`'s per-track volume, which is why
