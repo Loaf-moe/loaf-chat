@@ -1,4 +1,4 @@
-/// The middle column: a space's categories and channels, mockup only.
+/// The middle column: a space's categories and channels.
 library;
 
 import 'package:flutter/gestures.dart';
@@ -13,6 +13,7 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/count_label.dart';
 import '../widgets/loaf_avatar.dart';
+import '../widgets/speaking_ring.dart';
 import '../window/window_chrome.dart';
 import 'channel_actions.dart';
 import 'user_bar.dart';
@@ -32,9 +33,14 @@ class ChannelList extends StatefulWidget {
     this.onReorderFavourites,
     this.onNewMessage,
     this.allowedActions,
+    this.call,
   });
 
   final Space space;
+
+  /// The call you are in: its channel, and how each of its people is heard,
+  /// you among them. Null in no call, or one that is not connected.
+  final ({String channelId, List<TileInfo> people})? call;
 
   /// Home only: the "+" on the direct messages heading.
   final VoidCallback? onNewMessage;
@@ -133,6 +139,7 @@ class _ChannelListState extends State<ChannelList> {
                       onAction: widget.onAction,
                       allowedActions: widget.allowedActions,
                       ringingId: widget.ringingId,
+                      call: widget.call,
                       home: widget.home,
                       onReorder: widget.home && category.name == 'favourites'
                           ? widget.onReorderFavourites
@@ -292,6 +299,7 @@ class _CategorySection extends StatelessWidget {
     required this.onAction,
     this.allowedActions,
     this.ringingId,
+    this.call,
     this.home = false,
     this.onReorder,
     this.onAdd,
@@ -303,6 +311,7 @@ class _CategorySection extends StatelessWidget {
   /// Home's direct messages only: starts a new one.
   final VoidCallback? onAdd;
   final String? ringingId;
+  final ({String channelId, List<TileInfo> people})? call;
   final bool collapsed;
   final String? selectedChannelId;
   final LoafTokens tokens;
@@ -323,6 +332,7 @@ class _CategorySection extends StatelessWidget {
             channel.id == selectedChannelId ||
             channel.earlier.any((c) => c.id == selectedChannelId),
         ringing: channel.id == ringingId,
+        people: channel.id == call?.channelId ? call!.people : const [],
         tokens: tokens,
         home: home,
         longPressActions: longPressActions,
@@ -477,6 +487,7 @@ class _ChannelEntry extends StatelessWidget {
     required this.onAction,
     this.allowedActions,
     this.ringing = false,
+    this.people = const [],
     this.home = false,
     this.longPressActions = true,
   });
@@ -485,6 +496,10 @@ class _ChannelEntry extends StatelessWidget {
   final Set<ChannelAction>? allowedActions;
   final bool selected;
   final bool ringing;
+
+  /// How each person in this channel's call is heard, when it is the call
+  /// you are in. Empty otherwise.
+  final List<TileInfo> people;
 
   /// A Home row: its actions include favourite and low priority.
   final bool home;
@@ -624,27 +639,79 @@ class _ChannelEntry extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   for (final member in channel.occupants)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Row(
-                        children: [
-                          _MemberAvatar(member: member, size: 20),
-                          const SizedBox(width: 8),
-                          Text(
-                            member.name,
-                            overflow: TextOverflow.ellipsis,
-                            style: loafBody(
-                              13,
-                              400,
-                            ).copyWith(color: tokens.textMuted),
-                          ),
-                        ],
-                      ),
+                    _Occupant(
+                      key: ValueKey('occupant-${channel.id}-${member.id}'),
+                      member: member,
+                      heard: people
+                          .where((person) => person.id == member.id)
+                          .firstOrNull,
+                      tokens: tokens,
                     ),
                 ],
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Someone in a voice channel's call. In the call you are in, [heard] says
+/// whether they are talking or muted; elsewhere nobody can tell.
+class _Occupant extends StatelessWidget {
+  const _Occupant({
+    super.key,
+    required this.member,
+    required this.heard,
+    required this.tokens,
+  });
+
+  final Member member;
+  final TileInfo? heard;
+  final LoafTokens tokens;
+
+  @override
+  Widget build(BuildContext context) {
+    final speaking = heard?.speaking ?? false;
+    final deafened = heard?.deafened ?? false;
+    final muted = heard?.muted ?? false;
+    return Semantics(
+      label: [
+        member.name,
+        if (speaking) 'speaking',
+        // Deafened is muted too; the one word says both.
+        if (deafened) 'deafened' else if (muted) 'muted',
+      ].join(', '),
+      // One node a row, not one for the whole list of people.
+      container: true,
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            SpeakingRing(
+              speaking: speaking,
+              child: _MemberAvatar(member: member, size: 20),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                member.name,
+                overflow: TextOverflow.ellipsis,
+                style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+              ),
+            ),
+            if (deafened || muted)
+              Padding(
+                padding: const EdgeInsets.only(left: 6, right: LoafSpace.x3),
+                child: Icon(
+                  deafened ? LucideIcons.headphoneOff : LucideIcons.micOff,
+                  size: 14,
+                  color: tokens.textMuted,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

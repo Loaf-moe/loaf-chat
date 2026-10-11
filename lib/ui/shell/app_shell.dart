@@ -16,6 +16,8 @@ import 'package:flutter/services.dart';
 import '../call/call_controller.dart';
 import '../call/call_health.dart';
 import '../call/call_sounds.dart';
+import '../call/call_tile.dart';
+import '../call/call_view.dart';
 import '../call/connected_call_bar.dart';
 import '../call/dm_call_panel.dart';
 import '../call/incoming_call_card.dart';
@@ -366,6 +368,15 @@ class _AppShellState extends State<AppShell> {
       members: mockHome.members,
       categories: homeSections(collapseDuplicates(_homeRooms)),
     ).withSession(occupants: _callOccupants);
+  }
+
+  /// The call you are in and how each of its people is heard, while it is
+  /// connected: before that nobody's microphone is known, and while it
+  /// reconnects what is known is from before the link dropped.
+  ({String channelId, List<TileInfo> people})? get _heardCall {
+    final session = _calls.session;
+    if (session == null || session.phase != CallPhase.live) return null;
+    return (channelId: session.target.id, people: callTiles(_calls, session));
   }
 
   /// Who is in the call you are in, you included — so its channel or DM
@@ -1487,6 +1498,7 @@ class _AppShellState extends State<AppShell> {
             Expanded(
               child: ChannelList(
                 space: _space,
+                call: _heardCall,
                 selectedChannelId: _channel?.id ?? '',
                 onSelect: _selectChannel,
                 onAction: _channelAction,

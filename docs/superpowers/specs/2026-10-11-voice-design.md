@@ -266,6 +266,13 @@ the call on, including one that joins later. `livekit_client` has no call
 for it; the call goes to `flutter_webrtc`'s per-track volume, which is why
 that package is a dependency of its own.
 
+**In the channel list.** Under the voice channel whose call you are in,
+once it is connected, each person's avatar rings green while they are heard,
+a struck microphone sits beside anyone muted, and struck headphones beside
+you when deafened. Nobody else's deafening is known: neither LiveKit nor the
+membership event says. For a call this device is not connected to, only who
+is in it is known, so those rows show names alone.
+
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
 it is given a `CallMedia`, and `main.dart` gives it one on Linux. On other
 platforms a voice channel still reads "voice chat isn't available yet".

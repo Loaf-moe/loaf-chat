@@ -10,6 +10,7 @@ import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/ui/widgets/speaking_ring.dart';
 
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
 final _android = TargetPlatformVariant.only(TargetPlatform.android);
@@ -300,6 +301,55 @@ void main() {
       },
     );
   });
+
+  testWidgets(
+    'the channel list shows you as muted once you mute in a call',
+    variant: _desktop,
+    (tester) async {
+      await _pumpShell(tester, _wide);
+      await tester.tap(find.text('the hangout'));
+      await _connect(tester);
+      final struck = find.descendant(
+        of: find.byType(ChannelList),
+        matching: find.byIcon(LucideIcons.micOff),
+      );
+      final before = tester.widgetList(struck).length;
+
+      await tester.tap(find.byTooltip('Mute (⌘⇧M)'));
+      await tester.pump();
+
+      expect(tester.widgetList(struck).length, before + 1);
+    },
+  );
+
+  testWidgets(
+    'while the call reconnects, the channel list shows nobody as heard '
+    'or muted',
+    variant: _desktop,
+    (tester) async {
+      await _pumpShell(tester, _wide);
+      await tester.tap(find.text('the hangout'));
+      await _connect(tester);
+      await tester.tap(find.byTooltip('Mute (⌘⇧M)'));
+      await tester.pump();
+
+      await _debug(tester, 'toggle reconnecting');
+
+      final list = find.byType(ChannelList);
+      expect(
+        find.descendant(of: list, matching: find.byIcon(LucideIcons.micOff)),
+        findsNothing,
+      );
+      expect(
+        tester
+            .widgetList<SpeakingRing>(
+              find.descendant(of: list, matching: find.byType(SpeakingRing)),
+            )
+            .where((ring) => ring.speaking),
+        isEmpty,
+      );
+    },
+  );
 
   group('DM calls', () {
     Future<void> openDm(WidgetTester tester, String name) async {

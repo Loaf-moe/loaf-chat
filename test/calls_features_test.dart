@@ -9,6 +9,7 @@ import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/ui/widgets/speaking_ring.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'voice_only_calls.dart';
@@ -127,6 +128,40 @@ void main() {
       final calls = VoiceOnlyCalls();
 
       expect(callTiles(calls, live()).first.speaking, isFalse);
+    });
+  });
+
+  group("a tile's ring", () {
+    Future<bool> ringing(
+      WidgetTester tester, {
+      required bool speaking,
+      bool dimmed = false,
+    }) async {
+      await _pump(
+        tester,
+        SizedBox(
+          width: 300,
+          height: 200,
+          child: CallTile(
+            info: TileInfo(_ada, speaking: speaking),
+            dimmed: dimmed,
+          ),
+        ),
+      );
+      return tester.widget<SpeakingRing>(find.byType(SpeakingRing)).speaking;
+    }
+
+    testWidgets('is lit while they speak', (tester) async {
+      expect(await ringing(tester, speaking: true), isTrue);
+    });
+
+    testWidgets('is out while they do not', (tester) async {
+      expect(await ringing(tester, speaking: false), isFalse);
+    });
+
+    testWidgets('is out while the call is not connected, whatever was '
+        'last heard', (tester) async {
+      expect(await ringing(tester, speaking: true, dimmed: true), isFalse);
     });
   });
 

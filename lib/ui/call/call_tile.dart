@@ -9,6 +9,7 @@ import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
+import '../widgets/speaking_ring.dart';
 import 'calls.dart';
 
 /// What a tile draws. Built from a [CallParticipant], or from your own
@@ -157,16 +158,10 @@ class _CallTileState extends State<CallTile> {
       ),
     );
 
-    body = AnimatedContainer(
-      duration: LoafMotion.fast,
-      curve: LoafMotion.ease,
-      foregroundDecoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(LoafRadius.xl),
-        border: Border.all(
-          color: info.speaking && !faded ? tokens.online : Colors.transparent,
-          width: 3,
-        ),
-      ),
+    body = SpeakingRing(
+      speaking: info.speaking && !faded,
+      radius: LoafRadius.xl,
+      width: 3,
       child: AnimatedOpacity(
         duration: LoafMotion.normal,
         opacity: faded ? 0.45 : 1,
