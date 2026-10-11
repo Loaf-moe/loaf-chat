@@ -324,7 +324,10 @@ platforms a voice channel still reads "voice chat isn't available yet".
 
 - **Linux.** `flutter build linux` fetches libwebrtc during CMake configure
   and puts `libwebrtc.so` in the bundle's `lib/`. A build with no network
-  needs the zip placed at the path under Findings first.
+  needs the zip placed at the path under Findings first. The app starts
+  WebRTC itself (`LiveKitClient.initialize`) before first use: left to
+  start by itself, `flutter_webrtc` asks libwebrtc for a log level, and
+  libwebrtc logs to stderr once asked for any.
 - **macOS, iOS, Windows.** Adding the dependency makes these builds link
   WebRTC too (a Swift package binary on Apple platforms, a downloaded DLL on
   Windows). Calls stay off there.

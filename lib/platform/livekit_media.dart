@@ -11,6 +11,10 @@ import 'package:livekit_client/livekit_client.dart';
 import '../matrix/call_media.dart';
 import '../ui/settings/voice_settings.dart';
 
+/// Awaited before anything here reaches WebRTC: left to start itself, the
+/// plugin asks libwebrtc for a log level, which turns its stderr logging on.
+final Future<void> _webRtcStarted = LiveKitClient.initialize();
+
 /// Muting switches the microphone off and leaves it open.
 const _capture = AudioCaptureOptions(stopAudioCaptureOnMute: false);
 
@@ -26,20 +30,29 @@ class LiveKitAudioDevices implements AudioDevices {
 
   @override
   Future<List<AudioDevice>> microphones() =>
-      _listed(Hardware.instance.audioInputs);
+      _listed(() => Hardware.instance.audioInputs());
 
   @override
   Future<List<AudioDevice>> speakers() =>
-      _listed(Hardware.instance.audioOutputs);
+      _listed(() => Hardware.instance.audioOutputs());
 
   @override
-  Stream<void> get changes => Hardware.instance.onDeviceChange.stream;
+  Stream<void> get changes async* {
+    try {
+      await _webRtcStarted;
+    } on PlatformException {
+      // No WebRTC, so no devices to change.
+      return;
+    }
+    yield* Hardware.instance.onDeviceChange.stream;
+  }
 
   static Future<List<AudioDevice>> _listed(
     Future<List<MediaDevice>> Function() list,
   ) async {
     final List<MediaDevice> devices;
     try {
+      await _webRtcStarted;
       devices = await list();
     } on PlatformException {
       // The machine would not say: nothing to choose from but the default.
@@ -60,6 +73,7 @@ class LiveKitMedia implements CallMedia {
 
   @override
   Future<CallConnection> connect(Uri url, String jwt) async {
+    await _webRtcStarted;
     if (defaultTargetPlatform == TargetPlatform.linux) {
       ConnectivityPlatform.instance = _AlwaysOnline();
     }
