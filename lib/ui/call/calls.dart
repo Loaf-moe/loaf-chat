@@ -182,9 +182,6 @@ enum CallFeature {
   /// Choosing speaker, earpiece or headset on a phone.
   audioRoute,
 
-  /// Turning one person up or down.
-  volume,
-
   /// Calls in direct chats, and their ringing.
   direct,
 }
@@ -223,8 +220,6 @@ abstract interface class Calls implements Listenable {
 
   /// Whose tile fills the stage: a pinned tile, else the newest screen share.
   String? get spotlight;
-
-  double volumeOf(String id);
 
   /// Whether the call's media is encrypted end to end.
   bool get encrypted;
@@ -275,5 +270,4 @@ abstract interface class Calls implements Listenable {
   void startScreenShare(String source);
   void stopScreenShare();
   void pin(String? id);
-  void setVolume(String id, double value);
 }

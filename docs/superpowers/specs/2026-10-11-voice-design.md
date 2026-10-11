@@ -19,6 +19,7 @@ separate work.
 - Choosing the microphone and the speaker.
 - Switching the microphone's echo cancellation, noise suppression,
   automatic gain and high-pass filter.
+- Turning one person up or down.
 - Linux desktop.
 
 **Out:**
@@ -29,7 +30,6 @@ separate work.
 | Camera and screen sharing | The Linux libwebrtc build encodes and decodes in software only; needs its own research |
 | DM calls and ringing | Roadmap phase 8 |
 | macOS, iOS, Windows, Android | Each needs microphone permissions and its own check by hand; iOS also needs the audio session shared with `loaf_media` |
-| Per-person volume | `livekit_client` has no volume call; `flutter_webrtc` has one per track |
 | Calls whose members publish to another homeserver's SFU | loaf.moe has one SFU |
 | Element Call's `matrix_2_0` mode | Needs sticky events (MSC4354), which the homeserver does not have |
 
@@ -258,6 +258,13 @@ Linux they take effect only when a microphone is opened, so a switch made
 during a call reopens the microphone as a change of device does: at once
 when unmuted, at the next unmute when muted. `livekit_client` also asks for
 typing-noise detection and voice isolation; the Linux plugin reads neither.
+
+**Volume.** Someone's tile offers a slider from nothing to twice as loud as
+they are sent. The number is kept by user id in `voice.json`, so it holds
+across calls and launches, and applies to every device that person is in
+the call on, including one that joins later. `livekit_client` has no call
+for it; the call goes to `flutter_webrtc`'s per-track volume, which is why
+that package is a dependency of its own.
 
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
 it is given a `CallMedia`, and `main.dart` gives it one on Linux. On other

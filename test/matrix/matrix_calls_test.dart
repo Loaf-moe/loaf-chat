@@ -139,6 +139,9 @@ class _Logged implements CallMedia {
   /// Each time a connection was told which device to use.
   final deviceSets = <String>[];
 
+  /// Each time a connection was told how loud to play someone, in order.
+  final volumeSets = <(String, double)>[];
+
   /// The connection made last.
   CallConnection? last;
 
@@ -149,16 +152,18 @@ class _Logged implements CallMedia {
       await _inner.connect(url, jwt),
       _log,
       deviceSets,
+      volumeSets,
     );
   }
 }
 
 class _LoggedConnection implements CallConnection {
-  _LoggedConnection(this._inner, this._log, this._deviceSets);
+  _LoggedConnection(this._inner, this._log, this._deviceSets, this._volumeSets);
 
   final CallConnection _inner;
   final List<String> _log;
   final List<String> _deviceSets;
+  final List<(String, double)> _volumeSets;
 
   @override
   Future<void> disconnect() {
@@ -176,6 +181,12 @@ class _LoggedConnection implements CallConnection {
   Future<void> setMicrophone(bool on) => _inner.setMicrophone(on);
   @override
   Future<void> setDeafened(bool deafened) => _inner.setDeafened(deafened);
+  @override
+  Future<void> setVolume(String identity, double volume) {
+    _volumeSets.add((identity, volume));
+    return _inner.setVolume(identity, volume);
+  }
+
   @override
   String? get microphone => _inner.microphone;
   @override
@@ -292,6 +303,9 @@ class _World {
 
   /// This device's connection to the call it joined last.
   CallConnection get connection => _media.last!;
+
+  /// How loud the calls were told to play whom, in order.
+  List<(String, double)> get volumes => _media.volumeSets;
 
   /// Signs in, joins the voice rooms, and opens the calls. [microphone] is
   /// whether this device has one; [already] is state the oven has before
@@ -898,6 +912,138 @@ void main() {
       await _until(() => world.connection.microphone == 'sony');
 
       expect(world.connection.microphone, 'sony');
+    });
+  });
+
+  group("each person's volume", () {
+    const quiet = VoiceSettings(volumes: {_ada: 0.4});
+
+    test('set before the call is used once it is live', () async {
+      final world = await _open();
+      world.voice.value = quiet;
+      await world.other(_ada, 'ADADEVICE');
+
+      await world.join();
+      await _until(() => world.volumes.isNotEmpty);
+
+      expect(world.volumes, [('$_ada:ADADEVICE', 0.4)]);
+    });
+
+    test('set during the call is used at once', () async {
+      final world = await _open();
+      await world.other(_ada, 'ADADEVICE');
+      await world.join();
+
+      world.voice.value = quiet;
+      await _until(() => world.volumes.isNotEmpty);
+
+      expect(world.volumes, [('$_ada:ADADEVICE', 0.4)]);
+    });
+
+    test('goes for each of their devices', () async {
+      final world = await _open();
+      await world.other(_ada, 'ADADEVICE');
+      await world.other(_ada, 'ADAPHONE');
+      await world.join();
+
+      world.voice.value = quiet;
+      await _until(() => world.volumes.length >= 2);
+
+      expect(
+        world.volumes,
+        unorderedEquals([('$_ada:ADADEVICE', 0.4), ('$_ada:ADAPHONE', 0.4)]),
+      );
+    });
+
+    test('goes for a device of theirs that joins later', () async {
+      final world = await _open();
+      world.voice.value = quiet;
+      await world.join();
+
+      await world.other(_ada, 'ADAPHONE');
+      await _until(() => world.volumes.isNotEmpty);
+
+      expect(world.volumes, [('$_ada:ADAPHONE', 0.4)]);
+    });
+
+    test('set back to 1 is used too', () async {
+      final world = await _open();
+      world.voice.value = quiet;
+      await world.other(_ada, 'ADADEVICE');
+      await world.join();
+      await _until(() => world.volumes.isNotEmpty);
+
+      world.voice.value = const VoiceSettings();
+      await _until(() => world.volumes.length >= 2);
+
+      expect(world.volumes.last, ('$_ada:ADADEVICE', 1.0));
+    });
+
+    test('is told once, however often the call hears from the room', () async {
+      final world = await _open();
+      world.voice.value = quiet;
+      await world.other(_ada, 'ADADEVICE');
+      await world.join();
+      await _until(() => world.volumes.isNotEmpty);
+
+      await world.other('@bo:example.com', 'BODEVICE');
+      await _settle();
+
+      expect(world.volumes, [('$_ada:ADADEVICE', 0.4)]);
+    });
+
+    test('changed, leaves the devices and the processing alone', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.other(_ada, 'ADADEVICE');
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+      world._media.deviceSets.clear();
+
+      world.voice.value = quiet;
+      await _until(() => world.volumes.isNotEmpty);
+      await _settle();
+
+      expect(world._media.deviceSets, isEmpty);
+    });
+
+    test('changed, leaves a blocked microphone blocked', () async {
+      const sony = AudioDevice('sony', 'WH-1000XM3');
+      final world = await _open(broken: {'sony'});
+      world.voice.value = const VoiceSettings(microphone: sony);
+      await world.other(_ada, 'ADADEVICE');
+      await world.join();
+      await _until(() => world.calls.micBlocked);
+
+      world.voice.value = const VoiceSettings(
+        microphone: sony,
+        volumes: {_ada: 0.4},
+      );
+      await _until(() => world.volumes.isNotEmpty);
+      await _settle();
+
+      expect(world.calls.micBlocked, isTrue);
+    });
+
+    test('is left alone for someone never set', () async {
+      final world = await _open();
+      await world.other(_ada, 'ADADEVICE');
+
+      await world.join();
+      await _settle();
+
+      expect(world.volumes, isEmpty);
+    });
+
+    test('is never set for your own devices', () async {
+      final world = await _open();
+      world.voice.value = const VoiceSettings(volumes: {_me: 0.4});
+      await world.other(_me, 'MYPHONE');
+
+      await world.join();
+      await _settle();
+
+      expect(world.volumes, isEmpty);
     });
   });
 

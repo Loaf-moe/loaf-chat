@@ -3,7 +3,7 @@ import 'package:loaf_native/ui/call/calls.dart';
 import 'package:loaf_native/ui/model/models.dart';
 
 /// Calls with voice and nothing else, as a backend with no camera, screen
-/// sharing, camera choice, volume or DM calls has them. Joining goes live at
+/// sharing, camera choice or DM calls has them. Joining goes live at
 /// once.
 class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   VoiceOnlyCalls({this.canJoin = true, this.leaving});
@@ -104,8 +104,6 @@ class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   @override
   String get cameraDevice => '';
   @override
-  double volumeOf(String id) => 1;
-  @override
   CallParticipant? lobbyState(String memberId) => null;
 
   @override
@@ -128,8 +126,6 @@ class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   void setRoute(AudioRoute value) => _lacks();
   @override
   void setCameraDevice(String value) => _lacks();
-  @override
-  void setVolume(String id, double value) => _lacks();
 
   Never _lacks() => throw UnsupportedError('voice only');
 }

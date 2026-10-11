@@ -145,7 +145,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       target: channel,
       spaceName: spaceName,
       phase: CallPhase.connecting,
-      participants: room == null ? const [] : _participants(room, null),
+      participants: room == null
+          ? const []
+          : _participants(_occupants(room), null),
     );
     _notify();
     await _end(before);
@@ -188,18 +190,21 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     }
     if (!joined || attempt != _attempt) return;
 
-    final live = _live = _Live(room, connection!, membership!);
+    final live = _live = _Live(room, connection!, membership!)
+      ..voice = _voice?.value;
     connection.addListener(_onMedia);
-    live.deviceChanges = connection.deviceChanges.listen(
-      (_) => _changedVoice(),
-    );
+    live.deviceChanges = connection.deviceChanges.listen((_) {
+      if (identical(live, _live)) _applyAudio(live, voice: true);
+    });
+    final occupants = _occupants(room);
     _session = _session!.copyWith(
       phase: CallPhase.live,
       startedAt: _now(),
-      participants: _participants(room, connection),
+      participants: _participants(occupants, connection),
     );
     _notify();
     _applyAudio(live, voice: true);
+    _syncVolumes(live, occupants);
   }
 
   /// Takes the live call out of this object's hands, for [_end] to finish.
@@ -322,18 +327,39 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   }
 
   void _refresh(_Live live) {
+    final occupants = _occupants(live.room);
     _session = _session?.copyWith(
-      participants: _participants(live.room, live.connection),
+      participants: _participants(occupants, live.connection),
     );
     _notify();
+    _syncVolumes(live, occupants);
   }
 
-  /// Everyone else in [room]'s call. Someone is speaking if any of their
+  /// Tells [live]'s media how loud to play each device of everyone else
+  /// among [occupants], where that is not what it was last told.
+  void _syncVolumes(_Live live, List<CallOccupant> occupants) {
+    final volumes = _voice?.value.volumes ?? const <String, double>{};
+    for (final occupant in occupants) {
+      if (occupant.member.id == _client.userID) continue;
+      final volume = volumes[occupant.member.id] ?? 1;
+      for (final device in occupant.devices) {
+        final identity = '${occupant.member.id}:$device';
+        if ((live.volumes[identity] ?? 1) == volume) continue;
+        live.volumes[identity] = volume;
+        unawaited(live.connection.setVolume(identity, volume));
+      }
+    }
+  }
+
+  /// Everyone else among [occupants]. Someone is speaking if any of their
   /// devices is, and muted unless one of them sends a microphone.
-  List<CallParticipant> _participants(Room room, CallConnection? connection) {
+  List<CallParticipant> _participants(
+    List<CallOccupant> occupants,
+    CallConnection? connection,
+  ) {
     final peers = connection?.peers ?? const <String, CallPeer>{};
     return [
-      for (final occupant in _occupants(room))
+      for (final occupant in occupants)
         if (occupant.member.id != _client.userID)
           () {
             final theirs = [
@@ -372,11 +398,18 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     if (live != null) _applyAudio(live);
   }
 
-  /// Another device or other processing was chosen, or the machine's
-  /// devices changed.
+  /// Another device, other processing or someone's volume was chosen.
   void _changedVoice() {
     final live = _live;
-    if (live != null) _applyAudio(live, voice: true);
+    if (live == null) return;
+    final before = live.voice;
+    final now = live.voice = _voice?.value;
+    // Someone's volume alone leaves the microphone and the speaker be.
+    if (before?.copyWith(volumes: const {}) !=
+        now?.copyWith(volumes: const {})) {
+      _applyAudio(live, voice: true);
+    }
+    _syncVolumes(live, _occupants(live.room));
   }
 
   /// Brings what [live] sends and plays in line with [muted] and
@@ -468,8 +501,6 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   @override
   String get cameraDevice => '';
   @override
-  double volumeOf(String id) => 1;
-  @override
   CallParticipant? lobbyState(String memberId) => null;
 
   @override
@@ -492,8 +523,6 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   void setRoute(AudioRoute value) => _lacks('audioRoute');
   @override
   void setCameraDevice(String value) => _lacks('devices');
-  @override
-  void setVolume(String id, double value) => _lacks('volume');
 
   Never _lacks(String feature) =>
       throw UnsupportedError('MatrixCalls has no $feature');
@@ -508,6 +537,13 @@ class _Live {
   final OwnCallMembership membership;
 
   late final StreamSubscription<void> deviceChanges;
+
+  /// The settings as of the last change this call looked at.
+  VoiceSettings? voice;
+
+  /// How loud the media was last told to play each device, by identity.
+  /// Absent: never told, so as loud as sent.
+  final volumes = <String, double>{};
 
   /// Whether a sync has shown this device's membership since it was
   /// written. Until then its absence means nothing.

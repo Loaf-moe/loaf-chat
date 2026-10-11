@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/call/call_controller.dart';
 import 'package:loaf_native/ui/call/call_controls.dart';
+import 'package:loaf_native/ui/call/calls.dart';
 import 'package:loaf_native/ui/call/call_tile.dart';
 import 'package:loaf_native/ui/call/call_view.dart';
 import 'package:loaf_native/ui/call/voice_channel_page.dart';
+import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/model/models.dart';
+import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -17,17 +19,32 @@ const _mobile = TargetPlatformVariant({TargetPlatform.iOS});
 const _oven = Channel(id: '!oven', name: 'oven', kind: ChannelKind.voice);
 const _ada = Member('@ada:loaf.test', 'ada', Color(0xFF884422));
 
-Future<void> _pump(WidgetTester tester, Widget child) async {
+Future<void> _pump(
+  WidgetTester tester,
+  Widget child, {
+  VoiceController? voice,
+}) async {
   tester.view.physicalSize = const Size(1200, 800);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
+  final Widget app = MaterialApp(
+    theme: loafLightTheme(),
+    home: Scaffold(body: child),
+  );
   await tester.pumpWidget(
-    MaterialApp(
-      theme: loafLightTheme(),
-      home: Scaffold(body: child),
-    ),
+    voice == null ? app : VoiceScope(controller: voice, child: app),
   );
   await tester.pumpAndSettle();
+}
+
+VoiceController _voice({VoiceSettings saved = const VoiceSettings()}) {
+  final voice = VoiceController(
+    store: MemoryVoiceStore(),
+    devices: MemoryAudioDevices(),
+    settings: saved,
+  );
+  addTearDown(voice.dispose);
+  return voice;
 }
 
 Widget _controls(Calls calls) => CallControls(calls: calls, onLeave: () {});
@@ -35,11 +52,12 @@ Widget _controls(Calls calls) => CallControls(calls: calls, onLeave: () {});
 Widget _lobby(Calls calls) =>
     VoiceChannelPage(channel: _oven, calls: calls, onJoin: () {});
 
-/// A button that opens [ada]'s tile actions the way a right click does.
-Widget _tileActions(Calls calls) => Builder(
+/// A button that opens [ada]'s tile actions the way a right click does;
+/// with [you], as on your own tile.
+Widget _tileActions(Calls calls, {bool you = false}) => Builder(
   builder: (context) => TextButton(
     onPressed: () =>
-        showTileActions(context, calls, const TileInfo(_ada), Offset.zero),
+        showTileActions(context, calls, TileInfo(_ada, you: you), Offset.zero),
     child: const Text('open'),
   ),
 );
@@ -91,20 +109,79 @@ void main() {
     });
   });
 
-  testWidgets(
-    'calls with every feature offer volume for a tile',
-    variant: _desktop,
-    (tester) async {
-      final calls = CallController(me: _ada);
-      addTearDown(calls.dispose);
-      await _pump(tester, _tileActions(calls));
+  group('with voice settings to keep it in', () {
+    testWidgets("someone's tile offers their volume", variant: _desktop, (
+      tester,
+    ) async {
+      await _pump(tester, _tileActions(VoiceOnlyCalls()), voice: _voice());
 
       await tester.tap(find.text('open'));
       await tester.pumpAndSettle();
 
       expect(find.byType(Slider), findsOneWidget);
-    },
-  );
+    });
+
+    testWidgets('your own tile offers none', variant: _desktop, (tester) async {
+      await _pump(
+        tester,
+        _tileActions(VoiceOnlyCalls(), you: true),
+        voice: _voice(),
+      );
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pin'), findsOneWidget);
+      expect(find.byType(Slider), findsNothing);
+    });
+
+    testWidgets('the slider starts where they were set', variant: _desktop, (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        _tileActions(VoiceOnlyCalls()),
+        voice: _voice(saved: VoiceSettings(volumes: {_ada.id: 0.5})),
+      );
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<Slider>(find.byType(Slider)).value, 0.5);
+      expect(find.text('50%'), findsOneWidget);
+    });
+
+    testWidgets('dragging the slider sets their volume', variant: _desktop, (
+      tester,
+    ) async {
+      final voice = _voice();
+      await _pump(tester, _tileActions(VoiceOnlyCalls()), voice: voice);
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      await tester.drag(find.byType(Slider), const Offset(-60, 0));
+      await tester.pumpAndSettle();
+
+      expect(voice.volumeOf(_ada.id), lessThan(1));
+    });
+
+    testWidgets(
+      'the slider moves in steps of five in a hundred',
+      variant: _desktop,
+      (tester) async {
+        final voice = _voice();
+        await _pump(tester, _tileActions(VoiceOnlyCalls()), voice: voice);
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+
+        await tester.drag(find.byType(Slider), const Offset(-37, 0));
+        await tester.pumpAndSettle();
+
+        final twentieths = voice.volumeOf(_ada.id) * 20;
+        expect(twentieths, closeTo(twentieths.round(), 1e-9));
+      },
+    );
+  });
 
   group('calls with voice alone, on a phone', () {
     testWidgets('draw no audio output button', variant: _mobile, (

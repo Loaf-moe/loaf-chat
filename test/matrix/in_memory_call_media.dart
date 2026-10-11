@@ -145,6 +145,9 @@ class _Connection extends ChangeNotifier implements CallConnection {
   Future<void> setDeafened(bool deafened) async {}
 
   @override
+  Future<void> setVolume(String identity, double volume) async {}
+
+  @override
   Future<void> setMicrophoneDevice(String? id) async {
     microphone = _present(id);
     if (_microphone && _media.broken.contains(microphone)) {

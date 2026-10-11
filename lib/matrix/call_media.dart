@@ -121,6 +121,11 @@ abstract interface class CallConnection implements Listenable {
   /// Stops or resumes playing everyone else.
   Future<void> setDeafened(bool deafened);
 
+  /// Plays the device with [identity] at [volume] times as loud as it is
+  /// sent, from now on: what it sends now, and what it starts sending
+  /// later.
+  Future<void> setVolume(String identity, double volume);
+
   /// The device the microphone is taken from, by its id. Null is the
   /// system's default.
   String? get microphone;

@@ -1,5 +1,5 @@
-/// Which microphone and which speaker a call uses, and what is done to the
-/// microphone's sound.
+/// Which microphone and which speaker a call uses, what is done to the
+/// microphone's sound, and how loud each person is played.
 ///
 /// Saved to `voice.json` beside the other settings in the support
 /// directory. Per device, not per account: the devices are this machine's.
@@ -9,6 +9,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -67,7 +68,11 @@ class VoiceSettings {
     this.noiseSuppression = true,
     this.automaticGain = true,
     this.highPassFilter = false,
+    this.volumes = const {},
   });
+
+  /// The loudest anyone is played: twice as loud as sent.
+  static const maxVolume = 2.0;
 
   /// Anything unreadable falls back to that field's default, so a
   /// hand-edited file degrades instead of failing.
@@ -80,8 +85,20 @@ class VoiceSettings {
       noiseSuppression: _switch(json['noiseSuppression'], otherwise: true),
       automaticGain: _switch(json['automaticGain'], otherwise: true),
       highPassFilter: _switch(json['highPassFilter'], otherwise: false),
+      volumes: _volumes(json['volumes']),
     );
   }
+
+  static Map<String, double> _volumes(Object? json) => Map.unmodifiable({
+    if (json is Map)
+      for (final MapEntry(key: user, value: volume) in json.entries)
+        if (user is String &&
+            user.isNotEmpty &&
+            volume is num &&
+            volume >= 0 &&
+            volume <= maxVolume)
+          user: volume.toDouble(),
+  });
 
   static bool _switch(Object? json, {required bool otherwise}) =>
       json is bool ? json : otherwise;
@@ -100,6 +117,10 @@ class VoiceSettings {
   /// Takes the lowest of the microphone's sound out.
   final bool highPassFilter;
 
+  /// How loud each person is played, by user id, where 1 is as loud as
+  /// sent. Someone absent is played at 1.
+  final Map<String, double> volumes;
+
   /// A device is given as a function, so that null can be chosen.
   VoiceSettings copyWith({
     AudioDevice? Function()? microphone,
@@ -108,6 +129,7 @@ class VoiceSettings {
     bool? noiseSuppression,
     bool? automaticGain,
     bool? highPassFilter,
+    Map<String, double>? volumes,
   }) => VoiceSettings(
     microphone: microphone == null ? this.microphone : microphone(),
     speaker: speaker == null ? this.speaker : speaker(),
@@ -115,6 +137,7 @@ class VoiceSettings {
     noiseSuppression: noiseSuppression ?? this.noiseSuppression,
     automaticGain: automaticGain ?? this.automaticGain,
     highPassFilter: highPassFilter ?? this.highPassFilter,
+    volumes: volumes ?? this.volumes,
   );
 
   Map<String, Object> toJson() => {
@@ -124,6 +147,7 @@ class VoiceSettings {
     'noiseSuppression': noiseSuppression,
     'automaticGain': automaticGain,
     'highPassFilter': highPassFilter,
+    'volumes': volumes,
   };
 
   @override
@@ -134,7 +158,8 @@ class VoiceSettings {
       other.echoCancellation == echoCancellation &&
       other.noiseSuppression == noiseSuppression &&
       other.automaticGain == automaticGain &&
-      other.highPassFilter == highPassFilter;
+      other.highPassFilter == highPassFilter &&
+      mapEquals(other.volumes, volumes);
 
   @override
   int get hashCode => Object.hash(
@@ -144,6 +169,10 @@ class VoiceSettings {
     noiseSuppression,
     automaticGain,
     highPassFilter,
+    Object.hashAllUnordered([
+      for (final MapEntry(:key, :value) in volumes.entries)
+        Object.hash(key, value),
+    ]),
   );
 }
 
@@ -241,6 +270,11 @@ class VoiceController extends ChangeNotifier {
   /// Counts [refresh]es.
   var _asked = 0;
 
+  /// The newest settings not yet handed to the store, and whether a save
+  /// is under way.
+  VoiceSettings? _unsaved;
+  var _saving = false;
+
   AudioDevice? get microphone => settings.value.microphone;
   AudioDevice? get speaker => settings.value.speaker;
 
@@ -279,13 +313,44 @@ class VoiceController extends ChangeNotifier {
   void setHighPassFilter(bool on) =>
       _update(settings.value.copyWith(highPassFilter: on));
 
+  /// How loud [userId] is played, where 1 is as loud as sent.
+  double volumeOf(String userId) => settings.value.volumes[userId] ?? 1;
+
+  void setVolume(String userId, double volume) => _update(
+    settings.value.copyWith(
+      volumes: Map.unmodifiable({
+        for (final MapEntry(:key, :value) in settings.value.volumes.entries)
+          if (key != userId) key: value,
+        if (volume != 1) userId: volume,
+      }),
+    ),
+  );
+
   void _update(VoiceSettings next) {
     if (next == settings.value) return;
     settings.value = next;
     notifyListeners();
-    // A pick that can't be saved still applies for this run; losing it at
-    // the next launch beats crashing over a microphone.
-    unawaited(_store.save(next).onError<FileSystemException>((_, _) {}));
+    _unsaved = next;
+    if (!_saving) unawaited(_save());
+  }
+
+  /// One write at a time, and only the newest of those waiting: writes
+  /// begun together may finish in any order, and a slider makes many.
+  Future<void> _save() async {
+    _saving = true;
+    try {
+      for (var next = _unsaved; next != null; next = _unsaved) {
+        _unsaved = null;
+        try {
+          await _store.save(next);
+        } on FileSystemException {
+          // A pick that can't be saved still applies for this run; losing
+          // it at the next launch beats crashing over a microphone.
+        }
+      }
+    } finally {
+      _saving = false;
+    }
   }
 
   @override
@@ -307,4 +372,8 @@ class VoiceScope extends InheritedNotifier<VoiceController> {
 
   static VoiceController? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<VoiceScope>()?.notifier;
+
+  /// For event handlers: looks the controller up without subscribing.
+  static VoiceController? find(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<VoiceScope>()?.notifier;
 }

@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../members/role_colors.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
+import '../settings/voice_settings.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
 import '../widgets/loaf_button.dart';
@@ -139,7 +140,8 @@ Future<void> showTileActions(
   Offset? position,
 ) async {
   final pinned = calls.pinned == info.id;
-  final volume = !info.you && calls.features.contains(CallFeature.volume);
+  // Your own sound is never played to you.
+  final voice = info.you ? null : VoiceScope.find(context);
   final items = [
     ActionItem(
       value: pinned ? _TileAction.unpin : _TileAction.pin,
@@ -152,15 +154,15 @@ Future<void> showTileActions(
     action = await showActionMenu(
       context,
       position: position,
-      leading: [if (volume) _VolumeEntry(calls: calls, id: info.id)],
+      leading: [if (voice != null) _VolumeEntry(voice: voice, id: info.id)],
       items: items,
     );
   } else {
     action = await showActionSheet(
       context,
-      header: volume
-          ? (context) => _VolumeSlider(calls: calls, id: info.id)
-          : null,
+      header: voice == null
+          ? null
+          : (context) => _VolumeSlider(voice: voice, id: info.id),
       items: items,
     );
   }
@@ -176,9 +178,9 @@ Future<void> showTileActions(
 
 /// Per-person volume. Local only: it changes what you hear, not them.
 class _VolumeSlider extends StatefulWidget {
-  const _VolumeSlider({required this.calls, required this.id});
+  const _VolumeSlider({required this.voice, required this.id});
 
-  final Calls calls;
+  final VoiceController voice;
   final String id;
 
   @override
@@ -186,7 +188,7 @@ class _VolumeSlider extends StatefulWidget {
 }
 
 class _VolumeSliderState extends State<_VolumeSlider> {
-  late double _value = widget.calls.volumeOf(widget.id);
+  late double _value = widget.voice.volumeOf(widget.id);
 
   @override
   Widget build(BuildContext context) {
@@ -197,10 +199,12 @@ class _VolumeSliderState extends State<_VolumeSlider> {
         Expanded(
           child: Slider(
             value: _value,
-            max: 2,
+            max: VoiceSettings.maxVolume,
+            // Steps of five in a hundred, so that 100% can be dragged to.
+            divisions: 40,
             onChanged: (v) {
               setState(() => _value = v);
-              widget.calls.setVolume(widget.id, v);
+              widget.voice.setVolume(widget.id, v);
             },
           ),
         ),
@@ -218,9 +222,9 @@ class _VolumeSliderState extends State<_VolumeSlider> {
 }
 
 class _VolumeEntry extends PopupMenuEntry<_TileAction> {
-  const _VolumeEntry({required this.calls, required this.id});
+  const _VolumeEntry({required this.voice, required this.id});
 
-  final Calls calls;
+  final VoiceController voice;
   final String id;
 
   @override
@@ -239,7 +243,7 @@ class _VolumeEntryState extends State<_VolumeEntry> {
     width: 240,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
-      child: _VolumeSlider(calls: widget.calls, id: widget.id),
+      child: _VolumeSlider(voice: widget.voice, id: widget.id),
     ),
   );
 }

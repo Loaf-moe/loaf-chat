@@ -77,7 +77,6 @@ class CallController extends ChangeNotifier implements Calls {
 
   String? _pinned;
   final _shareOrder = <String>[];
-  final _volumes = <String, double>{};
 
   // Set from the debug menu.
   @override
@@ -99,9 +98,6 @@ class CallController extends ChangeNotifier implements Calls {
     if (_pinned != null) return _pinned;
     return _shareOrder.isEmpty ? null : _shareOrder.last;
   }
-
-  @override
-  double volumeOf(String id) => _volumes[id] ?? 1;
 
   @override
   CallParticipant? lobbyState(String memberId) => flags[memberId];
@@ -292,12 +288,6 @@ class CallController extends ChangeNotifier implements Calls {
   @override
   void pin(String? id) {
     _pinned = id;
-    notifyListeners();
-  }
-
-  @override
-  void setVolume(String id, double value) {
-    _volumes[id] = value;
     notifyListeners();
   }
 

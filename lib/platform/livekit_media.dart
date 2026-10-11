@@ -5,6 +5,7 @@ library;
 import 'package:connectivity_plus_platform_interface/connectivity_plus_platform_interface.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc show Helper;
 import 'package:livekit_client/livekit_client.dart';
 
 import '../matrix/call_media.dart';
@@ -106,16 +107,21 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
     _room.addListener(notifyListeners);
     _events = _room.createListener()
       ..on<TrackSubscribedEvent>((event) async {
+        final track = event.track;
+        if (track is! RemoteAudioTrack) return;
+        final volume = _volumes[event.participant.identity];
+        if (volume != null) await _play(track, volume);
         // Someone who starts talking while you are deafened stays unheard.
-        if (_deafened && event.track is RemoteAudioTrack) {
-          await event.track.disable();
-        }
+        if (_deafened) await track.disable();
       });
   }
 
   final Room _room;
   late final EventsListener<RoomEvent> _events;
   var _deafened = false;
+
+  /// How loud each device is played, by identity, where one was set.
+  final _volumes = <String, double>{};
 
   /// The devices chosen, by id. Null: the system's default.
   String? _microphone;
@@ -265,6 +271,28 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
       _playing = device.deviceId;
     } on PlatformException catch (e) {
       throw SpeakerUnavailable(e.toString());
+    }
+  }
+
+  @override
+  Future<void> setVolume(String identity, double volume) async {
+    _volumes[identity] = volume;
+    for (final participant in _room.remoteParticipants.values) {
+      if (participant.identity != identity) continue;
+      for (final publication in participant.audioTrackPublications) {
+        final track = publication.track;
+        if (track != null) await _play(track, volume);
+      }
+    }
+  }
+
+  Future<void> _play(RemoteAudioTrack track, double volume) async {
+    try {
+      await rtc.Helper.setVolume(volume, track.mediaStreamTrack);
+    } on PlatformException catch (e) {
+      // The plugin's code for a track it no longer has: it ended
+      // meanwhile, and nothing is left to set.
+      if (e.code != 'setVolume') rethrow;
     }
   }
 

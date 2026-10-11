@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/call/call_controller.dart';
+import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
+import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
@@ -16,18 +18,24 @@ final _desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
 const _phone = Size(390, 844);
 const _wide = Size(1440, 900);
 
-Future<void> _pumpShell(WidgetTester tester, Size size) async {
+/// [voice] is the voice settings the app has above it, when it has any.
+Future<void> _pumpShell(
+  WidgetTester tester,
+  Size size, {
+  VoiceController? voice,
+}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
 
+  final Widget app = MaterialApp(
+    theme: loafLightTheme(),
+    darkTheme: loafDarkTheme(),
+    themeMode: ThemeMode.dark,
+    home: const AppShell(),
+  );
   await tester.pumpWidget(
-    MaterialApp(
-      theme: loafLightTheme(),
-      darkTheme: loafDarkTheme(),
-      themeMode: ThemeMode.dark,
-      home: const AppShell(),
-    ),
+    voice == null ? app : VoiceScope(controller: voice, child: app),
   );
   await tester.pumpAndSettle();
 }
@@ -274,7 +282,12 @@ void main() {
       'goes nowhere',
       variant: _desktop,
       (tester) async {
-        await _pumpShell(tester, _wide);
+        final voice = VoiceController(
+          store: MemoryVoiceStore(),
+          devices: MemoryAudioDevices(),
+        );
+        addTearDown(voice.dispose);
+        await _pumpShell(tester, _wide, voice: voice);
         await tester.tap(find.text('the hangout'));
         await _connect(tester);
 

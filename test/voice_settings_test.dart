@@ -20,6 +20,23 @@ Future<VoiceController> _controller({
   return controller;
 }
 
+/// A store whose first write takes longest, as a file's may.
+class _SlowFirst implements VoiceStore {
+  VoiceSettings? saved;
+
+  /// How many writes were begun.
+  var writes = 0;
+
+  @override
+  Future<VoiceSettings?> load() async => null;
+
+  @override
+  Future<void> save(VoiceSettings settings) async {
+    await Future<void>.delayed(Duration(milliseconds: writes++ == 0 ? 60 : 0));
+    saved = settings;
+  }
+}
+
 class _FullDisk implements VoiceStore {
   @override
   Future<VoiceSettings?> load() async => null;
@@ -103,6 +120,8 @@ void main() {
     final controller = await _controller(store: store);
 
     controller.chooseMicrophone(_rode);
+
+    await pumpEventQueue();
 
     expect(store.saved, const VoiceSettings(microphone: _rode));
   });
@@ -238,6 +257,8 @@ void main() {
 
         flip(controller);
 
+        await pumpEventQueue();
+
         expect(store.saved, after);
       });
     }
@@ -263,6 +284,152 @@ void main() {
     controller.setNoiseSuppression(true);
 
     expect(told, 0);
+  });
+
+  group("each person's volume", () {
+    const ada = '@ada:example.com';
+    const bo = '@bo:example.com';
+
+    test('is 1 for someone never set', () async {
+      final controller = await _controller();
+
+      expect(controller.volumeOf(ada), 1);
+    });
+
+    test('is read back from the file', () async {
+      final dir = await Directory.systemTemp.createTemp('voice');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/voice.json');
+      const settings = VoiceSettings(volumes: {ada: 0.4});
+
+      await FileVoiceStore(file).save(settings);
+
+      expect(await FileVoiceStore(file).load(), settings);
+    });
+
+    test('goes to the store when set', () async {
+      final store = MemoryVoiceStore();
+      final controller = await _controller(store: store);
+
+      controller.setVolume(ada, 0.4);
+
+      expect(controller.volumeOf(ada), 0.4);
+      await pumpEventQueue();
+      expect(store.saved, const VoiceSettings(volumes: {ada: 0.4}));
+    });
+
+    test('is forgotten when set back to 1', () async {
+      final store = MemoryVoiceStore(const VoiceSettings(volumes: {ada: 0.4}));
+      final controller = await _controller(store: store);
+
+      controller.setVolume(ada, 1);
+
+      await pumpEventQueue();
+
+      expect(store.saved, const VoiceSettings());
+    });
+
+    test("leaves another person's, and the devices, as they were", () async {
+      final store = MemoryVoiceStore(
+        const VoiceSettings(microphone: _rode, volumes: {bo: 1.5}),
+      );
+      final controller = await _controller(store: store);
+
+      controller.setVolume(ada, 0.4);
+
+      await pumpEventQueue();
+
+      expect(
+        store.saved,
+        const VoiceSettings(microphone: _rode, volumes: {bo: 1.5, ada: 0.4}),
+      );
+    });
+
+    test('tells the calls when set', () async {
+      final controller = await _controller();
+      var calls = 0;
+      controller.settings.addListener(() => calls++);
+
+      controller.setVolume(ada, 0.4);
+
+      expect(calls, 1);
+    });
+
+    group('is dropped, alone, when saved as', () {
+      const shapes = <String, Map<String, Object?>>{
+        'no number': {ada: 'loud'},
+        'less than nothing': {ada: -0.1},
+        'more than double': {ada: 2.1},
+        'for nobody': {'': 0.4},
+      };
+      for (final MapEntry(key: name, value: shape) in shapes.entries) {
+        test(name, () {
+          final settings = VoiceSettings.fromJson({
+            'volumes': {...shape, bo: 1.5},
+          });
+
+          expect(settings.volumes, {bo: 1.5});
+        });
+      }
+    });
+
+    test('saved as a whole number is read', () {
+      final settings = VoiceSettings.fromJson({
+        'volumes': {ada: 2, bo: 0},
+      });
+
+      expect(settings.volumes, {ada: 2.0, bo: 0.0});
+    });
+
+    test('volumes that are no list of people read as none', () {
+      expect(VoiceSettings.fromJson({'volumes': 'loud'}).volumes, isEmpty);
+    });
+  });
+
+  test('changes in quick succession leave the last in the store', () async {
+    final store = _SlowFirst();
+    final controller = await _controller(store: store);
+
+    controller.setVolume('@ada:example.com', 0.2);
+    controller.setVolume('@ada:example.com', 0.4);
+    controller.setVolume('@ada:example.com', 0.6);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+
+    expect(store.saved?.volumes, {'@ada:example.com': 0.6});
+  });
+
+  test('changes made while a write is under way are written as one', () async {
+    final store = _SlowFirst();
+    final controller = await _controller(store: store);
+
+    for (var tenth = 1; tenth <= 9; tenth++) {
+      controller.setVolume('@ada:example.com', tenth / 10);
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+
+    expect(store.writes, lessThan(9));
+    expect(store.saved?.volumes, {'@ada:example.com': 0.9});
+  });
+
+  test('volumes read from a file cannot be changed in place', () {
+    final settings = VoiceSettings.fromJson({
+      'volumes': {'@ada:example.com': 0.4},
+    });
+
+    expect(
+      () => settings.volumes['@bo:example.com'] = 0.2,
+      throwsUnsupportedError,
+    );
+  });
+
+  test('volumes that were set cannot be changed in place', () async {
+    final controller = await _controller();
+    controller.setVolume('@ada:example.com', 0.4);
+
+    expect(
+      () => controller.settings.value.volumes['@bo:example.com'] = 0.2,
+      throwsUnsupportedError,
+    );
   });
 
   group('the rows to choose a device from', () {
