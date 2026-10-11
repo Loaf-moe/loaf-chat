@@ -23,6 +23,10 @@ mise install
 `mise install` brings Rust (pinned in `mise.toml`) along with Flutter. Run the
 build as `mise exec -- flutter build linux` so cargo is on the path.
 
+Flutter's engine expects GTK's Wayland backend. Where GTK is built for X11
+alone, the build adds `libgdk-wayland-stub.so` to the bundle to stand in for
+it.
+
 Voice channels use LiveKit's client, which links WebRTC. On Linux the build
 fetches a prebuilt `libwebrtc.so` from
 <https://github.com/webrtc-sdk/libwebrtc/releases> while CMake configures,
