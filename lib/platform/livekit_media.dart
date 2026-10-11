@@ -26,7 +26,13 @@ class LiveKitMedia implements CallMedia {
     } on Exception catch (e) {
       // Whatever kind of failure LiveKit reports: the call is not reached.
       await room.dispose();
-      throw CallMediaUnreachable(e.toString());
+      // LiveKit's address carries the token.
+      throw CallMediaUnreachable(
+        e.toString().replaceAll(
+          RegExp(r'access_token=[^&\s]+'),
+          'access_token=…',
+        ),
+      );
     }
     return _LiveKitConnection(room);
   }

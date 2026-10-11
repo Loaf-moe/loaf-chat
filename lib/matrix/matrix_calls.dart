@@ -145,9 +145,10 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       // Last: until this is written nobody else sees you in the call.
       await membership.join();
       joined = true;
-    } on Exception {
+    } on Exception catch (e, s) {
       // The call server, the media server or the homeserver said no, or
       // could not be reached: the session ends as failed, below.
+      Logs().w("[loaf] couldn't join the call in ${room.id}", e, s);
     } finally {
       if (!joined || attempt != _attempt) {
         await membership?.leave();
@@ -221,7 +222,10 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       live.echoed = false;
       final attempt = _attempt;
       unawaited(
-        live.membership.join().onError<Exception>((_, _) => _lost(attempt)),
+        live.membership.join().onError<Exception>((e, s) {
+          Logs().w("[loaf] couldn't say again that this device is here", e, s);
+          return _lost(attempt);
+        }),
       );
     }
     _refresh(live);
