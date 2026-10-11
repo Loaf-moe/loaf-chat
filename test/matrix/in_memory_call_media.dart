@@ -120,6 +120,9 @@ class _Connection extends ChangeNotifier implements CallConnection {
   CallQuality get quality => _media.quality.value;
 
   @override
+  bool get speaking => _microphone;
+
+  @override
   Map<String, CallPeer> get peers => {
     for (final other in _media.server._rooms[_room] ?? const <_Connection>[])
       if (!identical(other, this))

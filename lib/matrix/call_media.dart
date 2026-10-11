@@ -111,6 +111,9 @@ abstract interface class CallConnection implements Listenable {
   /// How well this device's own link is doing, as the media server rates it.
   CallQuality get quality;
 
+  /// Whether this device is being heard.
+  bool get speaking;
+
   /// Everyone else's devices, by their identity in the call.
   Map<String, CallPeer> get peers;
 

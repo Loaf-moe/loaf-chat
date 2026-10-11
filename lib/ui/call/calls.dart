@@ -228,6 +228,9 @@ abstract interface class Calls implements Listenable {
   // mute and deafen do.
   bool get muted;
   bool get deafened;
+
+  /// Whether you are being heard in the call.
+  bool get speaking;
   bool get camera;
   AudioRoute get route;
   String get cameraDevice;

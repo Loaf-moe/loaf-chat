@@ -87,6 +87,11 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   CallQuality get quality => _live?.connection.quality ?? CallQuality.unknown;
 
   @override
+  bool get speaking =>
+      // Muted is not heard, whatever the media has yet to notice.
+      !muted && (_live?.connection.speaking ?? false);
+
+  @override
   CallSession? get session => _session;
 
   @override

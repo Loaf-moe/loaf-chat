@@ -176,6 +176,8 @@ class _LoggedConnection implements CallConnection {
   @override
   CallQuality get quality => _inner.quality;
   @override
+  bool get speaking => _inner.speaking;
+  @override
   Map<String, CallPeer> get peers => _inner.peers;
   @override
   Future<void> setMicrophone(bool on) => _inner.setMicrophone(on);
@@ -557,6 +559,71 @@ void main() {
       await _until(() => !world.calls.session!.participants.single.muted);
 
       expect(world.calls.session!.participants.single.muted, isFalse);
+    });
+  });
+
+  group('whether you are speaking', () {
+    test('is yes while your microphone is sent', () async {
+      final world = await _open();
+
+      await world.join();
+      await _until(() => world.calls.speaking);
+
+      expect(world.calls.speaking, isTrue);
+    });
+
+    test('is no once you mute', () async {
+      final world = await _open();
+      await world.join();
+      await _until(() => world.calls.speaking);
+
+      world.calls.toggleMute();
+      await _until(() => !world.calls.speaking);
+
+      expect(world.calls.speaking, isFalse);
+    });
+
+    test('is no the moment you mute, before the media says so', () async {
+      final world = await _open();
+      await world.join();
+      await _until(() => world.calls.speaking);
+
+      world.calls.toggleMute();
+
+      expect(world.calls.speaking, isFalse);
+    });
+
+    test('is no outside a call', () async {
+      final world = await _open();
+
+      expect(world.calls.speaking, isFalse);
+    });
+
+    test('is no again after leaving', () async {
+      final world = await _open();
+      await world.join();
+      await _until(() => world.calls.speaking);
+
+      await world.calls.leave();
+
+      expect(world.calls.speaking, isFalse);
+    });
+
+    test('tells listeners when it changes', () async {
+      final world = await _open();
+      world.calls.toggleMute();
+      await world.join();
+      final heard = <bool>[];
+      world.calls.addListener(() {
+        if (heard.lastOrNull != world.calls.speaking) {
+          heard.add(world.calls.speaking);
+        }
+      });
+
+      world.calls.toggleMute();
+      await _until(() => heard.contains(true));
+
+      expect(heard, contains(true));
     });
   });
 

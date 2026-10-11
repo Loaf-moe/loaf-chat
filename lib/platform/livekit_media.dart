@@ -161,6 +161,9 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
   };
 
   @override
+  bool get speaking => _room.localParticipant?.isSpeaking ?? false;
+
+  @override
   CallQuality get quality =>
       switch (_room.localParticipant?.connectionQuality) {
         ConnectionQuality.excellent ||

@@ -109,6 +109,27 @@ void main() {
     });
   });
 
+  group('your own tile', () {
+    CallSession live() => const CallSession(
+      target: _oven,
+      spaceName: 'Bakery',
+      phase: CallPhase.live,
+      participants: [],
+    );
+
+    test('is marked speaking while you speak', () {
+      final calls = VoiceOnlyCalls()..speaking = true;
+
+      expect(callTiles(calls, live()).first.speaking, isTrue);
+    });
+
+    test('is not while you do not', () {
+      final calls = VoiceOnlyCalls();
+
+      expect(callTiles(calls, live()).first.speaking, isFalse);
+    });
+  });
+
   group('with voice settings to keep it in', () {
     testWidgets("someone's tile offers their volume", variant: _desktop, (
       tester,
