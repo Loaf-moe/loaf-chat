@@ -16,6 +16,7 @@ import '../widgets/toast.dart';
 import '../window/window_chrome.dart';
 import 'calls.dart';
 import 'call_controls.dart';
+import 'call_health.dart';
 import 'call_stage.dart';
 import 'call_tile.dart';
 
@@ -319,6 +320,10 @@ class CallTopBar extends StatelessWidget {
                             : tokens.textMuted,
                       ),
                     ),
+                  ],
+                  if (CallHealthMark.shows(calls)) ...[
+                    const SizedBox(width: LoafSpace.x2),
+                    CallHealthMark(calls: calls, quiet: true),
                   ],
                   if (calls.encrypted) ...[
                     const SizedBox(width: LoafSpace.x2),

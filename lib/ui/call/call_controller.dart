@@ -112,6 +112,9 @@ class CallController extends ChangeNotifier implements Calls {
   Set<CallFeature> get features => CallFeature.values.toSet();
 
   @override
+  CallQuality get quality => CallQuality.good;
+
+  @override
   bool joinable(Channel channel) => true;
 
   // ── Joining and leaving ──────────────────────────────────────────────

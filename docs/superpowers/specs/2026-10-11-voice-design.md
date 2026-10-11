@@ -203,6 +203,14 @@ change in a call of more than eight people, and the same sound plays at most
 once in half a second. The app's one sound switch silences them. The files and
 their licences are listed in `assets/SOURCES.md`.
 
+**Connection.** A call that has gone live carries one small mark of signal
+bars: after the channel's name in the call's top bar, and at the start of the
+bar that follows you to other channels, in place of that bar's own icon. Full
+bars are a good link (muted in the top bar, green on the bar); low bars in
+amber a weak one; no bars in red one barely there; no bars in amber
+reconnecting. The rating is LiveKit's own for this device. Hovering, or
+tapping on a phone, says which.
+
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
 it is given a `CallMedia`, and `main.dart` gives it one on Linux. On other
 platforms a voice channel still reads "voice chat isn't available yet".

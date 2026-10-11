@@ -21,6 +21,9 @@ class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   Set<CallFeature> get features => const {};
 
   @override
+  CallQuality quality = CallQuality.good;
+
+  @override
   CallSession? session;
 
   @override

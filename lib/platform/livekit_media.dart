@@ -81,6 +81,16 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
   };
 
   @override
+  CallQuality get quality =>
+      switch (_room.localParticipant?.connectionQuality) {
+        ConnectionQuality.excellent ||
+        ConnectionQuality.good => CallQuality.good,
+        ConnectionQuality.poor => CallQuality.poor,
+        ConnectionQuality.lost => CallQuality.bad,
+        ConnectionQuality.unknown || null => CallQuality.unknown,
+      };
+
+  @override
   Map<String, CallPeer> get peers => {
     for (final participant in _room.remoteParticipants.values)
       participant.identity: CallPeer(

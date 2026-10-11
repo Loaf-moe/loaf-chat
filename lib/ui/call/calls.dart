@@ -189,10 +189,24 @@ enum CallFeature {
   direct,
 }
 
+/// How well your own link to a call is carrying it.
+enum CallQuality {
+  /// Not rated yet.
+  unknown,
+  good,
+  poor,
+
+  /// Still connected, but barely anything gets through.
+  bad,
+}
+
 /// The one call you are in, and the one ringing at you, as the shell and the
 /// call widgets read and drive it.
 abstract interface class Calls implements Listenable {
   Member get me;
+
+  /// How well your link is carrying the call you are in.
+  CallQuality get quality;
 
   Set<CallFeature> get features;
 

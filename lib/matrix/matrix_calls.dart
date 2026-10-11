@@ -77,6 +77,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   Set<CallFeature> get features => const {};
 
   @override
+  CallQuality get quality => _live?.connection.quality ?? CallQuality.unknown;
+
+  @override
   CallSession? get session => _session;
 
   @override

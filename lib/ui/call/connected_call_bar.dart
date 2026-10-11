@@ -19,6 +19,7 @@ class ConnectedCallBar extends StatelessWidget {
     required this.subtitle,
     this.occupants = const [],
     this.warning = false,
+    this.leading,
     required this.muted,
     required this.onToggleMute,
     required this.onDisconnect,
@@ -35,6 +36,10 @@ class ConnectedCallBar extends StatelessWidget {
 
   /// Draws [title] in amber rather than green: the call is struggling.
   final bool warning;
+
+  /// What stands at the bar's start in place of its own mark: how the
+  /// call's connection is doing, once there is one to rate.
+  final Widget? leading;
 
   final bool muted;
   final VoidCallback onToggleMute;
@@ -57,11 +62,12 @@ class ConnectedCallBar extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(
-                LucideIcons.radio,
-                size: 18,
-                color: warning ? tokens.idle : tokens.online,
-              ),
+              leading ??
+                  Icon(
+                    LucideIcons.radio,
+                    size: 18,
+                    color: warning ? tokens.idle : tokens.online,
+                  ),
               const SizedBox(width: LoafSpace.x3),
               Expanded(
                 child: Column(

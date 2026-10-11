@@ -19,7 +19,9 @@ import 'package:loaf_native/ui/mock/mock_devices.dart';
 import 'package:loaf_native/ui/mock/mock_profile.dart';
 import 'package:loaf_native/ui/mock/mock_verifier.dart';
 import 'package:loaf_native/ui/model/models.dart';
+import 'package:loaf_native/ui/call/call_health.dart';
 import 'package:loaf_native/ui/call/calls.dart';
+import 'package:loaf_native/ui/call/connected_call_bar.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
 import 'package:loaf_native/ui/settings/settings_page.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
@@ -363,6 +365,98 @@ void main() {
 
       expect(calls.session?.target.name, 'oven');
       expect(find.byTooltip('Leave call'), findsOneWidget);
+    });
+
+    group('how the call\'s connection is doing', () {
+      Future<VoiceOnlyCalls> joined(WidgetTester tester) async {
+        final calls = VoiceOnlyCalls();
+        addTearDown(calls.dispose);
+        // The bar is drawn over a conversation, so #general has one.
+        final general = TimelineController(const [], you: _me);
+        addTearDown(general.dispose);
+        final rooms = _FakeRooms(spaces: [_bakery()])
+          ..abilities = {RoomAbility.messages, RoomAbility.calls}
+          ..calls = calls
+          ..timelines['!general'] = general;
+        await _pump(tester, rooms);
+        await tester.tap(_inList('oven'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('join voice'));
+        await tester.pumpAndSettle();
+        return calls;
+      }
+
+      testWidgets('shows muted in the call\'s own top bar', (tester) async {
+        await joined(tester);
+
+        final mark = find.byType(CallHealthMark);
+        expect(mark, findsOneWidget);
+        expect(
+          tester
+              .widget<Icon>(
+                find.descendant(of: mark, matching: find.byType(Icon)),
+              )
+              .color,
+          LoafTokens.of(tester.element(mark)).textMuted,
+        );
+      });
+
+      testWidgets('leads the bar that follows you to other channels', (
+        tester,
+      ) async {
+        await joined(tester);
+
+        await tester.tap(_inList('general'));
+        await tester.pumpAndSettle();
+
+        final bar = find.byType(ConnectedCallBar);
+        expect(
+          find.descendant(of: bar, matching: find.byType(CallHealthMark)),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: bar, matching: find.byIcon(LucideIcons.radio)),
+          findsNothing,
+        );
+      });
+
+      testWidgets('shows green on that bar', (tester) async {
+        await joined(tester);
+        await tester.tap(_inList('general'));
+        await tester.pumpAndSettle();
+
+        final mark = find.descendant(
+          of: find.byType(ConnectedCallBar),
+          matching: find.byType(CallHealthMark),
+        );
+        expect(
+          tester
+              .widget<Icon>(
+                find.descendant(of: mark, matching: find.byType(Icon)),
+              )
+              .color,
+          LoafTokens.of(tester.element(mark)).online,
+        );
+      });
+
+      testWidgets('turns the bar to its warning colour when weak', (
+        tester,
+      ) async {
+        final calls = await joined(tester);
+        await tester.tap(_inList('general'));
+        await tester.pumpAndSettle();
+
+        calls
+          ..quality = CallQuality.poor
+          ..show(calls.session);
+        await tester.pump();
+
+        final title = tester.widget<Text>(find.text('Voice connected'));
+        final tokens = LoafTokens.of(
+          tester.element(find.text('Voice connected')),
+        );
+        expect(title.style?.color, tokens.idle);
+      });
     });
 
     group('quitting while in a call', () {

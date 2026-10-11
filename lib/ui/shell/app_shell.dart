@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../call/call_controller.dart';
+import '../call/call_health.dart';
 import '../call/call_sounds.dart';
 import '../call/connected_call_bar.dart';
 import '../call/dm_call_panel.dart';
@@ -1082,7 +1083,13 @@ class _AppShellState extends State<AppShell> {
     return ConnectedCallBar(
       title: title,
       subtitle: subtitle,
-      warning: session.phase == CallPhase.reconnecting,
+      warning:
+          session.phase == CallPhase.reconnecting ||
+          _calls.quality == CallQuality.poor ||
+          _calls.quality == CallQuality.bad,
+      leading: CallHealthMark.shows(_calls)
+          ? CallHealthMark(calls: _calls, size: 18)
+          : null,
       occupants: present,
       muted: _calls.muted,
       onToggleMute: _calls.toggleMute,

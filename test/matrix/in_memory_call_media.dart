@@ -24,11 +24,16 @@ class InMemoryCallMedia implements CallMedia {
   InMemoryCallMedia(
     this.server, {
     ValueListenable<CallLink>? network,
+    ValueListenable<CallQuality>? quality,
     this.microphone = true,
-  }) : network = network ?? ValueNotifier(CallLink.connected);
+  }) : network = network ?? ValueNotifier(CallLink.connected),
+       quality = quality ?? ValueNotifier(CallQuality.good);
 
   final InMemoryCallServer server;
   final ValueListenable<CallLink> network;
+
+  /// How the server rates this device's link.
+  final ValueListenable<CallQuality> quality;
   final bool microphone;
 
   @override
@@ -47,6 +52,7 @@ class InMemoryCallMedia implements CallMedia {
     final connection = _Connection(this, identity, room);
     (server._rooms[room] ??= []).add(connection);
     network.addListener(connection._notify);
+    quality.addListener(connection._notify);
     server._changed(room);
     return connection;
   }
@@ -82,6 +88,9 @@ class _Connection extends ChangeNotifier implements CallConnection {
   CallLink get link => _gone ? CallLink.lost : _media.network.value;
 
   @override
+  CallQuality get quality => _media.quality.value;
+
+  @override
   Map<String, CallPeer> get peers => {
     for (final other in _media.server._rooms[_room] ?? const <_Connection>[])
       if (!identical(other, this))
@@ -108,6 +117,7 @@ class _Connection extends ChangeNotifier implements CallConnection {
     if (_gone) return;
     _gone = true;
     _media.network.removeListener(_notify);
+    _media.quality.removeListener(_notify);
     _media.server._rooms[_room]?.remove(this);
     _media.server._changed(_room);
   }

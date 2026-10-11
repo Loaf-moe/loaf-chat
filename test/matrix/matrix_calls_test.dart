@@ -157,6 +157,8 @@ class _LoggedConnection implements CallConnection {
   @override
   CallLink get link => _inner.link;
   @override
+  CallQuality get quality => _inner.quality;
+  @override
   Map<String, CallPeer> get peers => _inner.peers;
   @override
   Future<void> setMicrophone(bool on) => _inner.setMicrophone(on);
@@ -242,6 +244,7 @@ class _World {
   late final api = _Api(log);
   final server = InMemoryCallServer(_mediaUrl);
   final network = ValueNotifier(CallLink.connected);
+  final quality = ValueNotifier(CallQuality.good);
   late final Client client;
   late final Calls calls;
 
@@ -278,7 +281,12 @@ class _World {
     final rooms = MatrixRooms(
       client,
       callMedia: _Logged(
-        InMemoryCallMedia(server, network: network, microphone: microphone),
+        InMemoryCallMedia(
+          server,
+          network: network,
+          quality: quality,
+          microphone: microphone,
+        ),
         log,
       ),
       now: () => _noon,
@@ -794,6 +802,34 @@ void main() {
     final world = await _open();
 
     expect(world.calls.joinable(_ovenChannel), isTrue);
+  });
+
+  group('how good your link is', () {
+    test('is as the media rates it', () async {
+      final world = await _open();
+      await world.join();
+
+      world.quality.value = CallQuality.poor;
+
+      expect(world.calls.quality, CallQuality.poor);
+    });
+
+    test('tells its listeners when the rating changes', () async {
+      final world = await _open();
+      await world.join();
+      var told = 0;
+      world.calls.addListener(() => told++);
+
+      world.quality.value = CallQuality.poor;
+
+      expect(told, greaterThan(0));
+    });
+
+    test('is unknown with no call', () async {
+      final world = await _open();
+
+      expect(world.calls.quality, CallQuality.unknown);
+    });
   });
 
   group('the connection', () {

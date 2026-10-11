@@ -4,6 +4,10 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../ui/call/calls.dart' show CallQuality;
+
+export '../ui/call/calls.dart' show CallQuality;
+
 /// Whether a connection is carrying the call.
 enum CallLink {
   connected,
@@ -61,6 +65,9 @@ abstract interface class CallMedia {
 /// One device's place in a call. Notifies when anything it reports changes.
 abstract interface class CallConnection implements Listenable {
   CallLink get link;
+
+  /// How well this device's own link is doing, as the media server rates it.
+  CallQuality get quality;
 
   /// Everyone else's devices, by their identity in the call.
   Map<String, CallPeer> get peers;
