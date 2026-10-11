@@ -29,6 +29,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     this._timings = const CallMembershipTimings(),
   }) : _now = now ?? DateTime.now {
     _sync = _client.onSync.stream.listen((_) => _onSync());
+    _clearLeftBehind();
   }
 
   final Client _client;
@@ -52,6 +53,12 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   Future<void> _audioApplied = Future.value();
   String? _pinned;
   var _disposed = false;
+
+  /// The memberships [_clearLeftBehind] has dealt with, by event id.
+  final _cleared = <String>{};
+
+  /// The rooms whose call is being left, until the server has been told.
+  final _leaving = <String>{};
 
   @override
   bool muted = false;
@@ -182,9 +189,49 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   /// hear, then drops the media.
   Future<void> _end(_Live? live) async {
     if (live == null) return;
+    // The leave empties this one itself; memory shows it until the echo.
+    final own = live.room.getState(callMemberType, live.membership.stateKey);
+    if (own is Event) _cleared.add(own.eventId);
+    _leaving.add(live.room.id);
     await live.membership.leave();
+    _leaving.remove(live.room.id);
     live.membership.dispose();
     await live.connection.disconnect();
+  }
+
+  /// Empties any membership of this device's in a call it is not in: what a
+  /// run that died without leaving left behind. Nothing else would until
+  /// the membership ran out.
+  void _clearLeftBehind() {
+    final current = inCall ? _session!.target.id : null;
+    for (final room in _client.rooms) {
+      if (room.membership != Membership.join ||
+          room.id == current ||
+          _leaving.contains(room.id)) {
+        continue;
+      }
+      final key = callMemberStateKey(_client, room);
+      final own = room.getState(callMemberType, key);
+      if (own is! Event || !own.content.containsKey('application')) continue;
+      if (_cleared.add(own.eventId)) unawaited(_empty(room, key, own.eventId));
+    }
+  }
+
+  Future<void> _empty(Room room, String key, String eventId) async {
+    try {
+      await _client.setRoomStateWithKey(room.id, callMemberType, key, const {});
+    } on MatrixException catch (e, s) {
+      if (e.error == MatrixError.M_LIMIT_EXCEEDED) {
+        _cleared.remove(eventId);
+        return;
+      }
+      // Refused: asking again would be refused again.
+      Logs().w("[loaf] couldn't empty a call membership left behind", e, s);
+    } on Exception {
+      // A dropped connection, or a 5xx, which the SDK throws bare. As with
+      // being told to slow down, the next sync tries again.
+      _cleared.remove(eventId);
+    }
   }
 
   /// The call cannot go on: the server stopped keeping the membership, or
@@ -207,6 +254,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   // ── What the room and the media say ──────────────────────────────────
 
   void _onSync() {
+    _clearLeftBehind();
     final live = _live;
     if (live == null) return;
     // A room you have left is dropped from the client, not updated.

@@ -65,6 +65,12 @@ class _Api extends FakeMatrixApi {
   /// The homeserver refuses to store a membership.
   var refuseMembership = false;
 
+  /// How many of the next membership writes meet a dropped connection.
+  var dropMemberships = 0;
+
+  /// How many of the next membership writes are told to slow down.
+  var limitMemberships = 0;
+
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
     final path = request.url.path;
@@ -99,6 +105,17 @@ class _Api extends FakeMatrixApi {
     if (request.method == 'PUT' && path.contains(marker)) {
       final content = jsonDecode(request.body) as Map;
       log.add(content.isEmpty ? 'emptied membership' : 'wrote membership');
+      if (dropMemberships > 0) {
+        dropMemberships--;
+        throw http.ClientException('connection dropped');
+      }
+      if (limitMemberships > 0) {
+        limitMemberships--;
+        return _json({
+          'errcode': 'M_LIMIT_EXCEEDED',
+          'error': 'slow down',
+        }, 429);
+      }
       return refuseMembership
           ? _json({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}, 403)
           : _json({'event_id': '\$w${log.length}'});
@@ -225,8 +242,13 @@ class _World {
   late final Calls calls;
 
   /// Signs in, joins the voice rooms, and opens the calls. [microphone] is
-  /// whether this device has one.
-  Future<void> open({bool microphone = true, bool encrypted = false}) async {
+  /// whether this device has one; [already] is state the oven has before
+  /// the calls open.
+  Future<void> open({
+    bool microphone = true,
+    bool encrypted = false,
+    List<Map<String, Object?>> already = const [],
+  }) async {
     client = await openClient(
       httpClient: api,
       databasePath: inMemoryDatabasePath,
@@ -246,6 +268,7 @@ class _World {
         _member(_me),
         if (encrypted)
           _state('m.room.encryption', {'algorithm': 'm.megolm.v1.aes-sha2'}),
+        if (room == _oven) ...already,
       ]);
     }
     final rooms = MatrixRooms(
@@ -288,11 +311,23 @@ class _World {
   ];
 }
 
-Future<_World> _open({bool microphone = true, bool encrypted = false}) async {
+Future<_World> _open({
+  bool microphone = true,
+  bool encrypted = false,
+  List<Map<String, Object?>> already = const [],
+}) async {
   final world = _World();
-  await world.open(microphone: microphone, encrypted: encrypted);
+  await world.open(
+    microphone: microphone,
+    encrypted: encrypted,
+    already: already,
+  );
   return world;
 }
+
+/// Long enough for anything a sync set going to have happened.
+Future<void> _settle() =>
+    Future<void>.delayed(const Duration(milliseconds: 100));
 
 void main() {
   group('joining', () {
@@ -560,6 +595,19 @@ void main() {
       expect(world.log.skip(3), ['emptied membership', 'disconnected']);
     });
 
+    test('empties the membership once, though a sync still shows it', () async {
+      final world = await _open();
+      await world.join();
+      await _sync(world.client, _oven, [_inCall(_me, _device)]);
+
+      world.calls.leave();
+      await _until(() => world.log.last == 'disconnected');
+      await _sync(world.client, _oven, const []);
+      await _settle();
+
+      expect(world.log.skip(3), ['emptied membership', 'disconnected']);
+    });
+
     test('while still connecting ends with nothing connected', () async {
       final world = await _open();
       world.api.hold = Completer();
@@ -737,6 +785,91 @@ void main() {
       expect(world.calls.session?.phase, CallPhase.failed);
       expect(world.log.skip(3), ['emptied membership', 'disconnected']);
     });
+  });
+
+  group('a membership this device left behind', () {
+    test('is emptied at launch', () async {
+      final world = await _open(already: [_inCall(_me, _device)]);
+
+      await _until(() => world.log.isNotEmpty);
+
+      expect(world.log, ['emptied membership']);
+    });
+
+    test('is emptied when a later sync brings it', () async {
+      final world = await _open();
+
+      await _sync(world.client, _oven, [_inCall(_me, _device)]);
+      await _until(() => world.log.isNotEmpty);
+
+      expect(world.log, ['emptied membership']);
+    });
+
+    test('is emptied once, however many syncs still show it', () async {
+      final world = await _open(already: [_inCall(_me, _device)]);
+      await _until(() => world.log.isNotEmpty);
+
+      await _sync(world.client, _oven, const []);
+      await _sync(world.client, _oven, const []);
+      await _settle();
+
+      expect(world.log, ['emptied membership']);
+    });
+
+    test(
+      'is tried again at the next sync after a dropped connection',
+      () async {
+        final world = _World()..api.dropMemberships = 1;
+        await world.open(already: [_inCall(_me, _device)]);
+        await _until(() => world.log.isNotEmpty);
+        await _settle();
+
+        await _sync(world.client, _oven, const []);
+        await _until(() => world.log.length == 2);
+
+        expect(world.log, ['emptied membership', 'emptied membership']);
+      },
+    );
+
+    test('is tried again at the next sync when told to slow down', () async {
+      final world = _World()..api.limitMemberships = 1;
+      await world.open(already: [_inCall(_me, _device)]);
+      await _until(() => world.log.isNotEmpty);
+      await _settle();
+
+      await _sync(world.client, _oven, const []);
+      await _until(() => world.log.length == 2);
+
+      expect(world.log, ['emptied membership', 'emptied membership']);
+    });
+
+    test('is not tried again once refused', () async {
+      final world = _World()..api.refuseMembership = true;
+      await world.open(already: [_inCall(_me, _device)]);
+      await _until(() => world.log.isNotEmpty);
+      await _settle();
+
+      await _sync(world.client, _oven, const []);
+      await _settle();
+
+      expect(world.log, ['emptied membership']);
+    });
+  });
+
+  test('a membership of another of your devices is left alone', () async {
+    final world = await _open(already: [_inCall(_me, 'OTHERDEVICE')]);
+
+    await _settle();
+
+    expect(world.log, isEmpty);
+  });
+
+  test("someone else's membership is left alone", () async {
+    final world = await _open(already: [_member(_ada), _inCall(_ada, 'PHONE')]);
+
+    await _settle();
+
+    expect(world.log, isEmpty);
   });
 
   test('your membership emptied from elsewhere is written again', () async {

@@ -33,6 +33,17 @@ class CallMembershipTimings {
       joined.add(refreshEvery * n).subtract(headroom);
 }
 
+/// The state key of this device's call membership in [room].
+String callMemberStateKey(Client client, Room room) {
+  final key = '${client.userID}_${client.deviceID}_m.call';
+  final version = room.roomVersion ?? '';
+  // MSC3757 rooms let a user own state keys that begin with their id.
+  return version.startsWith('org.matrix.msc3757') ||
+          version.startsWith('org.matrix.msc3779')
+      ? key
+      : '_$key';
+}
+
 class OwnCallMembership {
   OwnCallMembership(
     this._client,
@@ -65,15 +76,7 @@ class OwnCallMembership {
   /// the server in the order they were made. Never fails.
   Future<void> _writing = Future.value();
 
-  String get stateKey {
-    final key = '${_client.userID}_${_client.deviceID}_m.call';
-    final version = _room.roomVersion ?? '';
-    // MSC3757 rooms let a user own state keys that begin with their id.
-    return version.startsWith('org.matrix.msc3757') ||
-            version.startsWith('org.matrix.msc3779')
-        ? key
-        : '_$key';
-  }
+  String get stateKey => callMemberStateKey(_client, _room);
 
   /// Says this device is in the call.
   Future<void> join() async {
