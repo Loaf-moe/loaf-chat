@@ -36,6 +36,38 @@ class CallPeer {
   int get hashCode => Object.hash(muted, speaking);
 }
 
+/// What is done to a microphone's sound before it is sent.
+@immutable
+class MicrophoneProcessing {
+  const MicrophoneProcessing({
+    this.echoCancellation = true,
+    this.noiseSuppression = true,
+    this.automaticGain = true,
+    this.highPassFilter = false,
+  });
+
+  final bool echoCancellation;
+  final bool noiseSuppression;
+  final bool automaticGain;
+  final bool highPassFilter;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MicrophoneProcessing &&
+      other.echoCancellation == echoCancellation &&
+      other.noiseSuppression == noiseSuppression &&
+      other.automaticGain == automaticGain &&
+      other.highPassFilter == highPassFilter;
+
+  @override
+  int get hashCode => Object.hash(
+    echoCancellation,
+    noiseSuppression,
+    automaticGain,
+    highPassFilter,
+  );
+}
+
 /// The media server could not be reached, or would not let this device in.
 class CallMediaUnreachable implements Exception {
   const CallMediaUnreachable(this.detail);
@@ -97,6 +129,10 @@ abstract interface class CallConnection implements Listenable {
   /// default.
   String? get speaker;
 
+  /// What the microphone is open with; while none is open, what the next
+  /// is opened with.
+  MicrophoneProcessing get processing;
+
   /// An event whenever a microphone or a speaker may have come or gone.
   Stream<void> get deviceChanges;
 
@@ -105,6 +141,11 @@ abstract interface class CallConnection implements Listenable {
   /// have as of this call. Throws [MicrophoneUnavailable] when one being
   /// sent does not reopen; it is then no longer sent.
   Future<void> setMicrophoneDevice(String? id);
+
+  /// Sends the microphone with [processing] from now on. Throws
+  /// [MicrophoneUnavailable] when one being sent does not reopen; it is
+  /// then no longer sent.
+  Future<void> setMicrophoneProcessing(MicrophoneProcessing processing);
 
   /// Plays everyone else on the device with [id] from now on, or on the
   /// system's default: for null, and for a device the machine does not

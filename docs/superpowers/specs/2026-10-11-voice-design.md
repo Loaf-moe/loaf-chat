@@ -17,6 +17,8 @@ separate work.
 - Mute, deafen, who is speaking, who is muted.
 - The call staying joined while you look at other channels.
 - Choosing the microphone and the speaker.
+- Switching the microphone's echo cancellation, noise suppression,
+  automatic gain and high-pass filter.
 - Linux desktop.
 
 **Out:**
@@ -27,7 +29,6 @@ separate work.
 | Camera and screen sharing | The Linux libwebrtc build encodes and decodes in software only; needs its own research |
 | DM calls and ringing | Roadmap phase 8 |
 | macOS, iOS, Windows, Android | Each needs microphone permissions and its own check by hand; iOS also needs the audio session shared with `loaf_media` |
-| Echo cancellation, noise suppression and gain switches | Follows device choice |
 | Per-person volume | `livekit_client` has no volume call; `flutter_webrtc` has one per track |
 | Calls whose members publish to another homeserver's SFU | loaf.moe has one SFU |
 | Element Call's `matrix_2_0` mode | Needs sticky events (MSC4354), which the homeserver does not have |
@@ -244,6 +245,15 @@ On Linux a device's id is its name, so two identical devices cannot be told
 apart, and a device the system renames reads as not connected. WebRTC lists
 the system default there a second time as `default: <name>`; that entry is
 left out of the list and is what "system default" opens.
+
+**Processing.** The voice section has a switch each for echo cancellation,
+noise suppression, automatic gain and the high-pass filter, kept in
+`voice.json` with the devices. The first three start on and the filter off,
+as `livekit_client` has them. They are WebRTC's own software processing. On
+Linux they take effect only when a microphone is opened, so a switch made
+during a call reopens the microphone as a change of device does: at once
+when unmuted, at the next unmute when muted. `livekit_client` also asks for
+typing-noise detection and voice isolation; the Linux plugin reads neither.
 
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
 it is given a `CallMedia`, and `main.dart` gives it one on Linux. On other

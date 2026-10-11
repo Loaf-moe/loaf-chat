@@ -183,6 +183,14 @@ class _LoggedConnection implements CallConnection {
   @override
   Stream<void> get deviceChanges => _inner.deviceChanges;
   @override
+  MicrophoneProcessing get processing => _inner.processing;
+  @override
+  Future<void> setMicrophoneProcessing(MicrophoneProcessing processing) {
+    _deviceSets.add('processing');
+    return _inner.setMicrophoneProcessing(processing);
+  }
+
+  @override
   Future<void> setMicrophoneDevice(String? id) {
     _deviceSets.add('microphone');
     return _inner.setMicrophoneDevice(id);
@@ -812,7 +820,62 @@ void main() {
       expect(watcher.peers[_mine]?.muted, isFalse);
     });
 
-    test('muting leaves the devices alone', () async {
+    test('a call opens the microphone with the processing chosen', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      world.voice.value = const VoiceSettings(
+        echoCancellation: false,
+        automaticGain: false,
+        highPassFilter: true,
+      );
+      MicrophoneProcessing? sentWith;
+      watcher.addListener(() {
+        if (watcher.peers[_mine]?.muted == false) {
+          sentWith ??= world.connection.processing;
+        }
+      });
+
+      await world.join();
+      await _until(() => sentWith != null);
+
+      expect(
+        sentWith,
+        const MicrophoneProcessing(
+          echoCancellation: false,
+          automaticGain: false,
+          highPassFilter: true,
+        ),
+      );
+    });
+
+    test('switching processing during a call applies it', () async {
+      final world = await _open();
+      await world.join();
+      const quiet = MicrophoneProcessing(noiseSuppression: false);
+
+      world.voice.value = const VoiceSettings(noiseSuppression: false);
+      await _until(() => world.connection.processing == quiet);
+
+      expect(world.connection.processing, quiet);
+    });
+
+    test(
+      'processing switched outside a call is used by the next one',
+      () async {
+        final world = await _open();
+        await world.join();
+        await world.calls.leave();
+        const raw = MicrophoneProcessing(echoCancellation: false);
+
+        world.voice.value = const VoiceSettings(echoCancellation: false);
+        await world.join();
+        await _until(() => world.connection.processing == raw);
+
+        expect(world.connection.processing, raw);
+      },
+    );
+
+    test('muting leaves the devices and the processing alone', () async {
       final world = await _open();
       final watcher = await world.watcher();
       await world.join();

@@ -57,7 +57,55 @@ List<String> _titles(WidgetTester tester) => [
     choice.title,
 ];
 
+/// Each processing switch by its title, and whether it is on.
+Map<String, bool> _switches(WidgetTester tester) => {
+  for (final check in tester.widgetList<SettingsCheck>(
+    find.byType(SettingsCheck),
+  ))
+    check.title: check.value,
+};
+
 void main() {
+  testWidgets('lists the four kinds of processing as they start out', (
+    tester,
+  ) async {
+    await _pump(tester);
+
+    expect(_switches(tester), {
+      'echo cancellation': true,
+      'noise suppression': true,
+      'automatic gain': true,
+      'high-pass filter': false,
+    });
+  });
+
+  testWidgets('a kind of processing switched off shows as off', (tester) async {
+    await _pump(tester, saved: const VoiceSettings(automaticGain: false));
+
+    expect(_switches(tester), {
+      'echo cancellation': true,
+      'noise suppression': true,
+      'automatic gain': false,
+      'high-pass filter': false,
+    });
+  });
+
+  for (final (title, read) in <(String, bool Function(VoiceSettings))>[
+    ('echo cancellation', (s) => s.echoCancellation),
+    ('noise suppression', (s) => s.noiseSuppression),
+    ('automatic gain', (s) => s.automaticGain),
+    ('high-pass filter', (s) => !s.highPassFilter),
+  ]) {
+    testWidgets('tapping $title switches it over', (tester) async {
+      final controller = await _pump(tester);
+
+      await tester.tap(find.text(title));
+      await tester.pump();
+
+      expect(read(controller.settings.value), isFalse);
+    });
+  }
+
   testWidgets('lists the system default and every device, for each', (
     tester,
   ) async {

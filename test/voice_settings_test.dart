@@ -151,6 +151,120 @@ void main() {
     expect(told, 0);
   });
 
+  test('nothing saved means every kind of processing is on but the '
+      'high-pass filter', () async {
+    final controller = await _controller(store: MemoryVoiceStore());
+
+    expect(controller.settings.value.echoCancellation, isTrue);
+    expect(controller.settings.value.noiseSuppression, isTrue);
+    expect(controller.settings.value.automaticGain, isTrue);
+    expect(controller.settings.value.highPassFilter, isFalse);
+  });
+
+  group('switched from what it starts as, read back from the file:', () {
+    const off = <String, VoiceSettings>{
+      'echo cancellation': VoiceSettings(echoCancellation: false),
+      'noise suppression': VoiceSettings(noiseSuppression: false),
+      'automatic gain': VoiceSettings(automaticGain: false),
+      'high-pass filter': VoiceSettings(highPassFilter: true),
+    };
+    for (final MapEntry(key: name, value: settings) in off.entries) {
+      test(name, () async {
+        final dir = await Directory.systemTemp.createTemp('voice');
+        addTearDown(() => dir.delete(recursive: true));
+        final file = File('${dir.path}/voice.json');
+
+        await FileVoiceStore(file).save(settings);
+
+        expect(await FileVoiceStore(file).load(), settings);
+      });
+    }
+  });
+
+  test('a switch that is no yes or no falls back to what it starts as, '
+      'alone', () {
+    final settings = VoiceSettings.fromJson({
+      'echoCancellation': 'no',
+      'noiseSuppression': false,
+      'highPassFilter': 'yes',
+    });
+
+    expect(settings.echoCancellation, isTrue);
+    expect(settings.noiseSuppression, isFalse);
+    expect(settings.highPassFilter, isFalse);
+  });
+
+  group('switching', () {
+    final switches = <String, (void Function(VoiceController), VoiceSettings)>{
+      'echo cancellation': (
+        (c) => c.setEchoCancellation(false),
+        const VoiceSettings(
+          microphone: _rode,
+          speaker: _sony,
+          echoCancellation: false,
+        ),
+      ),
+      'noise suppression': (
+        (c) => c.setNoiseSuppression(false),
+        const VoiceSettings(
+          microphone: _rode,
+          speaker: _sony,
+          noiseSuppression: false,
+        ),
+      ),
+      'automatic gain': (
+        (c) => c.setAutomaticGain(false),
+        const VoiceSettings(
+          microphone: _rode,
+          speaker: _sony,
+          automaticGain: false,
+        ),
+      ),
+      'high-pass filter': (
+        (c) => c.setHighPassFilter(true),
+        const VoiceSettings(
+          microphone: _rode,
+          speaker: _sony,
+          highPassFilter: true,
+        ),
+      ),
+    };
+    for (final MapEntry(key: name, value: (flip, after)) in switches.entries) {
+      test('$name is saved, the rest left as it was', () async {
+        final store = MemoryVoiceStore(
+          const VoiceSettings(microphone: _rode, speaker: _sony),
+        );
+        final controller = await _controller(store: store);
+
+        flip(controller);
+
+        expect(store.saved, after);
+      });
+    }
+  });
+
+  test('a switch tells the settings page and the calls', () async {
+    final controller = await _controller();
+    var page = 0;
+    var calls = 0;
+    controller.addListener(() => page++);
+    controller.settings.addListener(() => calls++);
+
+    controller.setNoiseSuppression(false);
+
+    expect((page, calls), (1, 1));
+  });
+
+  test('a switch set to what it is tells no one', () async {
+    final controller = await _controller();
+    var told = 0;
+    controller.addListener(() => told++);
+
+    controller.setNoiseSuppression(true);
+
+    expect(told, 0);
+  });
+
   test('the lists are empty until the machine has been asked', () async {
     final controller = await _controller();
 

@@ -126,6 +126,14 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
   String? _opened;
   String? _playing;
 
+  /// The processing chosen, and what the microphone is open with. Linux
+  /// takes it only when a microphone is opened.
+  var _processing = const MicrophoneProcessing();
+  MicrophoneProcessing? _openedWith;
+
+  @override
+  MicrophoneProcessing get processing => _openedWith ?? _processing;
+
   @override
   String? get microphone => _opened == _microphone ? _microphone : null;
 
@@ -179,11 +187,13 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
         return;
       }
       final id = _present(await Hardware.instance.audioInputs(), _microphone);
+      final processing = _processing;
       await local.setMicrophoneEnabled(
         true,
-        audioCaptureOptions: _capture.copyWith(deviceId: id),
+        audioCaptureOptions: _options(id, processing),
       );
       _opened = id;
+      _openedWith = processing;
     } on TrackCreateException catch (e) {
       throw MicrophoneUnavailable(e.toString());
     } on PlatformException catch (e) {
@@ -192,8 +202,18 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
   }
 
   @override
-  Future<void> setMicrophoneDevice(String? id) async {
+  Future<void> setMicrophoneDevice(String? id) {
     _microphone = id;
+    return _reopenIfSent();
+  }
+
+  @override
+  Future<void> setMicrophoneProcessing(MicrophoneProcessing processing) {
+    _processing = processing;
+    return _reopenIfSent();
+  }
+
+  Future<void> _reopenIfSent() async {
     final track = _track;
     // Reopening a muted microphone would send it until it is switched off
     // again; [setMicrophone] reopens it on the way to unmuting.
@@ -207,16 +227,30 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
     }
   }
 
-  /// Opens the microphone again from the device chosen, when that is not
-  /// the one it is open from.
+  /// Opens the microphone again from the device and with the processing
+  /// chosen, when either is not what it is open with.
   Future<void> _reopen(LocalAudioTrack track) async {
     final id = _present(await Hardware.instance.audioInputs(), _microphone);
-    if (id == null || id == _opened) return;
+    final processing = _processing;
+    if (id == null || (id == _opened && processing == _openedWith)) return;
     // Closed before the next is opened, so a failure leaves none open.
     _opened = null;
-    await track.restartTrack(track.currentOptions.copyWith(deviceId: id));
+    _openedWith = null;
+    await track.restartTrack(_options(id, processing));
     _opened = id;
+    _openedWith = processing;
   }
+
+  static AudioCaptureOptions _options(
+    String? id,
+    MicrophoneProcessing processing,
+  ) => _capture.copyWith(
+    deviceId: id,
+    echoCancellation: processing.echoCancellation,
+    noiseSuppression: processing.noiseSuppression,
+    autoGainControl: processing.automaticGain,
+    highPassFilter: processing.highPassFilter,
+  );
 
   @override
   Future<void> setSpeakerDevice(String? id) async {

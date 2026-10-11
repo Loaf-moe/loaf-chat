@@ -1,4 +1,5 @@
-/// Settings, voice: which microphone and which speaker calls use.
+/// Settings, voice: which microphone and which speaker calls use, and what
+/// is done to the microphone's sound.
 library;
 
 import 'dart:async';
@@ -32,21 +33,48 @@ class _VoiceSectionState extends State<VoiceSection> {
     listenable: widget.controller,
     builder: (context, _) {
       final controller = widget.controller;
+      final settings = controller.settings.value;
       return ListView(
         padding: const EdgeInsets.all(LoafSpace.x6),
         children: [
           const SettingsLabel(label: 'microphone'),
           ..._choices(
             controller.microphones,
-            controller.microphone,
+            settings.microphone,
             controller.chooseMicrophone,
           ),
           const SizedBox(height: LoafSpace.x4),
           const SettingsLabel(label: 'speaker'),
           ..._choices(
             controller.speakers,
-            controller.speaker,
+            settings.speaker,
             controller.chooseSpeaker,
+          ),
+          const SizedBox(height: LoafSpace.x4),
+          const SettingsLabel(label: 'processing'),
+          SettingsCheck(
+            title: 'echo cancellation',
+            detail: 'keeps what your speakers play out of your microphone',
+            value: settings.echoCancellation,
+            onChanged: controller.setEchoCancellation,
+          ),
+          SettingsCheck(
+            title: 'noise suppression',
+            detail: 'takes steady background noise out of your microphone',
+            value: settings.noiseSuppression,
+            onChanged: controller.setNoiseSuppression,
+          ),
+          SettingsCheck(
+            title: 'automatic gain',
+            detail: 'evens out how loud you are',
+            value: settings.automaticGain,
+            onChanged: controller.setAutomaticGain,
+          ),
+          SettingsCheck(
+            title: 'high-pass filter',
+            detail: 'takes low rumble out of your microphone',
+            value: settings.highPassFilter,
+            onChanged: controller.setHighPassFilter,
           ),
         ],
       );

@@ -31,7 +31,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     this._timings = const CallMembershipTimings(),
   }) : _now = now ?? DateTime.now {
     _sync = _client.onSync.stream.listen((_) => _onSync());
-    _voice?.addListener(_changedDevices);
+    _voice?.addListener(_changedVoice);
     _clearLeftBehind();
   }
 
@@ -40,7 +40,8 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   final List<CallOccupant> Function(Room room) _occupants;
   final Member Function() _me;
 
-  /// The microphone and the speaker chosen. Null: the system's defaults.
+  /// The microphone, its processing and the speaker chosen. Null: the
+  /// system's default devices, and every kind of processing.
   final ValueListenable<VoiceSettings>? _voice;
   final DateTime Function() _now;
   final CallMembershipTimings _timings;
@@ -190,7 +191,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     final live = _live = _Live(room, connection!, membership!);
     connection.addListener(_onMedia);
     live.deviceChanges = connection.deviceChanges.listen(
-      (_) => _changedDevices(),
+      (_) => _changedVoice(),
     );
     _session = _session!.copyWith(
       phase: CallPhase.live,
@@ -198,7 +199,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       participants: _participants(room, connection),
     );
     _notify();
-    _applyAudio(live, devices: true);
+    _applyAudio(live, voice: true);
   }
 
   /// Takes the live call out of this object's hands, for [_end] to finish.
@@ -371,16 +372,18 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     if (live != null) _applyAudio(live);
   }
 
-  /// Another device was chosen, or the machine's devices changed.
-  void _changedDevices() {
+  /// Another device or other processing was chosen, or the machine's
+  /// devices changed.
+  void _changedVoice() {
     final live = _live;
-    if (live != null) _applyAudio(live, devices: true);
+    if (live != null) _applyAudio(live, voice: true);
   }
 
   /// Brings what [live] sends and plays in line with [muted] and
-  /// [deafened] as they stand when its turn comes; with [devices], first
-  /// the microphone and the speaker it uses in line with those chosen.
-  void _applyAudio(_Live live, {bool devices = false}) {
+  /// [deafened] as they stand when its turn comes; with [voice], first
+  /// the microphone, its processing and the speaker in line with those
+  /// chosen.
+  void _applyAudio(_Live live, {bool voice = false}) {
     final before = _audioApplied;
     final applied = Completer<void>();
     _audioApplied = applied.future;
@@ -388,7 +391,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       await before;
       try {
         if (!identical(live, _live)) return;
-        if (devices) await _applyDevices(live.connection);
+        if (voice) await _applyVoice(live.connection);
         await live.connection.setDeafened(deafened);
         await live.connection.setMicrophone(!muted);
       } on MicrophoneUnavailable {
@@ -401,7 +404,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     }());
   }
 
-  Future<void> _applyDevices(CallConnection connection) async {
+  Future<void> _applyVoice(CallConnection connection) async {
     final voice = _voice?.value;
     try {
       await connection.setSpeakerDevice(voice?.speaker?.id);
@@ -416,6 +419,16 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       _notify();
     }
     await connection.setMicrophoneDevice(voice?.microphone?.id);
+    await connection.setMicrophoneProcessing(
+      voice == null
+          ? const MicrophoneProcessing()
+          : MicrophoneProcessing(
+              echoCancellation: voice.echoCancellation,
+              noiseSuppression: voice.noiseSuppression,
+              automaticGain: voice.automaticGain,
+              highPassFilter: voice.highPassFilter,
+            ),
+    );
   }
 
   @override
@@ -432,7 +445,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   void dispose() {
     _disposed = true;
     _attempt++;
-    _voice?.removeListener(_changedDevices);
+    _voice?.removeListener(_changedVoice);
     unawaited(_sync.cancel());
     unawaited(_end(_detach()));
     super.dispose();

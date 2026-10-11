@@ -98,6 +98,9 @@ class _Connection extends ChangeNotifier implements CallConnection {
   String? speaker;
 
   @override
+  MicrophoneProcessing processing = const MicrophoneProcessing();
+
+  @override
   Stream<void> get deviceChanges => _deviceChanges.stream;
 
   void _devicesChanged() => _deviceChanges.add(null);
@@ -150,6 +153,10 @@ class _Connection extends ChangeNotifier implements CallConnection {
       throw MicrophoneUnavailable("$microphone doesn't open");
     }
   }
+
+  @override
+  Future<void> setMicrophoneProcessing(MicrophoneProcessing processing) async =>
+      this.processing = processing;
 
   @override
   Future<void> setSpeakerDevice(String? id) async {

@@ -1,4 +1,5 @@
-/// Which microphone and which speaker a call uses.
+/// Which microphone and which speaker a call uses, and what is done to the
+/// microphone's sound.
 ///
 /// Saved to `voice.json` beside the other settings in the support
 /// directory. Per device, not per account: the devices are this machine's.
@@ -42,7 +43,14 @@ class AudioDevice {
 
 @immutable
 class VoiceSettings {
-  const VoiceSettings({this.microphone, this.speaker});
+  const VoiceSettings({
+    this.microphone,
+    this.speaker,
+    this.echoCancellation = true,
+    this.noiseSuppression = true,
+    this.automaticGain = true,
+    this.highPassFilter = false,
+  });
 
   /// Anything unreadable falls back to that field's default, so a
   /// hand-edited file degrades instead of failing.
@@ -51,26 +59,75 @@ class VoiceSettings {
     return VoiceSettings(
       microphone: AudioDevice.fromJson(json['microphone']),
       speaker: AudioDevice.fromJson(json['speaker']),
+      echoCancellation: _switch(json['echoCancellation'], otherwise: true),
+      noiseSuppression: _switch(json['noiseSuppression'], otherwise: true),
+      automaticGain: _switch(json['automaticGain'], otherwise: true),
+      highPassFilter: _switch(json['highPassFilter'], otherwise: false),
     );
   }
+
+  static bool _switch(Object? json, {required bool otherwise}) =>
+      json is bool ? json : otherwise;
 
   /// Null: whichever the system has as its default.
   final AudioDevice? microphone;
   final AudioDevice? speaker;
 
+  /// Keeps what the speaker plays out of the microphone.
+  final bool echoCancellation;
+  final bool noiseSuppression;
+
+  /// Evens out how loud the microphone is.
+  final bool automaticGain;
+
+  /// Takes the lowest of the microphone's sound out.
+  final bool highPassFilter;
+
+  /// A device is given as a function, so that null can be chosen.
+  VoiceSettings copyWith({
+    AudioDevice? Function()? microphone,
+    AudioDevice? Function()? speaker,
+    bool? echoCancellation,
+    bool? noiseSuppression,
+    bool? automaticGain,
+    bool? highPassFilter,
+  }) => VoiceSettings(
+    microphone: microphone == null ? this.microphone : microphone(),
+    speaker: speaker == null ? this.speaker : speaker(),
+    echoCancellation: echoCancellation ?? this.echoCancellation,
+    noiseSuppression: noiseSuppression ?? this.noiseSuppression,
+    automaticGain: automaticGain ?? this.automaticGain,
+    highPassFilter: highPassFilter ?? this.highPassFilter,
+  );
+
   Map<String, Object> toJson() => {
     'microphone': ?microphone?.toJson(),
     'speaker': ?speaker?.toJson(),
+    'echoCancellation': echoCancellation,
+    'noiseSuppression': noiseSuppression,
+    'automaticGain': automaticGain,
+    'highPassFilter': highPassFilter,
   };
 
   @override
   bool operator ==(Object other) =>
       other is VoiceSettings &&
       other.microphone == microphone &&
-      other.speaker == speaker;
+      other.speaker == speaker &&
+      other.echoCancellation == echoCancellation &&
+      other.noiseSuppression == noiseSuppression &&
+      other.automaticGain == automaticGain &&
+      other.highPassFilter == highPassFilter;
 
   @override
-  int get hashCode => Object.hash(microphone, speaker);
+  int get hashCode => Object.hash(
+    microphone,
+    speaker,
+    echoCancellation,
+    noiseSuppression,
+    automaticGain,
+    highPassFilter,
+  );
 }
 
 abstract interface class VoiceStore {
@@ -188,10 +245,22 @@ class VoiceController extends ChangeNotifier {
 
   /// [device] null goes back to the system's default.
   void chooseMicrophone(AudioDevice? device) =>
-      _update(VoiceSettings(microphone: device, speaker: speaker));
+      _update(settings.value.copyWith(microphone: () => device));
 
   void chooseSpeaker(AudioDevice? device) =>
-      _update(VoiceSettings(microphone: microphone, speaker: device));
+      _update(settings.value.copyWith(speaker: () => device));
+
+  void setEchoCancellation(bool on) =>
+      _update(settings.value.copyWith(echoCancellation: on));
+
+  void setNoiseSuppression(bool on) =>
+      _update(settings.value.copyWith(noiseSuppression: on));
+
+  void setAutomaticGain(bool on) =>
+      _update(settings.value.copyWith(automaticGain: on));
+
+  void setHighPassFilter(bool on) =>
+      _update(settings.value.copyWith(highPassFilter: on));
 
   void _update(VoiceSettings next) {
     if (next == settings.value) return;
