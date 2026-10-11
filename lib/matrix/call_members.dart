@@ -2,6 +2,8 @@
 /// Element Call writes it: one event per device, emptied on leaving.
 library;
 
+import 'dart:math';
+
 import 'package:matrix/matrix.dart';
 
 const callMemberType = 'org.matrix.msc3401.call.member';
@@ -18,44 +20,70 @@ typedef CallOccupancy = ({
   DateTime? nextExpiry,
 });
 
+/// One device's membership of a call: whose, on which device, and from when
+/// to when, in milliseconds since the epoch.
+typedef _Membership = ({String userId, String device, int start, int end});
+
+/// [event] as a membership of the room's own call. Null when it is not one:
+/// emptied on leaving, another application's or call's, or malformed.
+_Membership? _membership(MatrixEvent event) {
+  if (event.content case {
+    'application': 'm.call',
+    'call_id': '',
+    'device_id': final String device,
+    'focus_active': {'type': String _},
+  }) {
+    final expires = event.content['expires'] ?? _defaultExpiry;
+    final created =
+        event.content['created_ts'] ??
+        event.originServerTs.millisecondsSinceEpoch;
+    if (expires is num && expires > 0 && created is num) {
+      final start = created.toInt();
+      return (
+        userId: event.senderId,
+        device: device,
+        start: start,
+        end: start + expires.toInt(),
+      );
+    }
+  }
+  return null;
+}
+
 /// The users with a membership in the room's own call that has not run out
 /// by [now].
 CallOccupancy callOccupancy(Iterable<MatrixEvent> events, DateTime now) {
-  final joined = <String, int>{};
+  final live = [
+    for (final event in events)
+      if (_membership(event) case final membership?
+          when membership.end > now.millisecondsSinceEpoch)
+        membership,
+  ];
+
+  final arrived = <String, int>{};
   final devices = <String, Set<String>>{};
-  int? soonest;
-  for (final event in events) {
-    final content = event.content;
-    if (content['application'] != 'm.call') continue;
-    if (content['call_id'] != '') continue;
-    final device = content['device_id'];
-    if (device is! String) continue;
-    final focus = content['focus_active'];
-    if (focus is! Map || focus['type'] is! String) continue;
-    final expires = content['expires'] ?? _defaultExpiry;
-    if (expires is! num || expires <= 0) continue;
-    final created = content['created_ts'];
-    if (created != null && created is! num) continue;
-    final start = created is num
-        ? created.toInt()
-        : event.originServerTs.millisecondsSinceEpoch;
-    final end = start + expires.toInt();
-    if (end <= now.millisecondsSinceEpoch) continue;
-    final earlier = joined[event.senderId];
-    if (earlier == null || start < earlier) joined[event.senderId] = start;
-    (devices[event.senderId] ??= {}).add(device);
-    if (soonest == null || end < soonest) soonest = end;
+  for (final membership in live) {
+    arrived.update(
+      membership.userId,
+      (earliest) => min(earliest, membership.start),
+      ifAbsent: () => membership.start,
+    );
+    (devices[membership.userId] ??= {}).add(membership.device);
   }
-  final userIds = joined.keys.toList()
+  final inOrder = arrived.entries.toList()
     ..sort((a, b) {
-      final order = joined[a]!.compareTo(joined[b]!);
-      return order != 0 ? order : a.compareTo(b);
+      final order = a.value.compareTo(b.value);
+      return order != 0 ? order : a.key.compareTo(b.key);
     });
+
   return (
-    userIds: userIds,
+    userIds: [for (final entry in inOrder) entry.key],
     devices: devices,
-    nextExpiry: soonest == null
+    nextExpiry: live.isEmpty
         ? null
-        : DateTime.fromMillisecondsSinceEpoch(soonest, isUtc: true),
+        : DateTime.fromMillisecondsSinceEpoch(
+            live.map((membership) => membership.end).reduce(min),
+            isUtc: true,
+          ),
   );
 }
