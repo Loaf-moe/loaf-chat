@@ -67,6 +67,12 @@ class _Api extends FakeMatrixApi {
 
   var _createdRooms = 0;
 
+  /// Each kick asked for: the room and who.
+  final kicks = <(String, String)>[];
+
+  /// While set, a kick is refused.
+  var refuseKicks = false;
+
   /// Set by [_client], since [FakeMatrixApi.client] is a setter only:
   /// [mockIntercept] needs the client itself to push a fake sync.
   Client? ownerClient;
@@ -74,6 +80,20 @@ class _Api extends FakeMatrixApi {
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
     final path = request.url.path;
+    if (request.method == 'POST' && path.endsWith('/kick')) {
+      if (refuseKicks) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
+          403,
+        );
+      }
+      kicks.add((
+        Uri.decodeComponent(path.split('/rooms/')[1].split('/kick')[0]),
+        (jsonDecode(request.body) as Map<String, Object?>)['user_id']!
+            as String,
+      ));
+      return http.Response('{}', 200);
+    }
     if (request.method == 'GET' && path.contains('/state/m.room.member/')) {
       await hold?.future;
       final member =
@@ -1548,6 +1568,7 @@ void main() {
       RoomAbility.addSpace,
       RoomAbility.startDirect,
       RoomAbility.invite,
+      RoomAbility.kick,
       RoomAbility.devices,
     });
   });
@@ -2306,6 +2327,87 @@ void main() {
     expect(late.media.store, isNull);
     const media = Media(kind: MediaKind.image, name: 'a.png', ref: 'x');
     expect(late.media.preview(media, 300), isNull);
+  });
+
+  group('kicking from a voice channel', () {
+    const oven = '!oven:example.com';
+    const ada = '@ada:example.com';
+
+    Channel channel(MatrixRooms rooms) => rooms.spaces
+        .expand((s) => s.categories)
+        .expand((c) => c.channels)
+        .firstWhere((c) => c.id == oven);
+
+    /// The oven's power levels: yours, and what a kick takes.
+    Future<void> levels(Client client, {required int mine, int? kick}) =>
+        _sync(client, {
+          'join': {
+            oven: {
+              'state': {
+                'events': [
+                  _state('m.room.power_levels', {
+                    'users': {_me: mine},
+                    'kick': ?kick,
+                  }),
+                ],
+              },
+            },
+          },
+        });
+
+    test('you may kick anyone below your level when it reaches what a kick '
+        'takes', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await levels(client, mine: 75, kick: 60);
+      await _until(() => channel(rooms).kickBelow != null);
+
+      expect(channel(rooms).kickBelow, 75);
+    });
+
+    test('you may kick nobody when your level falls short', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await levels(client, mine: 40, kick: 60);
+      await _settle();
+
+      expect(channel(rooms).kickBelow, isNull);
+    });
+
+    test('a kick takes 50 where the room does not say', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await levels(client, mine: 50);
+      await _until(() => channel(rooms).kickBelow != null);
+
+      expect(channel(rooms).kickBelow, 50);
+    });
+
+    test('a kick is asked of the server for that room and person', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await rooms.kick(oven, ada);
+
+      expect(api.kicks, [(oven, ada)]);
+    });
+
+    test('a refused kick throws', () async {
+      final api = _Api()..refuseKicks = true;
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await expectLater(rooms.kick(oven, ada), throwsA(isA<MatrixException>()));
+    });
   });
 
   group('who is in a voice channel', () {

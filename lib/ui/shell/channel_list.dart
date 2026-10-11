@@ -40,9 +40,14 @@ class ChannelList extends StatefulWidget {
     this.allowedActions,
     this.call,
     required this.myId,
+    this.onKick,
   });
 
   final Space space;
+
+  /// Asked to kick [member] from [channel]. Left null, nobody's menu
+  /// offers it.
+  final void Function(Channel channel, Member member)? onKick;
 
   /// Your own user id: your row under a voice channel has no menu.
   final String myId;
@@ -150,6 +155,7 @@ class _ChannelListState extends State<ChannelList> {
                       ringingId: widget.ringingId,
                       call: widget.call,
                       myId: widget.myId,
+                      onKick: widget.onKick,
                       home: widget.home,
                       onReorder: widget.home && category.name == 'favourites'
                           ? widget.onReorderFavourites
@@ -311,6 +317,7 @@ class _CategorySection extends StatelessWidget {
     this.ringingId,
     this.call,
     required this.myId,
+    this.onKick,
     this.home = false,
     this.onReorder,
     this.onAdd,
@@ -324,6 +331,7 @@ class _CategorySection extends StatelessWidget {
   final String? ringingId;
   final ({String channelId, List<TileInfo> people})? call;
   final String myId;
+  final void Function(Channel channel, Member member)? onKick;
   final bool collapsed;
   final String? selectedChannelId;
   final LoafTokens tokens;
@@ -346,6 +354,7 @@ class _CategorySection extends StatelessWidget {
         ringing: channel.id == ringingId,
         people: channel.id == call?.channelId ? call!.people : const [],
         myId: myId,
+        onKick: onKick,
         tokens: tokens,
         home: home,
         longPressActions: longPressActions,
@@ -502,6 +511,7 @@ class _ChannelEntry extends StatelessWidget {
     this.ringing = false,
     this.people = const [],
     required this.myId,
+    this.onKick,
     this.home = false,
     this.longPressActions = true,
   });
@@ -515,6 +525,17 @@ class _ChannelEntry extends StatelessWidget {
   /// you are in. Empty otherwise.
   final List<TileInfo> people;
   final String myId;
+  final void Function(Channel channel, Member member)? onKick;
+
+  /// Kicks [member] from this channel, or null where you may not: the app
+  /// does no kicking, your level here does not reach, or it is you.
+  VoidCallback? _kick(Member member) {
+    final onKick = this.onKick;
+    final below = channel.kickBelow;
+    if (onKick == null || below == null) return null;
+    if (member.id == myId || member.powerLevel >= below) return null;
+    return () => onKick(channel, member);
+  }
 
   /// A Home row: its actions include favourite and low priority.
   final bool home;
@@ -661,6 +682,8 @@ class _ChannelEntry extends StatelessWidget {
                           .where((person) => person.id == member.id)
                           .firstOrNull,
                       you: member.id == myId,
+                      channelName: channel.name,
+                      onKick: _kick(member),
                       tokens: tokens,
                     ),
                 ],
@@ -680,20 +703,38 @@ class _Occupant extends StatelessWidget {
     required this.member,
     required this.heard,
     required this.you,
+    required this.channelName,
+    required this.onKick,
     required this.tokens,
   });
 
   final Member member;
   final TileInfo? heard;
   final bool you;
+  final String channelName;
+
+  /// Null where you may not kick them.
+  final VoidCallback? onKick;
   final LoafTokens tokens;
 
-  /// Their volume: a menu at [position] on a computer, a sheet on a phone.
+  /// Their volume, where [voice] keeps one, and the kick, where you may: a
+  /// menu at [position] on a computer, a sheet on a phone.
   Future<void> _openMenu(
     BuildContext context,
-    VoiceController voice, {
+    VoiceController? voice, {
     Offset? position,
   }) async {
+    final onKick = this.onKick;
+    final items = [
+      if (onKick != null)
+        ActionItem(
+          value: true,
+          icon: LucideIcons.userX,
+          label: 'kick from $channelName',
+          destructive: true,
+        ),
+    ];
+    final bool? kick;
     final name = Text(
       member.name,
       maxLines: 1,
@@ -701,28 +742,29 @@ class _Occupant extends StatelessWidget {
       style: loafBody(13, 600).copyWith(color: tokens.textMuted),
     );
     if (position != null) {
-      await showActionMenu<void>(
+      kick = await showActionMenu(
         context,
         position: position,
         leading: [
           _MenuHeading(child: name),
-          VolumeMenuEntry(voice: voice, id: member.id),
+          if (voice != null) VolumeMenuEntry(voice: voice, id: member.id),
         ],
-        items: const [],
+        items: items,
       );
     } else {
-      await showActionSheet<void>(
+      kick = await showActionSheet(
         context,
         header: (context) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             name,
-            VolumeSlider(voice: voice, id: member.id),
+            if (voice != null) VolumeSlider(voice: voice, id: member.id),
           ],
         ),
-        items: const [],
+        items: items,
       );
     }
+    if (kick ?? false) onKick?.call();
   }
 
   @override
@@ -734,6 +776,7 @@ class _Occupant extends StatelessWidget {
     // Found, not watched: whether the app keeps voice settings never
     // changes while it runs.
     final voice = you ? null : VoiceScope.find(context);
+    final hasMenu = voice != null || onKick != null;
     return Semantics(
       label: [
         member.name,
@@ -746,7 +789,7 @@ class _Occupant extends StatelessWidget {
       excludeSemantics: true,
       // A screen reader has no right-click; it opens the menu where the
       // row is.
-      onLongPress: voice == null
+      onLongPress: !hasMenu
           ? null
           : () {
               final box = context.findRenderObject()! as RenderBox;
@@ -765,13 +808,13 @@ class _Occupant extends StatelessWidget {
         child: InkWell(
           // Long press on a phone, right-click on a computer, as for a
           // channel's own actions.
-          onLongPress: !isDesktop && voice != null
+          onLongPress: !isDesktop && hasMenu
               ? () {
                   HapticFeedback.mediumImpact();
                   unawaited(_openMenu(context, voice));
                 }
               : null,
-          onSecondaryTapUp: isDesktop && voice != null
+          onSecondaryTapUp: isDesktop && hasMenu
               ? (details) => unawaited(
                   _openMenu(context, voice, position: details.globalPosition),
                 )
@@ -816,7 +859,7 @@ class _Occupant extends StatelessWidget {
 }
 
 /// A line of plain text heading a menu.
-class _MenuHeading extends PopupMenuEntry<void> {
+class _MenuHeading<T> extends PopupMenuEntry<T> {
   const _MenuHeading({required this.child});
 
   final Widget child;
@@ -825,13 +868,13 @@ class _MenuHeading extends PopupMenuEntry<void> {
   double get height => 28;
 
   @override
-  bool represents(void value) => false;
+  bool represents(T? value) => false;
 
   @override
-  State<_MenuHeading> createState() => _MenuHeadingState();
+  State<_MenuHeading<T>> createState() => _MenuHeadingState<T>();
 }
 
-class _MenuHeadingState extends State<_MenuHeading> {
+class _MenuHeadingState<T> extends State<_MenuHeading<T>> {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(

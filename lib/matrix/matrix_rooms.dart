@@ -229,6 +229,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     RoomAbility.addSpace,
     RoomAbility.startDirect,
     RoomAbility.invite,
+    RoomAbility.kick,
     RoomAbility.editProfile,
     RoomAbility.devices,
   };
@@ -687,6 +688,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       occupants: kind == ChannelKind.voice
           ? [for (final occupant in _occupants(room)) occupant.member]
           : const [],
+      kickBelow: room.canKick ? room.ownPowerLevel.level : null,
     );
     final wish = _wishes[room.id];
     if (wish == null) return channel;
@@ -1335,6 +1337,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _rebuild();
     return _home.firstWhere((c) => c.id == roomId);
   }
+
+  @override
+  Future<void> kick(String roomId, String userId) =>
+      client.kick(roomId, userId);
 
   /// Invites everyone in [userIds] to [roomId], one at a time. Throws
   /// [InviteRefused] naming whoever the server turned down; everyone else

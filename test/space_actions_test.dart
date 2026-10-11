@@ -121,6 +121,9 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
     invited[roomId] = userIds;
   }
 
+  @override
+  Future<void> kick(String roomId, String userId) => _unwired();
+
   Never _unwired() => throw UnsupportedError('not wired');
   @override
   void markRead(String roomId) => _unwired();

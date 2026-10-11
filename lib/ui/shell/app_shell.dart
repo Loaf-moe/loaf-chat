@@ -514,6 +514,28 @@ class _AppShellState extends State<AppShell> {
 
   /// A quick toggle's refusal: the change snaps back once the listener
   /// hears the backend's own state again, and a toast says to try again.
+  /// The kicks the server has yet to answer: the room and who.
+  final _kicking = <(String, String)>{};
+
+  /// Kicks [member] from [channel], once you have said you mean it.
+  Future<void> _kick(Channel channel, Member member) async {
+    final kick = (channel.id, member.id);
+    // They stay listed until a sync says otherwise; asking again meanwhile
+    // would only be refused.
+    if (_kicking.contains(kick)) return;
+    final confirmed = await confirmKick(context, member, channel);
+    if (!confirmed || !mounted || !_kicking.add(kick)) return;
+    try {
+      await _rooms.kick(channel.id, member.id);
+    } on Exception {
+      // The server said no, or could not be reached; either way they are
+      // still there.
+      if (mounted) showToast(context, "couldn't kick ${member.name}");
+    } finally {
+      _kicking.remove(kick);
+    }
+  }
+
   void _refused(Object error) {
     if (mounted) showToast(context, "couldn't do that. try again?");
   }
@@ -1500,6 +1522,7 @@ class _AppShellState extends State<AppShell> {
                 space: _space,
                 call: _heardCall,
                 myId: _me.id,
+                onKick: _can(RoomAbility.kick) ? _kick : null,
                 selectedChannelId: _channel?.id ?? '',
                 onSelect: _selectChannel,
                 onAction: _channelAction,

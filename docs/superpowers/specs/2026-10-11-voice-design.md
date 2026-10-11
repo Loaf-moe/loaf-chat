@@ -274,6 +274,20 @@ you when deafened. Nobody else's deafening is known: neither LiveKit nor the
 membership event says. For a call this device is not connected to, only who
 is in it is known, so those rows show names alone.
 
+**Kicking.** The same row menu offers "kick from <channel>" where your
+power level in that room reaches what a kick takes and the other person's is
+below yours. It asks first, then kicks them from the room: a Matrix kick,
+not a ban, so they may join again where the room's rules let them. They
+drop off the channel's list at once, since being listed takes being in the
+room, and Loaf Chat on their side leaves the call when it loses the room.
+
+Nothing else is offered because nothing else can be done from a client
+here. Muting someone for everyone goes through LiveKit's server API, which
+takes the server's secret; the call server only hands out tokens to join.
+Deafening someone else exists nowhere in LiveKit. Emptying someone's call
+membership removes them from lists only: their media stays connected and
+their client writes the membership back.
+
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
 it is given a `CallMedia`, and `main.dart` gives it one on Linux. On other
 platforms a voice channel still reads "voice chat isn't available yet".

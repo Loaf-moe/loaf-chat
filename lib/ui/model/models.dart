@@ -263,6 +263,7 @@ class Channel {
     this.earlier = const [],
     this.waitingFor = const [],
     this.avatar,
+    this.kickBelow,
   });
 
   final String id;
@@ -310,6 +311,10 @@ class Channel {
   /// Invited to a DM you started, and not in it yet.
   final List<Member> waitingFor;
 
+  /// Your power level here, when it lets you kick: anyone whose own is
+  /// below it can be kicked by you. Null: you can kick nobody.
+  final int? kickBelow;
+
   IconData get icon => switch (kind) {
     ChannelKind.voice => LucideIcons.volume2,
     ChannelKind.direct => LucideIcons.atSign,
@@ -339,6 +344,7 @@ class Channel {
     private: private,
     topic: topic,
     occupants: occupants ?? this.occupants,
+    kickBelow: kickBelow,
     joined: joined ?? this.joined,
     muted: muted ?? this.muted,
     members: members,

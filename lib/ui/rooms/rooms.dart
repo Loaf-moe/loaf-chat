@@ -38,6 +38,9 @@ enum RoomAbility {
   /// Inviting people to a room or space.
   invite,
 
+  /// Kicking someone from a room.
+  kick,
+
   /// Voice channels and DM calls.
   calls,
 
@@ -156,6 +159,10 @@ abstract interface class Rooms implements Listenable {
 
   /// Throws [InviteRefused] naming who did not go through.
   Future<void> invite(String roomId, List<String> userIds);
+
+  /// Removes [userId] from the room; they may join again where its rules
+  /// let them. Throws when the server says no.
+  Future<void> kick(String roomId, String userId);
 
   SpaceDirectory get directory;
 

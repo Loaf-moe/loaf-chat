@@ -312,6 +312,10 @@ class MockRooms extends ChangeNotifier implements Rooms {
     return SynchronousFuture(room);
   }
 
+  /// No mock channel says you may kick, so nothing asks.
+  @override
+  Future<void> kick(String roomId, String userId) => SynchronousFuture(null);
+
   /// The mock answers at once and never refuses.
   @override
   Future<void> invite(String roomId, List<String> userIds) =>
