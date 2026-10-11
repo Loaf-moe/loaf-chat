@@ -466,8 +466,6 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   @override
   AudioRoute get route => AudioRoute.speaker;
   @override
-  String get micDevice => '';
-  @override
   String get cameraDevice => '';
   @override
   double volumeOf(String id) => 1;
@@ -492,8 +490,6 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   void stopScreenShare() => _lacks('screenShare');
   @override
   void setRoute(AudioRoute value) => _lacks('audioRoute');
-  @override
-  void setMicDevice(String value) => _lacks('devices');
   @override
   void setCameraDevice(String value) => _lacks('devices');
   @override

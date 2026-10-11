@@ -1,13 +1,16 @@
 /// The call's control bar. Mobile: mic, camera, audio route, deafen, leave.
-/// Desktop: mic and camera with device menus, share screen, deafen, leave,
+/// Desktop: mic, camera and deafen with device menus, share screen, leave,
 /// each naming its keyboard shortcut.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../platform.dart';
+import '../settings/voice_settings.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
 import 'calls.dart';
@@ -19,7 +22,6 @@ String shortcutLabel(String key) =>
     ? '⌘⇧$key'
     : 'Ctrl+Shift+$key';
 
-const mockMics = ['MacBook Pro Microphone', 'AirPods Pro', 'Blue Yeti'];
 const mockCameras = ['FaceTime HD Camera', 'Continuity Camera'];
 const mockShareSources = [
   'Entire screen',
@@ -44,7 +46,9 @@ class CallControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final buttons = isDesktop ? _desktop(context) : _mobile(context);
+    final buttons = isDesktop
+        ? _desktop(context, VoiceScope.maybeOf(context))
+        : _mobile(context);
     return Padding(
       padding: EdgeInsets.symmetric(
         vertical: dense ? LoafSpace.x2 : LoafSpace.x3,
@@ -93,25 +97,46 @@ class CallControls extends StatelessWidget {
     _leaveButton(),
   ];
 
-  List<Widget> _desktop(BuildContext context) => [
-    if (_has(CallFeature.devices))
-      _WithDevices(
+  /// [voice] is which microphone and speaker calls use; without it there
+  /// is nothing to choose them with.
+  List<Widget> _desktop(BuildContext context, VoiceController? voice) => [
+    if (voice != null)
+      _WithMenu(
         button: _micButton(context),
         tooltip: 'Microphone',
-        devices: mockMics,
-        current: calls.micDevice,
-        onPick: calls.setMicDevice,
+        onOpen: (context, position) => _chooseDevice(
+          context,
+          position,
+          voice: voice,
+          devices: () => voice.microphones,
+          chosen: () => voice.microphone,
+          choose: voice.chooseMicrophone,
+        ),
       )
     else
       _micButton(context),
     if (_has(CallFeature.camera))
-      if (_has(CallFeature.devices))
-        _WithDevices(
+      if (_has(CallFeature.cameraDevices))
+        _WithMenu(
           button: _cameraButton(context),
           tooltip: 'Camera',
-          devices: mockCameras,
-          current: calls.cameraDevice,
-          onPick: calls.setCameraDevice,
+          onOpen: (context, position) async {
+            final picked = await showActionMenu<String>(
+              context,
+              position: position,
+              items: [
+                for (final camera in mockCameras)
+                  ActionItem(
+                    value: camera,
+                    icon: camera == calls.cameraDevice
+                        ? LucideIcons.check
+                        : LucideIcons.dot,
+                    label: camera,
+                  ),
+              ],
+            );
+            if (picked != null) calls.setCameraDevice(picked);
+          },
         )
       else
         _cameraButton(context),
@@ -143,7 +168,21 @@ class CallControls extends StatelessWidget {
           },
         ),
       ),
-    _deafenButton(),
+    if (voice != null)
+      _WithMenu(
+        button: _deafenButton(),
+        tooltip: 'Speaker',
+        onOpen: (context, position) => _chooseDevice(
+          context,
+          position,
+          voice: voice,
+          devices: () => voice.speakers,
+          chosen: () => voice.speaker,
+          choose: voice.chooseSpeaker,
+        ),
+      )
+    else
+      _deafenButton(),
     _leaveButton(),
   ];
 
@@ -155,6 +194,9 @@ class CallControls extends StatelessWidget {
       return _BlockedButton(
         icon: LucideIcons.micOff,
         what: 'Microphone',
+        // On a computer the microphone chosen did not open; the ⌄ beside
+        // it chooses another.
+        message: isDesktop ? "Couldn't open your microphone" : null,
         size: _size,
       );
     }
@@ -284,22 +326,26 @@ class _CallButtonState extends State<CallButton> {
   }
 }
 
-/// A control the OS has denied. Disabled with a slash; says why on hover,
-/// or on a phone, on tap.
+/// A control that cannot be used. Disabled with a slash; says why on
+/// hover, or on a phone, on tap.
 class _BlockedButton extends StatelessWidget {
   const _BlockedButton({
     required this.icon,
     required this.what,
     required this.size,
+    this.message,
   });
 
   final IconData icon;
   final String what;
   final double size;
 
+  /// What hovering says. Null: that the system has denied [what].
+  final String? message;
+
   @override
   Widget build(BuildContext context) {
-    final message = '$what blocked in system settings';
+    final message = this.message ?? '$what blocked in system settings';
     final button = CallButton(
       icon: icon,
       tooltip: message,
@@ -342,21 +388,44 @@ class _BlockedExplainer extends StatelessWidget {
   }
 }
 
-/// A desktop control with a small ⌄ beside it that picks the device.
-class _WithDevices extends StatelessWidget {
-  const _WithDevices({
+/// A desktop control with a small ⌄ beside it that opens a menu under
+/// itself.
+class _WithMenu extends StatefulWidget {
+  const _WithMenu({
     required this.button,
     required this.tooltip,
-    required this.devices,
-    required this.current,
-    required this.onPick,
+    required this.onOpen,
   });
 
   final Widget button;
   final String tooltip;
-  final List<String> devices;
-  final String current;
-  final ValueChanged<String> onPick;
+
+  /// Shows the menu at [position], from the ⌄'s own [context]. Done when
+  /// the menu has closed.
+  final Future<void> Function(BuildContext context, Offset position) onOpen;
+
+  @override
+  State<_WithMenu> createState() => _WithMenuState();
+}
+
+class _WithMenuState extends State<_WithMenu> {
+  /// From a tap until its menu has closed. A menu may take a moment to
+  /// show, and a second tap meanwhile would open a second.
+  var _open = false;
+
+  Future<void> _tap(BuildContext context) async {
+    if (_open) return;
+    _open = true;
+    final box = context.findRenderObject()! as RenderBox;
+    try {
+      await widget.onOpen(
+        context,
+        box.localToGlobal(Offset(0, box.size.height)),
+      );
+    } finally {
+      _open = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -364,30 +433,13 @@ class _WithDevices extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        button,
+        widget.button,
         Builder(
           builder: (context) => Tooltip(
-            message: '$tooltip settings',
+            message: '${widget.tooltip} settings',
             child: InkWell(
               borderRadius: BorderRadius.circular(LoafRadius.full),
-              onTap: () async {
-                final box = context.findRenderObject()! as RenderBox;
-                final picked = await showActionMenu<String>(
-                  context,
-                  position: box.localToGlobal(Offset(0, box.size.height)),
-                  items: [
-                    for (final d in devices)
-                      ActionItem(
-                        value: d,
-                        icon: d == current
-                            ? LucideIcons.check
-                            : LucideIcons.dot,
-                        label: d,
-                      ),
-                  ],
-                );
-                if (picked != null) onPick(picked);
-              },
+              onTap: () => unawaited(_tap(context)),
               child: Padding(
                 padding: const EdgeInsets.all(LoafSpace.x1),
                 child: Icon(
@@ -402,4 +454,30 @@ class _WithDevices extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Asks the machine what it has, then offers [devices] to [choose] from.
+Future<void> _chooseDevice(
+  BuildContext context,
+  Offset position, {
+  required VoiceController voice,
+  required List<AudioDevice> Function() devices,
+  required AudioDevice? Function() chosen,
+  required ValueChanged<AudioDevice?> choose,
+}) async {
+  await voice.refresh();
+  if (!context.mounted) return;
+  final picked = await showActionMenu<DeviceChoice>(
+    context,
+    position: position,
+    items: [
+      for (final choice in deviceChoices(devices(), chosen()))
+        ActionItem(
+          value: choice,
+          icon: choice.chosen ? LucideIcons.check : LucideIcons.dot,
+          label: choice.label,
+        ),
+    ],
+  );
+  if (picked != null) choose(picked.device);
 }

@@ -265,6 +265,44 @@ void main() {
     expect(told, 0);
   });
 
+  group('the rows to choose a device from', () {
+    test('are the system default, then the devices in order', () {
+      final rows = deviceChoices(const [_rode, _sony], null);
+
+      expect(
+        [for (final row in rows) (row.device, row.label)],
+        const [
+          (null, 'system default'),
+          (_rode, 'RODE NT-USB'),
+          (_sony, 'WH-1000XM3'),
+        ],
+      );
+    });
+
+    test('mark the system default when nothing is chosen', () {
+      final rows = deviceChoices(const [_rode, _sony], null);
+
+      expect([for (final row in rows) row.chosen], [true, false, false]);
+    });
+
+    test('mark the device chosen', () {
+      final rows = deviceChoices(const [_rode, _sony], _sony);
+
+      expect([for (final row in rows) row.chosen], [false, false, true]);
+    });
+
+    test('end with a chosen device the machine does not have, as not '
+        'connected', () {
+      final rows = deviceChoices(const [_rode], _sony);
+
+      expect(
+        (rows.last.device, rows.last.label, rows.last.chosen),
+        (_sony, 'WH-1000XM3 · not connected', true),
+      );
+      expect([for (final row in rows) row.chosen], [false, false, true]);
+    });
+  });
+
   test('the lists are empty until the machine has been asked', () async {
     final controller = await _controller();
 

@@ -234,6 +234,10 @@ uses the system default until it is back. The list is read again whenever
 the section opens and, once it has been opened, whenever WebRTC reports a
 change.
 
+On desktop the call's own controls offer the same choice: a ⌄ beside the
+microphone button lists the microphones and one beside deafen the speakers,
+each read again as its menu opens.
+
 A live call applies the choice again whenever WebRTC reports a change, so a
 device that goes away mid-call gives way to the system default and one that
 comes back is taken up. A speaker that cannot be set is logged and the call

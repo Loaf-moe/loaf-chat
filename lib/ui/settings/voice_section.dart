@@ -81,32 +81,17 @@ class _VoiceSectionState extends State<VoiceSection> {
     },
   );
 
-  /// "system default", then what the machine has, then the chosen device
-  /// if the machine no longer has it.
   List<Widget> _choices(
     List<AudioDevice> devices,
     AudioDevice? chosen,
     ValueChanged<AudioDevice?> choose,
   ) => [
-    SettingsChoice(
-      title: 'system default',
-      selected: chosen == null,
-      onTap: () => choose(null),
-    ),
-    for (final device in devices) ...[
-      const SizedBox(height: LoafSpace.x2),
+    for (final (index, choice) in deviceChoices(devices, chosen).indexed) ...[
+      if (index > 0) const SizedBox(height: LoafSpace.x2),
       SettingsChoice(
-        title: device.label,
-        selected: device == chosen,
-        onTap: () => choose(device),
-      ),
-    ],
-    if (chosen != null && !devices.contains(chosen)) ...[
-      const SizedBox(height: LoafSpace.x2),
-      SettingsChoice(
-        title: '${chosen.label} · not connected',
-        selected: true,
-        onTap: () => choose(chosen),
+        title: choice.label,
+        selected: choice.chosen,
+        onTap: () => choose(choice.device),
       ),
     ],
   ];

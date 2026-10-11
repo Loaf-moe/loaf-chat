@@ -41,6 +41,23 @@ class AudioDevice {
   int get hashCode => id.hashCode;
 }
 
+/// One row to choose a device from. A null [device] is the system's
+/// default.
+typedef DeviceChoice = ({AudioDevice? device, String label, bool chosen});
+
+/// The rows to choose one of [devices] from: the system's default, what the
+/// machine has, then [chosen] if the machine does not have it.
+List<DeviceChoice> deviceChoices(
+  List<AudioDevice> devices,
+  AudioDevice? chosen,
+) => [
+  (device: null, label: 'system default', chosen: chosen == null),
+  for (final device in devices)
+    (device: device, label: device.label, chosen: device == chosen),
+  if (chosen != null && !devices.contains(chosen))
+    (device: chosen, label: '${chosen.label} · not connected', chosen: true),
+];
+
 @immutable
 class VoiceSettings {
   const VoiceSettings({

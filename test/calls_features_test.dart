@@ -73,8 +73,9 @@ void main() {
     testWidgets('draw no device menus', variant: _desktop, (tester) async {
       await _pump(tester, _controls(VoiceOnlyCalls()));
 
-      expect(find.byTooltip('Microphone'), findsNothing);
-      expect(find.byTooltip('Camera'), findsNothing);
+      expect(find.byTooltip('Microphone settings'), findsNothing);
+      expect(find.byTooltip('Speaker settings'), findsNothing);
+      expect(find.byTooltip('Camera settings'), findsNothing);
     });
 
     testWidgets("offer no volume for someone's tile", variant: _desktop, (

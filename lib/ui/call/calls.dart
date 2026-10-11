@@ -176,8 +176,8 @@ enum CallFeature {
   camera,
   screenShare,
 
-  /// Choosing which microphone and camera.
-  devices,
+  /// Choosing which camera.
+  cameraDevices,
 
   /// Choosing speaker, earpiece or headset on a phone.
   audioRoute,
@@ -235,7 +235,6 @@ abstract interface class Calls implements Listenable {
   bool get deafened;
   bool get camera;
   AudioRoute get route;
-  String get micDevice;
   String get cameraDevice;
 
   /// What you are sharing, if anything. Desktop only.
@@ -272,7 +271,6 @@ abstract interface class Calls implements Listenable {
   void toggleCamera();
   void flipCamera();
   void setRoute(AudioRoute value);
-  void setMicDevice(String value);
   void setCameraDevice(String value);
   void startScreenShare(String source);
   void stopScreenShare();

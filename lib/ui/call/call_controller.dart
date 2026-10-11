@@ -70,8 +70,6 @@ class CallController extends ChangeNotifier implements Calls {
   @override
   AudioRoute route = AudioRoute.speaker;
   @override
-  String micDevice = 'MacBook Pro Microphone';
-  @override
   String cameraDevice = 'FaceTime HD Camera';
 
   @override
@@ -264,12 +262,6 @@ class CallController extends ChangeNotifier implements Calls {
   @override
   void setRoute(AudioRoute value) {
     route = value;
-    notifyListeners();
-  }
-
-  @override
-  void setMicDevice(String value) {
-    micDevice = value;
     notifyListeners();
   }
 
