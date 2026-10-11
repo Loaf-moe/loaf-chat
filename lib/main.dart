@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +13,7 @@ import 'ui/model/updater.dart';
 import 'ui/mock/mock_session.dart';
 import 'ui/platform.dart';
 import 'ui/rooms/rooms.dart';
+import 'ui/shell/before_quit.dart';
 import 'ui/model/chime.dart';
 import 'ui/settings/notification_settings.dart';
 import 'ui/theme/appearance.dart';
@@ -46,8 +49,35 @@ Rooms Function()? newRooms;
 /// mock's. Lives as long as the app.
 Updater? updater;
 
+/// What the app must do before it ends by a signal. Lives as long as the
+/// app.
+final beforeQuit = BeforeQuit();
+
+/// Ends the app on SIGINT or SIGTERM once [beforeQuit] has run. Watching a
+/// signal takes over from its default action, so nothing else would. A
+/// second signal ends it at once.
+void _quitOnSignals(BeforeQuit beforeQuit) {
+  var quitting = false;
+  for (final signal in [ProcessSignal.sigint, ProcessSignal.sigterm]) {
+    signal.watch().listen((_) async {
+      if (quitting) exit(128 + signal.signalNumber);
+      quitting = true;
+      try {
+        await beforeQuit.run();
+      } on Object catch (e, s) {
+        // The app ends either way; say what went wrong on the way out.
+        stderr.writeln('before quitting: $e\n$s');
+      }
+      exit(0);
+    });
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (!kIsWeb && (Platform.isLinux || Platform.isMacOS)) {
+    _quitOnSignals(beforeQuit);
+  }
   // Restored before the first frame, like the session, so the app never
   // flashes the wrong palette. The mock keeps nothing between runs.
   appearance = await AppearanceController.load(
@@ -127,6 +157,7 @@ class LoafApp extends StatelessWidget {
                   session: session,
                   rooms: newRooms,
                   updater: updater,
+                  beforeQuit: beforeQuit,
                 ),
               ),
             ),

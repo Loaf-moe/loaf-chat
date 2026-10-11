@@ -7,6 +7,7 @@
 library;
 
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -57,6 +58,7 @@ import 'profile.dart';
 import 'profile_controller.dart';
 import 'shell_faces.dart';
 import 'space_actions.dart';
+import 'before_quit.dart';
 import 'status_picker.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
@@ -71,6 +73,7 @@ class AppShell extends StatefulWidget {
     this.rooms,
     this.updater,
     this.routes,
+    this.beforeQuit,
   });
 
   /// Who is signed in, and how far this device is trusted. The app passes
@@ -89,6 +92,10 @@ class AppShell extends StatefulWidget {
   /// Messages to open, as notifications are clicked or tapped. One that
   /// comes before the first sync waits for it.
   final Stream<MessageRoute>? routes;
+
+  /// Where the shell says what it must do before the app ends by a signal.
+  /// A window closing asks the shell itself.
+  final BeforeQuit? beforeQuit;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -148,9 +155,34 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  late final AppLifecycleListener _exitRequests;
+
+  /// Tells everyone else you have left before the app goes, so that you are
+  /// not listed in a call you are no longer in.
+  Future<void> _leaveCall() => _calls.leave();
+
+  Future<AppExitResponse> _onExitRequested() async {
+    try {
+      await _leaveCall().timeout(BeforeQuit.limit, onTimeout: () {});
+    } on Object catch (e, s) {
+      // Whatever goes wrong, the window the user closed must still close.
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: e,
+          stack: s,
+          library: 'loaf',
+          context: ErrorDescription('while leaving a call to quit'),
+        ),
+      );
+    }
+    return AppExitResponse.exit;
+  }
+
   @override
   void initState() {
     super.initState();
+    _exitRequests = AppLifecycleListener(onExitRequested: _onExitRequested);
+    widget.beforeQuit?.add(_leaveCall);
     // The channel the app opens on is being read from the first frame.
     // Before listening: nothing is built yet to hear it.
     final opening = _channel;
@@ -207,6 +239,8 @@ class _AppShellState extends State<AppShell> {
     _profile
       ..removeListener(_onChange)
       ..dispose();
+    _exitRequests.dispose();
+    widget.beforeQuit?.remove(_leaveCall);
     _calls.removeListener(_onChange);
     _mockCalls?.dispose();
     super.dispose();

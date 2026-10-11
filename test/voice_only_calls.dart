@@ -6,10 +6,13 @@ import 'package:loaf_native/ui/model/models.dart';
 /// sharing, device choice, volume or DM calls has them. Joining goes live at
 /// once.
 class VoiceOnlyCalls extends ChangeNotifier implements Calls {
-  VoiceOnlyCalls({this.canJoin = true});
+  VoiceOnlyCalls({this.canJoin = true, this.leaving});
 
   /// What [joinable] answers for every channel.
   final bool canJoin;
+
+  /// When leaving finishes telling everyone else. Null: at once.
+  final Future<void>? leaving;
 
   @override
   final Member me = const Member('@you:loaf.test', 'you', Color(0xFF888888));
@@ -45,9 +48,10 @@ class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   }
 
   @override
-  void leave() {
+  Future<void> leave() {
     session = null;
     notifyListeners();
+    return leaving ?? Future.value();
   }
 
   @override

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -22,6 +23,7 @@ import 'package:loaf_native/ui/call/calls.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
 import 'package:loaf_native/ui/settings/settings_page.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
+import 'package:loaf_native/ui/shell/before_quit.dart';
 import 'package:loaf_native/ui/spaces/space_directory.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
@@ -201,6 +203,7 @@ Future<_Session> _pump(
   Size size = const Size(1440, 900),
   bool settle = true,
   Stream<MessageRoute>? routes,
+  BeforeQuit? beforeQuit,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -212,7 +215,12 @@ Future<_Session> _pump(
       theme: loafLightTheme(),
       darkTheme: loafDarkTheme(),
       themeMode: ThemeMode.dark,
-      home: AppShell(session: session, rooms: () => rooms, routes: routes),
+      home: AppShell(
+        session: session,
+        rooms: () => rooms,
+        routes: routes,
+        beforeQuit: beforeQuit,
+      ),
     ),
   );
   // A spinner never settles.
@@ -355,6 +363,64 @@ void main() {
 
       expect(calls.session?.target.name, 'oven');
       expect(find.byTooltip('Leave call'), findsOneWidget);
+    });
+
+    group('quitting while in a call', () {
+      /// The shell with a voice channel joined on [calls].
+      Future<void> inCall(
+        WidgetTester tester,
+        VoiceOnlyCalls calls, {
+        BeforeQuit? beforeQuit,
+      }) async {
+        addTearDown(calls.dispose);
+        final rooms = _FakeRooms(spaces: [_bakery()])
+          ..abilities = {RoomAbility.messages, RoomAbility.calls}
+          ..calls = calls;
+        await _pump(tester, rooms, beforeQuit: beforeQuit);
+        await tester.tap(_inList('oven'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('join voice'));
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('a window asked to close leaves the call first', (
+        tester,
+      ) async {
+        final calls = VoiceOnlyCalls();
+        await inCall(tester, calls);
+
+        final answer = await tester.binding.handleRequestAppExit();
+
+        expect(calls.session, isNull);
+        expect(answer, AppExitResponse.exit);
+      });
+
+      testWidgets('a signal to quit leaves the call', (tester) async {
+        final calls = VoiceOnlyCalls();
+        final beforeQuit = BeforeQuit();
+        await inCall(tester, calls, beforeQuit: beforeQuit);
+
+        await beforeQuit.run();
+
+        expect(calls.session, isNull);
+      });
+
+      testWidgets('a leave that never finishes holds the window three '
+          'seconds, no longer', (tester) async {
+        final calls = VoiceOnlyCalls(leaving: Completer<void>().future);
+        await inCall(tester, calls);
+        AppExitResponse? answer;
+
+        unawaited(
+          tester.binding.handleRequestAppExit().then((a) => answer = a),
+        );
+        await tester.pump(BeforeQuit.limit - const Duration(milliseconds: 1));
+        final before = answer;
+        await tester.pump(const Duration(milliseconds: 1));
+
+        expect(before, isNull);
+        expect(answer, AppExitResponse.exit);
+      });
     });
 
     testWidgets('calls with voice alone offer none in a DM', (tester) async {

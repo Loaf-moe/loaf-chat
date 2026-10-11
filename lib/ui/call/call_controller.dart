@@ -153,7 +153,7 @@ class CallController extends ChangeNotifier implements Calls {
   }
 
   @override
-  void leave() {
+  Future<void> leave() async {
     final session = _session;
     if (session == null) return;
     if (session.direct && !session.over) {

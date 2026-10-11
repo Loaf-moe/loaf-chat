@@ -54,6 +54,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   String? _pinned;
   var _disposed = false;
 
+  /// The joins that have not finished, or finished undoing themselves.
+  final _joins = <Future<void>>{};
+
   /// The memberships [_clearLeftBehind] has dealt with, by event id.
   final _cleared = <String>{};
 
@@ -94,23 +97,32 @@ class MatrixCalls extends ChangeNotifier implements Calls {
 
   @override
   void joinVoice(Channel channel, {required String spaceName}) =>
-      unawaited(_join(channel, spaceName));
+      _start(channel, spaceName);
 
   @override
   void retry() {
     final session = _session;
     if (session?.phase != CallPhase.failed) return;
-    unawaited(_join(session!.target, session.spaceName ?? ''));
+    _start(session!.target, session.spaceName ?? '');
+  }
+
+  void _start(Channel channel, String spaceName) {
+    final join = _join(channel, spaceName);
+    _joins.add(join);
+    unawaited(join.whenComplete(() => _joins.remove(join)));
   }
 
   @override
-  void leave() {
+  Future<void> leave() async {
     _attempt++;
     final live = _detach();
+    final joins = _joins.toList();
     _session = null;
     _pinned = null;
     _notify();
-    unawaited(_end(live));
+    await _end(live);
+    // A join that was under way has now been overtaken, and undoes itself.
+    await Future.wait(joins);
   }
 
   Future<void> _join(Channel channel, String spaceName) async {
@@ -259,7 +271,8 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     if (live == null) return;
     // A room you have left is dropped from the client, not updated.
     if (_client.getRoomById(live.room.id)?.membership != Membership.join) {
-      return leave();
+      unawaited(leave());
+      return;
     }
     final own = live.room.getState(callMemberType, live.membership.stateKey);
     final present = own != null && own.content['application'] == 'm.call';

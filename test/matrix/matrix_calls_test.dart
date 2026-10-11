@@ -65,6 +65,9 @@ class _Api extends FakeMatrixApi {
   /// The homeserver refuses to store a membership.
   var refuseMembership = false;
 
+  /// Held back until completed, when set: the answer to a membership write.
+  Completer<void>? holdMembership;
+
   /// How many of the next membership writes meet a dropped connection.
   var dropMemberships = 0;
 
@@ -105,6 +108,7 @@ class _Api extends FakeMatrixApi {
     if (request.method == 'PUT' && path.contains(marker)) {
       final content = jsonDecode(request.body) as Map;
       log.add(content.isEmpty ? 'emptied membership' : 'wrote membership');
+      await holdMembership?.future;
       if (dropMemberships > 0) {
         dropMemberships--;
         throw http.ClientException('connection dropped');
@@ -583,6 +587,43 @@ void main() {
 
       expect(world.calls.session, isNull);
       expect(world.calls.inCall, isFalse);
+    });
+
+    test('is done once the room has been told and the media dropped', () async {
+      final world = await _open();
+      await world.join();
+
+      await world.calls.leave();
+
+      expect(world.log.skip(3), ['emptied membership', 'disconnected']);
+    });
+
+    test('while the join is still being written is done only once that '
+        'is undone', () async {
+      final world = await _open();
+      final written = world.api.holdMembership = Completer();
+      world.calls.joinVoice(_ovenChannel, spaceName: 'Bakery');
+      await _until(() => world.log.contains('wrote membership'));
+
+      final left = world.calls.leave();
+      written.complete();
+      await left;
+
+      expect(world.log, [
+        'access',
+        'connected',
+        'wrote membership',
+        'emptied membership',
+        'disconnected',
+      ]);
+    });
+
+    test('with no call is done at once', () async {
+      final world = await _open();
+
+      await world.calls.leave();
+
+      expect(world.log, isEmpty);
     });
 
     test('says so in the room before dropping the media', () async {

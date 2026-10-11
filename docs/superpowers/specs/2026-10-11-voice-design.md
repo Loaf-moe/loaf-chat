@@ -186,6 +186,9 @@ at 4 disconnects.
 membership cannot be emptied, the disconnect still happens and the membership
 runs out at its `expires`.
 
+**Quitting leaves.** Closing the window, SIGINT and SIGTERM each leave the
+call first, waiting at most three seconds before the app ends anyway.
+
 **Participants.** The people shown in a call are the room's call memberships
 (`callOccupancy`, already used for the channel list). Speaking and muted come
 from the LiveKit participant with the matching identity.
@@ -222,8 +225,9 @@ platforms a voice channel still reads "voice chat isn't available yet".
 
 - **Ghosts.** A client that dies without emptying its membership stays listed
   until `expires`. Element Call leans on delayed events to clear these, and
-  the homeserver has none. Loaf Chat empties a membership its own device left
-  behind when it next launches.
+  the homeserver has none. Loaf Chat leaves when it is quit, and empties a
+  membership its own device left behind (a crash, a kill, the power going)
+  when it next launches.
 - **One SFU.** Members who publish to a different call server are listed but
   not heard.
 - **No reconnect UI beyond LiveKit's own.** A dropped connection shows

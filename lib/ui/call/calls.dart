@@ -245,8 +245,9 @@ abstract interface class Calls implements Listenable {
   void callAgain();
 
   /// Cancels a ring, hangs up, or dismisses a call that has ended. Leaves
-  /// any record the call is owed.
-  void leave();
+  /// any record the call is owed. The call is gone from [session] at once;
+  /// the future completes when everyone else has been told too.
+  Future<void> leave();
 
   void retry();
   void accept();
