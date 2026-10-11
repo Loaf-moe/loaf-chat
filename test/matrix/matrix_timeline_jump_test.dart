@@ -537,6 +537,48 @@ void main() {
     expect(h.bodies, isNot(contains('the old one')));
   });
 
+  test('a write from far back stops paging at the cap and stays put', () async {
+    final h = await _open();
+    h.api.contexts[r'$old'] = _context(r'$old', 'the old one');
+    // More pages than the cap, none of them live.
+    for (var i = 0; i < catchUpPages + 2; i++) {
+      h.api.forward.add(_page([_text('later $i')]));
+    }
+    h.timeline.jumpTo(r'$old');
+    await _until(() => h.timeline.jumpTarget != null);
+
+    h.timeline.delete(r'$old');
+    await _until(
+      () => h.api.redacted.isNotEmpty && h.api.forwardAsked == catchUpPages,
+    );
+    await _settle();
+    expect(h.api.redacted, [r'$old']);
+    expect(h.api.forwardAsked, catchUpPages);
+    expect(h.timeline.canLoadNewer, isTrue);
+    // Still where you were: the jumped-to message is loaded.
+    expect(h.bodies, contains('the old one'));
+
+    // Scrolling down still pages on from there.
+    h.timeline.loadNewer();
+    await _until(() => !h.timeline.loadingNewer);
+    expect(h.api.forwardAsked, catchUpPages + 1);
+  });
+
+  test('a reaction from far back is sent once the cap is reached', () async {
+    final h = await _open();
+    h.api.contexts[r'$old'] = _context(r'$old', 'the old one');
+    for (var i = 0; i < catchUpPages + 2; i++) {
+      h.api.forward.add(_page([_text('later $i')]));
+    }
+    h.timeline.jumpTo(r'$old');
+    await _until(() => h.timeline.jumpTarget != null);
+
+    h.timeline.toggleReaction(r'$old', '👍');
+    await _until(() => h.api.sent.isNotEmpty);
+    expect(h.api.sent, ['m.reaction']);
+    expect(h.api.forwardAsked, catchUpPages);
+  });
+
   test('a redacted reaction in a forward page is taken off', () async {
     final h = await _open();
     h.api.contexts[r'$old'] = _context(
