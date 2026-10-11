@@ -30,13 +30,18 @@ Commit: `refactor(call): the call UI reads a Calls interface`
 - New `lib/ui/call/calls.dart`: `abstract interface class Calls implements Listenable`, with the session types it speaks in (`CallSession`, `CallParticipant`, `CallPhase`), moved out of `call_controller.dart` and re-exported from it.
 - `lib/ui/call/call_controller.dart`: `class CallController extends ChangeNotifier implements Calls`. Its debug levers, `rings`, `flags`, `connectDelay` and `ringTimeout` stay on the class.
 - `lib/ui/call/call_view.dart`, `call_controls.dart`, `voice_channel_page.dart`, `dm_call_panel.dart`: take `Calls`.
-- `lib/ui/shell/app_shell.dart`: reads `Calls`; keeps its `CallController` for the debug menu.
+- `lib/ui/call/call_tile.dart`, `incoming_call_card.dart`: import `calls.dart` for the types.
 
-**What `Calls` holds** is settled when this task is planned. The inputs:
+**What `Calls` holds:** what the widgets and the shell read, and nothing else.
 
-- Every member the widgets and the shell read today (`session`, `incoming`, `inCall`, `muted`, `deafened`, `toggleMute`, `toggleDeafen`, `joinVoice`, `leave`, `retry`, `close`, and the camera, screen, device, route, pin and volume members).
-- `call_view.dart`'s `lobbyTiles` reads `flags`, a mock constructor input. It reads through `Calls` instead.
-- The members a real backend cannot honour in this phase (camera, screen share, device menus, audio route, per-person volume, DM calls) need a way for `Calls` to say so, so that Task 2 can leave those controls undrawn.
+- You: `me`.
+- Call state: `session`, `incoming`, `inCall`, `pinned`, `spotlight`, `volumeOf`, `encrypted`.
+- Your state: `muted`, `deafened`, `camera`, `route`, `micDevice`, `cameraDevice`, `sharing`, `micBlocked`, `cameraBlocked`.
+- Joining and leaving: `joinVoice`, `startDirect`, `callAgain`, `leave`, `retry`, `accept`, `decline`.
+- Controls: `toggleMute`, `toggleDeafen`, `toggleCamera`, `flipCamera`, `setRoute`, `setMicDevice`, `setCameraDevice`, `startScreenShare`, `stopScreenShare`, `pin`, `setVolume`.
+- `lobbyState(memberId)`: how someone in a call you have not joined is set up, when known. The mock answers from its `flags`.
+
+`app_shell.dart` is untouched: it still builds a `CallController`, which passes as a `Calls`.
 
 **Verification**
 
@@ -60,6 +65,7 @@ Commit: `feat(call): join a voice channel and talk`
 - `lib/ui/mock/mock_rooms.dart`: hands out the `CallController`.
 - `lib/matrix/matrix_rooms.dart`: hands out `MatrixCalls`; claims `RoomAbility.calls` on Linux.
 - `lib/ui/shell/app_shell.dart`: takes its `Calls` from the rooms.
+- `lib/ui/call/calls.dart` and the call widgets: `Calls` says which of camera, screen sharing, device menus, audio route, per-person volume and DM calls it has; a control for one it lacks is not drawn.
 - `lib/main.dart`: builds the LiveKit `CallMedia` and gives it to `MatrixRooms`.
 - `README.md`: what a Linux build fetches.
 - `docs/superpowers/plans/2026-09-26-sdk-wiring-roadmap.md`: phase 7's row and deferred lines.

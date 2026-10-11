@@ -9,7 +9,7 @@ import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
-import 'call_controller.dart';
+import 'calls.dart';
 
 /// What a tile draws. Built from a [CallParticipant], or from your own
 /// state for your own tile.

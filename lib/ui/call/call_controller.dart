@@ -1,8 +1,5 @@
-/// The one call you are in, and the one ringing at you — mockup only.
-///
-/// Stands in for matrix-dart-sdk's MatrixRTC session plus LiveKit: the phases
-/// and flags are the ones the real thing will report, driven here by timers
-/// and fixture behaviour instead of the network. See the calls design spec.
+/// The mock [Calls]: a call played out by timers and fixture behaviour
+/// instead of the network. See the calls design spec.
 library;
 
 import 'dart:async';
@@ -10,36 +7,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../mock/fixtures.dart';
+import 'calls.dart';
 
-enum CallPhase {
-  /// An outgoing DM call nobody has answered yet. You are already in the
-  /// call; ringing is how the wait is presented.
-  ringing,
-  connecting,
-  live,
-  reconnecting,
-
-  /// Couldn't connect. Offers retry and close.
-  failed,
-
-  /// Outgoing DM ring ended with nobody answering. Offers call again.
-  unanswered,
-
-  /// A 1:1 DM ring the other person declined. Offers call again.
-  declined,
-}
-
-/// Where one invitee of an outgoing DM call has got to.
-enum RingState { ringing, joined, declined, noAnswer }
-
-enum AudioRoute {
-  speaker('speaker'),
-  phone('iPhone'),
-  bluetooth('AirPods');
-
-  const AudioRoute(this.label);
-  final String label;
-}
+export 'calls.dart';
 
 /// How a fixture member responds to being rung, so the mock can play out
 /// answers, declines and silence.
@@ -51,141 +21,7 @@ class RingBehaviour {
   final Duration after;
 }
 
-/// A system line a call leaves in its DM's timeline.
-@immutable
-sealed class CallRecord {
-  const CallRecord();
-
-  String get label;
-}
-
-class EndedCall extends CallRecord {
-  const EndedCall(this.duration);
-
-  final Duration duration;
-
-  @override
-  String get label {
-    final minutes = duration.inMinutes;
-    if (minutes >= 60) return 'call · ${minutes ~/ 60}h ${minutes % 60}m';
-    return 'call · ${minutes < 1 ? 1 : minutes}m';
-  }
-}
-
-class MissedCall extends CallRecord {
-  const MissedCall();
-
-  @override
-  String get label => 'missed call';
-}
-
-class NoOneAnswered extends CallRecord {
-  const NoOneAnswered();
-
-  @override
-  String get label => 'no one answered';
-}
-
-/// Someone else in the call, as their tile draws them.
-@immutable
-class CallParticipant {
-  const CallParticipant(
-    this.member, {
-    this.muted = false,
-    this.deafened = false,
-    this.camera = false,
-    this.screen = false,
-    this.speaking = false,
-    this.ring,
-  });
-
-  final Member member;
-  final bool muted;
-  final bool deafened;
-  final bool camera;
-  final bool screen;
-  final bool speaking;
-
-  /// Only for invitees of a DM call you started.
-  final RingState? ring;
-
-  /// In the call, as opposed to still being rung or having declined.
-  bool get present => ring == null || ring == RingState.joined;
-
-  CallParticipant copyWith({
-    bool? muted,
-    bool? camera,
-    bool? screen,
-    bool? speaking,
-    RingState? ring,
-  }) => CallParticipant(
-    member,
-    muted: muted ?? this.muted,
-    deafened: deafened,
-    camera: camera ?? this.camera,
-    screen: screen ?? this.screen,
-    speaking: speaking ?? this.speaking,
-    ring: ring ?? this.ring,
-  );
-}
-
-@immutable
-class CallSession {
-  const CallSession({
-    required this.target,
-    required this.phase,
-    required this.participants,
-    this.spaceName,
-    this.startedAt,
-  });
-
-  /// A voice channel or a direct chat.
-  final Channel target;
-
-  /// The voice channel's space, for the connected-call bar.
-  final String? spaceName;
-
-  final CallPhase phase;
-  final List<CallParticipant> participants;
-
-  /// When the call went live, for the duration its DM records.
-  final DateTime? startedAt;
-
-  bool get direct => target.kind == ChannelKind.direct;
-
-  /// Ended states still show in the panel until closed, but you are no
-  /// longer in anything.
-  bool get over =>
-      phase == CallPhase.failed ||
-      phase == CallPhase.unanswered ||
-      phase == CallPhase.declined;
-
-  CallParticipant? find(String id) =>
-      participants.where((p) => p.member.id == id).firstOrNull;
-
-  CallSession copyWith({
-    CallPhase? phase,
-    List<CallParticipant>? participants,
-    DateTime? startedAt,
-  }) => CallSession(
-    target: target,
-    spaceName: spaceName,
-    phase: phase ?? this.phase,
-    participants: participants ?? this.participants,
-    startedAt: startedAt ?? this.startedAt,
-  );
-}
-
-/// A DM call ringing at you.
-@immutable
-class IncomingRing {
-  const IncomingRing(this.chat, this.caller);
-
-  final Channel chat;
-  final Member caller;
-}
-
-class CallController extends ChangeNotifier {
+class CallController extends ChangeNotifier implements Calls {
   CallController({
     required this.me,
     this.rings = const {},
@@ -194,6 +30,7 @@ class CallController extends ChangeNotifier {
     this.onRecord,
   }) : _now = now ?? DateTime.now;
 
+  @override
   final Member me;
 
   /// How each member answers a ring. Anyone missing never picks up.
@@ -218,47 +55,62 @@ class CallController extends ChangeNotifier {
   Timer? _speaking;
   var _speakerTurn = 0;
 
+  @override
   CallSession? get session => _session;
+  @override
   IncomingRing? get incoming => _incoming;
 
-  // Your own state. It outlives any one call, like the account panel's
-  // mute and deafen do.
+  @override
   bool muted = false;
+  @override
   bool deafened = false;
+  @override
   bool camera = false;
   bool frontCamera = true;
+  @override
   AudioRoute route = AudioRoute.speaker;
+  @override
   String micDevice = 'MacBook Pro Microphone';
+  @override
   String cameraDevice = 'FaceTime HD Camera';
 
-  /// What you are sharing, if anything. Desktop only.
+  @override
   String? sharing;
 
   String? _pinned;
   final _shareOrder = <String>[];
   final _volumes = <String, double>{};
 
-  // Mock-only switches, set from the debug menu.
+  // Set from the debug menu.
+  @override
   bool encrypted = true;
+  @override
   bool micBlocked = false;
+  @override
   bool cameraBlocked = false;
   bool _failNext = false;
 
-  /// Whether you are in a call right now: connecting, ringing out or live.
+  @override
   bool get inCall => _session != null && !_session!.over;
 
+  @override
   String? get pinned => _pinned;
 
-  /// Whose tile fills the stage: a pinned tile, else the newest screen share.
+  @override
   String? get spotlight {
     if (_pinned != null) return _pinned;
     return _shareOrder.isEmpty ? null : _shareOrder.last;
   }
 
+  @override
   double volumeOf(String id) => _volumes[id] ?? 1;
+
+  @override
+  CallParticipant? lobbyState(String memberId) => flags[memberId];
 
   // ── Joining and leaving ──────────────────────────────────────────────
 
+  @override
   void joinVoice(Channel channel, {required String spaceName}) {
     _reset();
     _session = CallSession(
@@ -271,7 +123,7 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Rings everyone in a direct chat. [video] starts with your camera on.
+  @override
   void startDirect(Channel chat, {bool video = false}) {
     _reset();
     camera = video && !cameraBlocked;
@@ -287,13 +139,14 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   void callAgain() {
     final session = _session;
     if (session == null) return;
     startDirect(session.target, video: camera);
   }
 
-  /// Cancels a ring or hangs up. Leaves any record the call is owed.
+  @override
   void leave() {
     final session = _session;
     if (session == null) return;
@@ -311,9 +164,7 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Dismisses an ended call's panel.
-  void close() => leave();
-
+  @override
   void retry() {
     final session = _session;
     if (session == null || session.phase != CallPhase.failed) return;
@@ -335,6 +186,7 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   void accept() {
     final ring = _incoming;
     if (ring == null) return;
@@ -354,6 +206,7 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   void decline() {
     _stopIncoming();
     notifyListeners();
@@ -369,6 +222,7 @@ class CallController extends ChangeNotifier {
 
   /// Unmuting while deafened undeafens too: you cannot talk to people you
   /// cannot hear.
+  @override
   void toggleMute() {
     if (micBlocked) return;
     muted = !muted;
@@ -378,38 +232,45 @@ class CallController extends ChangeNotifier {
 
   /// Deafening implies muting; coming back restores you to unmuted rather
   /// than leaving you silently muted for a reason you never chose.
+  @override
   void toggleDeafen() {
     deafened = !deafened;
     muted = deafened;
     notifyListeners();
   }
 
+  @override
   void toggleCamera() {
     if (cameraBlocked) return;
     camera = !camera;
     notifyListeners();
   }
 
+  @override
   void flipCamera() {
     frontCamera = !frontCamera;
     notifyListeners();
   }
 
+  @override
   void setRoute(AudioRoute value) {
     route = value;
     notifyListeners();
   }
 
+  @override
   void setMicDevice(String value) {
     micDevice = value;
     notifyListeners();
   }
 
+  @override
   void setCameraDevice(String value) {
     cameraDevice = value;
     notifyListeners();
   }
 
+  @override
   void startScreenShare(String source) {
     sharing = source;
     _shareOrder
@@ -418,6 +279,7 @@ class CallController extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   void stopScreenShare() {
     sharing = null;
     _shareOrder.remove(me.id);
@@ -426,11 +288,13 @@ class CallController extends ChangeNotifier {
 
   /// Pins [id] to the spotlight, or with null goes back to the automatic
   /// choice.
+  @override
   void pin(String? id) {
     _pinned = id;
     notifyListeners();
   }
 
+  @override
   void setVolume(String id, double value) {
     _volumes[id] = value;
     notifyListeners();

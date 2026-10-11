@@ -12,7 +12,7 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
 import '../window/window_chrome.dart';
-import 'call_controller.dart';
+import 'calls.dart';
 import 'call_controls.dart';
 import 'call_stage.dart';
 import 'call_tile.dart';
@@ -30,7 +30,7 @@ class VoiceChannelPage extends StatelessWidget {
   });
 
   final Channel channel;
-  final CallController calls;
+  final Calls calls;
   final VoidCallback onJoin;
 
   /// The phone layout's way back to the channel list.
@@ -92,7 +92,7 @@ class _Lobby extends StatelessWidget {
   });
 
   final Channel channel;
-  final CallController calls;
+  final Calls calls;
   final VoidCallback onJoin;
   final Widget? leading;
 

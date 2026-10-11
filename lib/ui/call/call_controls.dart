@@ -10,7 +10,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
-import 'call_controller.dart';
+import 'calls.dart';
 
 /// The shortcut as the platform writes it: ⌘⇧M on a Mac, Ctrl+Shift+M
 /// elsewhere.
@@ -36,7 +36,7 @@ class CallControls extends StatelessWidget {
     this.dense = false,
   });
 
-  final CallController calls;
+  final Calls calls;
   final VoidCallback onLeave;
 
   /// The DM panel's compact size: smaller buttons, same set.

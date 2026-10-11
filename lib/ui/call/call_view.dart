@@ -14,7 +14,7 @@ import '../widgets/action_menu.dart';
 import '../widgets/loaf_button.dart';
 import '../widgets/toast.dart';
 import '../window/window_chrome.dart';
-import 'call_controller.dart';
+import 'calls.dart';
 import 'call_controls.dart';
 import 'call_stage.dart';
 import 'call_tile.dart';
@@ -28,7 +28,7 @@ class CallView extends StatelessWidget {
     this.trailing = const [],
   });
 
-  final CallController calls;
+  final Calls calls;
 
   /// The DM panel's compact size: a slim top bar, one row of tiles.
   final bool compact;
@@ -115,7 +115,7 @@ class CallView extends StatelessWidget {
 }
 
 /// You, then everyone else, as the stage draws them.
-List<TileInfo> callTiles(CallController calls, CallSession session) => [
+List<TileInfo> callTiles(Calls calls, CallSession session) => [
   TileInfo(
     calls.me,
     you: true,
@@ -133,7 +133,7 @@ enum _TileAction { pin, unpin }
 /// entry: there is no profile view to open yet.
 Future<void> showTileActions(
   BuildContext context,
-  CallController calls,
+  Calls calls,
   TileInfo info,
   Offset? position,
 ) async {
@@ -176,7 +176,7 @@ Future<void> showTileActions(
 class _VolumeSlider extends StatefulWidget {
   const _VolumeSlider({required this.calls, required this.id});
 
-  final CallController calls;
+  final Calls calls;
   final String id;
 
   @override
@@ -218,7 +218,7 @@ class _VolumeSliderState extends State<_VolumeSlider> {
 class _VolumeEntry extends PopupMenuEntry<_TileAction> {
   const _VolumeEntry({required this.calls, required this.id});
 
-  final CallController calls;
+  final Calls calls;
   final String id;
 
   @override
@@ -252,7 +252,7 @@ class CallTopBar extends StatelessWidget {
     this.trailing = const [],
   });
 
-  final CallController calls;
+  final Calls calls;
   final CallSession session;
   final bool compact;
   final Widget? leading;
@@ -397,7 +397,7 @@ class TopBarButton extends StatelessWidget {
 class _ShareStrip extends StatelessWidget {
   const _ShareStrip({required this.calls});
 
-  final CallController calls;
+  final Calls calls;
 
   @override
   Widget build(BuildContext context) {
@@ -440,7 +440,7 @@ class _ShareStrip extends StatelessWidget {
 class _EndState extends StatelessWidget {
   const _EndState({required this.calls, required this.session});
 
-  final CallController calls;
+  final Calls calls;
   final CallSession session;
 
   @override
@@ -491,7 +491,7 @@ class _EndState extends StatelessWidget {
                   label: 'close',
                   size: LoafButtonSize.small,
                   emphasis: LoafButtonEmphasis.outlined,
-                  onTap: calls.close,
+                  onTap: calls.leave,
                 ),
               ],
             ),
@@ -504,12 +504,12 @@ class _EndState extends StatelessWidget {
 
 /// The channel's occupants plus your preview, for a voice channel you have
 /// not connected to — drawn dimmed, since you are not hearing them yet.
-List<TileInfo> lobbyTiles(CallController calls, Channel channel) => [
+List<TileInfo> lobbyTiles(Calls calls, Channel channel) => [
   TileInfo(calls.me, you: true, muted: calls.muted, camera: calls.camera),
   // How they are set up is visible without joining, like who is there.
   for (final m in channel.occupants)
-    if (calls.flags[m.id] case final flags?)
-      TileInfo.of(flags)
+    if (calls.lobbyState(m.id) case final state?)
+      TileInfo.of(state)
     else
       TileInfo(m),
 ];
