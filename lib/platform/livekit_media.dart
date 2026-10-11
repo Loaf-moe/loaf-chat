@@ -1,6 +1,7 @@
 /// A call's media over LiveKit: the one file that touches `livekit_client`.
 library;
 
+import 'package:connectivity_plus_platform_interface/connectivity_plus_platform_interface.dart';
 import 'package:flutter/foundation.dart';
 import 'package:livekit_client/livekit_client.dart';
 
@@ -11,6 +12,9 @@ class LiveKitMedia implements CallMedia {
 
   @override
   Future<CallConnection> connect(Uri url, String jwt) async {
+    if (defaultTargetPlatform == TargetPlatform.linux) {
+      ConnectivityPlatform.instance = _AlwaysOnline();
+    }
     final room = Room(
       roomOptions: const RoomOptions(
         // As Element Call publishes, so that either end hears the other the
@@ -36,6 +40,20 @@ class LiveKitMedia implements CallMedia {
     }
     return _LiveKitConnection(room);
   }
+}
+
+/// LiveKit asks `connectivity_plus` whether there is a network before every
+/// connection. On Linux that asks NetworkManager over D-Bus and throws where
+/// there is none, so there LiveKit is told yes and finds out by connecting.
+class _AlwaysOnline extends ConnectivityPlatform {
+  @override
+  Future<List<ConnectivityResult>> checkConnectivity() async => const [
+    ConnectivityResult.other,
+  ];
+
+  @override
+  Stream<List<ConnectivityResult>> get onConnectivityChanged =>
+      const Stream.empty();
 }
 
 class _LiveKitConnection extends ChangeNotifier implements CallConnection {
