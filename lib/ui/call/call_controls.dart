@@ -60,78 +60,89 @@ class CallControls extends StatelessWidget {
 
   double get _size => dense ? 40 : 52;
 
+  bool _has(CallFeature feature) => calls.features.contains(feature);
+
   List<Widget> _mobile(BuildContext context) => [
     _micButton(context),
-    _cameraButton(context),
-    CallButton(
-      icon: switch (calls.route) {
-        AudioRoute.speaker => LucideIcons.volume2,
-        AudioRoute.phone => LucideIcons.smartphone,
-        AudioRoute.bluetooth => LucideIcons.bluetooth,
-      },
-      tooltip: 'Audio output',
-      size: _size,
-      onTap: () async {
-        final route = await showActionSheet<AudioRoute>(
-          context,
-          items: [
-            for (final r in AudioRoute.values)
-              ActionItem(
-                value: r,
-                icon: r == calls.route ? LucideIcons.check : LucideIcons.dot,
-                label: r.label,
-              ),
-          ],
-        );
-        if (route != null) calls.setRoute(route);
-      },
-    ),
+    if (_has(CallFeature.camera)) _cameraButton(context),
+    if (_has(CallFeature.audioRoute))
+      CallButton(
+        icon: switch (calls.route) {
+          AudioRoute.speaker => LucideIcons.volume2,
+          AudioRoute.phone => LucideIcons.smartphone,
+          AudioRoute.bluetooth => LucideIcons.bluetooth,
+        },
+        tooltip: 'Audio output',
+        size: _size,
+        onTap: () async {
+          final route = await showActionSheet<AudioRoute>(
+            context,
+            items: [
+              for (final r in AudioRoute.values)
+                ActionItem(
+                  value: r,
+                  icon: r == calls.route ? LucideIcons.check : LucideIcons.dot,
+                  label: r.label,
+                ),
+            ],
+          );
+          if (route != null) calls.setRoute(route);
+        },
+      ),
     _deafenButton(),
     _leaveButton(),
   ];
 
   List<Widget> _desktop(BuildContext context) => [
-    _WithDevices(
-      button: _micButton(context),
-      tooltip: 'Microphone',
-      devices: mockMics,
-      current: calls.micDevice,
-      onPick: calls.setMicDevice,
-    ),
-    _WithDevices(
-      button: _cameraButton(context),
-      tooltip: 'Camera',
-      devices: mockCameras,
-      current: calls.cameraDevice,
-      onPick: calls.setCameraDevice,
-    ),
-    Builder(
-      builder: (context) => CallButton(
-        icon: LucideIcons.screenShare,
-        tooltip: calls.sharing == null ? 'Share screen' : 'Stop sharing',
-        size: _size,
-        active: calls.sharing != null,
-        onTap: () async {
-          if (calls.sharing != null) return calls.stopScreenShare();
-          final box = context.findRenderObject()! as RenderBox;
-          final source = await showActionMenu<String>(
-            context,
-            position: box.localToGlobal(Offset(0, box.size.height)),
-            items: [
-              for (final s in mockShareSources)
-                ActionItem(
-                  value: s,
-                  icon: s.startsWith('Window')
-                      ? LucideIcons.appWindow
-                      : LucideIcons.monitor,
-                  label: s,
-                ),
-            ],
-          );
-          if (source != null) calls.startScreenShare(source);
-        },
+    if (_has(CallFeature.devices))
+      _WithDevices(
+        button: _micButton(context),
+        tooltip: 'Microphone',
+        devices: mockMics,
+        current: calls.micDevice,
+        onPick: calls.setMicDevice,
+      )
+    else
+      _micButton(context),
+    if (_has(CallFeature.camera))
+      if (_has(CallFeature.devices))
+        _WithDevices(
+          button: _cameraButton(context),
+          tooltip: 'Camera',
+          devices: mockCameras,
+          current: calls.cameraDevice,
+          onPick: calls.setCameraDevice,
+        )
+      else
+        _cameraButton(context),
+    if (_has(CallFeature.screenShare))
+      Builder(
+        builder: (context) => CallButton(
+          icon: LucideIcons.screenShare,
+          tooltip: calls.sharing == null ? 'Share screen' : 'Stop sharing',
+          size: _size,
+          active: calls.sharing != null,
+          onTap: () async {
+            if (calls.sharing != null) return calls.stopScreenShare();
+            final box = context.findRenderObject()! as RenderBox;
+            final source = await showActionMenu<String>(
+              context,
+              position: box.localToGlobal(Offset(0, box.size.height)),
+              items: [
+                for (final s in mockShareSources)
+                  ActionItem(
+                    value: s,
+                    icon: s.startsWith('Window')
+                        ? LucideIcons.appWindow
+                        : LucideIcons.monitor,
+                    label: s,
+                  ),
+              ],
+            );
+            if (source != null) calls.startScreenShare(source);
+          },
+        ),
       ),
-    ),
     _deafenButton(),
     _leaveButton(),
   ];

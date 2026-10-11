@@ -15,6 +15,8 @@ import 'package:loaf_native/ui/rooms/rooms.dart';
 import 'package:matrix/matrix.dart' hide MediaKind, Role;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'in_memory_call_media.dart';
+
 const _me = '@test:fakeServer.notExisting';
 
 /// The fake server, plus answers it lacks: joining and leaving a room, muting
@@ -1506,6 +1508,28 @@ void main() {
   test('a blank display name is no name: the localpart stands in', () async {
     final rooms = await _rooms(await _client(api: _Api()..profileName = '  '));
     expect(rooms.me.name, 'test');
+  });
+
+  test('rooms given something to carry calls have calls', () async {
+    final client = await _client();
+    final rooms = MatrixRooms(
+      client,
+      callMedia: InMemoryCallMedia(
+        InMemoryCallServer(Uri.parse('wss://sfu.example.com')),
+      ),
+    );
+    addTearDown(rooms.dispose);
+
+    expect(rooms.calls, isNotNull);
+    expect(rooms.abilities, contains(RoomAbility.calls));
+  });
+
+  test('rooms given nothing to carry calls have none', () async {
+    final client = await _client();
+    final rooms = await _rooms(client);
+
+    expect(rooms.calls, isNull);
+    expect(rooms.abilities, isNot(contains(RoomAbility.calls)));
   });
 
   test('you are you, and the wired abilities show', () async {

@@ -137,6 +137,30 @@ void main() {
     expect(here.userIds, [_ada]);
   });
 
+  test('each user is listed with the devices they are in the call on', () {
+    final here = callOccupancy([
+      _membership(sender: _ada, device: 'PHONE'),
+      _membership(sender: _ada, device: 'LAPTOP'),
+      _membership(sender: _bo, device: 'DESK'),
+    ], _noon);
+
+    expect(here.devices, {
+      _ada: {'PHONE', 'LAPTOP'},
+      _bo: {'DESK'},
+    });
+  });
+
+  test('a device whose membership has run out is not among them', () {
+    final here = callOccupancy([
+      _membership(device: 'PHONE'),
+      _membership(device: 'LAPTOP', sent: _noonMs - 5 * _hour),
+    ], _noon);
+
+    expect(here.devices, {
+      _ada: {'PHONE'},
+    });
+  });
+
   test('whoever joined first is listed first', () {
     final here = callOccupancy([
       _membership(sender: _bo, sent: _noonMs - _hour),

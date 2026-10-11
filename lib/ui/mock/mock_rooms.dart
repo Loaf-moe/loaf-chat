@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../call/calls.dart';
 import '../channel/timeline_controller.dart';
 import '../model/arrival.dart';
 import '../model/media_source.dart';
@@ -81,6 +82,10 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   @override
   final Devices devices = MockDevices();
+
+  // The shell builds the mock's calls: their records write into its state.
+  @override
+  Calls? get calls => null;
 
   @override
   Set<RoomAbility> get abilities => RoomAbility.values.toSet();

@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
+import 'platform/livekit_media.dart';
 import 'ui/auth/loaf_session.dart';
 import 'ui/auth/session_root.dart';
 import 'ui/model/updater.dart';
@@ -69,6 +71,10 @@ Future<void> main() async {
     newRooms = () => MatrixRooms(
       matrix.client,
       externalMedia: appearance.externalMediaListenable,
+      // Calls are checked on Linux alone so far.
+      callMedia: defaultTargetPlatform == TargetPlatform.linux
+          ? const LiveKitMedia()
+          : null,
     );
     updater = pickUpdater();
   }

@@ -193,9 +193,9 @@ from the LiveKit participant with the matching identity.
 **Mute and deafen.** Mute stops the microphone track being sent. Deafen stops
 every remote audio track being played, and mutes.
 
-**Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` on
-Linux. On other platforms a voice channel still reads "voice chat isn't
-available yet".
+**Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
+it is given a `CallMedia`, and `main.dart` gives it one on Linux. On other
+platforms a voice channel still reads "voice chat isn't available yet".
 
 ## Platform and build
 

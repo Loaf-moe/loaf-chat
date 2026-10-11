@@ -61,19 +61,20 @@ Commit: `feat(call): join a voice channel and talk`
 - New `lib/matrix/call_media.dart`: the `CallMedia` interface and its plain types.
 - New `lib/platform/livekit_media.dart`: `CallMedia` over `livekit_client`.
 - New `lib/matrix/matrix_calls.dart`: `MatrixCalls implements Calls`.
-- `lib/ui/rooms/rooms.dart`: `Calls get calls`.
-- `lib/ui/mock/mock_rooms.dart`: hands out the `CallController`.
-- `lib/matrix/matrix_rooms.dart`: hands out `MatrixCalls`; claims `RoomAbility.calls` on Linux.
-- `lib/ui/shell/app_shell.dart`: takes its `Calls` from the rooms.
+- `lib/ui/rooms/rooms.dart`: `Calls? get calls`: the backend's own calls, or null where the shell plays the mock's.
+- `lib/ui/mock/mock_rooms.dart`: null. The shell keeps building the mock `CallController`, whose call records write into the shell's state.
+- `lib/matrix/matrix_rooms.dart`: takes a `CallMedia`; given one, hands out `MatrixCalls` and claims `RoomAbility.calls`.
+- `lib/ui/shell/app_shell.dart`: takes its `Calls` from the rooms, else the mock controller.
 - `lib/ui/call/calls.dart` and the call widgets: `Calls` says which of camera, screen sharing, device menus, audio route, per-person volume and DM calls it has; a control for one it lacks is not drawn.
-- `lib/main.dart`: builds the LiveKit `CallMedia` and gives it to `MatrixRooms`.
+- `lib/main.dart`: gives `MatrixRooms` the LiveKit `CallMedia` on Linux.
+- `linux/CMakeLists.txt`: `-Wno-error` for the two plugin targets, whose sources warn under newer clangs.
+- `ios/Runner/Info.plist`, `macos/Runner/Info.plist`: microphone and camera usage strings, which Apple requires of a binary that links those APIs.
 - `README.md`: what a Linux build fetches.
 - `docs/superpowers/plans/2026-09-26-sdk-wiring-roadmap.md`: phase 7's row and deferred lines.
 
 **Tests that change on purpose**
 
-- `test/matrix/matrix_rooms_test.dart` "you are you, and the wired abilities show": the ability set gains `calls` on Linux.
-- `test/app_shell_rooms_test.dart`: `_FakeRooms` gains `calls`.
+- `test/app_shell_rooms_test.dart`, `test/space_actions_test.dart`: `_FakeRooms` gains `calls`.
 
 **New tests** (lists are written when the task is planned)
 

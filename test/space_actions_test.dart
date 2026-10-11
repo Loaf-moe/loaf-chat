@@ -12,6 +12,7 @@ import 'package:loaf_native/ui/mock/mock_profile.dart';
 import 'package:loaf_native/ui/mock/mock_verifier.dart';
 import 'package:loaf_native/ui/members/presence.dart';
 import 'package:loaf_native/ui/model/models.dart';
+import 'package:loaf_native/ui/call/calls.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
@@ -64,6 +65,8 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
 
   @override
   Stream<Arrival> get arrivals => const Stream.empty();
+  @override
+  Calls? get calls => null;
   @override
   AvatarImages get avatarImages => const NoAvatarImages();
   @override

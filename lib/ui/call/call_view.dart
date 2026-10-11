@@ -138,6 +138,7 @@ Future<void> showTileActions(
   Offset? position,
 ) async {
   final pinned = calls.pinned == info.id;
+  final volume = !info.you && calls.features.contains(CallFeature.volume);
   final items = [
     ActionItem(
       value: pinned ? _TileAction.unpin : _TileAction.pin,
@@ -150,15 +151,15 @@ Future<void> showTileActions(
     action = await showActionMenu(
       context,
       position: position,
-      leading: [if (!info.you) _VolumeEntry(calls: calls, id: info.id)],
+      leading: [if (volume) _VolumeEntry(calls: calls, id: info.id)],
       items: items,
     );
   } else {
     action = await showActionSheet(
       context,
-      header: info.you
-          ? null
-          : (context) => _VolumeSlider(calls: calls, id: info.id),
+      header: volume
+          ? (context) => _VolumeSlider(calls: calls, id: info.id)
+          : null,
       items: items,
     );
   }

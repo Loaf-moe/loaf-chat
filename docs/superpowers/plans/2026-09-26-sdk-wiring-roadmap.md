@@ -28,7 +28,7 @@
 | 4 | **E2EE:** verify by emoji, recovery key, set up recovery, key backup restore, the incoming "is this you?" | Without it encrypted DMs are unreadable. vodozemac is already initialised by phase 1; the UI and `VerificationController` exist, so swap timers for `KeyVerification` and `Bootstrap` **Plan: `2026-09-27-e2ee.md`** | M–L |
 | 5 | **Channel and space actions:** join, leave, mute (push rule), DMs without duplicates, invites, `/hierarchy` browse, create space, tags and favourites | Every flow is already designed, and each is a thin call **Plan: `2026-09-27-channel-space-actions.md`** | M |
 | 6 | **Presence and status, profile, settings** | Cheap polish **Plan: `2026-09-29-presence-profile-devices.md`** | S |
-| 7 | **Voice channels** (MatrixRTC + `livekit_client`), connected-call bar, occupancy avatars | High delight, but heavy and needs a device | L |
+| 7 | **Voice channels** (MatrixRTC + `livekit_client`), connected-call bar, occupancy avatars | High delight, but heavy and needs a device. **Joining is built for Linux, audio only, awaiting checks by hand. Spec: `2026-10-11-voice-design.md`. Plan: `2026-10-11-voice-join.md`** | L |
 | 8 | **APNs push via Sygnal, DM ringing** (CallKit/PushKit, MSC4075) | Mac-only work, scheduled around Mac access | L |
 | 9 | Images and files, video, media viewer | Part of the v1 messaging scope, and independent of the phases above. **Built, awaiting checks by hand. Plan: `2026-09-30-media.md`** | M |
 
@@ -65,7 +65,7 @@ Phases 5, 6 and 9 are independent once phase 3 lands and can go to parallel suba
 - **Evicting cached timelines.** Every room opened stays open until sign-out; fine at loaf.moe's size, like large member lists.
 - ~~**The composer's + and paperclip buttons** do nothing on either backend. They belong to media (phase 9); until then they are controls with nothing behind them.~~ Done in phase 9 (`0c77e3b`).
 - **A toast for a refused reaction, edit or delete only shows while its room is on screen.** The screen still snaps back to what the server has.
-- **Voice channels read "messages aren't wired up yet"**, which an existing test pins, until calls land in phase 7.
+- ~~**Voice channels read "messages aren't wired up yet"**, which an existing test pins, until calls land in phase 7.~~ They read "voice chat isn't available yet" where the build has no calls, and open their call where it has.
 - ~~**"didn't send" takes minutes to appear offline** (found by hand, 2026-09-27). Two SDK defaults stack: `Client.sendTimelineEventTimeout` is 1 minute of retrying once a second, and the plain `http.Client` from `openClient` has no per-request timeout, so one attempt on a dead network hangs until the OS drops the TCP connection; the SDK checks its deadline only after an attempt fails. Candidate fix: a shorter window and a timeout on send requests only (sync long-polls for 30s by design). Chris's call: leave it until phase 9, since a send timeout would also bound image uploads.~~ Done in phase 9: a per-request timeout on sends.
 - ~~**Edit is offered on file and emote rows**; saving turns a file into a text message. It should be text and notice rows only.~~ Done in phase 9.
 - **`MatrixRooms.markRead` can target the SDK's `refreshingLastEvent` placeholder or a discarded echo.** It fails silently and heals itself.

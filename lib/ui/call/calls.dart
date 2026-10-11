@@ -170,10 +170,34 @@ class IncomingRing {
   final Member caller;
 }
 
+/// What a backend's calls can do beyond voice. A control for a feature that
+/// is missing is not drawn.
+enum CallFeature {
+  camera,
+  screenShare,
+
+  /// Choosing which microphone and camera.
+  devices,
+
+  /// Choosing speaker, earpiece or headset on a phone.
+  audioRoute,
+
+  /// Turning one person up or down.
+  volume,
+
+  /// Calls in direct chats, and their ringing.
+  direct,
+}
+
 /// The one call you are in, and the one ringing at you, as the shell and the
 /// call widgets read and drive it.
 abstract interface class Calls implements Listenable {
   Member get me;
+
+  Set<CallFeature> get features;
+
+  /// Whether [channel]'s call can be joined at all.
+  bool joinable(Channel channel);
 
   CallSession? get session;
   IncomingRing? get incoming;

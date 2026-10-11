@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 // The SDK has a Presence and a Timeline of its own; loaf's are the ones the
 // UI draws.
 import 'package:matrix/matrix.dart' hide Presence, Profile, Timeline;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show DatabaseException;
 
 import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
@@ -21,7 +22,10 @@ import '../ui/shell/profile.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
 import '../ui/widgets/avatar_images.dart';
+import '../ui/call/calls.dart';
+import 'call_media.dart';
 import 'call_members.dart';
+import 'matrix_calls.dart';
 import 'matrix_avatar_images.dart';
 import 'matrix_hierarchy.dart';
 import 'matrix_devices.dart';
@@ -58,6 +62,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   MatrixRooms(
     this.client, {
     this._mediaRoot,
+    this._callMedia,
     this.externalMedia,
     @visibleForTesting this._now,
   }) {
@@ -132,6 +137,22 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   var _disposed = false;
   final Directory? _mediaRoot;
 
+  /// What carries a call's audio. Null: this build has no calls.
+  final CallMedia? _callMedia;
+  MatrixCalls? _calls;
+
+  @override
+  Calls? get calls => switch (_callMedia) {
+    final media? => _calls ??= MatrixCalls(
+      client,
+      media,
+      occupants: _occupants,
+      me: () => me,
+      now: _now,
+    ),
+    null => null,
+  };
+
   /// The clock the unread counts back off by, and call memberships run out
   /// by; tests move it.
   final DateTime Function()? _now;
@@ -189,7 +210,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   final _generation = <(String, String), int>{};
 
   @override
-  Set<RoomAbility> get abilities => const {
+  Set<RoomAbility> get abilities => {
+    if (_callMedia != null) RoomAbility.calls,
     RoomAbility.answerInvites,
     RoomAbility.messages,
     RoomAbility.markRead,
@@ -329,10 +351,17 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     for (final room in client.rooms.toList()) {
       if (_disposed) return;
       if (room.membership != Membership.join || !_isVoice(room)) continue;
-      final stored = await client.database.getUnimportantRoomEventStatesForRoom(
-        const [],
-        room,
-      );
+      final List<Event> stored;
+      try {
+        stored = await client.database.getUnimportantRoomEventStatesForRoom(
+          const [],
+          room,
+        );
+      } on DatabaseException {
+        // Signing out closes the database under a read in flight.
+        if (_disposed) return;
+        rethrow;
+      }
       for (final event in stored) {
         final key = event.stateKey;
         if (event.type != callMemberType || key == null) continue;
@@ -649,10 +678,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       lowPriority: room.isLowPriority,
       lastActivity: room.latestEventReceivedTime,
       occupants: kind == ChannelKind.voice
-          ? [
-              for (final id in _call(room).userIds)
-                if (!_notInRoom(room, id)) _member(room, id),
-            ]
+          ? [for (final occupant in _occupants(room)) occupant.member]
           : const [],
     );
     final wish = _wishes[room.id];
@@ -677,11 +703,20 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     return member != null && member.asUser(room).membership != Membership.join;
   }
 
-  ({List<String> userIds, DateTime? nextExpiry}) _call(Room room) =>
-      callOccupancy(
-        (room.states[callMemberType]?.values ?? const []).whereType<Event>(),
-        (_now ?? DateTime.now)(),
-      );
+  /// Who is in [room]'s call, and on which devices.
+  List<CallOccupant> _occupants(Room room) {
+    final call = _call(room);
+    return [
+      for (final id in call.userIds)
+        if (!_notInRoom(room, id))
+          (member: _member(room, id), devices: call.devices[id]!),
+    ];
+  }
+
+  CallOccupancy _call(Room room) => callOccupancy(
+    (room.states[callMemberType]?.values ?? const []).whereType<Event>(),
+    (_now ?? DateTime.now)(),
+  );
 
   /// Whoever the room has in memory; [loadMembers] fills in the rest.
   List<Member> _members(Room room) => [
@@ -1320,6 +1355,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   void dispose() {
     _disposed = true;
     _callExpiry?.cancel();
+    _calls?.dispose();
     for (final s in _subscriptions) {
       unawaited(s.cancel());
     }

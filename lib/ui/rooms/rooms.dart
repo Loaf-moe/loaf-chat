@@ -5,6 +5,7 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../call/calls.dart';
 import '../channel/timeline.dart';
 import '../model/arrival.dart';
 import '../model/models.dart';
@@ -100,6 +101,10 @@ abstract interface class Rooms implements Listenable {
   /// Your signed-in sessions. Like [profile], the rooms own it and dispose
   /// of it with themselves.
   Devices get devices;
+
+  /// The backend's own calls, or null where the shell plays the mock's. The
+  /// rooms own it and dispose of it with themselves.
+  Calls? get calls;
 
   /// The rail, in order.
   List<Space> get spaces;

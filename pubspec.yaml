@@ -53,6 +53,7 @@ dependencies:
   # formatted_body; markdown reads a plain body the way the SDK writes one.
   html: ^0.15.6
   markdown: ^7.3.1
+  livekit_client: ^2.13.1
   loaf_media:
     path: packages/loaf_media
 

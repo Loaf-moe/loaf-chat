@@ -74,6 +74,11 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# These plugins take this file's -Werror through apply_standard_settings,
+# and their sources warn under newer clangs.
+target_compile_options(flutter_webrtc_plugin PRIVATE -Wno-error)
+target_compile_options(livekit_client_plugin PRIVATE -Wno-error)
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build

@@ -18,6 +18,7 @@ import 'package:loaf_native/ui/mock/mock_devices.dart';
 import 'package:loaf_native/ui/mock/mock_profile.dart';
 import 'package:loaf_native/ui/mock/mock_verifier.dart';
 import 'package:loaf_native/ui/model/models.dart';
+import 'package:loaf_native/ui/call/calls.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
 import 'package:loaf_native/ui/settings/settings_page.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
@@ -31,6 +32,8 @@ import 'package:loaf_native/ui/shell/profile.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
 import 'package:loaf_native/ui/model/media_source.dart';
 import 'package:loaf_native/ui/widgets/avatar_images.dart';
+
+import 'voice_only_calls.dart';
 
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
 final _desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
@@ -89,6 +92,8 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
 
   @override
   Stream<Arrival> get arrivals => const Stream.empty();
+  @override
+  Calls? calls;
   @override
   AvatarImages get avatarImages => const NoAvatarImages();
   @override
@@ -332,6 +337,37 @@ void main() {
         expect(find.byType(MemberList), findsNothing);
       },
     );
+
+    testWidgets('a voice channel joins through the rooms\' own calls', (
+      tester,
+    ) async {
+      final calls = VoiceOnlyCalls();
+      addTearDown(calls.dispose);
+      final rooms = _FakeRooms(spaces: [_bakery()])
+        ..abilities = {RoomAbility.messages, RoomAbility.calls}
+        ..calls = calls;
+      await _pump(tester, rooms);
+
+      await tester.tap(_inList('oven'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('join voice'));
+      await tester.pumpAndSettle();
+
+      expect(calls.session?.target.name, 'oven');
+      expect(find.byTooltip('Leave call'), findsOneWidget);
+    });
+
+    testWidgets('calls with voice alone offer none in a DM', (tester) async {
+      final calls = VoiceOnlyCalls();
+      addTearDown(calls.dispose);
+      final rooms = _FakeRooms(homeRooms: [_dm])
+        ..abilities = {RoomAbility.messages, RoomAbility.calls}
+        ..calls = calls;
+      await _pump(tester, rooms);
+
+      expect(find.byTooltip('Start a voice call'), findsNothing);
+      expect(find.byTooltip('Start a video call'), findsNothing);
+    });
 
     testWidgets('a DM offers no calls', (tester) async {
       await _pump(tester, _FakeRooms(homeRooms: [_dm]));

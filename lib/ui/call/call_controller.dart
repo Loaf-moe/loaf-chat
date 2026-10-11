@@ -108,6 +108,12 @@ class CallController extends ChangeNotifier implements Calls {
   @override
   CallParticipant? lobbyState(String memberId) => flags[memberId];
 
+  @override
+  Set<CallFeature> get features => CallFeature.values.toSet();
+
+  @override
+  bool joinable(Channel channel) => true;
+
   // ── Joining and leaving ──────────────────────────────────────────────
 
   @override

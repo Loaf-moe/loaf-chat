@@ -116,12 +116,18 @@ class _AppShellState extends State<AppShell> {
   /// the latest is kept: of two clicks before the sync, the last one wins.
   MessageRoute? _heldRoute;
 
-  late final _calls = CallController(
-    me: currentUser,
-    rings: mockRings,
-    flags: mockCallFlags,
-    onRecord: _onCallRecord,
-  );
+  /// The mock's calls, played by the shell because their records write
+  /// into its state. Null when the rooms have calls of their own.
+  late final CallController? _mockCalls = _rooms.calls == null
+      ? CallController(
+          me: currentUser,
+          rings: mockRings,
+          flags: mockCallFlags,
+          onRecord: _onCallRecord,
+        )
+      : null;
+
+  late final Calls _calls = _rooms.calls ?? _mockCalls!;
 
   Notifier? _notifier;
 
@@ -201,9 +207,8 @@ class _AppShellState extends State<AppShell> {
     _profile
       ..removeListener(_onChange)
       ..dispose();
-    _calls
-      ..removeListener(_onChange)
-      ..dispose();
+    _calls.removeListener(_onChange);
+    _mockCalls?.dispose();
     super.dispose();
   }
 
@@ -390,7 +395,8 @@ class _AppShellState extends State<AppShell> {
       if (channel.kind == ChannelKind.voice &&
           !joining &&
           isDesktop &&
-          _can(RoomAbility.calls)) {
+          _can(RoomAbility.calls) &&
+          _calls.joinable(channel)) {
         final here = _calls.inCall && _calls.session!.target.id == id;
         if (!here) _joinVoice(channel);
       }
@@ -776,7 +782,7 @@ class _AppShellState extends State<AppShell> {
   void _ring(String chatId, String callerId) {
     final chat = mockHome.allChannels.firstWhere((c) => c.id == chatId);
     final caller = chat.members.firstWhere((m) => m.id == callerId);
-    _calls.receive(chat, from: caller);
+    _mockCalls?.receive(chat, from: caller);
     if (_callKit) _accept();
   }
 
@@ -816,25 +822,25 @@ class _AppShellState extends State<AppShell> {
       case MockDebug.ringFromCrew:
         _ring('dm-crew', '@jun');
       case MockDebug.reconnecting:
-        _calls.toggleReconnecting();
+        _mockCalls?.toggleReconnecting();
       case MockDebug.failNext:
         // One "make the next thing fail" lever: the next call, sign-in or
         // verification, whichever comes first for each.
-        _calls.failNextConnection();
+        _mockCalls?.failNextConnection();
         if (_session case final MockSession mock) mock.failNext();
       case MockDebug.encryption:
-        _calls.toggleEncryption();
+        _mockCalls?.toggleEncryption();
       case MockDebug.micBlocked:
-        _calls.toggleMicBlocked();
+        _mockCalls?.toggleMicBlocked();
       case MockDebug.cameraBlocked:
-        _calls.toggleCameraBlocked();
+        _mockCalls?.toggleCameraBlocked();
       case MockDebug.presence:
         _profile.togglePresenceShared();
       case MockDebug.remoteShare:
         final someone = _calls.session?.participants
             .where((p) => p.present)
             .firstOrNull;
-        if (someone != null) _calls.toggleRemoteShare(someone.member.id);
+        if (someone != null) _mockCalls?.toggleRemoteShare(someone.member.id);
       case MockDebug.signOut:
         _session.signOut();
       // The account levers only move the mock; a real account's state
@@ -1136,7 +1142,10 @@ class _AppShellState extends State<AppShell> {
       onToggleMembers: wide
           ? () => setState(() => _showMembers = !_showMembers)
           : () => _scaffoldKey.currentState?.openEndDrawer(),
-      onStartCall: callHere || !_can(RoomAbility.calls)
+      onStartCall:
+          callHere ||
+              !_can(RoomAbility.calls) ||
+              !_calls.features.contains(CallFeature.direct)
           ? null
           : ({required video}) {
               _dmPanelExpanded = false;
@@ -1176,7 +1185,8 @@ class _AppShellState extends State<AppShell> {
       if (_calls.inCall) ...{
         combo(LogicalKeyboardKey.keyM): _calls.toggleMute,
         combo(LogicalKeyboardKey.keyD): _calls.toggleDeafen,
-        combo(LogicalKeyboardKey.keyV): _calls.toggleCamera,
+        if (_calls.features.contains(CallFeature.camera))
+          combo(LogicalKeyboardKey.keyV): _calls.toggleCamera,
       },
       if (_fullscreen)
         const SingleActivator(LogicalKeyboardKey.escape): () =>

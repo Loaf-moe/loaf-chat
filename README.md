@@ -23,6 +23,15 @@ mise install
 `mise install` brings Rust (pinned in `mise.toml`) along with Flutter. Run the
 build as `mise exec -- flutter build linux` so cargo is on the path.
 
+Voice channels use LiveKit's client, which links WebRTC. On Linux the build
+fetches a prebuilt `libwebrtc.so` from
+<https://github.com/webrtc-sdk/libwebrtc/releases> while CMake configures,
+keeps the zip in `flutter_webrtc`'s own directory in the pub cache
+(`third_party/downloads/`), and copies the library into the bundle's `lib/`.
+A zip already there is used as it is. The library needs libX11, libXcomposite,
+libXdamage, libXext, libXfixes, libXrandr, libgbm and libdrm to load, and
+PulseAudio's or ALSA's client library to open a microphone.
+
 ## Installing
 
 Download Loaf Chat for macOS, Windows or Linux from <https://get.loaf.moe>.
