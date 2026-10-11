@@ -215,7 +215,26 @@ class _AppShellState extends State<AppShell> {
       _heldRoute = null;
       _follow(held);
     }
+    _saySilenced();
     setState(() {});
+  }
+
+  /// What a moderator had put on you when the calls last changed.
+  CallSilence? _silenced;
+
+  /// Says when a moderator mutes, deafens or frees you during a call.
+  /// Nothing else would, short of trying a locked button.
+  void _saySilenced() {
+    final before = _silenced;
+    final now = _silenced = _calls.silenced;
+    // Leaving a call drops it without anyone having lifted it.
+    if (now == before || !_calls.inCall || !mounted) return;
+    showToast(context, switch ((before, now)) {
+      (_, CallSilence.deafened) => 'a moderator deafened you',
+      (_, CallSilence.muted) => 'a moderator muted you',
+      (CallSilence.deafened, null) => 'a moderator undeafened you',
+      (_, null) => 'a moderator unmuted you',
+    });
   }
 
   /// A presence or status write the server refused: the profile has already
@@ -1523,6 +1542,13 @@ class _AppShellState extends State<AppShell> {
                 call: _heardCall,
                 myId: _me.id,
                 onKick: _can(RoomAbility.kick) ? _kick : null,
+                onSilence: _can(RoomAbility.silence)
+                    ? (channel, member, silence) => unawaited(
+                        _rooms
+                            .silence(channel.id, member.id, silence)
+                            .catchError(_refused),
+                      )
+                    : null,
                 selectedChannelId: _channel?.id ?? '',
                 onSelect: _selectChannel,
                 onAction: _channelAction,

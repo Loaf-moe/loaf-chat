@@ -175,6 +175,18 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   /// Held back until completed, when set: the answer to a kick.
   Completer<void>? kickAnswer;
 
+  /// Each silence asked for: the room, who, and what (null lifts it).
+  final silences = <(String, String, CallSilence?)>[];
+
+  /// While set, a silence is refused.
+  var refuseSilences = false;
+
+  @override
+  Future<void> silence(String roomId, String userId, CallSilence? to) async {
+    if (refuseSilences) throw Exception('refused');
+    silences.add((roomId, userId, to));
+  }
+
   @override
   Future<void> kick(String roomId, String userId) async {
     if (refuseKicks) throw Exception('refused');
@@ -757,6 +769,145 @@ void main() {
       );
       expect(find.text('ADMINS — 1'), findsOneWidget);
       expect(find.text('MEMBERS — 1'), findsOneWidget);
+    });
+  });
+
+  group('being silenced by a moderator', () {
+    /// The shell in the oven's call on [calls], reading a text channel.
+    Future<void> inCall(WidgetTester tester, VoiceOnlyCalls calls) async {
+      addTearDown(calls.dispose);
+      final rooms = _FakeRooms(spaces: [_bakery()])
+        ..abilities = {RoomAbility.messages, RoomAbility.calls}
+        ..calls = calls;
+      await _pump(tester, rooms);
+      await tester.tap(_inList('oven'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('join voice'));
+      await tester.pumpAndSettle();
+    }
+
+    /// Puts [silence] on you, as a sync would.
+    Future<void> put(
+      WidgetTester tester,
+      VoiceOnlyCalls calls,
+      CallSilence? silence,
+    ) async {
+      calls
+        ..silenced = silence
+        ..show(calls.session);
+      // Until the toast is in; it then stays its reading time.
+      await tester.pumpAndSettle();
+    }
+
+    final said = <String, (CallSilence?, CallSilence?, String)>{
+      'muted': (null, CallSilence.muted, 'a moderator muted you'),
+      'deafened': (null, CallSilence.deafened, 'a moderator deafened you'),
+      'unmuted': (CallSilence.muted, null, 'a moderator unmuted you'),
+      'undeafened': (CallSilence.deafened, null, 'a moderator undeafened you'),
+    };
+    for (final MapEntry(key: name, value: (before, after, words))
+        in said.entries) {
+      testWidgets('says so when you are $name', (tester) async {
+        final calls = VoiceOnlyCalls();
+        await inCall(tester, calls);
+        if (before != null) {
+          await put(tester, calls, before);
+          await tester.pumpAndSettle(const Duration(seconds: 5));
+        }
+
+        await put(tester, calls, after);
+
+        expect(find.text(words), findsOneWidget);
+        await tester.pumpAndSettle(const Duration(seconds: 5));
+      });
+    }
+
+    testWidgets('says nothing when you leave the call still silenced', (
+      tester,
+    ) async {
+      final calls = VoiceOnlyCalls();
+      await inCall(tester, calls);
+      await put(tester, calls, CallSilence.muted);
+      await tester.pumpAndSettle(const Duration(seconds: 5));
+
+      calls
+        ..silenced = null
+        ..show(null);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('a moderator unmuted you'), findsNothing);
+    });
+  });
+
+  group('muting someone for everyone', () {
+    const ada = Member(
+      '@ada:loaf.test',
+      'Ada',
+      Color(0xFF884422),
+      presence: Presence.unknown,
+    );
+
+    Future<_FakeRooms> openMenu(
+      WidgetTester tester, {
+      Set<RoomAbility> abilities = const {RoomAbility.silence},
+    }) async {
+      final rooms = _FakeRooms(
+        spaces: [
+          _bakery(
+            channels: const [
+              Channel(id: '!general', name: 'general'),
+              Channel(
+                id: '!oven',
+                name: 'oven',
+                kind: ChannelKind.voice,
+                occupants: [ada],
+                canSilence: true,
+              ),
+            ],
+          ),
+        ],
+      )..abilities = abilities;
+      await _pump(tester, rooms);
+      await tester.tap(
+        find.byKey(const ValueKey('occupant-!oven-@ada:loaf.test')),
+        buttons: kSecondaryButton,
+      );
+      await tester.pumpAndSettle();
+      return rooms;
+    }
+
+    testWidgets('asks the rooms for it, of them, there', variant: _desktop, (
+      tester,
+    ) async {
+      final rooms = await openMenu(tester);
+
+      await tester.tap(find.text('mute for everyone'));
+      await tester.pumpAndSettle();
+
+      expect(rooms.silences, [('!oven', '@ada:loaf.test', CallSilence.muted)]);
+    });
+
+    testWidgets('says so when the server refuses', variant: _desktop, (
+      tester,
+    ) async {
+      final rooms = await openMenu(tester);
+      rooms.refuseSilences = true;
+
+      await tester.tap(find.text('mute for everyone'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text("couldn't do that. try again?"), findsOneWidget);
+      await tester.pumpAndSettle(const Duration(seconds: 5));
+    });
+
+    testWidgets('is not offered by rooms that cannot', variant: _desktop, (
+      tester,
+    ) async {
+      await openMenu(tester, abilities: const {});
+
+      expect(find.text('mute for everyone'), findsNothing);
     });
   });
 

@@ -26,6 +26,7 @@ import '../ui/widgets/avatar_images.dart';
 import '../ui/call/calls.dart';
 import 'call_media.dart';
 import 'call_members.dart';
+import 'call_silence.dart';
 import 'matrix_calls.dart';
 import 'matrix_avatar_images.dart';
 import 'matrix_hierarchy.dart';
@@ -230,6 +231,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     RoomAbility.startDirect,
     RoomAbility.invite,
     RoomAbility.kick,
+    RoomAbility.silence,
     RoomAbility.editProfile,
     RoomAbility.devices,
   };
@@ -689,6 +691,13 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
           ? [for (final occupant in _occupants(room)) occupant.member]
           : const [],
       kickBelow: room.canKick ? room.ownPowerLevel.level : null,
+      silenced: kind == ChannelKind.voice
+          ? callSilences(
+              (room.states[callSilenceType]?.values ?? const [])
+                  .whereType<Event>(),
+            )
+          : const {},
+      canSilence: room.canChangeStateEvent(callSilenceType),
     );
     final wish = _wishes[room.id];
     if (wish == null) return channel;
@@ -1341,6 +1350,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   @override
   Future<void> kick(String roomId, String userId) =>
       client.kick(roomId, userId);
+
+  @override
+  Future<void> silence(String roomId, String userId, CallSilence? to) =>
+      client.setRoomStateWithKey(
+        roomId,
+        callSilenceType,
+        callSilenceKey(userId),
+        callSilenceContent(to),
+      );
 
   /// Invites everyone in [userIds] to [roomId], one at a time. Throws
   /// [InviteRefused] naming whoever the server turned down; everyone else

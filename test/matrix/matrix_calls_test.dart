@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/call_media.dart';
 import 'package:loaf_native/matrix/call_members.dart';
+import 'package:loaf_native/matrix/call_silence.dart';
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/ui/call/calls.dart';
@@ -979,6 +980,223 @@ void main() {
       await _until(() => world.connection.microphone == 'sony');
 
       expect(world.connection.microphone, 'sony');
+    });
+  });
+
+  group('a moderator', () {
+    /// A moderator's entry about [user] in [room]: [silence], or lifted.
+    Map<String, Object?> entry(CallSilence? silence, {String user = _me}) =>
+        _state(
+          callSilenceType,
+          callSilenceContent(silence),
+          key: callSilenceKey(user),
+          sender: _ada,
+        );
+
+    test('muting you stops your microphone being sent', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      await _sync(world.client, _oven, [entry(CallSilence.muted)]);
+      await _until(() => watcher.peers[_mine]?.muted == true);
+
+      expect(watcher.peers[_mine]?.muted, isTrue);
+    });
+
+    test('muting you shows as muted, by a moderator', () async {
+      final world = await _open();
+      await world.join();
+
+      await _sync(world.client, _oven, [entry(CallSilence.muted)]);
+      await _until(() => world.calls.silenced != null);
+
+      expect(world.calls.silenced, CallSilence.muted);
+      expect(world.calls.muted, isTrue);
+      expect(world.calls.deafened, isFalse);
+    });
+
+    test('muting you tells listeners', () async {
+      final world = await _open();
+      await world.join();
+      var told = false;
+      world.calls.addListener(() => told |= world.calls.silenced != null);
+
+      await _sync(world.client, _oven, [entry(CallSilence.muted)]);
+      await _until(() => told);
+
+      expect(told, isTrue);
+    });
+
+    test('unmuting yourself meanwhile does nothing', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      await _sync(world.client, _oven, [entry(CallSilence.muted)]);
+      await _until(() => watcher.peers[_mine]?.muted == true);
+
+      world.calls.toggleMute();
+      await _settle();
+
+      expect(world.calls.muted, isTrue);
+      expect(watcher.peers[_mine]?.muted, isTrue);
+    });
+
+    test('lifting it sends you again, if you had not muted yourself', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      await _sync(world.client, _oven, [entry(CallSilence.muted)]);
+      await _until(() => watcher.peers[_mine]?.muted == true);
+
+      await _sync(world.client, _oven, [entry(null)]);
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      expect(world.calls.silenced, isNull);
+      expect(world.calls.muted, isFalse);
+    });
+
+    test('lifting it leaves you muted, if you had muted yourself', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      world.calls.toggleMute();
+      await world.join();
+      await _sync(world.client, _oven, [entry(CallSilence.muted)]);
+      await _until(() => world.calls.silenced != null);
+
+      await _sync(world.client, _oven, [entry(null)]);
+      await _until(() => world.calls.silenced == null);
+      await _settle();
+
+      expect(world.calls.muted, isTrue);
+      expect(watcher.peers[_mine]?.muted, isTrue);
+    });
+
+    test('muted by one, you can still deafen yourself and undo it', () async {
+      final world = await _open();
+      await world.join();
+      await _sync(world.client, _oven, [entry(CallSilence.muted)]);
+      await _until(() => world.calls.silenced != null);
+
+      world.calls.toggleDeafen();
+      final deafened = world.calls.deafened;
+      world.calls.toggleDeafen();
+
+      expect(deafened, isTrue);
+      expect(world.calls.deafened, isFalse);
+      expect(world.calls.muted, isTrue);
+    });
+
+    test('deafening you mutes and deafens you', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      await _sync(world.client, _oven, [entry(CallSilence.deafened)]);
+      await _until(() => watcher.peers[_mine]?.muted == true);
+
+      expect(world.calls.silenced, CallSilence.deafened);
+      expect(world.calls.muted, isTrue);
+      expect(world.calls.deafened, isTrue);
+    });
+
+    test('undeafening yourself meanwhile does nothing', () async {
+      final world = await _open();
+      await world.join();
+      await _sync(world.client, _oven, [entry(CallSilence.deafened)]);
+      await _until(() => world.calls.silenced != null);
+
+      world.calls.toggleDeafen();
+
+      expect(world.calls.deafened, isTrue);
+      expect(world.calls.muted, isTrue);
+    });
+
+    test('lifting a deafening returns you to how you had it', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      await _sync(world.client, _oven, [entry(CallSilence.deafened)]);
+      await _until(() => watcher.peers[_mine]?.muted == true);
+
+      await _sync(world.client, _oven, [entry(null)]);
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      expect(world.calls.deafened, isFalse);
+      expect(world.calls.muted, isFalse);
+    });
+
+    test('who silenced you before you joined has you silent from the '
+        'start', () async {
+      final world = await _open(already: [entry(CallSilence.muted)]);
+      final watcher = await world.watcher();
+
+      await world.join();
+      await _settle();
+
+      expect(world.calls.silenced, CallSilence.muted);
+      expect(watcher.peers[_mine]?.muted, isTrue);
+    });
+
+    test('silencing someone else leaves you alone', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.other(_ada, 'ADADEVICE');
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      await _sync(world.client, _oven, [
+        entry(CallSilence.deafened, user: _ada),
+      ]);
+      await _settle();
+
+      expect(world.calls.silenced, isNull);
+      expect(watcher.peers[_mine]?.muted, isFalse);
+    });
+
+    test('silencing someone else shows on them', () async {
+      final world = await _open();
+      await world.other(_ada, 'ADADEVICE');
+      await world.join();
+
+      await _sync(world.client, _oven, [
+        entry(CallSilence.deafened, user: _ada),
+      ]);
+      await _until(
+        () => world.calls.session?.participants.single.silenced != null,
+      );
+
+      expect(
+        world.calls.session?.participants.single.silenced,
+        CallSilence.deafened,
+      );
+    });
+
+    test('silencing you in another room leaves this call alone', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.muted == false);
+
+      await _sync(world.client, _kiln, [entry(CallSilence.muted)]);
+      await _settle();
+
+      expect(world.calls.silenced, isNull);
+      expect(watcher.peers[_mine]?.muted, isFalse);
+    });
+
+    test('has no say once you have left', () async {
+      final world = await _open();
+      await world.join();
+      await _sync(world.client, _oven, [entry(CallSilence.muted)]);
+      await _until(() => world.calls.silenced != null);
+
+      await world.calls.leave();
+
+      expect(world.calls.silenced, isNull);
+      expect(world.calls.muted, isFalse);
     });
   });
 

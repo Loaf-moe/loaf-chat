@@ -33,6 +33,8 @@ class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   @override
   bool speaking = false;
   @override
+  CallSilence? silenced;
+  @override
   String? pinned;
 
   /// Puts the call as [session] has it, as a backend's own events would.

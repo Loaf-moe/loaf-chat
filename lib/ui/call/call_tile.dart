@@ -25,17 +25,20 @@ class TileInfo {
     this.screen = false,
     this.speaking = false,
     this.ring,
+    this.silenced,
   });
 
   TileInfo.of(CallParticipant p)
     : this(
         p.member,
-        muted: p.muted,
-        deafened: p.deafened,
+        // A moderator's silence shows as the state it puts them in.
+        muted: p.muted || p.silenced != null,
+        deafened: p.deafened || p.silenced == CallSilence.deafened,
         camera: p.camera,
         screen: p.screen,
         speaking: p.speaking,
         ring: p.ring,
+        silenced: p.silenced,
       );
 
   final Member member;
@@ -46,6 +49,10 @@ class TileInfo {
   final bool screen;
   final bool speaking;
   final RingState? ring;
+
+  /// What a moderator has put on them, if anything. [muted] and [deafened]
+  /// already say so; this says whose doing it is.
+  final CallSilence? silenced;
 
   String get id => member.id;
 
@@ -257,22 +264,32 @@ class _NameChip extends StatelessWidget {
               style: loafBody(size, 400).copyWith(color: tokens.onRail),
             ),
           ],
-          if (info.deafened) ...[
+          if (info.deafened || info.muted) ...[
             const SizedBox(width: 4),
-            Icon(
-              LucideIcons.headphoneOff,
-              size: iconSize,
-              color: tokens.accent,
+            _byModerator(
+              info,
+              Icon(
+                info.deafened ? LucideIcons.headphoneOff : LucideIcons.micOff,
+                size: iconSize,
+                color: tokens.accent,
+              ),
             ),
-          ] else if (info.muted) ...[
-            const SizedBox(width: 4),
-            Icon(LucideIcons.micOff, size: iconSize, color: tokens.accent),
           ],
         ],
       ),
     );
   }
 }
+
+/// [icon] saying on hover that a moderator did it, where one did.
+Widget _byModerator(TileInfo info, Widget icon) => switch (info.silenced) {
+  null => icon,
+  CallSilence.muted => Tooltip(message: 'Muted by a moderator', child: icon),
+  CallSilence.deafened => Tooltip(
+    message: 'Deafened by a moderator',
+    child: icon,
+  ),
+};
 
 class _CornerButton extends StatelessWidget {
   const _CornerButton({

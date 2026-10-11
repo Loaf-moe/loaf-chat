@@ -131,6 +131,129 @@ void main() {
     });
   });
 
+  group("a moderator's silence", () {
+    test('on someone muted shows their tile as muted', () {
+      final tile = TileInfo.of(
+        const CallParticipant(_ada, silenced: CallSilence.muted),
+      );
+
+      expect((tile.muted, tile.deafened), (true, false));
+    });
+
+    test('on someone deafened shows their tile as deafened', () {
+      final tile = TileInfo.of(
+        const CallParticipant(_ada, silenced: CallSilence.deafened),
+      );
+
+      expect(tile.deafened, isTrue);
+    });
+
+    test("on someone is carried to their tile as a moderator's", () {
+      final tile = TileInfo.of(
+        const CallParticipant(_ada, silenced: CallSilence.deafened),
+      );
+
+      expect(tile.silenced, CallSilence.deafened);
+    });
+
+    test('on you is carried to your own tile', () {
+      final calls = VoiceOnlyCalls()..silenced = CallSilence.muted;
+      const session = CallSession(
+        target: _oven,
+        spaceName: 'Bakery',
+        phase: CallPhase.live,
+        participants: [],
+      );
+
+      expect(callTiles(calls, session).first.silenced, CallSilence.muted);
+    });
+
+    for (final (silence, words) in [
+      (CallSilence.muted, 'Muted by a moderator'),
+      (CallSilence.deafened, 'Deafened by a moderator'),
+    ]) {
+      testWidgets('on a tile says "$words"', (tester) async {
+        await _pump(
+          tester,
+          SizedBox(
+            width: 300,
+            height: 200,
+            child: CallTile(
+              info: TileInfo(
+                _ada,
+                muted: true,
+                deafened: silence == CallSilence.deafened,
+                silenced: silence,
+              ),
+            ),
+          ),
+        );
+
+        expect(find.byTooltip(words), findsOneWidget);
+      });
+    }
+
+    testWidgets('a tile muted by its own person says nothing of '
+        'moderators', (tester) async {
+      await _pump(
+        tester,
+        SizedBox(
+          width: 300,
+          height: 200,
+          child: CallTile(info: const TileInfo(_ada, muted: true)),
+        ),
+      );
+
+      expect(find.byTooltip('Muted by a moderator'), findsNothing);
+    });
+
+    testWidgets(
+      'on you locks the microphone button and says why',
+      variant: _desktop,
+      (tester) async {
+        final calls = VoiceOnlyCalls()
+          ..muted = true
+          ..silenced = CallSilence.muted;
+        await _pump(tester, _controls(calls));
+
+        expect(find.byTooltip('Muted by a moderator'), findsOneWidget);
+        expect(find.byTooltip('Deafened by a moderator'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'that deafens you locks the deafen button too',
+      variant: _desktop,
+      (tester) async {
+        final calls = VoiceOnlyCalls()
+          ..muted = true
+          ..deafened = true
+          ..silenced = CallSilence.deafened;
+        await _pump(tester, _controls(calls));
+
+        expect(find.byTooltip('Muted by a moderator'), findsOneWidget);
+        expect(find.byTooltip('Deafened by a moderator'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'on a phone, the locked button says why when tapped',
+      variant: _mobile,
+      (tester) async {
+        final calls = VoiceOnlyCalls()
+          ..muted = true
+          ..silenced = CallSilence.muted;
+        await _pump(tester, _controls(calls));
+
+        await tester.tap(find.byIcon(LucideIcons.micOff));
+        await tester.pumpAndSettle();
+
+        expect(find.text('muted by a moderator'), findsOneWidget);
+        expect(find.textContaining('settings › privacy'), findsNothing);
+      },
+    );
+  });
+
   group("a tile's ring", () {
     Future<bool> ringing(
       WidgetTester tester, {

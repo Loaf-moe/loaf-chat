@@ -16,6 +16,7 @@ import 'call_access.dart';
 import 'call_media.dart';
 import 'call_members.dart';
 import 'call_membership.dart';
+import 'call_silence.dart';
 
 /// Someone in a room's call, and the devices they are in it on.
 typedef CallOccupant = ({Member member, Set<String> devices});
@@ -70,10 +71,19 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   /// The rooms whose call is being left, until the server has been told.
   final _leaving = <String>{};
 
+  /// What you chose yourself. A moderator may have chosen more: see
+  /// [silenced].
+  var _muted = false;
+  var _deafened = false;
+
   @override
-  bool muted = false;
+  bool get muted => _muted || silenced != null;
+
   @override
-  bool deafened = false;
+  bool get deafened => _deafened || silenced == CallSilence.deafened;
+
+  @override
+  CallSilence? get silenced => _live?.silenced;
   @override
   bool micBlocked = false;
 
@@ -152,7 +162,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       phase: CallPhase.connecting,
       participants: room == null
           ? const []
-          : _participants(_occupants(room), null),
+          : _participants(room, _occupants(room), null),
     );
     _notify();
     await _end(before);
@@ -196,7 +206,8 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     if (!joined || attempt != _attempt) return;
 
     final live = _live = _Live(room, connection!, membership!)
-      ..voice = _voice?.value;
+      ..voice = _voice?.value
+      ..silenced = _silences(room)[_client.userID];
     connection.addListener(_onMedia);
     live.deviceChanges = connection.deviceChanges.listen((_) {
       if (identical(live, _live)) _applyAudio(live, voice: true);
@@ -205,7 +216,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     _session = _session!.copyWith(
       phase: CallPhase.live,
       startedAt: _now(),
-      participants: _participants(occupants, connection),
+      participants: _participants(room, occupants, connection),
     );
     _notify();
     _applyAudio(live, voice: true);
@@ -313,8 +324,18 @@ class MatrixCalls extends ChangeNotifier implements Calls {
         }),
       );
     }
+    final silenced = _silences(live.room)[_client.userID];
+    if (silenced != live.silenced) {
+      live.silenced = silenced;
+      _applyAudio(live);
+    }
     _refresh(live);
   }
+
+  /// Whom [room]'s moderators have muted or deafened, by user id.
+  Map<String, CallSilence> _silences(Room room) => callSilences(
+    (room.states[callSilenceType]?.values ?? const []).whereType<Event>(),
+  );
 
   void _onMedia() {
     final live = _live;
@@ -334,7 +355,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   void _refresh(_Live live) {
     final occupants = _occupants(live.room);
     _session = _session?.copyWith(
-      participants: _participants(occupants, live.connection),
+      participants: _participants(live.room, occupants, live.connection),
     );
     _notify();
     _syncVolumes(live, occupants);
@@ -359,10 +380,12 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   /// Everyone else among [occupants]. Someone is speaking if any of their
   /// devices is, and muted unless one of them sends a microphone.
   List<CallParticipant> _participants(
+    Room room,
     List<CallOccupant> occupants,
     CallConnection? connection,
   ) {
     final peers = connection?.peers ?? const <String, CallPeer>{};
+    final silences = _silences(room);
     return [
       for (final occupant in occupants)
         if (occupant.member.id != _client.userID)
@@ -374,6 +397,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
             return CallParticipant(
               occupant.member,
               muted: theirs.every((peer) => peer.muted),
+              silenced: silences[occupant.member.id],
               speaking: theirs.any((peer) => peer.speaking),
             );
           }(),
@@ -385,15 +409,18 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   @override
   void toggleMute() {
     if (micBlocked) return;
-    muted = !muted;
-    if (!muted) deafened = false;
+    // A moderator's mute is not yours to undo.
+    if (silenced != null) return;
+    _muted = !_muted;
+    if (!_muted) _deafened = false;
     _changedAudio();
   }
 
   @override
   void toggleDeafen() {
-    deafened = !deafened;
-    muted = deafened;
+    if (silenced == CallSilence.deafened) return;
+    _deafened = !_deafened;
+    _muted = _deafened;
     _changedAudio();
   }
 
@@ -433,7 +460,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
         await live.connection.setDeafened(deafened);
         await live.connection.setMicrophone(!muted);
       } on MicrophoneUnavailable {
-        muted = true;
+        _muted = true;
         micBlocked = true;
         _notify();
       } finally {
@@ -545,6 +572,9 @@ class _Live {
 
   /// The settings as of the last change this call looked at.
   VoiceSettings? voice;
+
+  /// What a moderator has put on you here, as of the last sync.
+  CallSilence? silenced;
 
   /// How loud the media was last told to play each device, by identity.
   /// Absent: never told, so as loud as sent.

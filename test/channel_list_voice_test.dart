@@ -69,6 +69,8 @@ Future<void> _pump(
   VoiceController? voice,
   Space space = _space,
   void Function(Channel channel, Member member)? onKick,
+  void Function(Channel channel, Member member, CallSilence? silence)?
+  onSilence,
 }) async {
   tester.view.physicalSize = const Size(400, 900);
   tester.view.devicePixelRatio = 1.0;
@@ -82,6 +84,7 @@ Future<void> _pump(
         onSelect: (_) {},
         myId: _you.id,
         onKick: onKick,
+        onSilence: onSilence,
         call: people == null ? null : (channelId: '!oven', people: people),
       ),
     ),
@@ -232,6 +235,187 @@ void main() {
     expect(said(_ada), 'ada, speaking');
     expect(said(_bo), 'bo, muted');
     semantics.dispose();
+  });
+
+  group("a moderator's silence", () {
+    Space silenced(Map<String, CallSilence> who, {bool canSilence = false}) =>
+        Space(
+          id: '!bakery',
+          name: 'Bakery',
+          color: const Color(0xFF884422),
+          categories: [
+            ChannelCategory('voice', [
+              Channel(
+                id: '!oven',
+                name: 'oven',
+                kind: ChannelKind.voice,
+                occupants: const [_you, _ada, _bo],
+                silenced: who,
+                canSilence: canSilence,
+              ),
+            ]),
+          ],
+        );
+
+    Color? iconColor(WidgetTester tester, Finder icon) =>
+        tester.widget<Icon>(icon).color;
+
+    testWidgets('shows a struck microphone on someone muted, in a channel '
+        'you are not in', (tester) async {
+      await _pump(tester, space: silenced({_ada.id: CallSilence.muted}));
+
+      expect(_icon('!oven', _ada, LucideIcons.micOff), findsOneWidget);
+      expect(_icon('!oven', _bo, LucideIcons.micOff), findsNothing);
+    });
+
+    testWidgets('shows struck headphones on someone deafened', (tester) async {
+      await _pump(tester, space: silenced({_ada.id: CallSilence.deafened}));
+
+      expect(_icon('!oven', _ada, LucideIcons.headphoneOff), findsOneWidget);
+      expect(_icon('!oven', _ada, LucideIcons.micOff), findsNothing);
+    });
+
+    testWidgets('is drawn apart from muting yourself', (tester) async {
+      await _pump(
+        tester,
+        space: silenced({_ada.id: CallSilence.muted}),
+        people: const [
+          TileInfo(_you, you: true),
+          TileInfo(_ada, muted: true),
+          TileInfo(_bo, muted: true),
+        ],
+      );
+
+      final theirs = iconColor(
+        tester,
+        _icon('!oven', _ada, LucideIcons.micOff),
+      );
+      final own = iconColor(tester, _icon('!oven', _bo, LucideIcons.micOff));
+      expect(theirs, isNot(own));
+    });
+
+    testWidgets('is said aloud as a moderator\'s', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await _pump(
+        tester,
+        space: silenced({
+          _ada.id: CallSilence.muted,
+          _bo.id: CallSilence.deafened,
+        }),
+      );
+
+      String said(Member member) =>
+          tester.getSemantics(_row('!oven', member)).label;
+      expect(said(_ada), 'ada, muted by a moderator');
+      expect(said(_bo), 'bo, deafened by a moderator');
+      semantics.dispose();
+    });
+
+    group('from the menu', () {
+      Future<List<(String, String, CallSilence?)>> open(
+        WidgetTester tester,
+        Map<String, CallSilence> who, {
+        Member on = _ada,
+        bool canSilence = true,
+        bool wired = true,
+      }) async {
+        final asked = <(String, String, CallSilence?)>[];
+        await _pump(
+          tester,
+          space: silenced(who, canSilence: canSilence),
+          onSilence: wired
+              ? (channel, member, silence) =>
+                    asked.add((channel.id, member.id, silence))
+              : null,
+        );
+        await _rightClick(tester, _row('!oven', on));
+        return asked;
+      }
+
+      testWidgets(
+        'offers muting and deafening someone left alone',
+        variant: _computer,
+        (tester) async {
+          await open(tester, const {});
+
+          expect(find.text('mute for everyone'), findsOneWidget);
+          expect(find.text('deafen for everyone'), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        'offers unmuting, and deafening, someone muted',
+        variant: _computer,
+        (tester) async {
+          await open(tester, {_ada.id: CallSilence.muted});
+
+          expect(find.text('unmute for everyone'), findsOneWidget);
+          expect(find.text('deafen for everyone'), findsOneWidget);
+          expect(find.text('mute for everyone'), findsNothing);
+        },
+      );
+
+      testWidgets(
+        'offers undeafening someone deafened, and nothing else',
+        variant: _computer,
+        (tester) async {
+          await open(tester, {_ada.id: CallSilence.deafened});
+
+          expect(find.text('undeafen for everyone'), findsOneWidget);
+          expect(find.text('mute for everyone'), findsNothing);
+          expect(find.text('unmute for everyone'), findsNothing);
+          expect(find.text('deafen for everyone'), findsNothing);
+        },
+      );
+
+      testWidgets('offers nothing where you may not', variant: _computer, (
+        tester,
+      ) async {
+        await open(tester, const {}, canSilence: false);
+
+        expect(find.text('mute for everyone'), findsNothing);
+      });
+
+      testWidgets(
+        'offers nothing where the app does none of it',
+        variant: _computer,
+        (tester) async {
+          await open(tester, const {}, wired: false);
+
+          expect(find.text('mute for everyone'), findsNothing);
+        },
+      );
+
+      testWidgets('offers nothing on your own row', variant: _computer, (
+        tester,
+      ) async {
+        await open(tester, const {}, on: _you);
+
+        expect(find.text('mute for everyone'), findsNothing);
+      });
+
+      final choices = <String, (Map<String, CallSilence>, CallSilence?)>{
+        'mute for everyone': (const {}, CallSilence.muted),
+        'deafen for everyone': (const {}, CallSilence.deafened),
+        'unmute for everyone': ({_ada.id: CallSilence.muted}, null),
+        'undeafen for everyone': ({_ada.id: CallSilence.deafened}, null),
+      };
+      for (final MapEntry(key: label, value: (who, wanted))
+          in choices.entries) {
+        testWidgets(
+          '"$label" asks for that, of them, there',
+          variant: _computer,
+          (tester) async {
+            final asked = await open(tester, who);
+
+            await tester.tap(find.text(label));
+            await tester.pumpAndSettle();
+
+            expect(asked, [('!oven', _ada.id, wanted)]);
+          },
+        );
+      }
+    });
   });
 
   group('kicking, from the menu on someone listed,', () {

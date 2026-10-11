@@ -82,11 +82,15 @@ class CallParticipant {
     this.screen = false,
     this.speaking = false,
     this.ring,
+    this.silenced,
   });
 
   final Member member;
   final bool muted;
   final bool deafened;
+
+  /// What a moderator has put on them, if anything.
+  final CallSilence? silenced;
   final bool camera;
   final bool screen;
   final bool speaking;
@@ -111,6 +115,7 @@ class CallParticipant {
     screen: screen ?? this.screen,
     speaking: speaking ?? this.speaking,
     ring: ring ?? this.ring,
+    silenced: silenced,
   );
 }
 
@@ -231,6 +236,11 @@ abstract interface class Calls implements Listenable {
 
   /// Whether you are being heard in the call.
   bool get speaking;
+
+  /// What a moderator has put on you in the call you are in, if anything.
+  /// While it stands [muted] (and, deafened, [deafened]) say so whatever
+  /// you chose, and the matching toggle does nothing.
+  CallSilence? get silenced;
   bool get camera;
   AudioRoute get route;
   String get cameraDevice;

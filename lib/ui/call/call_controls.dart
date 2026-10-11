@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../model/models.dart';
 import '../platform.dart';
 import '../settings/voice_settings.dart';
 import '../theme/loaf_theme.dart';
@@ -190,6 +191,17 @@ class CallControls extends StatelessWidget {
       isDesktop ? '$label (${shortcutLabel(key)})' : label;
 
   Widget _micButton(BuildContext context) {
+    if (calls.silenced != null) {
+      return _BlockedButton(
+        icon: LucideIcons.micOff,
+        what: 'Microphone',
+        message: 'Muted by a moderator',
+        explanation:
+            'a moderator of this channel has muted you for everyone. only '
+            'a moderator can undo it.',
+        size: _size,
+      );
+    }
     if (calls.micBlocked) {
       return _BlockedButton(
         icon: LucideIcons.micOff,
@@ -229,13 +241,25 @@ class CallControls extends StatelessWidget {
     );
   }
 
-  Widget _deafenButton() => CallButton(
-    icon: calls.deafened ? LucideIcons.headphoneOff : LucideIcons.headphones,
-    tooltip: _withShortcut(calls.deafened ? 'Undeafen' : 'Deafen', 'D'),
-    size: _size,
-    alert: calls.deafened,
-    onTap: calls.toggleDeafen,
-  );
+  Widget _deafenButton() => calls.silenced == CallSilence.deafened
+      ? _BlockedButton(
+          icon: LucideIcons.headphoneOff,
+          what: 'Sound',
+          message: 'Deafened by a moderator',
+          explanation:
+              'a moderator of this channel has deafened you for everyone. '
+              'only a moderator can undo it.',
+          size: _size,
+        )
+      : CallButton(
+          icon: calls.deafened
+              ? LucideIcons.headphoneOff
+              : LucideIcons.headphones,
+          tooltip: _withShortcut(calls.deafened ? 'Undeafen' : 'Deafen', 'D'),
+          size: _size,
+          alert: calls.deafened,
+          onTap: calls.toggleDeafen,
+        );
 
   Widget _leaveButton() => CallButton(
     icon: LucideIcons.phoneOff,
@@ -334,6 +358,7 @@ class _BlockedButton extends StatelessWidget {
     required this.what,
     required this.size,
     this.message,
+    this.explanation,
   });
 
   final IconData icon;
@@ -342,6 +367,10 @@ class _BlockedButton extends StatelessWidget {
 
   /// What hovering says. Null: that the system has denied [what].
   final String? message;
+
+  /// What tapping on a phone says under [message]. Null: where the system's
+  /// setting for [what] is.
+  final String? explanation;
 
   @override
   Widget build(BuildContext context) {
@@ -354,7 +383,18 @@ class _BlockedButton extends StatelessWidget {
           ? null
           : () => showActionSheet<void>(
               context,
-              header: (context) => _BlockedExplainer(what: what),
+              header: (context) => switch (explanation) {
+                final explanation? => _BlockedExplainer(
+                  title: message.toLowerCase(),
+                  body: explanation,
+                ),
+                null => _BlockedExplainer(
+                  title: '${what.toLowerCase()} is blocked',
+                  body:
+                      'loaf needs permission in settings › privacy to use '
+                      'your ${what.toLowerCase()}.',
+                ),
+              },
               items: const [],
             ),
     );
@@ -363,9 +403,10 @@ class _BlockedButton extends StatelessWidget {
 }
 
 class _BlockedExplainer extends StatelessWidget {
-  const _BlockedExplainer({required this.what});
+  const _BlockedExplainer({required this.title, required this.body});
 
-  final String what;
+  final String title;
+  final String body;
 
   @override
   Widget build(BuildContext context) {
@@ -374,15 +415,11 @@ class _BlockedExplainer extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '${what.toLowerCase()} is blocked',
+          title,
           style: loafBody(16, 600).copyWith(color: tokens.textStrong),
         ),
         const SizedBox(height: LoafSpace.x1),
-        Text(
-          'loaf needs permission in settings › privacy to use your '
-          '${what.toLowerCase()}.',
-          style: loafBody(14, 400).copyWith(color: tokens.textBody),
-        ),
+        Text(body, style: loafBody(14, 400).copyWith(color: tokens.textBody)),
       ],
     );
   }

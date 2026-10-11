@@ -127,6 +127,7 @@ List<TileInfo> callTiles(Calls calls, CallSession session) => [
     camera: calls.camera,
     screen: calls.sharing != null,
     speaking: calls.speaking,
+    silenced: calls.silenced,
   ),
   for (final p in session.participants) TileInfo.of(p),
 ];

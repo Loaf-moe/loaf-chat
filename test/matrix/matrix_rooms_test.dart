@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart' show Colors;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:loaf_native/matrix/call_silence.dart';
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/matrix/unread_tally.dart';
@@ -70,6 +71,12 @@ class _Api extends FakeMatrixApi {
   /// Each kick asked for: the room and who.
   final kicks = <(String, String)>[];
 
+  /// Each moderation entry written: the room, its state key, its content.
+  final silences = <(String, String, Map<String, Object?>)>[];
+
+  /// While set, writing a moderation entry is refused.
+  var refuseSilences = false;
+
   /// While set, a kick is refused.
   var refuseKicks = false;
 
@@ -80,6 +87,24 @@ class _Api extends FakeMatrixApi {
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
     final path = request.url.path;
+    const moderation = '/state/$callSilenceType/';
+    if (request.method == 'PUT' && path.contains(moderation)) {
+      if (refuseSilences) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
+          403,
+        );
+      }
+      silences.add((
+        Uri.decodeComponent(path.split('/rooms/')[1].split('/state/')[0]),
+        Uri.decodeComponent(path.split(moderation)[1]),
+        jsonDecode(request.body) as Map<String, Object?>,
+      ));
+      return http.Response(
+        jsonEncode({'event_id': '\$m${silences.length}'}),
+        200,
+      );
+    }
     if (request.method == 'POST' && path.endsWith('/kick')) {
       if (refuseKicks) {
         return http.Response(
@@ -1569,6 +1594,7 @@ void main() {
       RoomAbility.startDirect,
       RoomAbility.invite,
       RoomAbility.kick,
+      RoomAbility.silence,
       RoomAbility.devices,
     });
   });
@@ -2407,6 +2433,142 @@ void main() {
       await _bakery(client);
 
       await expectLater(rooms.kick(oven, ada), throwsA(isA<MatrixException>()));
+    });
+  });
+
+  group('muting and deafening for everyone, in a voice channel', () {
+    const oven = '!oven:example.com';
+    const ada = '@ada:example.com';
+
+    Channel channel(MatrixRooms rooms) => rooms.spaces
+        .expand((s) => s.categories)
+        .expand((c) => c.channels)
+        .firstWhere((c) => c.id == oven);
+
+    Future<void> state(Client client, List<Map<String, Object?>> events) =>
+        _sync(client, {
+          'join': {
+            oven: {
+              'state': {'events': events},
+            },
+          },
+        });
+
+    Map<String, Object?> entry(Map<String, Object?> content) => _state(
+      callSilenceType,
+      content,
+      key: '_$ada',
+      sender: '@mod:example.com',
+    );
+
+    test('the channel lists whom a moderator has silenced', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await state(client, [
+        entry({'muted': true, 'deafened': true}),
+      ]);
+      await _until(() => channel(rooms).silenced.isNotEmpty);
+
+      expect(channel(rooms).silenced, {ada: CallSilence.deafened});
+    });
+
+    test('lifting it takes them off the list', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await state(client, [
+        entry({'muted': true}),
+      ]);
+      await _until(() => channel(rooms).silenced.isNotEmpty);
+
+      await state(client, [entry(const {})]);
+      await _until(() => channel(rooms).silenced.isEmpty);
+
+      expect(channel(rooms).silenced, isEmpty);
+    });
+
+    test('you may where your level reaches what writing it takes', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await state(client, [
+        _state('m.room.power_levels', {
+          'users': {_me: 50},
+          'state_default': 50,
+        }),
+      ]);
+      await _until(() => channel(rooms).canSilence);
+
+      expect(channel(rooms).canSilence, isTrue);
+    });
+
+    test('you may not where it falls short', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await state(client, [
+        _state('m.room.power_levels', {
+          'users': {_me: 0},
+          'state_default': 50,
+        }),
+      ]);
+      await _settle();
+
+      expect(channel(rooms).canSilence, isFalse);
+    });
+
+    test('the room can ask more for it than for other state', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await state(client, [
+        _state('m.room.power_levels', {
+          'users': {_me: 50},
+          'state_default': 50,
+          'events': {callSilenceType: 100},
+        }),
+      ]);
+      await _settle();
+
+      expect(channel(rooms).canSilence, isFalse);
+    });
+
+    final written = <String, (CallSilence?, Map<String, Object?>)>{
+      'muting': (CallSilence.muted, {'muted': true, 'deafened': false}),
+      'deafening': (CallSilence.deafened, {'muted': true, 'deafened': true}),
+      'lifting it': (null, {}),
+    };
+    for (final MapEntry(key: name, value: (silence, content))
+        in written.entries) {
+      test('$name writes the entry about them', () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _bakery(client);
+
+        await rooms.silence(oven, ada, silence);
+
+        final (room, key, sent) = api.silences.single;
+        expect((room, key), (oven, '_$ada'));
+        expect(sent, content);
+      });
+    }
+
+    test('a refusal throws', () async {
+      final api = _Api()..refuseSilences = true;
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await expectLater(
+        rooms.silence(oven, ada, CallSilence.muted),
+        throwsA(isA<MatrixException>()),
+      );
     });
   });
 

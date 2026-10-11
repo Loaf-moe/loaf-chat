@@ -41,6 +41,7 @@ class ChannelList extends StatefulWidget {
     this.call,
     required this.myId,
     this.onKick,
+    this.onSilence,
   });
 
   final Space space;
@@ -48,6 +49,11 @@ class ChannelList extends StatefulWidget {
   /// Asked to kick [member] from [channel]. Left null, nobody's menu
   /// offers it.
   final void Function(Channel channel, Member member)? onKick;
+
+  /// Asked to put [silence] on [member] in [channel]'s call for everyone,
+  /// or with null to lift it. Left null, nobody's menu offers it.
+  final void Function(Channel channel, Member member, CallSilence? silence)?
+  onSilence;
 
   /// Your own user id: your row under a voice channel has no menu.
   final String myId;
@@ -156,6 +162,7 @@ class _ChannelListState extends State<ChannelList> {
                       call: widget.call,
                       myId: widget.myId,
                       onKick: widget.onKick,
+                      onSilence: widget.onSilence,
                       home: widget.home,
                       onReorder: widget.home && category.name == 'favourites'
                           ? widget.onReorderFavourites
@@ -318,6 +325,7 @@ class _CategorySection extends StatelessWidget {
     this.call,
     required this.myId,
     this.onKick,
+    this.onSilence,
     this.home = false,
     this.onReorder,
     this.onAdd,
@@ -332,6 +340,8 @@ class _CategorySection extends StatelessWidget {
   final ({String channelId, List<TileInfo> people})? call;
   final String myId;
   final void Function(Channel channel, Member member)? onKick;
+  final void Function(Channel channel, Member member, CallSilence? silence)?
+  onSilence;
   final bool collapsed;
   final String? selectedChannelId;
   final LoafTokens tokens;
@@ -355,6 +365,7 @@ class _CategorySection extends StatelessWidget {
         people: channel.id == call?.channelId ? call!.people : const [],
         myId: myId,
         onKick: onKick,
+        onSilence: onSilence,
         tokens: tokens,
         home: home,
         longPressActions: longPressActions,
@@ -512,6 +523,7 @@ class _ChannelEntry extends StatelessWidget {
     this.people = const [],
     required this.myId,
     this.onKick,
+    this.onSilence,
     this.home = false,
     this.longPressActions = true,
   });
@@ -526,6 +538,19 @@ class _ChannelEntry extends StatelessWidget {
   final List<TileInfo> people;
   final String myId;
   final void Function(Channel channel, Member member)? onKick;
+  final void Function(Channel channel, Member member, CallSilence? silence)?
+  onSilence;
+
+  /// Mutes or deafens [member] for everyone in this channel's call, or
+  /// null where you may not: the app does none of it, your level here does
+  /// not reach, or it is you.
+  ValueChanged<CallSilence?>? _silence(Member member) {
+    final onSilence = this.onSilence;
+    if (onSilence == null || !channel.canSilence || member.id == myId) {
+      return null;
+    }
+    return (silence) => onSilence(channel, member, silence);
+  }
 
   /// Kicks [member] from this channel, or null where you may not: the app
   /// does no kicking, your level here does not reach, or it is you.
@@ -684,6 +709,8 @@ class _ChannelEntry extends StatelessWidget {
                       you: member.id == myId,
                       channelName: channel.name,
                       onKick: _kick(member),
+                      silenced: channel.silenced[member.id],
+                      onSilence: _silence(member),
                       tokens: tokens,
                     ),
                 ],
@@ -705,6 +732,8 @@ class _Occupant extends StatelessWidget {
     required this.you,
     required this.channelName,
     required this.onKick,
+    required this.silenced,
+    required this.onSilence,
     required this.tokens,
   });
 
@@ -715,26 +744,60 @@ class _Occupant extends StatelessWidget {
 
   /// Null where you may not kick them.
   final VoidCallback? onKick;
+
+  /// What a moderator has put on them, if anything.
+  final CallSilence? silenced;
+
+  /// Null where you may not mute or deafen them for everyone.
+  final ValueChanged<CallSilence?>? onSilence;
   final LoafTokens tokens;
 
-  /// Their volume, where [voice] keeps one, and the kick, where you may: a
-  /// menu at [position] on a computer, a sheet on a phone.
+  /// Their volume, where [voice] keeps one, and what a moderator may do,
+  /// where you are one: a menu at [position] on a computer, a sheet on a
+  /// phone.
   Future<void> _openMenu(
     BuildContext context,
     VoiceController? voice, {
     Offset? position,
   }) async {
     final onKick = this.onKick;
+    final onSilence = this.onSilence;
     final items = [
+      if (onSilence != null) ...[
+        if (silenced == null)
+          const ActionItem(
+            value: _OccupantAction.mute,
+            icon: LucideIcons.micOff,
+            label: 'mute for everyone',
+          ),
+        if (silenced == CallSilence.muted)
+          const ActionItem(
+            value: _OccupantAction.lift,
+            icon: LucideIcons.mic,
+            label: 'unmute for everyone',
+          ),
+        if (silenced == CallSilence.deafened)
+          const ActionItem(
+            value: _OccupantAction.lift,
+            icon: LucideIcons.headphones,
+            label: 'undeafen for everyone',
+          )
+        else
+          const ActionItem(
+            value: _OccupantAction.deafen,
+            icon: LucideIcons.headphoneOff,
+            label: 'deafen for everyone',
+          ),
+      ],
       if (onKick != null)
         ActionItem(
-          value: true,
+          value: _OccupantAction.kick,
           icon: LucideIcons.userX,
           label: 'kick from $channelName',
           destructive: true,
         ),
     ];
-    final bool? kick;
+    final _OccupantAction? action;
     final name = Text(
       member.name,
       maxLines: 1,
@@ -742,7 +805,7 @@ class _Occupant extends StatelessWidget {
       style: loafBody(13, 600).copyWith(color: tokens.textMuted),
     );
     if (position != null) {
-      kick = await showActionMenu(
+      action = await showActionMenu(
         context,
         position: position,
         leading: [
@@ -752,7 +815,7 @@ class _Occupant extends StatelessWidget {
         items: items,
       );
     } else {
-      kick = await showActionSheet(
+      action = await showActionSheet(
         context,
         header: (context) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -764,25 +827,41 @@ class _Occupant extends StatelessWidget {
         items: items,
       );
     }
-    if (kick ?? false) onKick?.call();
+    switch (action) {
+      case _OccupantAction.mute:
+        onSilence?.call(CallSilence.muted);
+      case _OccupantAction.deafen:
+        onSilence?.call(CallSilence.deafened);
+      case _OccupantAction.lift:
+        onSilence?.call(null);
+      case _OccupantAction.kick:
+        onKick?.call();
+      case null:
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final speaking = heard?.speaking ?? false;
-    final deafened = heard?.deafened ?? false;
-    final muted = heard?.muted ?? false;
+    final deafened =
+        silenced == CallSilence.deafened || (heard?.deafened ?? false);
+    final muted = silenced != null || (heard?.muted ?? false);
     // Your own sound is never played to you, so there is nothing to set.
     // Found, not watched: whether the app keeps voice settings never
     // changes while it runs.
     final voice = you ? null : VoiceScope.find(context);
-    final hasMenu = voice != null || onKick != null;
+    final hasMenu = voice != null || onKick != null || onSilence != null;
     return Semantics(
       label: [
         member.name,
         if (speaking) 'speaking',
         // Deafened is muted too; the one word says both.
-        if (deafened) 'deafened' else if (muted) 'muted',
+        if (silenced != null)
+          '${deafened ? 'deafened' : 'muted'} by a moderator'
+        else if (deafened)
+          'deafened'
+        else if (muted)
+          'muted',
       ].join(', '),
       // One node a row, not one for the whole list of people.
       container: true,
@@ -846,7 +925,10 @@ class _Occupant extends StatelessWidget {
                     child: Icon(
                       deafened ? LucideIcons.headphoneOff : LucideIcons.micOff,
                       size: 14,
-                      color: tokens.textMuted,
+                      // A moderator's doing stands out from their own.
+                      color: silenced != null
+                          ? tokens.accent
+                          : tokens.textMuted,
                     ),
                   ),
               ],
@@ -857,6 +939,9 @@ class _Occupant extends StatelessWidget {
     );
   }
 }
+
+/// What the menu on someone in a voice channel can do.
+enum _OccupantAction { mute, deafen, lift, kick }
 
 /// A line of plain text heading a menu.
 class _MenuHeading<T> extends PopupMenuEntry<T> {

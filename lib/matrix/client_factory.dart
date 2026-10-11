@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:loaf_native/matrix/call_members.dart';
+import 'package:loaf_native/matrix/call_silence.dart';
 import 'package:loaf_native/matrix/loaf_http_client.dart';
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
@@ -77,6 +78,7 @@ Future<Client> openClient({
       EventTypes.RoomJoinRules,
       EventTypes.RoomPowerLevels,
       callMemberType,
+      callSilenceType,
     },
     // The 7 emoji only: the spec draws no QR, and a client that names no
     // method can take part in no verification at all.

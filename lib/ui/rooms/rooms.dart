@@ -41,6 +41,9 @@ enum RoomAbility {
   /// Kicking someone from a room.
   kick,
 
+  /// Muting or deafening someone in a call for everyone.
+  silence,
+
   /// Voice channels and DM calls.
   calls,
 
@@ -163,6 +166,11 @@ abstract interface class Rooms implements Listenable {
   /// Removes [userId] from the room; they may join again where its rules
   /// let them. Throws when the server says no.
   Future<void> kick(String roomId, String userId);
+
+  /// Puts [to] on [userId] in the room's call for everyone, or with null
+  /// lifts it. Their own client is what obeys. Throws when the server
+  /// says no.
+  Future<void> silence(String roomId, String userId, CallSilence? to);
 
   SpaceDirectory get directory;
 

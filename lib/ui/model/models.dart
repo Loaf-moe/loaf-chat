@@ -243,6 +243,9 @@ class Message {
   );
 }
 
+/// What a moderator has put on someone in a call. Deafened is muted too.
+enum CallSilence { muted, deafened }
+
 class Channel {
   const Channel({
     required this.id,
@@ -264,6 +267,8 @@ class Channel {
     this.waitingFor = const [],
     this.avatar,
     this.kickBelow,
+    this.silenced = const {},
+    this.canSilence = false,
   });
 
   final String id;
@@ -315,6 +320,14 @@ class Channel {
   /// below it can be kicked by you. Null: you can kick nobody.
   final int? kickBelow;
 
+  /// Whom a moderator has muted or deafened in this channel's call, by
+  /// user id.
+  final Map<String, CallSilence> silenced;
+
+  /// Whether you may mute or deafen people in this channel's call for
+  /// everyone.
+  final bool canSilence;
+
   IconData get icon => switch (kind) {
     ChannelKind.voice => LucideIcons.volume2,
     ChannelKind.direct => LucideIcons.atSign,
@@ -345,6 +358,8 @@ class Channel {
     topic: topic,
     occupants: occupants ?? this.occupants,
     kickBelow: kickBelow,
+    silenced: silenced,
+    canSilence: canSilence,
     joined: joined ?? this.joined,
     muted: muted ?? this.muted,
     members: members,

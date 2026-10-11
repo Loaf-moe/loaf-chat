@@ -281,12 +281,40 @@ not a ban, so they may join again where the room's rules let them. They
 drop off the channel's list at once, since being listed takes being in the
 room, and Loaf Chat on their side leaves the call when it loses the room.
 
-Nothing else is offered because nothing else can be done from a client
-here. Muting someone for everyone goes through LiveKit's server API, which
-takes the server's secret; the call server only hands out tokens to join.
-Deafening someone else exists nowhere in LiveKit. Emptying someone's call
-membership removes them from lists only: their media stays connected and
-their client writes the membership back.
+**Moderator mute and deafen.** The media server cannot be told to silence
+anyone from a client: that goes through LiveKit's server API, which takes
+the server's secret, and the call server only hands out tokens to join. So
+this is honoured, not enforced. A moderator writes a state event in the
+voice room and each Loaf Chat reads the entry about its own user and
+silences itself:
+
+```
+type:      moe.loaf.call.moderation
+state_key: _<user id>
+content:   {"muted": true, "deafened": false}
+```
+
+`deafened` deafens and mutes; otherwise `muted` mutes; an emptied entry
+lifts it. The key is not the bare user id because a state key that begins
+with `@` may only be written by that user. Who may write it is the room's
+own power levels (`events` for this type, else `state_default`), which the
+homeserver checks; an entry binds its user whatever their level. A room
+with no power-levels event lets anyone write state, and so anyone silence
+anyone.
+
+While an entry stands the person's microphone (and, deafened, their sound)
+is off whatever they chose, the matching control is locked and says a
+moderator did it, and lifting it returns them to their own choice. A toast
+tells them when it is put on or lifted during a call. It shows
+to everyone: on the person's row under the voice channel, in red, whether or
+not you are in that call, and on their tile. The row menu offers "mute for
+everyone" and "deafen for everyone", or their undoing, where the room lets
+you write the entry. It stays until lifted, outlasting the call.
+
+A client that does not read the entry (Element Call, anything modified) is
+not bound by it; kicking is what binds everyone. Emptying someone's call
+membership is no substitute: it takes them off lists only, their media
+stays connected, and their client writes the membership back.
 
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
 it is given a `CallMedia`, and `main.dart` gives it one on Linux. On other

@@ -68,6 +68,10 @@ class CallController extends ChangeNotifier implements Calls {
   // The mock's ring goes round the others.
   @override
   bool get speaking => false;
+
+  // The mock has no moderators.
+  @override
+  CallSilence? get silenced => null;
   @override
   bool camera = false;
   bool frontCamera = true;
