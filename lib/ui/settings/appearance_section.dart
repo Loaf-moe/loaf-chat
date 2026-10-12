@@ -55,9 +55,10 @@ class AppearanceSection extends StatelessWidget {
           SettingsCheck(
             title: 'external content',
             detail:
-                'show pictures and video hosted on other sites. fetching '
-                'them tells those sites your address. never used in '
-                'encrypted rooms.',
+                'show pictures and video hosted on other sites, and '
+                'previews of links. pictures and video come from those '
+                'sites, which tells them your address; previews come from '
+                'your homeserver. never used in encrypted rooms.',
             value: controller.externalMedia,
             onChanged: controller.setExternalMedia,
           ),

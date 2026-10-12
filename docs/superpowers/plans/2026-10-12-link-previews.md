@@ -25,7 +25,8 @@ Commit: `feat(previews): a link's preview shows under its message`
 
 - `lib/ui/channel/message_markup.dart`: `firstWebLink`.
 - `lib/ui/model/models.dart`: `Message.previewLink`.
-- `lib/ui/channel/timeline_controller.dart`: sets `previewLink` on send and on edit.
+- `lib/ui/channel/timeline_controller.dart`: sets `previewLink` on the messages it starts with, on send and on edit.
+- `lib/ui/mock/fixtures.dart`: a message with a link the mock previews.
 - New `lib/ui/model/link_previews.dart`: `LinkPreviews`, `LinkPreviewState` and its three cases, `LinkPreview`, `NoLinkPreviews`, `LinkPreviewsScope`.
 - New `lib/ui/channel/link_preview_card.dart`: `LinkPreviewCard`.
 - `lib/ui/channel/message_group_tile.dart`: the card in `_MessageBody`'s column.
@@ -35,7 +36,8 @@ Commit: `feat(previews): a link's preview shows under its message`
 - `lib/matrix/matrix_rooms.dart`: owns the `MatrixLinkPreviews` and disposes of it.
 - `lib/matrix/matrix_timeline.dart`: sets `previewLink` in `_message`.
 - `lib/ui/shell/app_shell.dart`: `LinkPreviewsScope` beside `MediaSourceScope`.
-- `lib/ui/settings/appearance_section.dart`: the "external content" line.
+- `lib/ui/settings/appearance_section.dart`, `lib/ui/theme/appearance.dart`: the "external content" line and the setting's comment.
+- `docs/superpowers/specs/2026-10-12-link-previews-design.md`: what building it settled.
 
 **Tests that change on purpose**
 
@@ -47,6 +49,8 @@ Commit: `feat(previews): a link's preview shows under its message`
 - `test/timeline_controller_test.dart`: the mock's `previewLink` on send and on edit.
 - `test/matrix/matrix_timeline_test.dart`: which messages offer a link.
 - `test/matrix/matrix_link_previews_test.dart`.
+- `test/link_previews_test.dart`.
+- `test/message_text_test.dart`: a link inside a spoiler.
 - `test/link_preview_card_test.dart`.
 - `test/message_group_tile_test.dart`: where the card sits.
 

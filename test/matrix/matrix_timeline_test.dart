@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/client_factory.dart';
@@ -297,12 +297,13 @@ Future<_Harness> _open(
   List<Map<String, Object?>> events, {
   String? prevBatch,
   bool encrypted = false,
+  ValueListenable<bool>? externalMedia,
 }) async {
   final api = _Api();
   final client = await _client(api);
   addTearDown(client.dispose);
   await _sync(client, events, prevBatch: prevBatch, encrypted: encrypted);
-  final rooms = MatrixRooms(client);
+  final rooms = MatrixRooms(client, externalMedia: externalMedia);
   addTearDown(rooms.dispose);
   final h = _Harness(api, client, rooms);
   h.timeline; // Opens it.
@@ -587,6 +588,166 @@ void main() {
       await _until(() => h.messages.length == 2);
       expect(h.messages.map((m) => m.body), ['one', 'two']);
       expect(heard, greaterThan(0));
+    });
+  });
+
+  group('offering a link for a preview', () {
+    final bake = Uri.parse('https://loaf.moe/bake');
+
+    for (final msgtype in ['m.text', 'm.notice', 'm.emote']) {
+      test('an $msgtype message offers its first link', () async {
+        final h = await _open([
+          _text(
+            'read https://loaf.moe/bake then https://loaf.moe/proof',
+            msgtype: msgtype,
+          ),
+        ]);
+        expect(h.messages.single.previewLink, bake);
+      });
+    }
+
+    test(
+      'an emote offers its own link, never one in its author\'s name',
+      () async {
+        final h = await _open([
+          _member(_ada, 'see https://elsewhere.example'),
+          _text('reads https://loaf.moe/bake', msgtype: 'm.emote'),
+          _event('m.room.message', {
+            'msgtype': 'm.emote',
+            'body': 'waves',
+            'format': 'org.matrix.custom.html',
+            'formatted_body': '<i>waves</i>',
+          }),
+        ]);
+        expect(h.messages.first.previewLink, bake);
+        expect(h.messages.last.previewLink, isNull);
+      },
+    );
+
+    test('an edit on its way does not change the link until the server '
+        'has it', () async {
+      final h = await _open([
+        _text('read https://loaf.moe/bake', id: r'$m', sender: _me),
+      ]);
+      final api = h.api..holdSend = Completer<void>();
+      h.timeline.saveEdit(r'$m', 'read https://loaf.moe/proof');
+      await _until(() => h.messages.single.body.endsWith('proof'));
+      expect(h.messages.single.previewLink, isNull);
+      api.holdSend!.complete();
+      await _until(() => h.messages.single.previewLink != null);
+      expect(
+        h.messages.single.previewLink,
+        Uri.parse('https://loaf.moe/proof'),
+      );
+    });
+
+    test('a deleted edit gives the message its first link back', () async {
+      final h = await _open([_text('read https://loaf.moe/bake', id: r'$m')]);
+      final change = _edit(r'$m', 'read https://loaf.moe/proof');
+      await _sync(h.client, [change]);
+      expect(
+        h.messages.single.previewLink,
+        Uri.parse('https://loaf.moe/proof'),
+      );
+      await _sync(h.client, [
+        _event('m.room.redaction', {})..['redacts'] = change['event_id'],
+      ]);
+      expect(h.messages.single.previewLink, bake);
+    });
+
+    test('a link in the formatted body is the one offered', () async {
+      final h = await _open([
+        _event('m.room.message', {
+          'msgtype': 'm.text',
+          'body': 'read this',
+          'format': 'org.matrix.custom.html',
+          'formatted_body': 'read <a href="https://loaf.moe/bake">this</a>',
+        }),
+      ]);
+      expect(h.messages.single.previewLink, bake);
+    });
+
+    test('a message with no link offers none', () async {
+      final h = await _open([_text('no links here')]);
+      expect(h.messages.single.previewLink, isNull);
+    });
+
+    test('in an encrypted room nothing is offered', () async {
+      final h = await _open([
+        _text('read https://loaf.moe/bake'),
+      ], encrypted: true);
+      expect(h.messages.single.previewLink, isNull);
+    });
+
+    test('with external content off nothing is offered, and switching it '
+        'on offers it', () async {
+      final external = ValueNotifier(false);
+      addTearDown(external.dispose);
+      final h = await _open([
+        _text('read https://loaf.moe/bake'),
+      ], externalMedia: external);
+      expect(h.messages.single.previewLink, isNull);
+      external.value = true;
+      expect(h.messages.single.previewLink, bake);
+      external.value = false;
+      expect(h.messages.single.previewLink, isNull);
+    });
+
+    test('a file\'s caption offers nothing', () async {
+      final h = await _open([
+        _event('m.room.message', {
+          'msgtype': 'm.image',
+          'filename': 'loaf.png',
+          'body': 'from https://loaf.moe/bake',
+          'url': 'mxc://example.com/loaf',
+        }),
+      ]);
+      expect(h.messages.single.media, isNotNull);
+      expect(h.messages.single.previewLink, isNull);
+    });
+
+    test('a link drawn as a picture is not also offered', () async {
+      final h = await _open([
+        _text('look https://loaf.moe/crumb.png and https://loaf.moe/bake'),
+      ]);
+      expect(h.messages.single.media, isNotNull);
+      expect(h.messages.single.previewLink, isNull);
+    });
+
+    test(
+      'a message on its way offers nothing until the server has it',
+      () async {
+        final h = await _open([_text('hi')]);
+        final api = h.api..holdSend = Completer<void>();
+        h.timeline.send('read https://loaf.moe/bake');
+        await _until(() => h.messages.length == 2);
+        expect(h.messages.last.status, MessageStatus.sending);
+        expect(h.messages.last.previewLink, isNull);
+        api.holdSend!.complete();
+        await _until(() => h.messages.last.status == MessageStatus.sent);
+        expect(h.messages.last.previewLink, bake);
+      },
+    );
+
+    test('the quote in a reply offers nothing', () async {
+      final h = await _open([
+        _text('read https://loaf.moe/bake', id: r'$q'),
+        _text('thanks', replyTo: r'$q'),
+      ]);
+      expect(h.messages.first.previewLink, bake);
+      expect(h.messages.last.replyTo!.previewLink, isNull);
+    });
+
+    test('an edit changes the link offered, or takes it away', () async {
+      final h = await _open([_text('read https://loaf.moe/bake', id: r'$m')]);
+      expect(h.messages.single.previewLink, bake);
+      await _sync(h.client, [_edit(r'$m', 'read https://loaf.moe/proof')]);
+      expect(
+        h.messages.single.previewLink,
+        Uri.parse('https://loaf.moe/proof'),
+      );
+      await _sync(h.client, [_edit(r'$m', 'never mind')]);
+      expect(h.messages.single.previewLink, isNull);
     });
   });
 

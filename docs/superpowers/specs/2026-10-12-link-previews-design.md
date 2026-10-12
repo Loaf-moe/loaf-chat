@@ -96,7 +96,8 @@ repository at `916578d`.
 - `parseMessage` keeps the blocks of the 512 texts last read.
 - `mentionOf` turns a matrix.to link to a user into a mention. A matrix.to
   link to a room or a message stays a link.
-- A run inside a spoiler carries `Run.spoiler`.
+- A run inside a spoiler carries `Run.spoiler`, except a bare address that
+  `linkify` made a link: that run lost it, and drew unhidden.
 - A media row is sized before its picture loads
   (`lib/ui/channel/media_row.dart`). Nothing corrects the scroll offset for
   a row that grows after layout.
@@ -116,10 +117,11 @@ draws a card for a link it is given and looks for none itself.
 `firstWebLink(List<Block> blocks)` in `message_markup.dart` returns the
 first `Run.link` whose scheme is `http` or `https`, whose host is not
 `matrix.to`, and which is not inside a spoiler, or null. A mention carries
-no link, and neither does code.
+no link, and neither does code. `linkify` keeps `Run.spoiler` on the links
+it makes.
 
-The mock `TimelineController` sets `previewLink` with `firstWebLink` when a
-message is sent and when it is edited.
+The mock `TimelineController` sets `previewLink` with `firstWebLink` on the
+text messages it starts with, when a message is sent and when it is edited.
 
 ### `LinkPreviews`
 
@@ -173,10 +175,12 @@ The UI never sees an mxc or an OpenGraph key.
 - it has no media, attached or linked;
 - it is not the quote inside a reply.
 
-The link is `firstWebLink(parseMessage(formatted:, body:))` over what the
-row draws, so an edit that changes the first link changes the preview.
-`MatrixTimeline` remembers each message's link by the event the row draws:
-a message is parsed for its link once, and again after an edit.
+The link is `firstWebLink(parseMessage(formatted:, body:))` over the
+event's own words, as last edited, once the server has the edit. An emote's
+row starts with its author's name; the name is not searched, so it cannot
+choose what is previewed. `MatrixTimeline` remembers each message's link by
+the event the row draws: a message is parsed for its link once, and again
+after an edit.
 
 ## Fetching
 
@@ -200,9 +204,9 @@ a message is parsed for its link once, and again after an edit.
 | The server says it previews nothing | `LinkPreviewNone`, with no request | for the session |
 | 200 with a title, a description or an image | `LinkPreviewReady` | for the session |
 | 200 with none of them | `LinkPreviewNone` | for the session |
-| 200 that does not read as a preview | `LinkPreviewNone` | for the session |
-| The server refuses (`MatrixException` other than `M_LIMIT_EXCEEDED`) | `LinkPreviewNone` | for the session |
-| `M_LIMIT_EXCEEDED`, or no answer (timeout, offline) | `LinkPreviewNone` | for one minute; the first ask after that requests again |
+| 200 whose fields are of the wrong type | `LinkPreviewNone` | for the session |
+| The server refuses (any `MatrixException` other than `M_LIMIT_EXCEEDED`, `M_UNKNOWN_TOKEN` and a server error among them) | `LinkPreviewNone` | for the session |
+| `M_LIMIT_EXCEEDED`, no answer (timeout, offline), an answer that is not JSON or not the homeserver's (a proxy's page), or a picture that is not an address | `LinkPreviewNone` | for one minute; the first ask after that requests again |
 
 **Reading the reply**
 
@@ -227,8 +231,9 @@ below the text.
   `textMuted`, the title in `loafBody(14, 600)` `textStrong` on one line,
   the description in `loafBody(12, 400)` `textMuted` on two.
 - **None:** nothing. A link already known to have nothing draws no line.
-- **Opening:** a tap opens the link through `openMessageLink`, with the
-  focus ring a media row has on a computer.
+- **Opening:** a tap opens the link through `openMessageLink`. On a computer
+  a clicked card takes the focus ring a media row has, and Enter or Space
+  opens it again.
 - **A picture that fails to load:** the card stays and the text takes its
   place.
 
@@ -265,15 +270,18 @@ gain `linkPreviews`.
   `FakeMatrixApi`: `previewLink` for a text message with a link; null in an
   encrypted room, with the setting off, for a message with media, for a link
   that became media, for a sending message and for a quote; the setting
-  changing redraws the rows; an edit changing the link.
+  changing redraws the rows; an edit changing the link, an edit on its way
+  not yet changing it, and a deleted edit giving the first link back; an
+  emote whose author's name holds a link.
 - **Fetching** (`test/matrix/matrix_link_previews_test.dart`), over a
-  `FakeMatrixApi` subclass, with `fake_async` for the clock:
+  `FakeMatrixApi` subclass, with the clock passed in:
   - a full reply; a title that is not a string; an image that is not `mxc`;
     an empty reply; a reply whose `matrix:image:size` is not a number;
   - `M_FORBIDDEN` kept and not asked again;
-  - a timeout and `M_LIMIT_EXCEEDED` each not asked again within a minute,
-    and asked again after it;
-  - two askers sharing one request;
+  - a timeout, a request that cannot be sent, `M_LIMIT_EXCEEDED`, a proxy's
+    page with either status and a picture that is not an address each not
+    asked again within a minute, and asked again after it;
+  - two askers sharing one request, at first and after the minute;
   - the legacy path on a server without authenticated media;
   - a server whose capability is disabled asked for no preview, with links
     asked about early ending as none;
@@ -284,9 +292,14 @@ gain `linkPreviews`.
 - **The card** (`test/link_preview_card_test.dart`): nothing drawn before
   300 ms; the line after it; the card at 88 high when ready; nothing drawn
   for none; a tap opening the link; the layout without a picture; a picture
-  that fails leaving the card; the widths on a computer and a phone.
+  that fails leaving the card; the widths on a computer and a phone; large
+  text staying inside the card; a row whose link changes; the focus ring
+  and Enter on a computer.
 - **The row** (`test/message_group_tile_test.dart`): the card between the
-  text and the reactions; no card without `previewLink`.
+  text and the reactions; no card without `previewLink`; a file with a link
+  drawing both.
+- **Spoilers** (`test/message_text_test.dart`): a link inside a spoiler
+  opening only once shown.
 
 **By hand on loaf.moe:** a link the allowlist covers; one it does not; a
 link in an encrypted room; "external content" switched off with a card on

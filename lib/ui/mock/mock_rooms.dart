@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import '../call/calls.dart';
 import '../channel/timeline_controller.dart';
 import '../model/arrival.dart';
+import '../model/link_previews.dart';
 import '../model/media_source.dart';
 import '../rooms/rooms.dart';
 import '../settings/devices.dart';
@@ -20,6 +21,7 @@ import '../spaces/space_directory.dart';
 import '../widgets/avatar_images.dart';
 import 'fixtures.dart';
 import 'mock_devices.dart';
+import 'mock_link_previews.dart';
 import 'mock_media_source.dart';
 import 'mock_profile.dart';
 import 'mock_space_directory.dart';
@@ -76,6 +78,9 @@ class MockRooms extends ChangeNotifier implements Rooms {
   late final MediaSource media = MockMediaSource(
     _mediaDir = Directory.systemTemp.createTempSync('loaf-mock-media'),
   );
+
+  @override
+  final LinkPreviews linkPreviews = MockLinkPreviews();
 
   @override
   final Profile profile = MockProfile();

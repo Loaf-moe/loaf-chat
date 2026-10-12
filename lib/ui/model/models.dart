@@ -160,6 +160,7 @@ class Message {
     this.edited = false,
     this.replyTo,
     this.media,
+    this.previewLink,
     this.uploaded,
     this.callLine,
     this.status = MessageStatus.sent,
@@ -177,6 +178,7 @@ class Message {
       edited = false,
       replyTo = null,
       media = null,
+      previewLink = null,
       uploaded = null,
       callLine = null,
       status = MessageStatus.sent,
@@ -203,6 +205,10 @@ class Message {
   /// its caption, and empty when there is none.
   final Media? media;
 
+  /// The link this message offers a preview of. Null when it has none, or
+  /// where previews are not asked for: the backend that made it decides.
+  final Uri? previewLink;
+
   /// How much of an outgoing file has gone up, 0 to 1. Set only while sending.
   final double? uploaded;
 
@@ -218,12 +224,14 @@ class Message {
   /// See [Message.stub].
   final bool stub;
 
-  /// New words make the old formatting wrong: [formatted] goes with a new
-  /// [body], and without one the message has none.
+  /// New words make the old formatting and the old link wrong: [formatted]
+  /// and [previewLink] go with a new [body], and without them the message
+  /// has neither.
   Message copyWith({
     List<Reaction>? reactions,
     String? body,
     String? formatted,
+    Uri? previewLink,
     bool? edited,
   }) => Message(
     id: id,
@@ -235,6 +243,7 @@ class Message {
     edited: edited ?? this.edited,
     replyTo: replyTo,
     media: media,
+    previewLink: body == null ? this.previewLink : previewLink,
     uploaded: uploaded,
     callLine: callLine,
     status: status,

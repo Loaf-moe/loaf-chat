@@ -23,6 +23,7 @@ import 'package:loaf_native/ui/verify/verifier.dart';
 import 'package:loaf_native/ui/settings/devices.dart';
 import 'package:loaf_native/ui/shell/profile.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
+import 'package:loaf_native/ui/model/link_previews.dart';
 import 'package:loaf_native/ui/model/media_source.dart';
 import 'package:loaf_native/ui/widgets/avatar_images.dart';
 
@@ -71,6 +72,8 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   AvatarImages get avatarImages => const NoAvatarImages();
   @override
   MediaSource get media => const NoMediaSource();
+  @override
+  LinkPreviews get linkPreviews => const NoLinkPreviews();
   @override
   Profile get profile => MockProfile();
   @override

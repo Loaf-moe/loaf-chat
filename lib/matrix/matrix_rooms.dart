@@ -31,6 +31,7 @@ import 'matrix_calls.dart';
 import 'matrix_avatar_images.dart';
 import 'matrix_hierarchy.dart';
 import 'matrix_devices.dart';
+import 'matrix_link_previews.dart';
 import 'matrix_media.dart';
 import 'matrix_profile.dart';
 import 'matrix_space_directory.dart';
@@ -168,7 +169,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// Fires when the next call membership runs out, since no sync says so.
   Timer? _callExpiry;
 
-  /// Whether files linked on other sites are shown. Null: they are.
+  /// Whether files linked on other sites are shown, and links previewed.
+  /// Null: they are.
   final ValueListenable<bool>? externalMedia;
 
   var _synced = false;
@@ -250,6 +252,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       _media ??= _disposed ? MatrixMediaSource.closed(client) : _openMedia();
 
   MatrixMediaSource? _media;
+
+  @override
+  MatrixLinkPreviews get linkPreviews {
+    final made = _linkPreviews ??= MatrixLinkPreviews(client, now: _now);
+    if (_disposed) made.dispose();
+    return made;
+  }
+
+  MatrixLinkPreviews? _linkPreviews;
 
   /// Files are kept in the SDK's own storage folder, which sign-out already
   /// clears. With none (some tests), every file fails with "no media folder".
@@ -1399,6 +1410,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _profile?.dispose();
     _devices?.dispose();
     _media?.dispose();
+    _linkPreviews?.dispose();
     super.dispose();
   }
 }

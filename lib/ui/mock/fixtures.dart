@@ -330,7 +330,9 @@ List<Message> mockHomeTimeline(String id) {
         id: '$id-2',
         author: _sam,
         sentAt: at(2, 18, 20),
-        body: "i'm in, starting the levain friday night",
+        body:
+            "i'm in, starting the levain friday night, this one: "
+            'https://loaf.moe/levain',
       ),
       Message(id: '$id-3', author: _mika, sentAt: at(2, 18, 21), body: 'same'),
     ],
