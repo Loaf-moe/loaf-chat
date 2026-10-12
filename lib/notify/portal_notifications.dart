@@ -35,7 +35,8 @@ class PortalNotifications implements DesktopNotifications {
   final void Function(Object error) _log;
   var _logged = false;
 
-  // Lazy so that building one opens no socket: only a shown notice does.
+  // Lazy so that building one, or reading `clicks`, opens no socket: only a
+  // shown notice, or a listener on `clicks`, does.
   late final _bus = bus ?? DBusClient.session();
 
   late final _portal = DBusRemoteObject(
@@ -47,7 +48,9 @@ class PortalNotifications implements DesktopNotifications {
   /// The portal's interface version; 2 takes a `sound`. Kept only once read.
   int? _version;
   final _shown = <String, MessageRoute>{};
-  final _clicks = StreamController<MessageRoute>.broadcast();
+  late final _clicks = StreamController<MessageRoute>.broadcast(
+    onListen: _listen,
+  );
   StreamSubscription<DBusSignal>? _invoked;
 
   /// A portal that isn't up yet, or can't be read, counts as version 1 for
@@ -67,18 +70,24 @@ class PortalNotifications implements DesktopNotifications {
     }
   }
 
+  /// Subscribes to the portal's signal, once. The subscription sends its
+  /// match rule without anyone awaiting it, so with no session bus its
+  /// failure would be an uncaught async error: the zone gives it to [_fail].
   void _listen() {
-    _invoked ??=
-        DBusRemoteObjectSignalStream(
-          object: _portal,
-          interface: _iface,
-          name: 'ActionInvoked',
-          signature: DBusSignature('ssav'),
-        ).listen((s) {
-          if (s.values[1].asString() != 'open') return;
-          final route = _shown[s.values[0].asString()] ?? _target(s.values[2]);
-          if (route != null) _clicks.add(route);
-        });
+    runZonedGuarded(() {
+      _invoked ??=
+          DBusRemoteObjectSignalStream(
+            object: _portal,
+            interface: _iface,
+            name: 'ActionInvoked',
+            signature: DBusSignature('ssav'),
+          ).listen((s) {
+            if (s.values[1].asString() != 'open') return;
+            final route =
+                _shown[s.values[0].asString()] ?? _target(s.values[2]);
+            if (route != null) _clicks.add(route);
+          }, onError: _fail);
+    }, (e, _) => _fail(e));
   }
 
   /// The default action's target, [room, event]: how a click on a notice
@@ -155,10 +164,7 @@ class PortalNotifications implements DesktopNotifications {
   }
 
   @override
-  Stream<MessageRoute> get clicks {
-    _listen();
-    return _clicks.stream;
-  }
+  Stream<MessageRoute> get clicks => _clicks.stream;
 
   @override
   Future<bool> blocked() async => false;

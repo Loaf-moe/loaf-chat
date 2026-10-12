@@ -32,7 +32,8 @@ class FdoNotifications implements DesktopNotifications {
   final void Function(Object error) _log;
   var _logged = false;
 
-  // Lazy so that building one opens no socket: only a shown notice does.
+  // Lazy so that building one, or reading `clicks`, opens no socket: only a
+  // shown notice, or a listener on `clicks`, does.
   late final _bus = bus ?? DBusClient.session();
 
   late final _server = DBusRemoteObject(
@@ -46,7 +47,9 @@ class FdoNotifications implements DesktopNotifications {
 
   /// Each notification up, by the id the server gave it.
   final _routes = <int, MessageRoute>{};
-  final _clicks = StreamController<MessageRoute>.broadcast();
+  late final _clicks = StreamController<MessageRoute>.broadcast(
+    onListen: _listen,
+  );
   StreamSubscription<DBusSignal>? _invoked;
   StreamSubscription<DBusSignal>? _closed;
 
@@ -65,25 +68,30 @@ class FdoNotifications implements DesktopNotifications {
         throw e;
       });
 
+  /// Subscribes to the server's signals, once. The subscriptions send their
+  /// match rules without anyone awaiting them, so with no session bus their
+  /// failure would be an uncaught async error: the zone gives it to [_fail].
   void _listen() {
-    _invoked ??=
-        DBusRemoteObjectSignalStream(
-          object: _server,
-          interface: _name,
-          name: 'ActionInvoked',
-          signature: DBusSignature('us'),
-        ).listen((s) {
-          final route = _routes[s.values[0].asUint32()];
-          if (route != null && s.values[1].asString() == 'default') {
-            _clicks.add(route);
-          }
-        });
-    _closed ??= DBusRemoteObjectSignalStream(
-      object: _server,
-      interface: _name,
-      name: 'NotificationClosed',
-      signature: DBusSignature('uu'),
-    ).listen((s) => _routes.remove(s.values[0].asUint32()));
+    runZonedGuarded(() {
+      _invoked ??=
+          DBusRemoteObjectSignalStream(
+            object: _server,
+            interface: _name,
+            name: 'ActionInvoked',
+            signature: DBusSignature('us'),
+          ).listen((s) {
+            final route = _routes[s.values[0].asUint32()];
+            if (route != null && s.values[1].asString() == 'default') {
+              _clicks.add(route);
+            }
+          }, onError: _fail);
+      _closed ??= DBusRemoteObjectSignalStream(
+        object: _server,
+        interface: _name,
+        name: 'NotificationClosed',
+        signature: DBusSignature('uu'),
+      ).listen((s) => _routes.remove(s.values[0].asUint32()), onError: _fail);
+    }, (e, _) => _fail(e));
   }
 
   void _fail(Object error) {
@@ -155,10 +163,7 @@ class FdoNotifications implements DesktopNotifications {
   }
 
   @override
-  Stream<MessageRoute> get clicks {
-    _listen();
-    return _clicks.stream;
-  }
+  Stream<MessageRoute> get clicks => _clicks.stream;
 
   @override
   Future<bool> blocked() async => false;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dbus/dbus.dart';
@@ -193,5 +194,44 @@ void main() {
     final s = await serve(['actions', 'body']);
     await n.show(_notice(sound: false));
     expect(s.notified, hasLength(1));
+  });
+
+  // A bus nobody listens on, as on a desktop with no session bus.
+  DBusClient deadBus() =>
+      DBusClient(DBusAddress.unix(path: '${dir.path}/no-such-bus'));
+
+  test('reading clicks alone opens no bus', () async {
+    final uncaught = <Object>[];
+    final logged = <Object>[];
+    await runZonedGuarded(() async {
+      final n = FdoNotifications(
+        chime: chime,
+        soundFile: '/app/chime.wav',
+        bus: deadBus(),
+        log: logged.add,
+      );
+      n.clicks;
+      await pumpEventQueue();
+      expect(logged, isEmpty, reason: 'nothing was attempted');
+    }, (e, _) => uncaught.add(e));
+    expect(uncaught, isEmpty);
+  });
+
+  test('listening with no bus leaks no uncaught error', () async {
+    final uncaught = <Object>[];
+    final logged = <Object>[];
+    await runZonedGuarded(() async {
+      final n = FdoNotifications(
+        chime: chime,
+        soundFile: '/app/chime.wav',
+        bus: deadBus(),
+        log: logged.add,
+      );
+      final sub = n.clicks.listen((_) {});
+      await pumpEventQueue();
+      await sub.cancel();
+    }, (e, _) => uncaught.add(e));
+    expect(uncaught, isEmpty);
+    expect(logged, hasLength(1), reason: 'logged once');
   });
 }
