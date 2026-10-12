@@ -21,3 +21,11 @@ bool get ssoInBrowser => switch (defaultTargetPlatform) {
   TargetPlatform.linux || TargetPlatform.windows => true,
   _ => false,
 };
+
+/// Whether voice channels are live. Each platform needs its microphone
+/// permission and a check by hand before it joins this list; see "Scope" in
+/// the voice design spec.
+bool get hasCalls => switch (defaultTargetPlatform) {
+  TargetPlatform.linux || TargetPlatform.macOS => true,
+  _ => false,
+};

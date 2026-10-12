@@ -30,7 +30,10 @@ class _VoiceSectionState extends State<VoiceSection> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.controller,
+    listenable: Listenable.merge([
+      widget.controller,
+      widget.controller.applying,
+    ]),
     builder: (context, _) {
       final controller = widget.controller;
       final settings = controller.settings.value;
@@ -91,6 +94,7 @@ class _VoiceSectionState extends State<VoiceSection> {
       SettingsChoice(
         title: choice.label,
         selected: choice.chosen,
+        busy: choice.chosen && widget.controller.applying.value,
         onTap: () => choose(choice.device),
       ),
     ],

@@ -300,6 +300,9 @@ class _World {
 
   /// The microphone and the speaker chosen in settings.
   final voice = ValueNotifier(const VoiceSettings());
+
+  /// Whether a call is still taking those up.
+  final voiceApplying = ValueNotifier(false);
   late final Client client;
   late final Calls calls;
   late final _Logged _media;
@@ -357,6 +360,7 @@ class _World {
       client,
       callMedia: _media,
       voice: voice,
+      voiceApplying: voiceApplying,
       now: () => _noon,
     );
     addTearDown(rooms.dispose);
@@ -736,6 +740,27 @@ void main() {
       await _until(() => world.connection.speaker != null);
 
       expect(world.connection.microphone, 'rode');
+      expect(world.connection.speaker, 'desk');
+    });
+
+    test('a call says so while it takes up a speaker chosen', () async {
+      final world = await _open();
+      await world.join();
+      await _until(() => world.connection.microphone == null);
+      await _until(() => !world.voiceApplying.value);
+      final said = <bool>[];
+      world.voiceApplying.addListener(
+        () => said.add(world.voiceApplying.value),
+      );
+      final shown = <bool>{};
+      world.calls.addListener(() => shown.add(world.calls.switchingAudio));
+
+      world.voice.value = const VoiceSettings(speaker: desk);
+      await _until(() => said.length == 2);
+
+      expect(said, [true, false]);
+      expect(shown, {true, false});
+      expect(world.calls.switchingAudio, isFalse);
       expect(world.connection.speaker, 'desk');
     });
 

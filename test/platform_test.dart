@@ -24,4 +24,27 @@ void main() {
       expect(ssoInBrowser, isFalse);
     },
   );
+
+  testWidgets(
+    'voice channels are live where they have been checked by hand',
+    variant: TargetPlatformVariant(const {
+      TargetPlatform.linux,
+      TargetPlatform.macOS,
+    }),
+    (tester) async {
+      expect(hasCalls, isTrue);
+    },
+  );
+
+  testWidgets(
+    'voice channels stay off everywhere else',
+    variant: TargetPlatformVariant(const {
+      TargetPlatform.iOS,
+      TargetPlatform.android,
+      TargetPlatform.windows,
+    }),
+    (tester) async {
+      expect(hasCalls, isFalse);
+    },
+  );
 }

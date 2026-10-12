@@ -28,6 +28,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     required this._occupants,
     required this._me,
     this._voice,
+    this._voiceApplying,
     DateTime Function()? now,
     this._timings = const CallMembershipTimings(),
   }) : _now = now ?? DateTime.now {
@@ -44,6 +45,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   /// The microphone, its processing and the speaker chosen. Null: the
   /// system's default devices, and every kind of processing.
   final ValueListenable<VoiceSettings>? _voice;
+
+  /// Told true while a call takes those up, which can take seconds.
+  final ValueNotifier<bool>? _voiceApplying;
   final DateTime Function() _now;
   final CallMembershipTimings _timings;
   late final StreamSubscription<SyncUpdate> _sync;
@@ -86,6 +90,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   CallSilence? get silenced => _live?.silenced;
   @override
   bool micBlocked = false;
+
+  @override
+  bool switchingAudio = false;
 
   @override
   Member get me => _me();
@@ -456,7 +463,14 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       await before;
       try {
         if (!identical(live, _live)) return;
-        if (voice) await _applyVoice(live.connection);
+        if (voice) {
+          _switching(true);
+          try {
+            await _applyVoice(live.connection);
+          } finally {
+            _switching(false);
+          }
+        }
         await live.connection.setDeafened(deafened);
         await live.connection.setMicrophone(!muted);
       } on MicrophoneUnavailable {
@@ -467,6 +481,12 @@ class MatrixCalls extends ChangeNotifier implements Calls {
         applied.complete();
       }
     }());
+  }
+
+  void _switching(bool on) {
+    switchingAudio = on;
+    _voiceApplying?.value = on;
+    _notify();
   }
 
   Future<void> _applyVoice(CallConnection connection) async {

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
 import 'platform/livekit_media.dart';
+import 'platform/system_audio_devices.dart';
 import 'ui/auth/loaf_session.dart';
 import 'ui/auth/session_root.dart';
 import 'ui/model/updater.dart';
@@ -99,8 +100,7 @@ Future<void> main() async {
   );
   // The stored session restores from disk before the first frame, so a
   // signed-in app never flashes the sign-in screen.
-  // Calls are checked on Linux alone so far.
-  final calls = defaultTargetPlatform == TargetPlatform.linux;
+  final calls = hasCalls;
   if (backend == 'mock') {
     session = MockSession();
     voice = await VoiceController.load(
@@ -110,17 +110,24 @@ Future<void> main() async {
   } else {
     final matrix = await MatrixSession.open(desktop: isDesktop);
     session = matrix;
+    // The Mac's own account of its devices; WebRTC's is used elsewhere.
+    final system = defaultTargetPlatform == TargetPlatform.macOS
+        ? SystemAudioDevices()
+        : null;
     if (calls) {
       voice = await VoiceController.load(
         await FileVoiceStore.inSupportDirectory(),
-        devices: const LiveKitAudioDevices(),
+        devices: system ?? const LiveKitAudioDevices(),
       );
     }
     newRooms = () => MatrixRooms(
       matrix.client,
       externalMedia: appearance.externalMediaListenable,
-      callMedia: calls ? const LiveKitMedia() : null,
+      callMedia: calls
+          ? LiveKitMedia(selectSpeaker: system?.selectSpeaker)
+          : null,
       voice: voice?.settings,
+      voiceApplying: voice?.applying,
     );
     updater = pickUpdater();
   }

@@ -1131,6 +1131,7 @@ class _AppShellState extends State<AppShell> {
       CallPhase.ringing => 'Ringing…',
       CallPhase.connecting => 'Connecting…',
       CallPhase.reconnecting => 'Reconnecting…',
+      _ when _calls.switchingAudio => 'Switching audio…',
       _ => session.direct ? 'Call connected' : 'Voice connected',
     };
     return ConnectedCallBar(

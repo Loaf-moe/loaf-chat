@@ -99,11 +99,15 @@ class SettingsChoice extends StatelessWidget {
     required this.title,
     required this.selected,
     required this.onTap,
+    this.busy = false,
   });
 
   final String title;
   final bool selected;
   final VoidCallback onTap;
+
+  /// Chosen, and not yet in place: a spinner stands in for the check.
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -134,7 +138,15 @@ class SettingsChoice extends StatelessWidget {
                     style: loafBody(15, 500).copyWith(color: tokens.textStrong),
                   ),
                 ),
-                if (selected)
+                if (busy)
+                  SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: tokens.accent,
+                    ),
+                  )
+                else if (selected)
                   Icon(LucideIcons.check, size: 18, color: tokens.accent),
               ],
             ),

@@ -67,6 +67,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     this._mediaRoot,
     this._callMedia,
     this._voice,
+    this._voiceApplying,
     this.externalMedia,
     @visibleForTesting this._now,
   }) {
@@ -147,6 +148,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// The microphone and the speaker a call uses. Null: the system's
   /// defaults.
   final ValueListenable<VoiceSettings>? _voice;
+  final ValueNotifier<bool>? _voiceApplying;
   MatrixCalls? _calls;
 
   @override
@@ -157,6 +159,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       occupants: _occupants,
       me: () => me,
       voice: _voice,
+      voiceApplying: _voiceApplying,
       now: _now,
     ),
     null => null,
