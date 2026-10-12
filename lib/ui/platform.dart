@@ -30,6 +30,9 @@ bool get picksAudioDevices => defaultTargetPlatform != TargetPlatform.iOS;
 /// permission and a check by hand before it joins this list; see "Scope" in
 /// the voice design spec.
 bool get hasCalls => switch (defaultTargetPlatform) {
-  TargetPlatform.linux || TargetPlatform.macOS || TargetPlatform.iOS => true,
+  TargetPlatform.linux ||
+  TargetPlatform.macOS ||
+  TargetPlatform.iOS ||
+  TargetPlatform.windows => true,
   _ => false,
 };

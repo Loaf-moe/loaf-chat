@@ -20,7 +20,7 @@ separate work.
 - Switching the microphone's echo cancellation, noise suppression,
   automatic gain and high-pass filter.
 - Turning one person up or down.
-- Linux and macOS desktop, and iOS.
+- Linux, macOS and Windows desktop, and iOS.
 
 **Out:**
 
@@ -29,7 +29,7 @@ separate work.
 | Calls in encrypted rooms                                | Element Call encrypts media per participant there; a client without those keys can neither hear nor be heard |
 | Camera and screen sharing                               | The Linux libwebrtc build encodes and decodes in software only; needs its own research                       |
 | DM calls and ringing                                    | Roadmap phase 8                                                                                              |
-| Windows, Android                                        | Each needs microphone permissions and its own check by hand                                                  |
+| Android                                                 | Needs microphone permissions and its own check by hand                                                       |
 | Calls whose members publish to another homeserver's SFU | loaf.moe has one SFU                                                                                         |
 | Element Call's `matrix_2_0` mode                        | Needs sticky events (MSC4354), which the homeserver does not have                                            |
 
@@ -344,7 +344,7 @@ stays connected, and their client writes the membership back.
 
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
 it is given a `CallMedia`, and `main.dart` gives it one where `hasCalls`
-says so: Linux, macOS and iOS. On other platforms a voice channel still reads
+says so: everywhere but Android. There a voice channel still reads
 "voice chat isn't available yet".
 
 ## Platform and build
@@ -369,9 +369,26 @@ says so: Linux, macOS and iOS. On other platforms a voice channel still reads
   the session (`CallAudioHold`, `LoafMedia.callHoldsAudio`), and until the
   call is over a video leaves the session as the call set it. A video still
   making sound when the call ends takes the session back.
-- **Windows.** Adding the dependency makes this build link WebRTC too (a
-  downloaded DLL). Calls stay off there: `hasCalls` in
-  `lib/ui/platform.dart` names where they are on.
+- **Windows.** Switched on without anyone having joined a call there: no
+  one who works on Loaf Chat has a Windows machine. What it rests on:
+  - The plugin's Windows code is its Linux code (`common/cpp`), down to how
+    it lists devices and switches them; only WebRTC's audio backend
+    underneath differs (WASAPI for PulseAudio).
+  - `libwebrtc.dll` has been in the bundle since 0.1.18, and the app loads
+    it at launch, calls or no calls; that release's smoke test installed
+    the app and saw it stay up.
+  - A desktop app needs no manifest entry or entitlement for the
+    microphone on Windows.
+
+  What nobody has seen:
+  - Whether the device lists carry the default a second time, as Linux's
+    do, and under what name.
+  - Whether changing the speaker stalls the app, as it did on macOS.
+  - A microphone switched off for desktop apps in Windows' privacy
+    settings. Windows may hand such an app silence rather than an error,
+    and the call would then show you as unmuted and unheard.
+  - Whether Windows' firewall asks about the app on a first call.
+
 - **Flatpak** already has `--socket=pulseaudio` and `--device=all`.
 
 ## Testing

@@ -31,6 +31,7 @@ void main() {
       TargetPlatform.linux,
       TargetPlatform.macOS,
       TargetPlatform.iOS,
+      TargetPlatform.windows,
     }),
     (tester) async {
       expect(hasCalls, isTrue);
@@ -39,10 +40,7 @@ void main() {
 
   testWidgets(
     'voice channels stay off everywhere else',
-    variant: TargetPlatformVariant(const {
-      TargetPlatform.android,
-      TargetPlatform.windows,
-    }),
+    variant: TargetPlatformVariant(const {TargetPlatform.android}),
     (tester) async {
       expect(hasCalls, isFalse);
     },
