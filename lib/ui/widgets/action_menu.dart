@@ -100,8 +100,8 @@ Future<T?> showActionSheet<T>(
 }
 
 /// Pointer: a menu at [position], in global coordinates. Escape or a click
-/// elsewhere closes it. [leading] entries go above the actions — a divider
-/// is added between them.
+/// elsewhere closes it. [leading] entries go above the actions, with a
+/// divider between them when there are both.
 Future<T?> showActionMenu<T>(
   BuildContext context, {
   required Offset position,
@@ -124,7 +124,8 @@ Future<T?> showActionMenu<T>(
     ),
     items: [
       ...leading,
-      if (leading.isNotEmpty) const PopupMenuDivider(height: 9),
+      if (leading.isNotEmpty && items.isNotEmpty)
+        const PopupMenuDivider(height: 9),
       for (final item in items)
         PopupMenuItem<T>(
           value: item.value,

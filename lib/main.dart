@@ -1,16 +1,23 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
+import 'platform/livekit_media.dart';
 import 'ui/auth/loaf_session.dart';
 import 'ui/auth/session_root.dart';
 import 'ui/model/updater.dart';
+import 'ui/mock/mock_audio_devices.dart';
 import 'ui/mock/mock_session.dart';
 import 'ui/platform.dart';
 import 'ui/rooms/rooms.dart';
+import 'ui/shell/before_quit.dart';
 import 'ui/model/chime.dart';
 import 'ui/settings/notification_settings.dart';
+import 'ui/settings/voice_settings.dart';
 import 'ui/theme/appearance.dart';
 import 'ui/theme/loaf_theme.dart';
 import 'ui/window/window_chrome.dart';
@@ -24,6 +31,10 @@ final themeMode = ValueNotifier<ThemeMode>(ThemeMode.dark);
 /// Which theme the app wears. Lives as long as the app, like [themeMode].
 late final AppearanceController appearance;
 late final NotificationController notifications;
+
+/// Which microphone and speaker calls use; null where there are no calls.
+/// Lives as long as the app, like [themeMode].
+VoiceController? voice;
 
 /// The app talks to a real homeserver; `--dart-define=LOAF_BACKEND=mock`
 /// plays the mock instead, for previews and the debug levers.
@@ -44,8 +55,35 @@ Rooms Function()? newRooms;
 /// mock's. Lives as long as the app.
 Updater? updater;
 
+/// What the app must do before it ends by a signal. Lives as long as the
+/// app.
+final beforeQuit = BeforeQuit();
+
+/// Ends the app on SIGINT or SIGTERM once [beforeQuit] has run. Watching a
+/// signal takes over from its default action, so nothing else would. A
+/// second signal ends it at once.
+void _quitOnSignals(BeforeQuit beforeQuit) {
+  var quitting = false;
+  for (final signal in [ProcessSignal.sigint, ProcessSignal.sigterm]) {
+    signal.watch().listen((_) async {
+      if (quitting) exit(128 + signal.signalNumber);
+      quitting = true;
+      try {
+        await beforeQuit.run();
+      } on Object catch (e, s) {
+        // The app ends either way; say what went wrong on the way out.
+        stderr.writeln('before quitting: $e\n$s');
+      }
+      exit(0);
+    });
+  }
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (!kIsWeb && (Platform.isLinux || Platform.isMacOS)) {
+    _quitOnSignals(beforeQuit);
+  }
   // Restored before the first frame, like the session, so the app never
   // flashes the wrong palette. The mock keeps nothing between runs.
   appearance = await AppearanceController.load(
@@ -61,14 +99,28 @@ Future<void> main() async {
   );
   // The stored session restores from disk before the first frame, so a
   // signed-in app never flashes the sign-in screen.
+  // Calls are checked on Linux alone so far.
+  final calls = defaultTargetPlatform == TargetPlatform.linux;
   if (backend == 'mock') {
     session = MockSession();
+    voice = await VoiceController.load(
+      MemoryVoiceStore(),
+      devices: MemoryAudioDevices(),
+    );
   } else {
     final matrix = await MatrixSession.open(desktop: isDesktop);
     session = matrix;
+    if (calls) {
+      voice = await VoiceController.load(
+        await FileVoiceStore.inSupportDirectory(),
+        devices: const LiveKitAudioDevices(),
+      );
+    }
     newRooms = () => MatrixRooms(
       matrix.client,
       externalMedia: appearance.externalMediaListenable,
+      callMedia: calls ? const LiveKitMedia() : null,
+      voice: voice?.settings,
     );
     updater = pickUpdater();
   }
@@ -82,51 +134,58 @@ class LoafApp extends StatelessWidget {
   const LoafApp({super.key});
 
   @override
-  Widget build(BuildContext context) => AppearanceScope(
-    controller: appearance,
-    child: NotificationScope(
-      controller: notifications,
-      child: ListenableBuilder(
-        listenable: Listenable.merge([appearance, themeMode]),
-        builder: (context, _) {
-          final mode = themeMode.value;
-          // 日本 has one palette, so it fills both slots and Ctrl+T leaves it be.
-          final nihon = appearance.effective == LoafThemeId.nihon;
-          return MaterialApp(
-            title: 'Loaf Chat',
-            debugShowCheckedModeBanner: false,
-            theme: nihon ? loafNihonTheme() : loafLightTheme(),
-            darkTheme: nihon ? loafNihonTheme() : loafDarkTheme(),
-            themeMode: mode,
-            builder: (context, child) =>
-                WindowChrome(controller: windowChrome, child: child!),
-            home: CallbackShortcuts(
-              bindings: {
-                // Ctrl+T flips the palette. This exists so both themes get looked
-                // at during design; it is not a product feature.
-                const SingleActivator(
-                  LogicalKeyboardKey.keyT,
-                  control: true,
-                ): () {
-                  themeMode.value = mode == ThemeMode.dark
-                      ? ThemeMode.light
-                      : ThemeMode.dark;
-                },
+  Widget build(BuildContext context) {
+    final app = ListenableBuilder(
+      listenable: Listenable.merge([appearance, themeMode]),
+      builder: (context, _) {
+        final mode = themeMode.value;
+        // 日本 has one palette, so it fills both slots and Ctrl+T leaves it be.
+        final nihon = appearance.effective == LoafThemeId.nihon;
+        return MaterialApp(
+          title: 'Loaf Chat',
+          debugShowCheckedModeBanner: false,
+          theme: nihon ? loafNihonTheme() : loafLightTheme(),
+          darkTheme: nihon ? loafNihonTheme() : loafDarkTheme(),
+          themeMode: mode,
+          builder: (context, child) =>
+              WindowChrome(controller: windowChrome, child: child!),
+          home: CallbackShortcuts(
+            bindings: {
+              // Ctrl+T flips the palette. This exists so both themes get looked
+              // at during design; it is not a product feature.
+              const SingleActivator(
+                LogicalKeyboardKey.keyT,
+                control: true,
+              ): () {
+                themeMode.value = mode == ThemeMode.dark
+                    ? ThemeMode.light
+                    : ThemeMode.dark;
               },
-              // Sign-in or the app, as the session says. The debug menu's levers
-              // move between them.
-              child: Focus(
-                autofocus: true,
-                child: SessionRoot(
-                  session: session,
-                  rooms: newRooms,
-                  updater: updater,
-                ),
+            },
+            // Sign-in or the app, as the session says. The debug menu's levers
+            // move between them.
+            child: Focus(
+              autofocus: true,
+              child: SessionRoot(
+                session: session,
+                rooms: newRooms,
+                updater: updater,
+                beforeQuit: beforeQuit,
               ),
             ),
-          );
+          ),
+        );
+      },
+    );
+    return AppearanceScope(
+      controller: appearance,
+      child: NotificationScope(
+        controller: notifications,
+        child: switch (voice) {
+          final voice? => VoiceScope(controller: voice, child: app),
+          null => app,
         },
       ),
-    ),
-  );
+    );
+  }
 }

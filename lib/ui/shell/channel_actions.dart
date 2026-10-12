@@ -246,3 +246,37 @@ Future<String?> showOlderConversations(BuildContext context, Channel channel) {
     ),
   );
 }
+
+/// Confirms kicking [member] from [channel] before anything is sent.
+Future<bool> confirmKick(
+  BuildContext context,
+  Member member,
+  Channel channel,
+) async {
+  final tokens = LoafTokens.of(context);
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      backgroundColor: tokens.card,
+      title: Text(
+        'kick ${member.name} from ${channel.name}?',
+        style: loafBody(17, 600).copyWith(color: tokens.textStrong),
+      ),
+      content: Text(
+        'they are removed from the channel and its call.',
+        style: loafBody(14, 400).copyWith(color: tokens.textBody),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text('cancel', style: TextStyle(color: tokens.textMuted)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text('kick', style: TextStyle(color: tokens.accent)),
+        ),
+      ],
+    ),
+  );
+  return confirmed ?? false;
+}

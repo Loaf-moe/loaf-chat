@@ -71,6 +71,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>talk in voice channels</string>
+	<key>NSCameraUsageDescription</key>
+	<string>turn your camera on in a call</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>send photos and videos, and pick a picture for your profile</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
