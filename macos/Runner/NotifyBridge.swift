@@ -6,9 +6,9 @@ import UserNotifications
 /// Desktop notifications on macOS. Each message is donated as an incoming
 /// INSendMessageIntent, so it shows as a communication notification with
 /// the sender's picture. That needs Apple's communication entitlement:
-/// debug builds carry it through their development profile, releases get
-/// it at signing (`tool/release/macos.sh`). Without it the update fails and
-/// the plain notification goes. The other end is
+/// both `DebugProfile.entitlements` and `Release.entitlements` carry it,
+/// and Xcode's automatic signing supplies the profile that allows it.
+/// Without it the update fails and the plain notification goes. The other end is
 /// `lib/notify/channel_notifications.dart`.
 final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
   private let channel: FlutterMethodChannel
@@ -95,7 +95,7 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
         identifier: "\(roomId)|\(eventId)", content: shown, trigger: nil)
       self.center.add(request) { error in
         if let error { NSLog("[loaf notify] \(error)") }
-        DispatchQueue.main.async { result(sound) }
+        DispatchQueue.main.async { result(sound && error == nil) }
       }
     }
   }
