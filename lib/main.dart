@@ -9,7 +9,9 @@ import 'ui/model/updater.dart';
 import 'ui/mock/mock_session.dart';
 import 'ui/platform.dart';
 import 'ui/rooms/rooms.dart';
+import 'notify/pick_notifications.dart';
 import 'ui/model/chime.dart';
+import 'ui/model/message_route.dart';
 import 'ui/settings/notification_settings.dart';
 import 'ui/theme/appearance.dart';
 import 'ui/theme/loaf_theme.dart';
@@ -24,6 +26,9 @@ final themeMode = ValueNotifier<ThemeMode>(ThemeMode.dark);
 /// Which theme the app wears. Lives as long as the app, like [themeMode].
 late final AppearanceController appearance;
 late final NotificationController notifications;
+
+/// Where clicked notifications lead, for the app's life; null without them.
+Stream<MessageRoute>? noticeRoutes;
 
 /// The app talks to a real homeserver; `--dart-define=LOAF_BACKEND=mock`
 /// plays the mock instead, for previews and the debug levers.
@@ -53,12 +58,18 @@ Future<void> main() async {
         ? MemoryAppearanceStore()
         : await FileAppearanceStore.inSupportDirectory(),
   );
+  final chime = NativeChime();
+  final desktop = backend == 'mock'
+      ? null
+      : pickDesktopNotifications(chime: chime);
   notifications = await NotificationController.load(
     backend == 'mock'
         ? MemoryNotificationStore()
         : await FileNotificationStore.inSupportDirectory(),
-    chime: NativeChime(),
+    chime: chime,
+    desktop: desktop,
   );
+  noticeRoutes = desktop == null ? null : fronted(desktop.clicks);
   // The stored session restores from disk before the first frame, so a
   // signed-in app never flashes the sign-in screen.
   if (backend == 'mock') {
@@ -121,6 +132,7 @@ class LoafApp extends StatelessWidget {
                   session: session,
                   rooms: newRooms,
                   updater: updater,
+                  routes: noticeRoutes,
                 ),
               ),
             ),

@@ -4,6 +4,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../model/message_route.dart';
 import '../model/updater.dart';
 import '../rooms/rooms.dart';
 import '../shell/app_shell.dart';
@@ -17,9 +18,13 @@ class SessionRoot extends StatefulWidget {
     required this.session,
     this.rooms,
     this.updater,
+    this.routes,
   });
 
   final LoafSession session;
+
+  /// Where clicked notifications lead; the shell follows them.
+  final Stream<MessageRoute>? routes;
 
   /// Makes the account's rooms each time the app opens onto them. Left
   /// out, the shell plays the mock's.
@@ -96,6 +101,7 @@ class _SessionRootState extends State<SessionRoot> {
         session: _session,
         rooms: widget.rooms,
         updater: widget.updater,
+        routes: widget.routes,
       );
     }
     return LoginPage(
