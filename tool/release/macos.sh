@@ -38,7 +38,14 @@ security list-keychains -d user -s "$keychain" login.keychain-db
 
 plutil -lint tool/release/macos-export.plist
 
-mise exec -- flutter build macos --release --config-only \
+# The build runs third-party code (Flutter assemble, Run Script phases,
+# SwiftPM and pub build hooks); none of it needs a secret. The API key
+# reaches xcodebuild as a file path and IDs in its arguments, and the
+# keychain is already unlocked, so every secret leaves the environment.
+build_env=(env -u NOTARY_KEY_P8 -u NOTARY_KEY_ID -u NOTARY_ISSUER_ID
+  -u MACOS_CERTIFICATE_P12 -u MACOS_CERTIFICATE_PASSWORD -u SPARKLE_PRIVATE_KEY)
+
+"${build_env[@]}" mise exec -- flutter build macos --release --config-only \
   --build-name="$version" --build-number="$build" \
   --dart-define=LOAF_BUILD="$build" \
   --dart-define=LOAF_VERSION="$version"
@@ -61,14 +68,19 @@ auth=(-authenticationKeyPath "$work/key.p8"
 # no development certificate, so each release may make a new one, and Apple
 # caps those. If a run fails on that cap, revoke the stale "Apple
 # Development" certificates the releases made.
-xcodebuild archive -workspace macos/Runner.xcworkspace -scheme Runner \
+"${build_env[@]}" xcodebuild archive -workspace macos/Runner.xcworkspace -scheme Runner \
   -configuration Release -destination 'generic/platform=macOS' \
   -archivePath "$work/Runner.xcarchive" \
+  ENABLE_HARDENED_RUNTIME=YES \
   -allowProvisioningUpdates "${auth[@]}"
+
+# ENABLE_HARDENED_RUNTIME: the project leaves it off, and the export only
+# keeps the archive's flags. Notarization rejects an app without it; the
+# old manual signing passed --options runtime instead.
 
 # Re-signs every nested binary with Developer ID, inside out, and embeds the
 # Developer ID provisioning profile that communication notifications need.
-xcodebuild -exportArchive -archivePath "$work/Runner.xcarchive" \
+"${build_env[@]}" xcodebuild -exportArchive -archivePath "$work/Runner.xcarchive" \
   -exportOptionsPlist tool/release/macos-export.plist \
   -exportPath "$work/export" -allowProvisioningUpdates "${auth[@]}"
 
@@ -95,7 +107,8 @@ entitlement com.apple.security.temporary-exception.mach-lookup.global-name >/dev
   || fail "the exported app carries get-task-allow"
 [ -f "$app/Contents/embedded.provisionprofile" ] \
   || fail "the exported app has no embedded provisioning profile"
-codesign --verify --deep --strict "$app"
+codesign --verify --deep --strict "$app" \
+  || fail "the exported app fails codesign --verify --deep --strict"
 # The export re-signs Sparkle's helpers and must leave the Downloader's
 # entitlements as Sparkle shipped them (none, in 2.8.0).
 codesign -d --entitlements - --xml "$app/$downloader" > "$work/downloader.entitlements"
@@ -116,6 +129,16 @@ fi
 codesign -dvv "$app" > "$work/signature.txt" 2>&1
 grep -q '^Authority=Developer ID Application' "$work/signature.txt" \
   || fail "the exported app is not signed with Developer ID"
+# Notarization requires the hardened runtime.
+grep -q '^CodeDirectory .*flags=.*runtime' "$work/signature.txt" \
+  || fail "the exported app is not signed with the hardened runtime"
+# Sparkle compares CFBundleVersion: a wrong one publishes an update that
+# never installs, or one that installs forever.
+info() { /usr/libexec/PlistBuddy -c "Print :$1" "$app/Contents/Info.plist" 2>/dev/null; }
+[ "$(info CFBundleShortVersionString)" = "$version" ] \
+  || fail "the exported app's version is $(info CFBundleShortVersionString), not $version"
+[ "$(info CFBundleVersion)" = "$build" ] \
+  || fail "the exported app's build is $(info CFBundleVersion), not $build"
 
 stage="$work/dmg"; mkdir "$stage"
 cp -R "$app" "$stage/"
