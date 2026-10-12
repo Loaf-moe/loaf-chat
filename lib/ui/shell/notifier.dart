@@ -60,8 +60,8 @@ class Notifier {
   static final Stopwatch _stopwatch = Stopwatch()..start();
   static Duration _clock() => _stopwatch.elapsed;
 
-  /// When a chime or notification last sounded, on that clock: messages within a second of
-  /// it are the same moment, and get one chime.
+  /// When a chime or notification last sounded, on that clock: messages
+  /// within a second of it are the same moment, and get one chime.
   Duration? _lastChime;
 
   /// The same test the channel view uses before it marks anything read.
