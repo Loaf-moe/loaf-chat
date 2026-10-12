@@ -1,0 +1,4 @@
+#!/bin/sh
+# Apple's rsync, ahead of any other on the path: Flutter's Swift package copy
+# needs the parent directories it makes. See [env] in mise.toml.
+exec /usr/bin/rsync "$@"
