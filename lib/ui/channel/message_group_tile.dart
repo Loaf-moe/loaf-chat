@@ -13,6 +13,7 @@ import '../model/media_source.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
+import 'link_preview_card.dart';
 import 'media_open.dart';
 import 'media_row.dart';
 import 'message_actions.dart';
@@ -228,6 +229,7 @@ class _MessageBody extends StatelessWidget {
           if (message.media != null) const SizedBox(height: LoafSpace.x2),
           _text(tokens),
         ],
+        if (message.previewLink case final link?) LinkPreviewCard(link: link),
         if (message.reactions.isNotEmpty) ...[
           const SizedBox(height: LoafSpace.x2),
           _ReactionsWrap(

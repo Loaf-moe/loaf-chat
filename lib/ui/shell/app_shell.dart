@@ -49,6 +49,7 @@ import '../mock/mock_session.dart';
 import '../verify/verification_controller.dart';
 import '../verify/verify_panel.dart';
 import '../verify/verify_state.dart';
+import '../model/link_previews.dart';
 import '../model/media_source.dart';
 import '../widgets/avatar_images.dart';
 import '../widgets/toast.dart';
@@ -1407,25 +1408,28 @@ class _AppShellState extends State<AppShell> {
       images: _rooms.avatarImages,
       child: MediaSourceScope(
         source: _rooms.media,
-        child: PresenceScope(
-          shared: _profile.presenceShared,
-          child: CallbackShortcuts(
-            bindings: _shortcuts,
-            child: Focus(
-              autofocus: true,
-              child: Stack(
-                children: [
-                  shell,
-                  if (ring != null && !_callKit)
-                    _IncomingPosition(
-                      child: IncomingCallCard(
-                        ring: ring,
-                        onAccept: _accept,
-                        onDecline: _calls.decline,
-                        onOpen: _openIncoming,
+        child: LinkPreviewsScope(
+          previews: _rooms.linkPreviews,
+          child: PresenceScope(
+            shared: _profile.presenceShared,
+            child: CallbackShortcuts(
+              bindings: _shortcuts,
+              child: Focus(
+                autofocus: true,
+                child: Stack(
+                  children: [
+                    shell,
+                    if (ring != null && !_callKit)
+                      _IncomingPosition(
+                        child: IncomingCallCard(
+                          ring: ring,
+                          onAccept: _accept,
+                          onDecline: _calls.decline,
+                          onOpen: _openIncoming,
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

@@ -12,6 +12,7 @@ import '../model/models.dart';
 import '../settings/devices.dart';
 import '../shell/profile.dart';
 import '../spaces/space_directory.dart';
+import '../model/link_previews.dart';
 import '../model/media_source.dart';
 import '../widgets/avatar_images.dart';
 
@@ -99,6 +100,9 @@ abstract interface class Rooms implements Listenable {
   /// Turns the media on this account's messages into pictures and files on
   /// disk, the way [avatarImages] does for avatars.
   MediaSource get media;
+
+  /// What the links in this account's messages lead to.
+  LinkPreviews get linkPreviews;
 
   /// Your presence and status, and everyone else's. The rooms own it and
   /// dispose of it with themselves.

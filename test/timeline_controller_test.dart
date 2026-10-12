@@ -192,6 +192,72 @@ void main() {
       expect(t.jumpTarget, isNull);
     });
 
+    test('a message it starts with offers its first link for a preview', () {
+      final c = TimelineController([
+        Message(
+          id: '1',
+          author: _them,
+          sentAt: DateTime(2026, 9, 24, 10),
+          body: 'read https://loaf.moe/bake first',
+        ),
+        _msg('2', _them),
+      ], you: _you);
+      addTearDown(c.dispose);
+      expect(c.messages.first.previewLink, Uri.parse('https://loaf.moe/bake'));
+      expect(c.messages.last.previewLink, isNull);
+    });
+
+    test('a file it starts with offers no link', () {
+      final c = TimelineController([
+        Message(
+          id: '1',
+          author: _them,
+          sentAt: DateTime(2026, 9, 24, 10),
+          body: 'from https://loaf.moe/bake',
+          media: const Media(
+            kind: MediaKind.file,
+            name: 'recipe.pdf',
+            ref: 'recipe',
+          ),
+        ),
+      ], you: _you);
+      addTearDown(c.dispose);
+      expect(c.messages.single.previewLink, isNull);
+    });
+
+    test('a sent message offers its first link for a preview', () {
+      final c = TimelineController([], you: _you);
+      addTearDown(c.dispose);
+      c.send('read https://loaf.moe/bake first');
+      expect(c.messages.single.previewLink, Uri.parse('https://loaf.moe/bake'));
+    });
+
+    test('a sent message with no link offers none', () {
+      final c = TimelineController([], you: _you);
+      addTearDown(c.dispose);
+      c.send('no links');
+      expect(c.messages.single.previewLink, isNull);
+    });
+
+    test('an edit that changes the link changes what is offered', () {
+      final c = TimelineController([], you: _you);
+      addTearDown(c.dispose);
+      c.send('read https://loaf.moe/bake');
+      c.saveEdit(c.messages.single.id, 'read https://loaf.moe/proof');
+      expect(
+        c.messages.single.previewLink,
+        Uri.parse('https://loaf.moe/proof'),
+      );
+    });
+
+    test('an edit that removes the link offers none', () {
+      final c = TimelineController([], you: _you);
+      addTearDown(c.dispose);
+      c.send('read https://loaf.moe/bake');
+      c.saveEdit(c.messages.single.id, 'never mind');
+      expect(c.messages.single.previewLink, isNull);
+    });
+
     test('the mock is always at the live end', () {
       final t = timeline();
       addTearDown(t.dispose);
