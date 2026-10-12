@@ -37,6 +37,10 @@ description = "loaf_media's Dart tests"
 dir = "packages/loaf_media"
 run = "flutter test"
 
+[tasks."test:media:apple"]
+description = "loaf_media's Swift tests; needs a Mac"
+run = "swift test --package-path packages/loaf_media/darwin/LoafMediaCore"
+
 [tasks."test:streams"]
 description = "loaf_streams' Rust tests"
 run = "cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml"
@@ -65,8 +69,13 @@ run = "flutter build ios --debug --simulator"
 description = "Run on this Mac; arguments go to flutter run"
 run = "flutter run -d macos"
 
+[tasks."run:ios"]
+description = "Run on an iPhone or iPad"
+usage = 'arg "<device>" help="Its name or id, as flutter devices lists it"'
+run = 'flutter run -d "{{usage.device}}"'
+
 [tasks."run:ios:sim"]
-description = "Run in an iOS simulator; arguments go to flutter run"
+description = "Run in an iOS simulator"
 usage = 'flag "--simulator <name>" default="iPhone 17" help="The simulator, by name"'
 run = [
   # Boots it if it is not, and waits: an install into a simulator still

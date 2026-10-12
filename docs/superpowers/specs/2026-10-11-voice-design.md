@@ -20,18 +20,18 @@ separate work.
 - Switching the microphone's echo cancellation, noise suppression,
   automatic gain and high-pass filter.
 - Turning one person up or down.
-- Linux and macOS desktop.
+- Linux and macOS desktop, and iOS.
 
 **Out:**
 
-| Deferred                                                | Why                                                                                                                    |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Calls in encrypted rooms                                | Element Call encrypts media per participant there; a client without those keys can neither hear nor be heard           |
-| Camera and screen sharing                               | The Linux libwebrtc build encodes and decodes in software only; needs its own research                                 |
-| DM calls and ringing                                    | Roadmap phase 8                                                                                                        |
-| iOS, Windows, Android                                   | Each needs microphone permissions and its own check by hand; iOS also needs the audio session shared with `loaf_media` |
-| Calls whose members publish to another homeserver's SFU | loaf.moe has one SFU                                                                                                   |
-| Element Call's `matrix_2_0` mode                        | Needs sticky events (MSC4354), which the homeserver does not have                                                      |
+| Deferred                                                | Why                                                                                                          |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Calls in encrypted rooms                                | Element Call encrypts media per participant there; a client without those keys can neither hear nor be heard |
+| Camera and screen sharing                               | The Linux libwebrtc build encodes and decodes in software only; needs its own research                       |
+| DM calls and ringing                                    | Roadmap phase 8                                                                                              |
+| Windows, Android                                        | Each needs microphone permissions and its own check by hand                                                  |
+| Calls whose members publish to another homeserver's SFU | loaf.moe has one SFU                                                                                         |
+| Element Call's `matrix_2_0` mode                        | Needs sticky events (MSC4354), which the homeserver does not have                                            |
 
 ## Findings (checked 2026-10-11)
 
@@ -344,7 +344,7 @@ stays connected, and their client writes the membership back.
 
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
 it is given a `CallMedia`, and `main.dart` gives it one where `hasCalls`
-says so: Linux and macOS. On other platforms a voice channel still reads
+says so: Linux, macOS and iOS. On other platforms a voice channel still reads
 "voice chat isn't available yet".
 
 ## Platform and build
@@ -359,9 +359,19 @@ says so: Linux and macOS. On other platforms a voice channel still reads
   and its release is signed for the hardened runtime; both refuse the
   microphone without the `com.apple.security.device.audio-input`
   entitlement, so both entitlements files carry it.
-- **iOS, Windows.** Adding the dependency makes these builds link WebRTC too
-  (a Swift package binary on iOS, a downloaded DLL on Windows). Calls stay
-  off there: `hasCalls` in `lib/ui/platform.dart` names where they are on.
+- **iOS.** WebRTC comes as a Swift package binary. The system routes sound
+  there, from Control Center, so the voice section has no microphone or
+  speaker to choose (`picksAudioDevices`) and the call follows the route.
+  Checked in the simulator only so far. A call and an inline video share
+  one audio session there. `loaf_media` sets it to playback while a video
+  plays with its sound on and deactivates it when the video stops, either
+  of which would take the call's sound; so the app tells it when a call has
+  the session (`CallAudioHold`, `LoafMedia.callHoldsAudio`), and until the
+  call is over a video leaves the session as the call set it. A video still
+  making sound when the call ends takes the session back.
+- **Windows.** Adding the dependency makes this build link WebRTC too (a
+  downloaded DLL). Calls stay off there: `hasCalls` in
+  `lib/ui/platform.dart` names where they are on.
 - **Flatpak** already has `--socket=pulseaudio` and `--device=all`.
 
 ## Testing

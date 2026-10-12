@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import 'settings_controls.dart';
 import 'voice_settings.dart';
@@ -25,7 +26,7 @@ class _VoiceSectionState extends State<VoiceSection> {
     super.initState();
     // Not every system says when a device comes or goes; opening the
     // section always looks again.
-    unawaited(widget.controller.refresh());
+    if (picksAudioDevices) unawaited(widget.controller.refresh());
   }
 
   @override
@@ -40,20 +41,22 @@ class _VoiceSectionState extends State<VoiceSection> {
       return ListView(
         padding: const EdgeInsets.all(LoafSpace.x6),
         children: [
-          const SettingsLabel(label: 'microphone'),
-          ..._choices(
-            controller.microphones,
-            settings.microphone,
-            controller.chooseMicrophone,
-          ),
-          const SizedBox(height: LoafSpace.x4),
-          const SettingsLabel(label: 'speaker'),
-          ..._choices(
-            controller.speakers,
-            settings.speaker,
-            controller.chooseSpeaker,
-          ),
-          const SizedBox(height: LoafSpace.x4),
+          if (picksAudioDevices) ...[
+            const SettingsLabel(label: 'microphone'),
+            ..._choices(
+              controller.microphones,
+              settings.microphone,
+              controller.chooseMicrophone,
+            ),
+            const SizedBox(height: LoafSpace.x4),
+            const SettingsLabel(label: 'speaker'),
+            ..._choices(
+              controller.speakers,
+              settings.speaker,
+              controller.chooseSpeaker,
+            ),
+            const SizedBox(height: LoafSpace.x4),
+          ],
           const SettingsLabel(label: 'processing'),
           SettingsCheck(
             title: 'echo cancellation',

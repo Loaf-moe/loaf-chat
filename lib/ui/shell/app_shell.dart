@@ -12,7 +12,9 @@ import 'dart:ui' show AppExitResponse;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:loaf_media/loaf_media.dart';
 
+import '../call/call_audio_hold.dart';
 import '../call/call_controller.dart';
 import '../call/call_health.dart';
 import '../call/call_sounds.dart';
@@ -143,6 +145,7 @@ class _AppShellState extends State<AppShell> {
 
   Notifier? _notifier;
   CallSounds? _callSounds;
+  late final CallAudioHold _audioHold;
 
   @override
   void didChangeDependencies() {
@@ -205,6 +208,10 @@ class _AppShellState extends State<AppShell> {
     _rooms.addListener(_onChange);
     _profile.addListener(_onChange);
     _calls.addListener(_onChange);
+    _audioHold = CallAudioHold(
+      _calls,
+      hold: (held) => unawaited(LoafMedia.callHoldsAudio(held)),
+    );
     _session.addListener(_onSessionChange);
     _updater.addListener(_onChange);
     _routes = widget.routes?.listen(_follow);
@@ -258,6 +265,7 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     _notifier?.dispose();
     _callSounds?.dispose();
+    _audioHold.dispose();
     unawaited(_routes?.cancel());
     _session.removeListener(_onSessionChange);
     _updater.removeListener(_onChange);

@@ -66,6 +66,19 @@ Map<String, bool> _switches(WidgetTester tester) => {
 };
 
 void main() {
+  testWidgets(
+    'iOS has no devices to choose: the system routes its sound',
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    (tester) async {
+      await _pump(tester);
+
+      expect(find.byType(SettingsChoice), findsNothing);
+      expect(find.text('microphone'), findsNothing);
+      expect(find.text('speaker'), findsNothing);
+      expect(_switches(tester), hasLength(4));
+    },
+  );
+
   testWidgets('what is chosen is busy while a call takes it up', (
     tester,
   ) async {

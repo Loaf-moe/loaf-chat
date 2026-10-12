@@ -58,4 +58,37 @@ final class AudioClaimTests: XCTestCase {
     _ = claim.update(view: 1, playing: true, muted: false)
     XCTAssertNil(claim.update(view: 1, playing: true, muted: false))
   }
+
+  func testAVideoStartingDuringACallLeavesTheSessionAlone() {
+    var claim = AudioClaim()
+    _ = claim.call(true)
+    XCTAssertNil(claim.update(view: 1, playing: true, muted: false))
+  }
+
+  func testAVideoStoppingDuringACallLeavesTheSessionAlone() {
+    var claim = AudioClaim()
+    _ = claim.update(view: 1, playing: true, muted: false)
+    _ = claim.call(true)
+    XCTAssertNil(claim.update(view: 1, playing: false, muted: false))
+    XCTAssertNil(claim.remove(view: 1))
+  }
+
+  func testACallStartingOverAVideoLeavesTheSessionAlone() {
+    var claim = AudioClaim()
+    _ = claim.update(view: 1, playing: true, muted: false)
+    XCTAssertNil(claim.call(true))
+  }
+
+  func testACallEndingOverAVideoStillPlayingClaims() {
+    var claim = AudioClaim()
+    _ = claim.call(true)
+    _ = claim.update(view: 1, playing: true, muted: false)
+    XCTAssertEqual(claim.call(false), .claim)
+  }
+
+  func testACallEndingWithNothingPlayingChangesNothing() {
+    var claim = AudioClaim()
+    _ = claim.call(true)
+    XCTAssertNil(claim.call(false))
+  }
 }

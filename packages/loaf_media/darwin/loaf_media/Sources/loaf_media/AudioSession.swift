@@ -6,7 +6,8 @@
   /// The app's default session mutes on the silent switch and cannot do
   /// picture in picture; video needs `.playback`. It is claimed only for as
   /// long as it is needed, so other sounds keep their own behaviour and
-  /// other apps' audio resumes when the video stops. Main thread only.
+  /// other apps' audio resumes when the video stops. A call keeps it for
+  /// itself throughout. Main thread only.
   final class AudioSession {
     static let shared = AudioSession()
 
@@ -20,6 +21,10 @@
 
     func remove(view: Int64) {
       apply(claim.remove(view: view))
+    }
+
+    func call(active: Bool) {
+      apply(claim.call(active))
     }
 
     private func apply(_ transition: AudioClaim.Transition?) {
