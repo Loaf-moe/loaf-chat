@@ -32,10 +32,13 @@ class Noticer {
 
   Future<void> show(Arrival a, {required bool sound}) async {
     if (!settings.notifications) return;
+    // Recorded before the avatar is awaited, which can take seconds: a room
+    // read in that window is then withdrawn like any other (the "seen
+    // unread" rule below), instead of going unnoticed.
+    _shown[a.roomId] = (_shown[a.roomId] ?? false) || _unread(a.roomId);
     final ref = a.senderAvatar;
     final avatarPath = ref == null ? null : await rooms.noticeAvatar(ref);
     if (_disposed || !settings.notifications) return;
-    _shown[a.roomId] = (_shown[a.roomId] ?? false) || _unread(a.roomId);
     await desktop.show(
       noticeFor(
         a,
@@ -46,6 +49,14 @@ class Noticer {
         avatarPath: avatarPath,
       ),
     );
+    // Two cases, kept apart. A room read (or gone) during the show was
+    // seen unread, so `_onRooms` already withdrew it: nothing was up then,
+    // so withdraw again now that the notice is. A room merely counted 0
+    // since the start was never seen unread, its entry is still here, and
+    // it stays: a count can lag its message.
+    if (!_disposed && !_shown.containsKey(a.roomId)) {
+      await desktop.withdraw(a.roomId);
+    }
   }
 
   bool _unread(String roomId) {
