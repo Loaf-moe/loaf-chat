@@ -113,22 +113,37 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       );
       await dir.create(recursive: true);
       final name = sha256.convert(utf8.encode(ref.value)).toString();
-      final file = File(
-        '${dir.path}${Platform.pathSeparator}$name.${_imageExtension(bytes)}',
-      );
-      if (!await file.exists()) await file.writeAsBytes(bytes, flush: true);
+      // A picture Windows can't name by extension is no picture.
+      final ext = imageExtension(bytes);
+      if (ext == null) return null;
+      final file = File('${dir.path}${Platform.pathSeparator}$name.$ext');
+      if (!await file.exists()) {
+        // Written beside, then renamed in: a reader (the OS, reading the
+        // toast's picture) never sees half a file.
+        final part = File('${file.path}.${bytes.hashCode}.part');
+        await part.writeAsBytes(bytes, flush: true);
+        await part.rename(file.path);
+      }
       return file.path;
     } on Object {
       return null;
     }
   }
 
-  /// Windows reads a toast's picture by its extension.
-  static String _imageExtension(Uint8List b) {
-    if (b.length > 3 && b[0] == 0x89 && b[1] == 0x50) return 'png';
-    if (b.length > 2 && b[0] == 0xFF && b[1] == 0xD8) return 'jpg';
-    if (b.length > 3 && b[0] == 0x47 && b[1] == 0x49) return 'gif';
-    return 'webp';
+  /// Windows reads a toast's picture by its extension, so this names the
+  /// format by its magic bytes; null when it is none of the four.
+  @visibleForTesting
+  static String? imageExtension(Uint8List b) {
+    bool at(int i, List<int> m) =>
+        b.length >= i + m.length &&
+        [for (var k = 0; k < m.length; k++) b[i + k] == m[k]].every((x) => x);
+    if (at(0, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) return 'png';
+    if (at(0, [0xFF, 0xD8, 0xFF])) return 'jpg';
+    if (at(0, [0x47, 0x49, 0x46, 0x38])) return 'gif';
+    if (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])) {
+      return 'webp';
+    }
+    return null;
   }
 
   @override
