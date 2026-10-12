@@ -2969,6 +2969,28 @@ Chris, 2026-10-08: "You do it. We already did this. It's the same profile." iOS 
 - [ ] **Step 2:** Write `macos.sh`, `macos-export.plist` and the `release.yml` change. Run `bash -n tool/release/macos.sh`. Check that `actionlint` passes, if it's available.
 - [ ] **Step 3:** Commit (`build(release): sign the macOS release through Apple's cloud, with communication notifications`). The real proof is the tagged release run; the controller watches it.
 
+### Task 9c: The macOS release signs manually, with a profile fetched through the API
+
+Chris made this call on 2026-10-12, after Task 9b had signed its CI archive automatically as Apple Development. That route may mint a new development certificate on every fresh runner, and Apple caps those. The new rule: CI creates nothing in the Apple account. **Nothing in `tool/release/macos.sh` may use `-allowProvisioningUpdates`.**
+
+**What changes in `macos.sh`:**
+1. **Fetch the profile.** Using the App Store Connect API key the job already has (`NOTARY_KEY_P8`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`):
+   - Make an ES256 JWT with `openssl` (`kid` = key id, `iss` = issuer, `aud` = `appstoreconnect-v1`, `exp` ≤ 20 minutes). Convert openssl's DER signature to raw `r‖s`.
+   - `GET /v1/bundleIds?filter[identifier]=moe.loaf.chat.ios`.
+   - From that bundle id's profiles, pick the ACTIVE `MAC_APP_DIRECT` (Developer ID) profile whose certificates include the imported P12's certificate. Match by serial number or SHA-1.
+   - Decode its `profileContent`. Read its UUID and name with `security cms -D`.
+   - If none matches, **fail the release** with an `::error::` naming what to do. Don't create anything.
+2. **Install the profile** where Xcode looks: `~/Library/Developer/Xcode/UserData/Provisioning Profiles/<uuid>.provisionprofile`. Check the right path for the runner's Xcode.
+3. **Archive with manual signing:** `CODE_SIGN_STYLE=Manual`, `CODE_SIGN_IDENTITY="Developer ID Application"`, `DEVELOPMENT_TEAM=6W2A5N37N3`, `PROVISIONING_PROFILE_SPECIFIER=<uuid>`, plus `ENABLE_HARDENED_RUNTIME=YES`. No `-allowProvisioningUpdates` and no auth flags.
+4. **Export with `macos-export.plist`** switched to `signingStyle` `manual`, plus `signingCertificate` `Developer ID Application` and a `provisioningProfiles` map of `moe.loaf.chat.ios` → the profile's UUID. Write the map into a copy of the plist at runtime. The checked-in plist keeps no UUID.
+5. **Keep every existing gate,** the `env -u` secret scrub, the DMG, notarization and the appcast. The gate list grows by one: the embedded profile's UUID is the fetched one.
+6. **Keep the JWT out of the build step's environment,** and never echo it.
+
+**Proving it locally:**
+- Prove steps 2–5 with the Developer ID profile Xcode already made on this Mac. Find it in `~/Library/Developer/Xcode/UserData/Provisioning Profiles/`, or in the earlier export's `embedded.provisionprofile`.
+- Prove the JWT function by signing with a throwaway EC P-256 key and verifying with `openssl`.
+- The API fetch itself is proven only by the tagged run, because the issuer ID lives only in CI.
+
 ### Task 10: Windows: `packages/loaf_notify` and the Rust crate `loaf_notify_win`
 
 **Files:**
