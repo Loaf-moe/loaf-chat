@@ -8,6 +8,7 @@ use std::sync::Arc;
 use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 
+use crate::callback::{Callback, ClickFn};
 use crate::notifier::{self, Notifier};
 use crate::toast::Toast;
 
@@ -21,11 +22,12 @@ const FAILED: i32 = -3;
 /// A pointer argument was null.
 const NULL: i32 = -4;
 
-/// Called on a WinRT thread when a toast is clicked. Dart's
-/// `NativeCallable.listener` runs it later, on its own thread, so both
-/// strings are handed over: Dart copies them, then returns each to
-/// `loaf_notify_string_free`.
-pub type ClickFn = unsafe extern "C" fn(room_id: *mut c_char, event_id: *mut c_char);
+/// What `loaf_notify_new` hands to Dart: the notifier, and the switch for
+/// the click callback its toasts hold.
+struct Handle {
+    notifier: Notifier,
+    callback: Callback,
+}
 
 /// Makes the calling thread able to use WinRT. Dart's thread is not the
 /// runner's COM-initialised main thread, and a thread that already has a
@@ -71,15 +73,27 @@ pub extern "C" fn loaf_notify_new(click: ClickFn) -> *mut c_void {
             eprintln!("[loaf notify] new: {e}");
             return std::ptr::null_mut();
         }
+        let callback = Callback::new(click);
+        let switch = callback.clone();
         let clicked: notifier::Clicked = Arc::new(move |room, event| {
             let (Ok(room), Ok(event)) = (CString::new(room), CString::new(event)) else {
                 return;
             };
-            // SAFETY: ownership of both passes to the callback, which
-            // frees them with `loaf_notify_string_free`.
-            unsafe { click(room.into_raw(), event.into_raw()) };
+            let (room, event) = (room.into_raw(), event.into_raw());
+            // Ownership of both passes to Dart, which frees them with
+            // `loaf_notify_string_free`; if the callback is off they are ours.
+            // SAFETY: both are live CStrings from into_raw.
+            if !unsafe { switch.call(room, event) } {
+                // SAFETY: just made by into_raw and not handed over.
+                drop(unsafe { CString::from_raw(room) });
+                drop(unsafe { CString::from_raw(event) });
+            }
         });
-        Box::into_raw(Box::new(Notifier::new(clicked))).cast::<c_void>()
+        Box::into_raw(Box::new(Handle {
+            notifier: Notifier::new(clicked),
+            callback,
+        }))
+        .cast::<c_void>()
     })
     .unwrap_or(std::ptr::null_mut())
 }
@@ -93,7 +107,11 @@ pub unsafe extern "C" fn loaf_notify_free(notifier: *mut c_void) {
     }
     let _ = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: forwarded from this function's contract.
-        drop(unsafe { Box::from_raw(notifier.cast::<Notifier>()) });
+        let handle = unsafe { Box::from_raw(notifier.cast::<Handle>()) };
+        // Off first: toasts in Action Center outlive the notifier, and Dart
+        // closes its callable once this returns.
+        handle.callback.clear();
+        drop(handle);
     }));
 }
 
@@ -151,7 +169,7 @@ pub unsafe extern "C" fn loaf_notify_show(
             unsafe { string(avatar) }.ok()
         };
         // SAFETY: forwarded from this function's contract.
-        let notifier = unsafe { &*notifier.cast::<Notifier>() };
+        let notifier = unsafe { &(*notifier.cast::<Handle>()).notifier };
         status(
             "show",
             notifier.show(&Toast {
@@ -183,7 +201,7 @@ pub unsafe extern "C" fn loaf_notify_withdraw(
         match unsafe { string(room_id) } {
             Ok(room_id) => {
                 // SAFETY: forwarded from this function's contract.
-                let notifier = unsafe { &*notifier.cast::<Notifier>() };
+                let notifier = unsafe { &(*notifier.cast::<Handle>()).notifier };
                 status("withdraw", notifier.withdraw(room_id))
             }
             Err(e) => e,

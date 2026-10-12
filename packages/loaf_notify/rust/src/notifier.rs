@@ -21,7 +21,8 @@ pub type Clicked = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 pub struct Notifier {
     clicked: Clicked,
-    shown: Mutex<HashMap<String, Vec<ToastNotification>>>,
+    /// Each toast with its `Activated` token.
+    shown: Mutex<HashMap<String, Vec<(ToastNotification, i64)>>>,
 }
 
 impl Notifier {
@@ -40,7 +41,7 @@ impl Notifier {
         notification.SetGroup(&HSTRING::from(group.as_str()))?;
         notification.SetTag(&HSTRING::from(key(toast.event_id)))?;
         let clicked = self.clicked.clone();
-        notification.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(
+        let token = notification.Activated(&TypedEventHandler::<ToastNotification, IInspectable>::new(
             move |_, args| {
                 if let Some(args) = args.as_ref()
                     && let Ok(args) = args.cast::<ToastActivatedEventArgs>()
@@ -56,7 +57,7 @@ impl Notifier {
         ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(AUMID))?
             .Show(&notification)?;
         if let Ok(mut shown) = self.shown.lock() {
-            shown.entry(group).or_default().push(notification);
+            shown.entry(group).or_default().push((notification, token));
         }
         Ok(())
     }
@@ -65,10 +66,30 @@ impl Notifier {
         let group = key(room_id);
         ToastNotificationManager::History()?
             .RemoveGroupWithId(&HSTRING::from(group.as_str()), &HSTRING::from(AUMID))?;
-        if let Ok(mut shown) = self.shown.lock() {
-            shown.remove(&group);
+        if let Ok(mut shown) = self.shown.lock()
+            && let Some(toasts) = shown.remove(&group)
+        {
+            detach(toasts);
         }
         Ok(())
+    }
+}
+
+/// Takes the click handlers off toasts we stop tracking, so they stop
+/// holding the callback.
+fn detach(toasts: Vec<(ToastNotification, i64)>) {
+    for (toast, token) in toasts {
+        let _ = toast.RemoveActivated(token);
+    }
+}
+
+impl Drop for Notifier {
+    fn drop(&mut self) {
+        if let Ok(mut shown) = self.shown.lock() {
+            for (_, toasts) in shown.drain() {
+                detach(toasts);
+            }
+        }
     }
 }
 

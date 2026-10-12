@@ -146,7 +146,9 @@ class WindowsDesktopNotifications implements DesktopNotifications {
   @override
   Future<void> openSystemSettings() async {
     try {
-      await _launch(Uri.parse('ms-settings:notifications'));
+      if (!await _launch(Uri.parse('ms-settings:notifications'))) {
+        _fail('could not open ms-settings:notifications');
+      }
     } on Object catch (e) {
       _fail(e);
     }

@@ -131,8 +131,10 @@ class ToastNotifier {
 
   int blocked() => _blocked();
 
-  /// Frees the notifier and stops listening. Its toasts' handlers die with
-  /// it, so a click after this does nothing.
+  /// Frees the notifier, which first switches its click callback off (so
+  /// once that returns no new call begins, even from a toast still in
+  /// Action Center), then closes the listener. A click already posted to
+  /// the isolate when `close()` runs is dropped, and its two strings leak.
   void dispose() {
     if (_handle != nullptr) _free(_handle);
     _handle = nullptr;

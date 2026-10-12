@@ -52,6 +52,10 @@ fn clip(text: &str, max: usize) -> String {
         return whole;
     }
     const ELLIPSIS: char = '…';
+    // Not even the ellipsis fits.
+    if max < ELLIPSIS.len_utf8() {
+        return String::new();
+    }
     let room = max.saturating_sub(ELLIPSIS.len_utf8());
     let mut out = String::with_capacity(max);
     let mut piece = String::new();
@@ -215,5 +219,18 @@ mod tests {
         let title = "&".repeat(5000);
         let t = Toast { title: &title, body: "hi", room_id: "!r:x", event_id: "$e", avatar: None };
         assert!(xml(&t).len() < 5 * 1024);
+    }
+
+    #[test]
+    fn nothing_fits_in_less_than_an_ellipsis() {
+        assert_eq!(clip("abc", 0), "");
+        assert_eq!(clip("abc", 2), "");
+    }
+
+    #[test]
+    fn a_huge_room_id_leaves_the_text_empty_not_an_ellipsis() {
+        let room = format!("!{}:x", "r".repeat(6000));
+        let t = Toast { title: "Ada", body: "hi", room_id: &room, event_id: "$e", avatar: None };
+        assert!(xml(&t).contains("<text></text><text></text>"));
     }
 }

@@ -164,6 +164,18 @@ void main() {
     await sub.cancel();
   });
 
+  test('a launcher that returns false is logged once', () async {
+    final n = WindowsDesktopNotifications(
+      chime: chime,
+      toasts: toasts,
+      log: logged.add,
+      launch: (_) async => false,
+    );
+    await n.openSystemSettings();
+    await n.openSystemSettings();
+    expect(logged, hasLength(1));
+  });
+
   test('openSystemSettings launches ms-settings', () async {
     await make().openSystemSettings();
     expect(launched, [Uri.parse('ms-settings:notifications')]);
