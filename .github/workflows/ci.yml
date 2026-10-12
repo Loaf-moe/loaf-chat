@@ -71,7 +71,7 @@ jobs:
       - if: ${{ !cancelled() }}
         run: mise exec -- cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml
       - if: ${{ !cancelled() }}
-        run: mise exec -- cargo test --locked --manifest-path packages/loaf_notify/windows/rust/Cargo.toml
+        run: mise exec -- cargo test --locked --manifest-path packages/loaf_notify/rust/Cargo.toml
       - if: ${{ !cancelled() }}
         run: mise exec -- flutter analyze
 

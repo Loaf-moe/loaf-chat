@@ -1,7 +1,7 @@
-/// Desktop notifications on macOS and Windows: one channel, two native
-/// ends. `macos/Runner/NotifyBridge.swift` (UNUserNotificationCenter) and
-/// `packages/loaf_notify/windows` (toasts). The contract is in this
-/// step's plan, Task 8.
+/// Desktop notifications on macOS: one method channel, whose native end is
+/// `macos/Runner/NotifyBridge.swift` (UNUserNotificationCenter). Windows
+/// has no channel; see `windows_notifications.dart`. The contract is in
+/// this step's plan, Task 8.
 library;
 
 import 'dart:async';

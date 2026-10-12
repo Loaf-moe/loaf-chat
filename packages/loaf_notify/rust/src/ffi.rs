@@ -1,9 +1,12 @@
-//! The C API `loaf_notify_plugin.cpp` calls. Every entry point catches
-//! panics; strings are UTF-8 and NUL-terminated.
+//! The C API Dart binds with `@Native` (`packages/loaf_notify/lib/`). Every
+//! entry point catches panics; strings are UTF-8 and NUL-terminated.
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+
+use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
+use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
 
 use crate::notifier::{self, Notifier};
 use crate::toast::Toast;
@@ -18,22 +21,20 @@ const FAILED: i32 = -3;
 /// A pointer argument was null.
 const NULL: i32 = -4;
 
-pub type ClickFn =
-    unsafe extern "C" fn(context: *mut c_void, room_id: *const c_char, event_id: *const c_char);
+/// Called on a WinRT thread when a toast is clicked. Dart's
+/// `NativeCallable.listener` runs it later, on its own thread, so both
+/// strings are handed over: Dart copies them, then returns each to
+/// `loaf_notify_string_free`.
+pub type ClickFn = unsafe extern "C" fn(room_id: *mut c_char, event_id: *mut c_char);
 
-/// The plugin's pointer, sent to the WinRT thread a click arrives on. The
-/// plugin outlives the notifier, and its callback only posts a message.
-struct Context(*mut c_void);
-// SAFETY: see above; the pointer is never dereferenced here.
-unsafe impl Send for Context {}
-// SAFETY: as above.
-unsafe impl Sync for Context {}
-
-impl Context {
-    // A method, so a closure captures the whole Context (which is Send)
-    // and not just its raw-pointer field (edition 2024 captures fields).
-    fn get(&self) -> *mut c_void {
-        self.0
+/// Makes the calling thread able to use WinRT. Dart's thread is not the
+/// runner's COM-initialised main thread, and a thread that already has a
+/// (different) apartment answers `RPC_E_CHANGED_MODE`, which is as good.
+fn apartment() -> windows::core::Result<()> {
+    // SAFETY: no pointers; initialisation is per calling thread.
+    match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
+        Err(e) if e.code() != RPC_E_CHANGED_MODE => Err(e),
+        _ => Ok(()),
     }
 }
 
@@ -64,16 +65,19 @@ fn status(what: &str, result: windows::core::Result<()>) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn loaf_notify_new(click: ClickFn, context: *mut c_void) -> *mut c_void {
+pub extern "C" fn loaf_notify_new(click: ClickFn) -> *mut c_void {
     catch_unwind(|| {
-        let context = Context(context);
+        if let Err(e) = apartment() {
+            eprintln!("[loaf notify] new: {e}");
+            return std::ptr::null_mut();
+        }
         let clicked: notifier::Clicked = Arc::new(move |room, event| {
             let (Ok(room), Ok(event)) = (CString::new(room), CString::new(event)) else {
                 return;
             };
-            // SAFETY: the plugin's callback copies both strings before
-            // returning; they live until then.
-            unsafe { click(context.get(), room.as_ptr(), event.as_ptr()) };
+            // SAFETY: ownership of both passes to the callback, which
+            // frees them with `loaf_notify_string_free`.
+            unsafe { click(room.into_raw(), event.into_raw()) };
         });
         Box::into_raw(Box::new(Notifier::new(clicked))).cast::<c_void>()
     })
@@ -95,9 +99,14 @@ pub unsafe extern "C" fn loaf_notify_free(notifier: *mut c_void) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn loaf_notify_register() -> i32 {
-    guard(|| match notifier::icon_path() {
-        Some(icon) => status("register", notifier::register(&icon)),
-        None => FAILED,
+    guard(|| {
+        if let Err(e) = apartment() {
+            return status("register", Err(e));
+        }
+        match notifier::icon_path() {
+            Some(icon) => status("register", notifier::register(&icon)),
+            None => FAILED,
+        }
     })
 }
 
@@ -116,6 +125,9 @@ pub unsafe extern "C" fn loaf_notify_show(
     guard(|| {
         if notifier.is_null() {
             return NULL;
+        }
+        if let Err(e) = apartment() {
+            return status("show", Err(e));
         }
         // SAFETY: forwarded from this function's contract.
         let fields = unsafe {
@@ -164,6 +176,9 @@ pub unsafe extern "C" fn loaf_notify_withdraw(
         if notifier.is_null() {
             return NULL;
         }
+        if let Err(e) = apartment() {
+            return status("withdraw", Err(e));
+        }
         // SAFETY: forwarded from this function's contract.
         match unsafe { string(room_id) } {
             Ok(room_id) => {
@@ -178,12 +193,17 @@ pub unsafe extern "C" fn loaf_notify_withdraw(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn loaf_notify_blocked() -> i32 {
-    guard(|| match notifier::blocked() {
-        Ok(true) => 1,
-        Ok(false) => 0,
-        Err(e) => {
-            eprintln!("[loaf notify] blocked: {e}");
-            FAILED
+    guard(|| {
+        if let Err(e) = apartment() {
+            return status("blocked", Err(e));
+        }
+        match notifier::blocked() {
+            Ok(true) => 1,
+            Ok(false) => 0,
+            Err(e) => {
+                eprintln!("[loaf notify] blocked: {e}");
+                FAILED
+            }
         }
     })
 }

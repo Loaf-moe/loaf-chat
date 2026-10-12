@@ -1,17 +1,11 @@
 name: loaf_notify
-description: "Windows toasts for Loaf Chat's desktop notifications."
+description: "Windows toasts for Loaf Chat's desktop notifications: Dart over dart:ffi into a Rust crate built by a build hook."
 publish_to: none
 
 environment:
   sdk: ^3.13.4
-  flutter: '>=3.3.0'
 
 dependencies:
-  flutter:
-    sdk: flutter
-
-flutter:
-  plugin:
-    platforms:
-      windows:
-        pluginClass: LoafNotifyPluginCApi
+  code_assets: ^2.1.0
+  ffi: ^2.2.0
+  hooks: ^2.2.0
