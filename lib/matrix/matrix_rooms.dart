@@ -583,18 +583,31 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   /// Brings back an invite's own membership event and its inviter, which a
   /// relaunch leaves on disk: without them a DM invite reads as a room, the
-  /// inviter as nobody, and accepting skips `m.direct`. The SDK's own
-  /// `loadHeroUsers` does exactly this for invites, from the database first.
+  /// inviter as nobody, and accepting skips `m.direct`. Your own event
+  /// comes from memory or the store, never the server: a server asked about
+  /// a room you are not in answers with nothing true, and an answer landing
+  /// after the sync's own event would replace it.
   void _loadInvite(Room room) {
     if (!_invitesLoaded.add(room.id)) return;
     unawaited(
-      room
-          .loadHeroUsers()
+      _inviteMembers(room)
           .then<void>((_) {}, onError: (Object _) {})
           .whenComplete(() {
             if (!_disposed) _rebuild();
           }),
     );
+  }
+
+  Future<void> _inviteMembers(Room room) async {
+    final me = client.userID!;
+    var mine = room.getState(EventTypes.RoomMember, me)?.asUser(room);
+    if (mine == null) {
+      mine = await client.database.getUser(me, room);
+      if (mine != null) room.setState(mine);
+    }
+    final inviter = mine?.senderId;
+    if (inviter == null || inviter == me) return;
+    await room.requestUser(inviter, ignoreErrors: true, requestState: false);
   }
 
   Space _space(Room space, Map<String, Room> joined) {
