@@ -33,7 +33,7 @@ class MockRooms extends ChangeNotifier implements Rooms {
   // This session's changes, layered over the fixtures by Space.withSession.
   final _membership = <String, bool>{};
   final _notify = <String, NotifyLevel>{};
-  final _read = <String>{};
+  final _readAt = <String, DateTime>{};
 
   // Home's room tags, as this session has them. Favourites are a list so
   // their order is the list's; m.favourite's `order` is its position.
@@ -123,7 +123,7 @@ class MockRooms extends ChangeNotifier implements Rooms {
         space.withSession(
           membership: _membership,
           notify: _notify,
-          read: _read,
+          read: _readAt,
         ),
   ];
 
@@ -144,8 +144,12 @@ class MockRooms extends ChangeNotifier implements Rooms {
           notify: _notify[room.id],
           // Read state is applied per room here, before duplicates fold
           // together, so an older room's unreads still count on the row.
-          unread: _read.contains(room.id) ? 0 : room.unread,
-          mentions: _read.contains(room.id) ? 0 : room.mentions,
+          unread: _readAt.containsKey(room.id) ? 0 : room.unread,
+          mentions: _readAt.containsKey(room.id) ? 0 : room.mentions,
+          read: switch (_readAt[room.id]) {
+            final at? => ReadMark(at: at),
+            null => null,
+          },
         ),
   ];
 
@@ -166,8 +170,8 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   @override
   void markRead(String roomId) {
-    if (_read.contains(roomId)) return;
-    _change(() => _read.add(roomId));
+    if (_readAt.containsKey(roomId)) return;
+    _change(() => _readAt[roomId] = DateTime.now());
   }
 
   @override

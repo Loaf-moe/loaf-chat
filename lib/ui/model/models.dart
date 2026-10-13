@@ -255,6 +255,20 @@ class Message {
 /// What a moderator has put on someone in a call. Deafened is muted too.
 enum CallSilence { muted, deafened }
 
+/// Your read receipt in a room: the event it sits on, where known, and the
+/// server's time for it. A message is read when the receipt is on it or
+/// later.
+@immutable
+class ReadMark {
+  const ReadMark({this.eventId, required this.at});
+
+  final String? eventId;
+  final DateTime at;
+
+  bool covers(String eventId, DateTime? sentAt) =>
+      this.eventId == eventId || (sentAt != null && !sentAt.isAfter(at));
+}
+
 /// How much of a room reaches you: everything, mentions alone, or nothing.
 /// Unread state is untouched either way. On Matrix, [mentions] is a
 /// room-kind push rule with no actions and [none] an override rule, which
@@ -278,6 +292,7 @@ class Channel {
     this.favouriteOrder,
     this.lowPriority = false,
     this.lastActivity,
+    this.read,
     this.earlier = const [],
     this.waitingFor = const [],
     this.avatar,
@@ -322,6 +337,9 @@ class Channel {
   /// The newest event, which is what orders DMs.
   final DateTime? lastActivity;
 
+  /// Your receipt here; null while nothing is known of it.
+  final ReadMark? read;
+
   /// Older 1:1 rooms with the same person, folded into this row so Home
   /// shows each person once. Matrix allows duplicates; loaf hides them.
   final List<Channel> earlier;
@@ -359,6 +377,7 @@ class Channel {
     double? favouriteOrder,
     bool? lowPriority,
     DateTime? lastActivity,
+    ReadMark? read,
     List<Channel>? earlier,
   }) => Channel(
     id: id,
@@ -380,6 +399,7 @@ class Channel {
     favouriteOrder: favouriteOrder ?? this.favouriteOrder,
     lowPriority: lowPriority ?? this.lowPriority,
     lastActivity: lastActivity ?? this.lastActivity,
+    read: read ?? this.read,
     earlier: earlier ?? this.earlier,
     waitingFor: waitingFor,
   );
@@ -433,7 +453,7 @@ class Space {
   /// This space with this session's changes layered over the fixtures — the
   /// mock's stand-in for membership, read markers and push rules arriving
   /// over sync. [membership] maps channel ids to joined (true) or left
-  /// (false); [notify] likewise; channels in [read] have nothing unread.
+  /// (false); [notify] likewise; channels in [read] were read at that time.
   ///
   /// A left invite-only channel is dropped entirely: only channels you could
   /// join in one tap are ever listed.
@@ -443,7 +463,7 @@ class Space {
   Space withSession({
     Map<String, bool> membership = const {},
     Map<String, NotifyLevel> notify = const {},
-    Set<String> read = const {},
+    Map<String, DateTime> read = const {},
     Map<String, List<Member>> occupants = const {},
     Map<String, int> unread = const {},
   }) => Space(
@@ -463,9 +483,13 @@ class Space {
                 // Reading clears what the fixture had; anything that lands
                 // afterwards, such as a missed call, counts again.
                 unread:
-                    (read.contains(channel.id) ? 0 : channel.unread) +
+                    (read.containsKey(channel.id) ? 0 : channel.unread) +
                     (unread[channel.id] ?? 0),
-                mentions: read.contains(channel.id) ? 0 : null,
+                mentions: read.containsKey(channel.id) ? 0 : null,
+                read: switch (read[channel.id]) {
+                  final at? => ReadMark(at: at),
+                  null => null,
+                },
                 occupants: occupants[channel.id],
               ),
         ]),

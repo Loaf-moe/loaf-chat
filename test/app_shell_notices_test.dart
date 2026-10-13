@@ -163,6 +163,32 @@ void main() {
       );
     });
 
+    testWidgets(
+      'a message read on another device in the same sync leaves no notice',
+      (tester) async {
+        final api = _Api();
+        await run(
+          tester,
+          focused: false,
+          api: api,
+          body: (shell) async {
+            await openChannel(tester, kitchen);
+            await react(
+              tester,
+              () => deliver(
+                shell.client,
+                pantry,
+                [msg(r'$m')],
+                ephemeral: [receipt(r'$m', ts: after + 1)],
+              ),
+              done: () => true,
+            );
+            expect(shell.desktop.shown, isEmpty);
+          },
+        );
+      },
+    );
+
     testWidgets('a receipt from another device', (tester) async {
       final api = _Api();
       await run(
@@ -219,7 +245,14 @@ void main() {
         body: (shell) async {
           await openChannel(tester, kitchen);
           await _send(tester, shell, api, pantry, r'$a');
-          await _send(tester, shell, api, pantry, r'$b');
+          // Five minutes on, so a receipt between the two is short of it.
+          api.sent[r'$b'] = {
+            ...msg(r'$b', ts: after + 300000),
+            'room_id': pantry,
+          };
+          await arrive(tester, shell, pantry, [
+            msg(r'$b', ts: after + 300000),
+          ], done: () => shell.desktop.shown.length >= 2);
 
           await react(
             tester,

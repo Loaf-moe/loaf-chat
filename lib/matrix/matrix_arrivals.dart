@@ -187,6 +187,7 @@ class MatrixArrivals {
       senderId: event.senderId,
       senderName: sender.calcDisplayname(),
       senderAvatar: AvatarRef.maybe(sender.avatarUrl?.toString()),
+      sentAt: event.originServerTs,
       kind: kind,
       text: kind == ArrivalKind.text
           ? event.calcLocalizedBodyFallback(

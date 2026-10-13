@@ -42,6 +42,7 @@ import 'matrix_timeline.dart';
 import 'matrix_arrivals.dart';
 import 'matrix_unread.dart';
 import 'media_store.dart';
+import 'unread_rules.dart';
 import 'unread_tally.dart';
 
 /// `m.room.create` types that make a room a voice channel: Element's video
@@ -769,6 +770,13 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       favouriteOrder: favourite?.order,
       lowPriority: room.isLowPriority,
       lastActivity: room.latestEventReceivedTime,
+      read: switch (ownReceipt(room)) {
+        final own? => ReadMark(
+          eventId: own.eventId,
+          at: DateTime.fromMillisecondsSinceEpoch(own.ts),
+        ),
+        null => null,
+      },
       occupants: kind == ChannelKind.voice
           ? [for (final occupant in _occupants(room)) occupant.member]
           : const [],

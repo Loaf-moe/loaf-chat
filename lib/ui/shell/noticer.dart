@@ -1,5 +1,7 @@
 /// Desktop notifications for the shell: what each says, and taking a
-/// room's back once it is read, here or on another device.
+/// room's back once its messages are read, here or on another device.
+/// Read is your receipt's position: on the message or later. The unread
+/// count is no guide, since a message and its receipt can share a sync.
 library;
 
 import 'dart:async';
@@ -24,21 +26,21 @@ class Noticer {
   final Rooms rooms;
   final NotificationController settings;
 
-  /// Rooms with notices up, and whether each has been seen unread since.
-  /// A count can lag its message within a sync: a room read as 0 before it
-  /// was ever seen unread has not been read, only not yet counted.
-  final _shown = <String, bool>{};
+  /// The notices up, by room: each message's id and when it was sent.
+  final _shown = <String, Map<String, DateTime?>>{};
   var _disposed = false;
 
   Future<void> show(Arrival a, {required bool sound}) async {
     if (!settings.notifications) return;
+    // A receipt in the same sync as the message: read before it was seen.
+    if (_isRead(a.roomId, a.eventId, a.sentAt)) return;
     // Recorded before the avatar is awaited, which can take seconds: a room
-    // read in that window is then withdrawn like any other (the "seen
-    // unread" rule below), instead of going unnoticed.
-    _shown[a.roomId] = (_shown[a.roomId] ?? false) || _unread(a.roomId);
+    // read in that window is then withdrawn like any other.
+    (_shown[a.roomId] ??= {})[a.eventId] = a.sentAt;
     final ref = a.senderAvatar;
     final avatarPath = ref == null ? null : await rooms.noticeAvatar(ref);
     if (_disposed || !settings.notifications) return;
+    if (!_shown.containsKey(a.roomId)) return; // Withdrawn while waiting.
     await desktop.show(
       noticeFor(
         a,
@@ -49,20 +51,14 @@ class Noticer {
         avatarPath: avatarPath,
       ),
     );
-    // Two cases, kept apart. A room read (or gone) during the show was
-    // seen unread, so `_onRooms` already withdrew it: nothing was up then,
-    // so withdraw again now that the notice is. A room merely counted 0
-    // since the start was never seen unread, its entry is still here, and
-    // it stays: a count can lag its message.
-    if (!_disposed && !_shown.containsKey(a.roomId)) {
-      await desktop.withdraw(a.roomId);
+    // Read while the notice was going up: it is up now, so take it down.
+    if (!_disposed && _isRead(a.roomId, a.eventId, a.sentAt)) {
+      _withdraw(a.roomId);
     }
   }
 
-  bool _unread(String roomId) {
-    final c = _channel(roomId);
-    return c != null && (c.unread > 0 || c.mentions > 0);
-  }
+  bool _isRead(String roomId, String eventId, DateTime? sentAt) =>
+      _channel(roomId)?.read?.covers(eventId, sentAt) ?? false;
 
   Channel? _channel(String roomId) {
     for (final c in rooms.homeRooms) {
@@ -77,14 +73,18 @@ class Noticer {
   }
 
   void _onRooms() {
-    for (final MapEntry(key: id, value: seen) in _shown.entries.toList()) {
-      if (_channel(id) == null) {
+    for (final MapEntry(key: id, value: messages) in _shown.entries.toList()) {
+      final channel = _channel(id);
+      if (channel == null) {
         _withdraw(id);
-      } else if (_unread(id)) {
-        _shown[id] = true;
-      } else if (seen) {
-        _withdraw(id);
+        continue;
       }
+      final read = channel.read;
+      if (read == null) continue;
+      final allRead = messages.entries.every(
+        (m) => read.covers(m.key, m.value),
+      );
+      if (allRead) _withdraw(id);
     }
   }
 

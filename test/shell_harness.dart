@@ -74,12 +74,13 @@ Map<String, Object?> _child(String id) => _state('m.space.child', {
   'via': ['example.com'],
 }, key: id);
 
-Map<String, Object?> msg(String id) => {
+/// Ada's message [id], sent at [ts], a minute after launch unless said.
+Map<String, Object?> msg(String id, {int? ts}) => {
   'type': 'm.room.message',
   'sender': _ada,
   'content': {'msgtype': 'm.text', 'body': 'hi'},
   'event_id': id,
-  'origin_server_ts': after,
+  'origin_server_ts': ts ?? after,
 };
 
 /// Your read receipt on [eventId], placed at [ts].

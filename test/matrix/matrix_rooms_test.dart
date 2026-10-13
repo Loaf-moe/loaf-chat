@@ -648,6 +648,21 @@ void main() {
       expect(channel(rooms, general).unread, 1);
     });
 
+    test('a channel carries your receipt', () async {
+      final (client, rooms) = await bakery();
+      expect(channel(rooms, general).read, isNull);
+      await _timeline(
+        client,
+        general,
+        [_msg('one', id: r'$one')],
+        ephemeral: [_receipt(r'$one', ts: 4000)],
+      );
+      await _settle();
+      final read = channel(rooms, general).read!;
+      expect(read.eventId, r'$one');
+      expect(read.at, DateTime.fromMillisecondsSinceEpoch(4000));
+    });
+
     test('your receipt reads what came before it', () async {
       final (client, rooms) = await bakery();
       await _timeline(client, general, [

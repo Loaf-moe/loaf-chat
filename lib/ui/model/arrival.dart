@@ -19,6 +19,7 @@ class Arrival {
     this.senderAvatar,
     this.kind = ArrivalKind.text,
     this.text = '',
+    this.sentAt,
   });
 
   final String roomId;
@@ -33,6 +34,10 @@ class Arrival {
   /// The message as plain text, reply quote left out. Only for
   /// [ArrivalKind.text].
   final String text;
+
+  /// When the message was sent, by its server; what a read receipt's time
+  /// is held against.
+  final DateTime? sentAt;
 
   @override
   bool operator ==(Object other) =>

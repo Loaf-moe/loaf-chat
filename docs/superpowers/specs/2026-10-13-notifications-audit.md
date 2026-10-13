@@ -26,7 +26,8 @@ sync ─▶ SDK Client ─▶ MatrixArrivals ─▶ MatrixRooms.arrivals ─▶ 
 - `lib/ui/shell/notifier.dart` decides: nothing, the chime, a desktop
   notification, or (a phone in the background) nothing in-app.
 - `lib/ui/shell/noticer.dart` builds the notice (`lib/ui/model/notice.dart`),
-  shows it, and withdraws a room's notices once the room is read or gone.
+  shows it, and withdraws a room's notices once your receipt, on any
+  device, covers their messages, or the room is gone.
 - `lib/notify/` holds one `DesktopNotifications` adapter per platform;
   `lib/notify/pick_notifications.dart` picks it and wraps its clicks in
   `fronted`, which brings the window forward and feeds `AppShell.routes`.

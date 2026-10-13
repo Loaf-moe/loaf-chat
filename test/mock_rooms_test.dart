@@ -36,6 +36,12 @@ void main() {
     expect(heard, 1);
   });
 
+  test('marking read sets a read mark', () {
+    expect(_home(rooms, 'fermentation').read, isNull);
+    rooms.markRead('fermentation');
+    expect(_home(rooms, 'fermentation').read, isNotNull);
+  });
+
   test('marking a space channel read recounts the space', () {
     final space = rooms.spaces.first;
     final unread = space.allChannels.firstWhere((c) => c.unread > 0);
