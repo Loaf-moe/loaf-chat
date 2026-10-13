@@ -154,7 +154,9 @@ void main() {
       final n = make();
       final clicks = <MessageRoute>[];
       n.clicks.listen(clicks.add);
-      await pumpEventQueue();
+      // Listening sends the match rule without awaiting it; the bus answers
+      // a ping on the same connection only once it has that rule.
+      await appSide.ping();
       await p.invoke(r'room:!old:x:$z', ['!old:x', r'$z']);
       await pumpEventQueue();
       expect(clicks, [const MessageRoute('!old:x', r'$z')]);
