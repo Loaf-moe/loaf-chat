@@ -14,8 +14,10 @@ import 'ui/mock/mock_audio_devices.dart';
 import 'ui/mock/mock_session.dart';
 import 'ui/platform.dart';
 import 'ui/rooms/rooms.dart';
+import 'notify/pick_notifications.dart';
 import 'ui/shell/before_quit.dart';
 import 'ui/model/chime.dart';
+import 'ui/model/message_route.dart';
 import 'ui/settings/notification_settings.dart';
 import 'ui/settings/voice_settings.dart';
 import 'ui/theme/appearance.dart';
@@ -31,6 +33,9 @@ final themeMode = ValueNotifier<ThemeMode>(ThemeMode.dark);
 /// Which theme the app wears. Lives as long as the app, like [themeMode].
 late final AppearanceController appearance;
 late final NotificationController notifications;
+
+/// Where clicked notifications lead, for the app's life; null without them.
+Stream<MessageRoute>? noticeRoutes;
 
 /// Which microphone and speaker calls use; null where there are no calls.
 /// Lives as long as the app, like [themeMode].
@@ -91,12 +96,18 @@ Future<void> main() async {
         ? MemoryAppearanceStore()
         : await FileAppearanceStore.inSupportDirectory(),
   );
+  final chime = NativeChime();
+  final desktop = backend == 'mock'
+      ? null
+      : pickDesktopNotifications(chime: chime);
   notifications = await NotificationController.load(
     backend == 'mock'
         ? MemoryNotificationStore()
         : await FileNotificationStore.inSupportDirectory(),
-    chime: NativeChime(),
+    chime: chime,
+    desktop: desktop,
   );
+  noticeRoutes = desktop == null ? null : fronted(desktop.clicks);
   // The stored session restores from disk before the first frame, so a
   // signed-in app never flashes the sign-in screen.
   // Calls are checked on Linux alone so far.
@@ -171,6 +182,7 @@ class LoafApp extends StatelessWidget {
                 rooms: newRooms,
                 updater: updater,
                 beforeQuit: beforeQuit,
+                routes: noticeRoutes,
               ),
             ),
           ),

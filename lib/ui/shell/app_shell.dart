@@ -35,6 +35,7 @@ import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
 import '../mock/mock_rooms.dart';
+import 'noticer.dart';
 import 'notifier.dart';
 import '../channel/timeline.dart' show messageUnavailable;
 import '../model/message_route.dart';
@@ -142,6 +143,7 @@ class _AppShellState extends State<AppShell> {
   late final Calls _calls = _rooms.calls ?? _mockCalls!;
 
   Notifier? _notifier;
+  Noticer? _noticer;
   CallSounds? _callSounds;
 
   @override
@@ -152,12 +154,26 @@ class _AppShellState extends State<AppShell> {
     // rebuilds the shell.
     final notifications = NotificationScope.find(context);
     if (_notifier == null && notifications != null) {
+      final desktop = notifications.desktop;
+      final noticer = desktop == null
+          ? null
+          : Noticer(desktop: desktop, rooms: _rooms, settings: notifications);
+      _noticer = noticer;
       _notifier = Notifier(
         arrivals: _rooms.arrivals,
         chime: notifications.chime,
         soundOn: () => notifications.sound,
         openRoom: () => _openMessagesRoom,
+        notice: noticer == null
+            ? null
+            : (arrival, {required sound}) =>
+                  unawaited(noticer.show(arrival, sound: sound)),
       );
+      // The first time the shell opens after sign-in is when macOS asks
+      // permission; asking again later does nothing.
+      if (desktop != null && notifications.notifications) {
+        unawaited(desktop.prepare());
+      }
     }
     if (_callSounds == null && notifications != null) {
       _callSounds = CallSounds(
@@ -257,6 +273,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     _notifier?.dispose();
+    _noticer?.dispose();
     _callSounds?.dispose();
     unawaited(_routes?.cancel());
     _session.removeListener(_onSessionChange);

@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:matrix/matrix.dart';
 
 import '../ui/model/arrival.dart';
+import '../ui/model/models.dart';
 import 'unread_rules.dart';
 
 class MatrixArrivals {
@@ -71,8 +72,32 @@ class MatrixArrivals {
     for (final event in events) {
       final joined = _joinedAt[event.room.id];
       if (joined != null && event.originServerTs.isBefore(joined)) continue;
-      _arrivals.add(Arrival(roomId: event.room.id, eventId: event.eventId));
+      _arrivals.add(_arrival(event));
     }
+  }
+
+  /// What a notification will say about [event]: read now, while the
+  /// sender's member event and the decrypted content are at hand.
+  Arrival _arrival(Event event) {
+    final sender = event.senderFromMemoryOrFallback;
+    final kind = arrivalKind(event);
+    return Arrival(
+      roomId: event.room.id,
+      eventId: event.eventId,
+      senderId: event.senderId,
+      senderName: sender.calcDisplayname(),
+      senderAvatar: AvatarRef.maybe(sender.avatarUrl?.toString()),
+      kind: kind,
+      text: kind == ArrivalKind.text
+          ? event.calcLocalizedBodyFallback(
+              const MatrixDefaultLocalizations(),
+              hideReply: true,
+              hideEdit: true,
+              plaintextBody: true,
+              removeMarkdown: true,
+            )
+          : '',
+    );
   }
 
   void dispose() {
@@ -81,4 +106,17 @@ class MatrixArrivals {
     _pending.clear();
     unawaited(_arrivals.close());
   }
+}
+
+/// A picture, a file, words, or a message this device has no key for.
+ArrivalKind arrivalKind(Event event) {
+  if (event.type == EventTypes.Encrypted) return ArrivalKind.encrypted;
+  if (event.type == EventTypes.Sticker) return ArrivalKind.picture;
+  return switch (event.messageType) {
+    MessageTypes.Image => ArrivalKind.picture,
+    MessageTypes.File ||
+    MessageTypes.Video ||
+    MessageTypes.Audio => ArrivalKind.file,
+    _ => ArrivalKind.text,
+  };
 }

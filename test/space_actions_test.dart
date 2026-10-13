@@ -62,6 +62,9 @@ Space _bakery() => const Space(
 /// only what is granted through [abilities] can be done, and leaving a
 /// space really does take it off [spaces].
 class _FakeRooms extends ChangeNotifier implements Rooms {
+  @override
+  Future<String?> noticeAvatar(AvatarRef ref) async => null;
+
   _FakeRooms({this.spaces = const [], this.homeRooms = const []});
 
   @override
