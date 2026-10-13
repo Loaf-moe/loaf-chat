@@ -5,7 +5,7 @@
 **Goal:** When Loaf Chat on iPhone is in the background or closed, a message the push rules say should notify arrives as a notification. It is decrypted on the phone, is titled like a desktop notice, and plays the chime. Tapping it opens the message. Once the room is read, its notifications are withdrawn.
 
 **Architecture:**
-- **Pusher.** Release builds with `LOAF_PUSH_GATEWAY` set register an `http` pusher with `event_id_only` under the one app id `moe.loaf.chat.ios`.
+- **Pusher.** Release builds register an `http` pusher with `event_id_only` under the one app id `moe.loaf.chat.ios`, sending to the Loaf Chat gateway `https://push.matrix.loaf.moe/_matrix/push/v1/notify`, a constant in the source as Element X and FluffyChat do.
 - **Shared storage.** The SDK database, `notifications.json` and a new `names.json` move into the App Group `group.moe.loaf.chat`, so the extension can read them.
 - **The extension.** A Notification Service Extension (Swift) reads the token and the room key from the database and fetches the event. It decrypts with `loaf_push`, a Rust `cdylib` wrapping vodozemac. A Dart build hook builds `loaf_push` (the same pattern as `loaf_notify` on Windows), Flutter embeds it in the app's `Frameworks/`, and the extension loads it with `dlopen`/`dlsym`.
 - **Testable Swift.** The extension's logic lives in a local Swift package, `ios/LoafPushCore`, tested with `swift test`, the same pattern as `LoafMediaCore`.
@@ -25,7 +25,8 @@
     - **CI creates nothing new in Apple's account** beyond what the existing iOS cloud-signing export already does. If the first E release fails on a missing capability, stop and tell Chris. Don't add `-allowProvisioningUpdates` scope or new API calls.
   - **`loaf_push` gets into the extension through a Dart build hook plus `dlopen`.** There is no C header, no module map and no Xcode Run Script. Every new file is Dart, Rust or Swift (memory `dart-or-rust-only`).
     - Accepted cost: the iOS release job now compiles Rust for `aarch64-apple-ios`, and `mise.toml` gains the iOS Rust targets.
-  - **One app id, no `.dev`.** The pusher's `app_id` is always `moe.loaf.chat.ios`. Only release builds (`kReleaseMode`) with `LOAF_PUSH_GATEWAY` set register a pusher. Debug builds never do. Push is tested on TestFlight.
+  - **The gateway is a constant** (Chris, 2026-10-12): `https://push.matrix.loaf.moe/_matrix/push/v1/notify`, used by every user on every homeserver, the way Element X uses matrix.org and FluffyChat uses push.fluffychat.im. The gateway is a separate Rust project (another session); the app only needs its URL.
+  - **One app id, no `.dev`.** The pusher's `app_id` is always `moe.loaf.chat.ios`. Only release builds (`kReleaseMode`) register a pusher. Debug builds never do. Push is tested on TestFlight.
   - **No filtering entitlement yet.** This plan has no `LOAF_PUSH_FILTERING` code path and the extension evaluates no push rules: without the entitlement it could not drop a push anyway.
     - Instead, the Channels default sets `.m.rule.encrypted` to match `.m.rule.message`, as the spec's fallback says.
     - In-extension rule evaluation is a later, separate plan, once Apple grants the entitlement.
@@ -36,7 +37,6 @@
 - **Copy (lowercase, verbatim):**
   - The extension falls back to the desktop strings: `encrypted message` (no room key); `new message` (Show message text off, an expired or missing token, or a failed fetch).
   - Titles follow `Notice.title`: `sender` in a DM, otherwise `'$sender in $place'`. With no sender name, the title is `place`, or `loaf chat` when there's no place either.
-  - Settings, iOS, when `LOAF_PUSH_GATEWAY` is unset: `push isn't set up in this build.`
   - Settings, the iOS OS-blocked line: `ios is blocking notifications from loaf chat.`, with the existing `open system settings` button.
   - Settings, Channels: the heading `channels`, with the options `all messages` and `mentions only`; the detail `for every channel without its own setting, on every device you're signed in on.`
   - Settings, Direct messages: `direct messages always notify.`
@@ -81,7 +81,7 @@
 | `ios/LoafPushCore/` | A Swift package: the store reader, the names, the content builder, the decryptor seam |
 | `ios/NotifyService/` | The extension target: `NotificationService.swift`, `Info.plist`, entitlements |
 | `ios/Runner/NotifyBridge.swift`, `Runner.entitlements` | The app's end of the channel, and its entitlements |
-| `tool/release/ios.sh`, `.github/workflows/release.yml` | The gateway define, plus the entitlement gate |
+| `tool/release/ios.sh`, `tool/release/ios-export-local.plist` | The entitlement gate |
 
 ---
 
@@ -964,7 +964,7 @@ git commit -m "feat(push): the Notification Service Extension decrypts and title
 **Interfaces:**
 - Produces:
   - `class IosPush { IosPush({MethodChannel? channel}); Stream<MessageRoute> get clicks; Future<void> prepare(); Future<String?> pushToken(); Future<void> withdraw(String roomId, {DateTime? before}); Future<bool> blocked(); Future<void> openSystemSettings(); }`
-  - `const pushGateway = String.fromEnvironment('LOAF_PUSH_GATEWAY');`
+  - `const pushGateway = 'https://push.matrix.loaf.moe/_matrix/push/v1/notify';` (one Loaf Chat gateway serves every homeserver; a comment says so)
   - `class Pusher { Pusher({required Client client, required IosPush push, required bool Function() enabled, bool release = kReleaseMode, String gateway = pushGateway}); Future<void> sync(); }`. `sync()` sets the pusher when enabled, and deletes this device's pusher when disabled.
 - The channel contract (new or changed):
   - `pushToken` → `String?`: the hex APNs token, or nil after a 20 s timeout or a failure. It calls `registerForRemoteNotifications`.
@@ -981,7 +981,6 @@ git commit -m "feat(push): the Notification Service Extension decrypts and title
 `pusher_test.dart` uses `FakeMatrixApi`, recording `POST /_matrix/client/v3/pushers/set` bodies. The cases:
 - **Release, enabled, token `ab12`:** posts `{"app_id": "moe.loaf.chat.ios", "pushkey": "ab12", "kind": "http", "app_display_name": "Loaf Chat", "data": {"url": <gateway>, "format": "event_id_only"}, ...}`.
 - **Not release:** posts nothing.
-- **Empty gateway:** posts nothing.
 - **Enabled → disabled:** after a sync with a token, sets `kind: null` for the same `app_id` and `pushkey` (the Matrix way to delete).
 - **No token:** `pushToken` returns null, and nothing is posted.
 
@@ -998,7 +997,7 @@ Expected: FAIL, because nothing is defined yet.
 
 ```dart
 Future<void> sync() async {
-  if (!release || gateway.isEmpty) return;
+  if (!release) return;
   final token = await push.pushToken();
   if (token == null) return;
   final id = PusherId(appId: 'moe.loaf.chat.ios', pushkey: token);
@@ -1142,7 +1141,6 @@ git commit -m "fix(notify): on iOS a resume doesn't chime for messages push deli
 - **Reads:** `readDefault` reads them back.
 - **Widget, on iOS (`debugDefaultTargetPlatformOverride`):**
   - Notifications, Sound and Show message text show.
-  - With an empty gateway, the line `push isn't set up in this build.` shows.
   - With `blocked() == true`, `ios is blocking notifications from loaf chat.` and `open system settings` show.
   - The Channels choice shows on every platform.
   - `direct messages always notify.` shows as plain text.
@@ -1165,16 +1163,13 @@ git commit -m "feat(notify): Settings sets the channel default everywhere, and p
 
 ### Task 12: Release wiring, plus the entitlement gate
 
-**Ask Chris before committing this task** (memory `ask-before-ci-risk`). Show them the diff of `ios.sh` and `release.yml`.
+**Ask Chris before committing this task** (memory `ask-before-ci-risk`). Show them the diff of `ios.sh`.
 
 **Files:**
-- Modify: `tool/release/ios.sh`, `.github/workflows/release.yml`
+- Modify: `tool/release/ios.sh`
+- Create: `tool/release/ios-export-local.plist`
 
-- [ ] **Step 1: The gateway**
-
-In `release.yml`, the `ios` job gets `env: LOAF_PUSH_GATEWAY: ${{ vars.LOAF_PUSH_GATEWAY }}`, a repository *variable* rather than a secret, since a URL isn't secret. `ios.sh` passes `--dart-define=LOAF_PUSH_GATEWAY="${LOAF_PUSH_GATEWAY:-}"` and prints a `::notice::` when it's empty ("push isn't set up in this build"). That isn't a failure: the app says so honestly in Settings. Chris sets the variable when their gateway is ready. This plan never asks what it is (memory `client-not-server`).
-
-- [ ] **Step 2: The entitlement gate, before the upload**
+- [ ] **Step 1: The entitlement gate, before the upload**
 
 The archive is unsigned, and the export both signs and uploads. Nothing yet proves that `aps-environment` and the App Group survive that path. So first export once to a local folder, with the same cloud signing and nothing new created. Then check the signed result, and only then run the existing upload export unchanged.
 
@@ -1204,7 +1199,7 @@ ls "$app/Frameworks" | grep -qi loaf_push \
 
 This adds roughly a minute to the iOS job. If the gate fails on the first E release, **stop and tell Chris** with the job log. Don't change signing to get past it.
 
-- [ ] **Step 3: Commit (after Chris's yes), merge, and tag**
+- [ ] **Step 2: Commit (after Chris's yes), merge, and tag**
 
 Follow the handoff's process: merge onto `origin/main` from the worktree, run `mise run test:all` on the merged tree, push, and tag the next free version. Watch the run (memory `release-test-via-ci`).
 
