@@ -1209,7 +1209,7 @@ Follow the handoff's process: merge onto `origin/main` from the worktree, run `m
 
 This needs Chris's phone. Ask what they saw for anything a screenshot can't show.
 
-1. **Install and permission.** Install from TestFlight, then sign in. The permission prompt appears, and Settings shows Notifications on, with no "isn't set up" line.
+1. **Install and permission.** Install from TestFlight, then sign in. The permission prompt appears, and Settings shows Notifications on.
 2. **An encrypted DM with the phone locked.** mochi sends `hello`, using the throwaway sender in the handoff. Expected: `mochi` / `hello` with the chime. If it shows `encrypted message`, the phone's session lacks the key: verify it with the recovery key and retry.
 3. **Mentions only, in an encrypted channel.** With Channels set to mentions only, a plain message pushes nothing. A mention pushes nothing either: the server can't see a mention inside an encrypted message, and without the filtering entitlement the phone can't decide instead. Record it in the ledger as the known gap until filtering. In an unencrypted channel, the mention does push.
 4. **Tap with the app backgrounded.** It opens the DM at the message, which glows.
