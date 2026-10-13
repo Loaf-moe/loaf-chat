@@ -13,10 +13,11 @@ import flutter_webrtc
 final class AudioDevicesBridge: NSObject {
   private static let system = AudioObjectID(kAudioObjectSystemObject)
 
-  /// Everything here is asked off the main thread. CoreAudio answers
-  /// slowly while a device is changing, and WebRTC rebuilds its audio
-  /// engine before it answers, which takes seconds; the plugin's own call
-  /// for that waits on the main thread, where Dart runs too.
+  /// Everything here is asked off the main thread, where Dart runs too.
+  /// CoreAudio answers slowly while a device is changing. A speaker is
+  /// chosen on the plugin's own queue: WebRTC rebuilds its audio engine
+  /// before it answers, which takes seconds, and the plugin's calls from
+  /// Dart wait their turn behind it instead of meeting it halfway.
   private static let work = DispatchQueue(label: "loaf.audio")
 
   /// What an output stream plays through. The echo canceller's tap on a
@@ -37,6 +38,7 @@ final class AudioDevicesBridge: NSObject {
     super.init()
     channel.setMethodCallHandler { call, result in
       let answer: () -> Any?
+      var queue = Self.work
       switch call.method {
       case "microphones":
         answer = { Self.listed(Self.isMicrophone) }
@@ -45,11 +47,12 @@ final class AudioDevicesBridge: NSObject {
       case "selectSpeaker":
         let id = call.arguments as? String
         answer = { Self.selectSpeaker(id) }
+        queue = FlutterWebRTCWorkQueue()
       default:
         result(FlutterMethodNotImplemented)
         return
       }
-      Self.work.async {
+      queue.async {
         let answered = answer()
         DispatchQueue.main.async { result(answered) }
       }

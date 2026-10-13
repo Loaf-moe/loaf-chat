@@ -65,6 +65,14 @@ dependencies:
   loaf_notify:
     path: packages/loaf_notify
 
+# Until upstream takes it: on iOS and macOS the plugin's calls run on a
+# queue of their own instead of the main thread, where Dart runs too.
+dependency_overrides:
+  flutter_webrtc:
+    git:
+      url: https://github.com/Loaf-moe/flutter-webrtc.git
+      ref: 5462125ba21f460a2c55a5b806ce8da8197eb5d0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
