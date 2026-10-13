@@ -1,20 +1,53 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:loaf_native/ui/mock/mock_profile.dart';
 import 'package:loaf_native/ui/model/chime.dart';
 import 'package:loaf_native/ui/model/desktop_notifications.dart';
 import 'package:loaf_native/ui/settings/notification_settings.dart';
 import 'package:loaf_native/ui/settings/notifications_section.dart';
+import 'package:loaf_native/ui/settings/settings_controls.dart';
+import 'package:loaf_native/ui/shell/profile.dart';
+import 'package:loaf_native/ui/shell/profile_controller.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+
+/// The mock's profile, with a choice the test can hold in flight.
+class _Profile extends MockProfile {
+  Completer<void>? hold;
+  var busy = false;
+
+  @override
+  bool get settingChannelDefault => busy;
+
+  @override
+  Future<void> setChannelDefault(ChannelDefault level) async {
+    busy = true;
+    notifyListeners();
+    await hold?.future;
+    busy = false;
+    await super.setChannelDefault(level);
+    notifyListeners();
+  }
+}
 
 Future<void> pumpSection(
   WidgetTester tester,
-  NotificationController controller,
-) => tester.pumpWidget(
+  NotificationController controller, {
+  ProfileController? profile,
+}) => tester.pumpWidget(
   MaterialApp(
     theme: loafDarkTheme(),
-    home: Scaffold(body: NotificationsSection(controller: controller)),
+    home: Scaffold(
+      body: NotificationsSection(controller: controller, profile: profile),
+    ),
   ),
+);
+
+NotificationController soundController() => NotificationController(
+  store: MemoryNotificationStore(),
+  chime: FakeChime(),
 );
 
 NotificationController desktopController(
@@ -138,6 +171,52 @@ void main() {
         );
       }
     });
+  });
+
+  testWidgets('without a profile, nothing of the account shows', (
+    tester,
+  ) async {
+    await pumpSection(tester, soundController());
+    expect(find.text("EVERYWHERE YOU'RE SIGNED IN"), findsNothing);
+    expect(find.text('all messages'), findsNothing);
+  });
+
+  testWidgets('the channel default shows the choice and saves the other', (
+    tester,
+  ) async {
+    final profile = _Profile();
+    final controller = ProfileController(profile: profile);
+    addTearDown(controller.dispose);
+    await pumpSection(tester, soundController(), profile: controller);
+    expect(find.text("EVERYWHERE YOU'RE SIGNED IN"), findsOneWidget);
+    expect(find.text('direct messages always notify.'), findsOneWidget);
+    bool selected(String title) => tester
+        .widget<SettingsChoice>(find.widgetWithText(SettingsChoice, title))
+        .selected;
+    expect(selected('all messages'), isTrue);
+    expect(selected('mentions only'), isFalse);
+
+    await tester.tap(find.text('mentions only'));
+    await tester.pump();
+    expect(profile.channelDefault, ChannelDefault.mentions);
+    expect(selected('mentions only'), isTrue);
+    expect(selected('all messages'), isFalse);
+  });
+
+  testWidgets('a choice in flight spins until it lands', (tester) async {
+    final profile = _Profile()..hold = Completer();
+    final controller = ProfileController(profile: profile);
+    addTearDown(controller.dispose);
+    await pumpSection(tester, soundController(), profile: controller);
+
+    await tester.tap(find.text('mentions only'));
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    profile.hold!.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    expect(profile.channelDefault, ChannelDefault.mentions);
   });
 
   testWidgets('show message text is greyed while notifications are off', (

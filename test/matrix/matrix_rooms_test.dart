@@ -26,6 +26,9 @@ const _me = '@test:fakeServer.notExisting';
 /// until completed; [refuse] makes them a 403.
 class _Api extends FakeMatrixApi {
   final answered = <String>[];
+
+  /// Push-rule calls as `METHOD path`, the path from `/pushrules` on.
+  final rules = <String>[];
   Completer<void>? hold;
   var refuse = false;
 
@@ -219,6 +222,9 @@ class _Api extends FakeMatrixApi {
             path.contains('/state/m.space.parent/'));
     if (isJoinOrLeave || isMuteOrTag || isSpaceState) {
       answered.add(path);
+      if (path.contains('/pushrules/')) {
+        rules.add('$method ${path.substring(path.indexOf('/pushrules'))}');
+      }
       await hold?.future;
       final blockedById = refuseIds.any(
         (id) => path.contains(Uri.encodeComponent(id)),
@@ -354,6 +360,40 @@ Map<String, Object?> _room(
   'unread_notifications': {
     'notification_count': notifications,
     'highlight_count': highlights,
+  },
+};
+
+/// The account's push rules: a mute ([override]) and mentions only ([room])
+/// for the rooms named, as the SDK writes them.
+Map<String, Object?> _rules({
+  List<String> override = const [],
+  List<String> room = const [],
+}) => {
+  'type': 'm.push_rules',
+  'content': {
+    'global': {
+      'override': [
+        for (final id in override)
+          {
+            'rule_id': id,
+            'default': false,
+            'enabled': true,
+            'conditions': [
+              {'kind': 'event_match', 'key': 'room_id', 'pattern': id},
+            ],
+            'actions': <Object>[],
+          },
+      ],
+      'room': [
+        for (final id in room)
+          {
+            'rule_id': id,
+            'default': false,
+            'enabled': true,
+            'actions': <Object>[],
+          },
+      ],
+    },
   },
 };
 
@@ -602,7 +642,7 @@ void main() {
 
     test('a muted room still counts', () async {
       final (client, rooms) = await bakery();
-      await rooms.setMuted(general, true);
+      await rooms.setNotify(general, NotifyLevel.none);
       await _timeline(client, general, [_msg('one')]);
       await _settle();
       expect(channel(rooms, general).unread, 1);
@@ -1209,7 +1249,7 @@ void main() {
     final sourdough = rooms.spaces.last.categories.last.channels.first;
     expect(sourdough.private, isTrue);
     expect(sourdough.topic, 'wild yeast');
-    expect(sourdough.muted, isFalse);
+    expect(sourdough.notify, NotifyLevel.all);
   });
 
   test('a space\'s rooms never also appear in Home', () async {
@@ -1325,8 +1365,29 @@ void main() {
     expect(byId['!fav:example.com']!.favourite, isTrue);
     expect(byId['!fav:example.com']!.favouriteOrder, 0.25);
     expect(byId['!low:example.com']!.lowPriority, isTrue);
-    expect(byId['!low:example.com']!.muted, isTrue);
-    expect(byId['!fav:example.com']!.muted, isFalse);
+    expect(byId['!low:example.com']!.notify, NotifyLevel.mentions);
+    expect(byId['!fav:example.com']!.notify, NotifyLevel.all);
+  });
+
+  test('an override rule mutes the room, even beside a room rule', () async {
+    final client = await _client();
+    final rooms = await _rooms(client);
+    await _sync(client, {
+      'join': {'!m:example.com': _room('both')},
+    });
+    await client.handleSync(
+      SyncUpdate.fromJson({
+        'next_batch': 'rules',
+        'account_data': {
+          'events': [
+            _rules(override: ['!m:example.com'], room: ['!m:example.com']),
+          ],
+        },
+      }),
+    );
+    await _settle();
+    final byId = {for (final c in rooms.homeRooms) c.id: c};
+    expect(byId['!m:example.com']!.notify, NotifyLevel.none);
   });
 
   test('two DMs with one person name the same person, so they fold', () async {
@@ -1587,7 +1648,7 @@ void main() {
       RoomAbility.answerInvites,
       RoomAbility.messages,
       RoomAbility.markRead,
-      RoomAbility.mute,
+      RoomAbility.notify,
       RoomAbility.tag,
       RoomAbility.join,
       RoomAbility.leave,
@@ -1613,25 +1674,79 @@ void main() {
       },
     };
 
-    test('muting shows at once and sends the push rule', () async {
-      final api = _Api();
-      final client = await _client(api: api);
-      final rooms = await _rooms(client);
-      await _sync(client, {
-        'join': {'!m:example.com': _room('mute me')},
+    test(
+      'a notification level shows at once and sends the push rule',
+      () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _sync(client, {
+          'join': {'!m:example.com': _room('mute me')},
+        });
+        await _settle();
+
+        final result = rooms.setNotify('!m:example.com', NotifyLevel.none);
+        expect(byId(rooms, '!m:example.com').notify, NotifyLevel.none);
+        await result;
+        await _settle();
+
+        expect(byId(rooms, '!m:example.com').notify, NotifyLevel.none);
+        expect(
+          api.answered.where((p) => p.contains('/pushrules/')),
+          isNotEmpty,
+        );
+      },
+    );
+
+    // Mute is an override rule, mentions only a room rule, all neither: a
+    // change between two of them is what the server has to end up holding.
+    const rule = '/pushrules/global';
+    const id = '!m%3Aexample.com';
+    for (final (from, to, sent) in <(NotifyLevel, NotifyLevel, List<String>)>[
+      (NotifyLevel.all, NotifyLevel.mentions, ['PUT $rule/room/$id']),
+      (NotifyLevel.all, NotifyLevel.none, ['PUT $rule/override/$id']),
+      (
+        NotifyLevel.mentions,
+        NotifyLevel.none,
+        ['DELETE $rule/room/$id', 'PUT $rule/override/$id'],
+      ),
+      (NotifyLevel.mentions, NotifyLevel.all, ['DELETE $rule/room/$id']),
+      (
+        NotifyLevel.none,
+        NotifyLevel.mentions,
+        ['DELETE $rule/override/$id', 'PUT $rule/room/$id'],
+      ),
+      (NotifyLevel.none, NotifyLevel.all, ['DELETE $rule/override/$id']),
+    ]) {
+      test('from ${from.name} to ${to.name} leaves the right rules', () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _sync(client, {
+          'join': {'!m:example.com': _room('mute me')},
+        });
+        await client.handleSync(
+          SyncUpdate.fromJson({
+            'next_batch': 'rules',
+            'account_data': {
+              'events': [
+                _rules(
+                  override: [if (from == NotifyLevel.none) '!m:example.com'],
+                  room: [if (from == NotifyLevel.mentions) '!m:example.com'],
+                ),
+              ],
+            },
+          }),
+        );
+        await _settle();
+        expect(byId(rooms, '!m:example.com').notify, from);
+
+        await rooms.setNotify('!m:example.com', to);
+        expect(api.rules, sent);
       });
-      await _settle();
+    }
 
-      final result = rooms.setMuted('!m:example.com', true);
-      expect(byId(rooms, '!m:example.com').muted, isTrue);
-      await result;
-      await _settle();
-
-      expect(byId(rooms, '!m:example.com').muted, isTrue);
-      expect(api.answered.where((p) => p.contains('/pushrules/')), isNotEmpty);
-    });
-
-    test('a refused mute snaps back and throws', () async {
+    test('a refused level snaps back and throws', () async {
       final api = _Api()..refuse = true;
       final client = await _client(api: api);
       final rooms = await _rooms(client);
@@ -1641,11 +1756,11 @@ void main() {
       await _settle();
 
       await expectLater(
-        rooms.setMuted('!m:example.com', true),
+        rooms.setNotify('!m:example.com', NotifyLevel.none),
         throwsA(isA<MatrixException>()),
       );
       await _settle();
-      expect(byId(rooms, '!m:example.com').muted, isFalse);
+      expect(byId(rooms, '!m:example.com').notify, NotifyLevel.all);
     });
 
     test('a refused call only rolls back its own wish', () async {
@@ -1657,13 +1772,13 @@ void main() {
       });
       await _settle();
 
-      final first = rooms.setMuted('!m:example.com', true);
+      final first = rooms.setNotify('!m:example.com', NotifyLevel.none);
       await _settle();
       // The room's real state is still unmuted, so muting off again settles
       // at once: no push rule needs to change.
-      final second = rooms.setMuted('!m:example.com', false);
+      final second = rooms.setNotify('!m:example.com', NotifyLevel.all);
       await _settle();
-      expect(byId(rooms, '!m:example.com').muted, isFalse);
+      expect(byId(rooms, '!m:example.com').notify, NotifyLevel.all);
 
       api.refuse = true;
       api.hold!.complete();
@@ -1672,7 +1787,7 @@ void main() {
       await _settle();
 
       // The older refusal does not undo the newer wish.
-      expect(byId(rooms, '!m:example.com').muted, isFalse);
+      expect(byId(rooms, '!m:example.com').notify, NotifyLevel.all);
     });
 
     test('favouriting a low-priority room clears low priority', () async {
@@ -1788,9 +1903,9 @@ void main() {
       });
       await _settle();
 
-      await rooms.setMuted('!m:example.com', true);
+      await rooms.setNotify('!m:example.com', NotifyLevel.none);
       await _settle();
-      expect(byId(rooms, '!m:example.com').muted, isTrue);
+      expect(byId(rooms, '!m:example.com').notify, NotifyLevel.none);
 
       // The server agrees: the wish is gone, so a later change from another
       // device is drawn straight through.
@@ -1819,7 +1934,7 @@ void main() {
         }),
       );
       await _settle();
-      expect(byId(rooms, '!m:example.com').muted, isTrue);
+      expect(byId(rooms, '!m:example.com').notify, NotifyLevel.none);
 
       await client.handleSync(
         SyncUpdate.fromJson({
@@ -1837,7 +1952,7 @@ void main() {
         }),
       );
       await _settle();
-      expect(byId(rooms, '!m:example.com').muted, isFalse);
+      expect(byId(rooms, '!m:example.com').notify, NotifyLevel.all);
     });
 
     test(

@@ -460,7 +460,10 @@ class _Detail extends StatelessWidget {
     SettingsSection.notifications => switch (NotificationScope.maybeOf(
       context,
     )) {
-      final controller? => NotificationsSection(controller: controller),
+      final controller? => NotificationsSection(
+        controller: controller,
+        profile: profile,
+      ),
       null => AccountSection(profile: profile, me: me, editable: editable),
     },
     SettingsSection.voice => switch (VoiceScope.maybeOf(context)) {

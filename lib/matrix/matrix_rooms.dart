@@ -51,13 +51,13 @@ const _voiceTypes = {'m.call', 'org.matrix.msc3417.call'};
 /// What a row should show while its change is on its way. A field is
 /// cleared when a sync shows it, or when its call fails.
 class _Wish {
-  bool? muted;
+  NotifyLevel? notify;
   bool? favourite;
   double? favouriteOrder;
   bool? lowPriority;
   bool? joined;
   bool get isEmpty =>
-      muted == null &&
+      notify == null &&
       favourite == null &&
       favouriteOrder == null &&
       lowPriority == null &&
@@ -283,7 +283,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     RoomAbility.answerInvites,
     RoomAbility.messages,
     RoomAbility.markRead,
-    RoomAbility.mute,
+    RoomAbility.notify,
     RoomAbility.tag,
     RoomAbility.join,
     RoomAbility.leave,
@@ -553,10 +553,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     for (final id in _wishes.keys.toList()) {
       final wish = _wishes[id]!;
       final room = client.getRoomById(id);
-      if (wish.muted != null &&
+      if (wish.notify != null &&
           room != null &&
-          (room.pushRuleState != PushRuleState.notify) == wish.muted) {
-        wish.muted = null;
+          _levelOf(room.pushRuleState) == wish.notify) {
+        wish.notify = null;
       }
       if (wish.favourite != null &&
           room != null &&
@@ -746,7 +746,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         JoinRules.knock,
       }.contains(room.joinRules),
       topic: topic.isEmpty ? null : topic,
-      muted: room.pushRuleState != PushRuleState.notify,
+      notify: _levelOf(room.pushRuleState),
       members: switch (kind) {
         ChannelKind.direct => _others(room),
         ChannelKind.room => _members(room),
@@ -771,7 +771,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final wish = _wishes[room.id];
     if (wish == null) return channel;
     return channel.copyWith(
-      muted: wish.muted,
+      notify: wish.notify,
       favourite: wish.favourite,
       favouriteOrder: wish.favouriteOrder,
       lowPriority: wish.lowPriority,
@@ -1012,17 +1012,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
-  Future<void> setMuted(String roomId, bool muted) {
+  Future<void> setNotify(String roomId, NotifyLevel level) {
     final room = client.getRoomById(roomId);
     if (room == null) return Future.value();
     return _wished(
       roomId,
-      'muted',
-      (wish) => wish.muted = muted,
-      (wish) => wish.muted = null,
-      () => room.setPushRuleState(
-        muted ? PushRuleState.dontNotify : PushRuleState.notify,
-      ),
+      'notify',
+      (wish) => wish.notify = level,
+      (wish) => wish.notify = null,
+      () => room.setPushRuleState(_stateOf(level)),
     );
   }
 
@@ -1472,3 +1470,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     super.dispose();
   }
 }
+
+NotifyLevel _levelOf(PushRuleState state) => switch (state) {
+  PushRuleState.notify => NotifyLevel.all,
+  PushRuleState.mentionsOnly => NotifyLevel.mentions,
+  PushRuleState.dontNotify => NotifyLevel.none,
+};
+
+PushRuleState _stateOf(NotifyLevel level) => switch (level) {
+  NotifyLevel.all => PushRuleState.notify,
+  NotifyLevel.mentions => PushRuleState.mentionsOnly,
+  NotifyLevel.none => PushRuleState.dontNotify,
+};

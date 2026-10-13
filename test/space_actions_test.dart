@@ -137,7 +137,7 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   void markRead(String roomId) => _unwired();
   @override
-  Future<void> setMuted(String roomId, bool muted) => _unwired();
+  Future<void> setNotify(String roomId, NotifyLevel level) => _unwired();
   @override
   Future<void> setJoined(String roomId, bool joined) => _unwired();
   @override

@@ -26,6 +26,14 @@ class _Profile extends ChangeNotifier implements Profile {
   var uploadingAvatar = false;
   @override
   var presenceShared = true;
+  @override
+  var channelDefault = ChannelDefault.all;
+  @override
+  var settingChannelDefault = false;
+
+  @override
+  Future<void> setChannelDefault(ChannelDefault level) async =>
+      channelDefault = level;
 
   /// The next save waits for this, then throws [failWith] if set.
   Completer<void>? hold;

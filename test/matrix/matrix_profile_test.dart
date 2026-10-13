@@ -10,7 +10,7 @@ import 'package:loaf_native/matrix/matrix_profile.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/ui/members/presence.dart' as loaf;
 import 'package:loaf_native/ui/shell/profile.dart'
-    show AccountSaveFailed, HalfApplied;
+    show AccountSaveFailed, ChannelDefault, HalfApplied;
 import 'package:matrix/matrix.dart' hide Presence;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -31,6 +31,14 @@ class _Api extends FakeMatrixApi {
   Client? client;
   var refuseBusy = false;
   var refuseMute = false;
+
+  /// The channel default's two rules: `encrypted:false`, `message:false`
+  /// in [log]; each can be refused, and the next write held.
+  var refuseEncrypted = false;
+  var refuseMessage = false;
+  Completer<void>? rulesHold;
+  var messageEnabled = true;
+  var encryptedEnabled = true;
 
   /// Profile writes and uploads, in order: `PUT displayname {…}`,
   /// `POST upload`, `PUT avatar_url {…}`.
@@ -74,6 +82,33 @@ class _Api extends FakeMatrixApi {
             ],
           },
         }),
+      );
+      return http.Response(jsonEncode({}), 200);
+    }
+    if (request.method == 'PUT' &&
+        path.contains('/pushrules/global/underride/.m.rule.') &&
+        path.endsWith('/enabled')) {
+      final rule = path.split('/.m.rule.')[1].split('/')[0];
+      final enabled =
+          (jsonDecode(request.body) as Map<String, Object?>)['enabled'] as bool;
+      log.add('$rule:$enabled');
+      // Refused or not is decided as the request lands; the hold only
+      // delays the answer.
+      final refused = switch (rule) {
+        'encrypted' => refuseEncrypted,
+        'message' => refuseMessage,
+        _ => false,
+      };
+      final hold = rulesHold;
+      rulesHold = null;
+      if (hold != null) await hold.future;
+      if (refused) return _refused('M_UNKNOWN', 500);
+      if (rule == 'encrypted') encryptedEnabled = enabled;
+      if (rule == 'message') messageEnabled = enabled;
+      await _rulesSync(
+        client!,
+        message: messageEnabled,
+        encrypted: encryptedEnabled,
       );
       return http.Response(jsonEncode({}), 200);
     }
@@ -170,6 +205,41 @@ Future<void> _presence(
   // The SDK's streams deliver a beat later.
   await _settle();
 }
+
+/// The server's default message rules, as a sync echoes them.
+Future<void> _rulesSync(
+  Client client, {
+  required bool message,
+  required bool encrypted,
+}) => client.handleSync(
+  SyncUpdate.fromJson({
+    'next_batch': 'u${_batches++}',
+    'account_data': {
+      'events': [
+        {
+          'type': 'm.push_rules',
+          'content': {
+            'global': {
+              'underride': [
+                for (final (id, on) in [
+                  ('.m.rule.message', message),
+                  ('.m.rule.encrypted', encrypted),
+                ])
+                  {
+                    'rule_id': id,
+                    'default': true,
+                    'enabled': on,
+                    'conditions': <Object?>[],
+                    'actions': ['notify'],
+                  },
+              ],
+            },
+          },
+        },
+      ],
+    },
+  }),
+);
 
 /// Account data as a sync brings it, master rule included.
 Future<void> _remote(
@@ -537,6 +607,120 @@ void main() {
       await _remote(client, choice: 'idle', muted: true);
       expect(profile.choice, loaf.PresenceChoice.dnd);
       expect(api.log.where((e) => !e.startsWith('presence:')), isEmpty);
+    });
+  });
+
+  group('channel default', () {
+    test('all messages, unless .m.rule.message is off', () async {
+      final (_, client, profile) = await _profile();
+      expect(profile.channelDefault, ChannelDefault.all);
+      await _rulesSync(client, message: false, encrypted: false);
+      await _settle();
+      expect(profile.channelDefault, ChannelDefault.mentions);
+    });
+
+    test('a profile opened with the rule off starts at mentions', () async {
+      final api = _Api();
+      final client = await _client(api);
+      await _rulesSync(client, message: false, encrypted: false);
+      final profile = MatrixProfile(client);
+      addTearDown(profile.dispose);
+      expect(profile.channelDefault, ChannelDefault.mentions);
+    });
+
+    test('mentions only turns off encrypted, then message', () async {
+      final (api, _, profile) = await _profile();
+      api.log.clear();
+      final done = profile.setChannelDefault(ChannelDefault.mentions);
+      expect(profile.channelDefault, ChannelDefault.mentions);
+      expect(profile.settingChannelDefault, isTrue);
+      await done;
+      await _settle();
+      expect(api.log, ['encrypted:false', 'message:false']);
+      expect(profile.channelDefault, ChannelDefault.mentions);
+      expect(profile.settingChannelDefault, isFalse);
+    });
+
+    test('choosing the level already set sends nothing', () async {
+      final (api, _, profile) = await _profile();
+      api.log.clear();
+      await profile.setChannelDefault(ChannelDefault.all);
+      expect(api.log, isEmpty);
+      expect(profile.settingChannelDefault, isFalse);
+    });
+
+    test('all messages turns both back on', () async {
+      final (api, _, profile) = await _profile();
+      await profile.setChannelDefault(ChannelDefault.mentions);
+      api.log.clear();
+      await profile.setChannelDefault(ChannelDefault.all);
+      await _settle();
+      expect(api.log, ['encrypted:true', 'message:true']);
+      expect(profile.channelDefault, ChannelDefault.all);
+    });
+
+    test('a refused first write changes nothing and throws', () async {
+      final (api, _, profile) = await _profile();
+      api.refuseEncrypted = true;
+      api.log.clear();
+      await expectLater(
+        profile.setChannelDefault(ChannelDefault.mentions),
+        throwsA(isA<MatrixException>()),
+      );
+      expect(api.log, ['encrypted:false']);
+      expect(profile.channelDefault, ChannelDefault.all);
+      expect(profile.settingChannelDefault, isFalse);
+    });
+
+    test('a refused second write snaps back and throws', () async {
+      final (api, _, profile) = await _profile();
+      api.refuseMessage = true;
+      await expectLater(
+        profile.setChannelDefault(ChannelDefault.mentions),
+        throwsA(isA<MatrixException>()),
+      );
+      await _settle();
+      expect(profile.channelDefault, ChannelDefault.all);
+    });
+
+    test('a later choice stands when an earlier one fails', () async {
+      final (api, _, profile) = await _profile();
+      final hold = Completer<void>();
+      api.rulesHold = hold;
+      api.refuseEncrypted = true;
+      final first = profile.setChannelDefault(ChannelDefault.mentions);
+      await _settle();
+      api.refuseEncrypted = false;
+      await profile.setChannelDefault(ChannelDefault.all);
+      hold.complete();
+      await expectLater(first, throwsA(isA<MatrixException>()));
+      await _settle();
+      expect(profile.channelDefault, ChannelDefault.all);
+    });
+
+    test('a change from elsewhere is followed', () async {
+      final (_, client, profile) = await _profile();
+      await _rulesSync(client, message: false, encrypted: true);
+      await _settle();
+      expect(profile.channelDefault, ChannelDefault.mentions);
+      await _rulesSync(client, message: true, encrypted: true);
+      await _settle();
+      expect(profile.channelDefault, ChannelDefault.all);
+    });
+
+    test('a sync during a write does not undo the choice', () async {
+      final (api, client, profile) = await _profile();
+      final hold = Completer<void>();
+      api.rulesHold = hold;
+      final done = profile.setChannelDefault(ChannelDefault.mentions);
+      await _settle();
+      await _rulesSync(client, message: true, encrypted: true);
+      await _settle();
+      expect(profile.channelDefault, ChannelDefault.mentions);
+      hold.complete();
+      await done;
+      await _settle();
+      expect(profile.channelDefault, ChannelDefault.mentions);
     });
   });
 

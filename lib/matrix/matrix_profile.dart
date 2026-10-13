@@ -29,6 +29,7 @@ class MatrixProfile extends ChangeNotifier implements Profile {
     // What was chosen, on this or another device; nothing is sent for it.
     _choice = _reconcile(_stored, client.allPushNotificationsMuted);
     client.syncPresence = _syncWire(_choice);
+    _channelDefault = _readChannelDefault();
     _ownStatus = _loadOwnStatus();
     // The status stream does not replay, and a sync may already be done.
     final status = client.onSyncStatus.value;
@@ -79,6 +80,10 @@ class MatrixProfile extends ChangeNotifier implements Profile {
   /// on the sync half-finished, and must not be mistaken for someone else's.
   var _choosing = 0;
 
+  var _channelDefault = ChannelDefault.all;
+  var _defaultTurn = 0;
+  var _settingDefault = 0;
+
   static const _accountType = 'moe.loaf.presence';
 
   /// The stored own status, read at start. The publish waits on it so it
@@ -111,6 +116,58 @@ class MatrixProfile extends ChangeNotifier implements Profile {
 
   @override
   bool get uploadingAvatar => _uploading;
+
+  @override
+  ChannelDefault get channelDefault => _channelDefault;
+
+  @override
+  bool get settingChannelDefault => _settingDefault > 0;
+
+  /// `.m.rule.message` decides. `.m.rule.encrypted` is written beside it;
+  /// a client that changed only one of the two still gets the answer for a
+  /// plain room.
+  ChannelDefault _readChannelDefault() {
+    final rules = client.globalPushRules?.underride;
+    final message = rules
+        ?.where((rule) => rule.ruleId == '.m.rule.message')
+        .firstOrNull;
+    return message == null || message.enabled
+        ? ChannelDefault.all
+        : ChannelDefault.mentions;
+  }
+
+  @override
+  Future<void> setChannelDefault(ChannelDefault level) async {
+    if (level == _channelDefault && _settingDefault == 0) return;
+    final previous = _channelDefault;
+    final turn = ++_defaultTurn;
+    _channelDefault = level;
+    _settingDefault++;
+    _notify();
+    final enabled = level == ChannelDefault.all;
+    try {
+      // The rule read back goes last: a first write that fails changes
+      // nothing anyone sees, and the next attempt redoes both.
+      await client.setPushRuleEnabled(
+        PushRuleKind.underride,
+        '.m.rule.encrypted',
+        enabled,
+      );
+      await client.setPushRuleEnabled(
+        PushRuleKind.underride,
+        '.m.rule.message',
+        enabled,
+      );
+    } catch (_) {
+      if (!_disposed && turn == _defaultTurn) {
+        _channelDefault = previous;
+        _notify();
+      }
+      rethrow;
+    } finally {
+      _settingDefault--;
+    }
+  }
 
   @override
   Member get me {
@@ -222,6 +279,15 @@ class MatrixProfile extends ChangeNotifier implements Profile {
           (e) => e.type == _accountType || e.type == EventTypes.PushRules,
         )) {
       _follow();
+    }
+    if (_settingDefault == 0 &&
+        account != null &&
+        account.any((e) => e.type == EventTypes.PushRules)) {
+      final next = _readChannelDefault();
+      if (next != _channelDefault) {
+        _channelDefault = next;
+        _notify();
+      }
     }
     final events = update.presence;
     if (events == null || events.isEmpty) return;

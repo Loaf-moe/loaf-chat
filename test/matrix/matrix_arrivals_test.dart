@@ -114,12 +114,27 @@ Future<void> _deliver(Client client, List<Map<String, Object?>> events) =>
     );
 
 /// Push rules as a server holds them: a mention of you notifies, and so does
-/// any message, except where a room rule says [muted].
-Map<String, Object?> _pushRules({List<String> muted = const []}) => {
+/// any message. A room in [mentionsOnly] keeps its mentions, by a room rule;
+/// one in [muted] keeps nothing, by an override rule, which the server
+/// ranks above its own mention rule.
+Map<String, Object?> _pushRules({
+  List<String> muted = const [],
+  List<String> mentionsOnly = const [],
+}) => {
   'type': 'm.push_rules',
   'content': {
     'global': {
       'override': [
+        for (final id in muted)
+          {
+            'rule_id': id,
+            'default': false,
+            'enabled': true,
+            'conditions': [
+              {'kind': 'event_match', 'key': 'room_id', 'pattern': id},
+            ],
+            'actions': <Object?>[],
+          },
         {
           'rule_id': '.m.rule.is_user_mention',
           'default': true,
@@ -139,12 +154,12 @@ Map<String, Object?> _pushRules({List<String> muted = const []}) => {
       ],
       'content': <Object?>[],
       'room': [
-        for (final id in muted)
+        for (final id in mentionsOnly)
           {
             'rule_id': id,
             'default': false,
             'enabled': true,
-            'actions': ['dont_notify'],
+            'actions': <Object?>[],
           },
       ],
       'sender': <Object?>[],
@@ -380,11 +395,34 @@ void main() {
       expect(rig.got.map((a) => a.eventId), [r'$real']);
     });
 
-    test('a muted room is quiet but a mention in it chimes', () async {
+    test('a mentions-only room is quiet but a mention in it chimes', () async {
       final client = await _client();
       await _join(client);
       // The SDK builds its evaluator from the `m.push_rules` account data
-      // of a sync: a room rule named for the room, with no notify action.
+      // of a sync.
+      await _sync(
+        client,
+        accountData: [
+          _pushRules(mentionsOnly: [_general]),
+        ],
+      );
+      final rig = await _rig(client);
+      await _deliver(client, [
+        _msg(r'$plain'),
+        _msg(
+          r'$mention',
+          mentions: {
+            'user_ids': [_me],
+          },
+        ),
+      ]);
+      await rig.reached(r'$mention');
+      expect(rig.got.map((a) => a.eventId), [r'$mention']);
+    });
+
+    test('a muted room is quiet, mention or not', () async {
+      final client = await _client();
+      await _join(client);
       await _sync(
         client,
         accountData: [
@@ -402,7 +440,7 @@ void main() {
         ),
       ]);
       await rig.reached(r'$mention');
-      expect(rig.got.map((a) => a.eventId), [r'$mention']);
+      expect(rig.got, isEmpty);
     });
 
     test('the same messages arrive once the room is unmuted', () async {

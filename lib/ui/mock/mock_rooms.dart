@@ -32,7 +32,7 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   // This session's changes, layered over the fixtures by Space.withSession.
   final _membership = <String, bool>{};
-  final _muted = <String, bool>{};
+  final _notify = <String, NotifyLevel>{};
   final _read = <String>{};
 
   // Home's room tags, as this session has them. Favourites are a list so
@@ -120,10 +120,14 @@ class MockRooms extends ChangeNotifier implements Rooms {
   List<Space> get spaces => [
     for (final space in [...mockSpaces, ..._acceptedSpaces])
       if (_membership[space.id] != false)
-        space.withSession(membership: _membership, muted: _muted, read: _read),
+        space.withSession(
+          membership: _membership,
+          notify: _notify,
+          read: _read,
+        ),
   ];
 
-  /// Home's rooms with this session's tags, mutes and reading applied.
+  /// Home's rooms with this session's tags, levels and reading applied.
   /// Rooms you have left are gone: Home has no "join" pills, only what you
   /// are in.
   @override
@@ -137,7 +141,7 @@ class MockRooms extends ChangeNotifier implements Rooms {
               : null,
           lowPriority: _lowPriority[room.id],
           lastActivity: _activity[room.id],
-          muted: _muted[room.id],
+          notify: _notify[room.id],
           // Read state is applied per room here, before duplicates fold
           // together, so an older room's unreads still count on the row.
           unread: _read.contains(room.id) ? 0 : room.unread,
@@ -167,8 +171,8 @@ class MockRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
-  Future<void> setMuted(String roomId, bool muted) {
-    _change(() => _muted[roomId] = muted);
+  Future<void> setNotify(String roomId, NotifyLevel level) {
+    _change(() => _notify[roomId] = level);
     return SynchronousFuture(null);
   }
 

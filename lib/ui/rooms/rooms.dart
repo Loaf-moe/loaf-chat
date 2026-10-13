@@ -22,7 +22,9 @@ import '../widgets/avatar_images.dart';
 enum RoomAbility {
   /// Mark as read, and reading by opening.
   markRead,
-  mute,
+
+  /// Choosing a channel's [NotifyLevel].
+  notify,
   leave,
 
   /// Joining an unjoined channel from its row.
@@ -138,7 +140,7 @@ abstract interface class Rooms implements Listenable {
   Timeline? timeline(String roomId);
 
   void markRead(String roomId);
-  Future<void> setMuted(String roomId, bool muted);
+  Future<void> setNotify(String roomId, NotifyLevel level);
   Future<void> setJoined(String roomId, bool joined);
   Future<void> setFavourite(String roomId, bool favourite);
 

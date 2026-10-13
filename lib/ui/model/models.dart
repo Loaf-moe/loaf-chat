@@ -255,6 +255,12 @@ class Message {
 /// What a moderator has put on someone in a call. Deafened is muted too.
 enum CallSilence { muted, deafened }
 
+/// How much of a room reaches you: everything, mentions alone, or nothing.
+/// Unread state is untouched either way. On Matrix, [mentions] is a
+/// room-kind push rule with no actions and [none] an override rule, which
+/// the mention rules can't get past.
+enum NotifyLevel { all, mentions, none }
+
 class Channel {
   const Channel({
     required this.id,
@@ -266,7 +272,7 @@ class Channel {
     this.topic,
     this.occupants = const [],
     this.joined = true,
-    this.muted = false,
+    this.notify = NotifyLevel.all,
     this.members = const [],
     this.favourite = false,
     this.favouriteOrder,
@@ -300,9 +306,7 @@ class Channel {
   /// space's members) are ever listed — see "Joining a space" in the spec.
   final bool joined;
 
-  /// Mentions still reach you; nothing else does. A single toggle with no
-  /// expiry, mapping to a mentions-only push rule.
-  final bool muted;
+  final NotifyLevel notify;
 
   /// For a direct chat: everyone in it except you. One person is a 1:1
   /// DM, more is a group DM.
@@ -347,7 +351,7 @@ class Channel {
 
   Channel copyWith({
     bool? joined,
-    bool? muted,
+    NotifyLevel? notify,
     int? unread,
     int? mentions,
     List<Member>? occupants,
@@ -370,7 +374,7 @@ class Channel {
     silenced: silenced,
     canSilence: canSilence,
     joined: joined ?? this.joined,
-    muted: muted ?? this.muted,
+    notify: notify ?? this.notify,
     members: members,
     favourite: favourite ?? this.favourite,
     favouriteOrder: favouriteOrder ?? this.favouriteOrder,
@@ -429,7 +433,7 @@ class Space {
   /// This space with this session's changes layered over the fixtures — the
   /// mock's stand-in for membership, read markers and push rules arriving
   /// over sync. [membership] maps channel ids to joined (true) or left
-  /// (false); [muted] likewise; channels in [read] have nothing unread.
+  /// (false); [notify] likewise; channels in [read] have nothing unread.
   ///
   /// A left invite-only channel is dropped entirely: only channels you could
   /// join in one tap are ever listed.
@@ -438,7 +442,7 @@ class Space {
   /// adds to a channel's count, for the missed calls a DM has picked up.
   Space withSession({
     Map<String, bool> membership = const {},
-    Map<String, bool> muted = const {},
+    Map<String, NotifyLevel> notify = const {},
     Set<String> read = const {},
     Map<String, List<Member>> occupants = const {},
     Map<String, int> unread = const {},
@@ -455,7 +459,7 @@ class Space {
             if (!(channel.private && membership[channel.id] == false))
               channel.copyWith(
                 joined: membership[channel.id],
-                muted: muted[channel.id],
+                notify: notify[channel.id],
                 // Reading clears what the fixture had; anything that lands
                 // afterwards, such as a missed call, counts again.
                 unread:
