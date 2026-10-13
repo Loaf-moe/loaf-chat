@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_arrivals.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
+import 'package:loaf_native/ui/model/message_route.dart';
 import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -404,6 +405,7 @@ class _Rig {
   _Rig(this.client) : arrivals = MatrixArrivals(client, now: () => _launch) {
     _subs = [
       arrivals.stream.listen(got.add),
+      arrivals.retractions.listen(retracted.add),
       // Subscribed after the arrivals' own, so it runs after them.
       client.onTimelineEvent.stream.listen((e) => seen.add(e.eventId)),
     ];
@@ -412,6 +414,7 @@ class _Rig {
   final Client client;
   final MatrixArrivals arrivals;
   final got = <Arrival>[];
+  final retracted = <MessageRoute>[];
   final seen = <String>[];
   late final List<StreamSubscription<Object?>> _subs;
 
@@ -485,8 +488,10 @@ void main() {
     /// encrypted; the message is sealed by them.
     Future<(Client, String, Map<String, Object?>)> sealed(
       _Kind kind,
-      _Mention mention,
-    ) async {
+      _Mention mention, {
+      Map<String, Object?>? content,
+      String type = EventTypes.Message,
+    }) async {
       final mine = await cryptoClient();
       final theirs = await cryptoClient(
         api: FakeMatrixApi.currentApi,
@@ -495,19 +500,21 @@ void main() {
       await theirs.updateUserDeviceKeys(additionalUsers: {me});
       final room = await _joinEncrypted(theirs, kind);
       await _joinEncrypted(mine, kind);
-      final content = await theirs.encryption!.encryptGroupMessagePayload(
+      final sealed = await theirs.encryption!.encryptGroupMessagePayload(
         room,
-        {
-          'msgtype': 'm.text',
-          'body': 'hi',
-          if (mention == _Mention.userIds)
-            'm.mentions': {
-              'user_ids': [me],
+        content ??
+            {
+              'msgtype': 'm.text',
+              'body': 'hi',
+              if (mention == _Mention.userIds)
+                'm.mentions': {
+                  'user_ids': [me],
+                },
             },
-        },
+        type: type,
       );
-      _keyOf(theirs, room, content);
-      return (mine, room, content);
+      _keyOf(theirs, room, sealed);
+      return (mine, room, sealed);
     }
 
     for (final account in accounts) {
@@ -564,9 +571,56 @@ void main() {
               readable.map((a) => (a.eventId, a.text)),
               notifies ? [(r'$m', 'hi')] : isEmpty,
             );
+            expect(rig.retracted, isEmpty);
           });
         }
       }
+    }
+
+    // A message noticed while sealed whose text, once read, does not
+    // notify: its notice is taken back. An edit or a reaction is known
+    // sealed, its relation in the clear; a notice or a poll is not.
+    for (final (what, type, content)
+        in <(String, String, Map<String, Object?>)>[
+          (
+            'a bot notice',
+            EventTypes.Message,
+            {'msgtype': 'm.notice', 'body': 'hi'},
+          ),
+          (
+            'a poll',
+            'org.matrix.msc3381.poll.start',
+            {
+              'org.matrix.msc3381.poll.start': {
+                'question': {'body': 'rye?'},
+                'answers': <Object?>[],
+              },
+            },
+          ),
+        ]) {
+      test('a sealed notice is taken back when its text is $what', () async {
+        final (mine, room, sealedContent) = await sealed(
+          _Kind.group,
+          _Mention.none,
+          content: content,
+          type: type,
+        );
+        await _sync(
+          mine,
+          accountData: [_rulesFor(_Account.all, _RoomRule.all, room)],
+        );
+        final rig = await _rig(mine);
+        await _deliver(mine, room, [_sealedMsg(sealedContent, r'$m')]);
+        await rig.reached(r'$m');
+        expect(rig.got.map((a) => (a.eventId, a.kind)), [
+          (r'$m', ArrivalKind.encrypted),
+        ]);
+
+        await _giveKey(mine, room, sealedContent);
+        await _until(() => rig.retracted.isNotEmpty);
+        expect(rig.retracted, [MessageRoute(room, r'$m')]);
+        expect(rig.got, hasLength(1), reason: 'no text arrival');
+      });
     }
   });
 

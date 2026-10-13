@@ -193,7 +193,10 @@ sealed when judged is kept, by room and session, and judged again when
 `Room.onSessionKeyReceived` brings its key, as the unread store already
 did for its counts. It arrives again as what it says; the notifier
 sounds no second time, and the notice, keyed by room and event on every
-platform, is replaced.
+platform, is replaced. One noticed while sealed whose text turns out not
+to notify (a bot notice, an edit, a room since left) has its notice
+taken back: by the one message on macOS and Linux, by the room on
+Windows, whose native side does not expose a toast by tag yet.
 
 **F4. A mentions-only room silenced your localpart.** The SDK checks room
 rules before content rules; the spec says content first. Fixed: Loaf

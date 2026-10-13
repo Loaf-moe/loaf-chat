@@ -146,11 +146,15 @@ class PortalNotifications implements DesktopNotifications {
   }
 
   @override
-  Future<void> withdraw(String roomId) async {
-    final ids = [
-      for (final MapEntry(key: id, value: route) in _shown.entries)
-        if (route.roomId == roomId) id,
-    ];
+  Future<void> withdraw(String roomId) => _remove([
+    for (final MapEntry(key: id, value: route) in _shown.entries)
+      if (route.roomId == roomId) id,
+  ]);
+
+  @override
+  Future<void> retract(MessageRoute route) => _remove([_id(route)]);
+
+  Future<void> _remove(List<String> ids) async {
     for (final id in ids) {
       _shown.remove(id);
       try {

@@ -18,6 +18,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart' show DatabaseException;
 import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
 import '../ui/model/arrival.dart';
+import '../ui/model/message_route.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/settings/devices.dart';
@@ -162,6 +163,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   @override
   Stream<Arrival> get arrivals => _arrivals.stream;
+
+  @override
+  Stream<MessageRoute> get retractions => _arrivals.retractions;
 
   /// A space's children the SDK doesn't have state for: unjoined channels,
   /// and the children of an unjoined subspace. The hierarchy cache: the

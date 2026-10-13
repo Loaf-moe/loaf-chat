@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import '../call/calls.dart';
 import '../channel/timeline.dart';
 import '../model/arrival.dart';
+import '../model/message_route.dart';
 import '../model/models.dart';
 import '../settings/devices.dart';
 import '../shell/profile.dart';
@@ -124,6 +125,10 @@ abstract interface class Rooms implements Listenable {
   /// New messages that the push rules say should notify you, as they
   /// arrive. Never the backlog a launch catches up on.
   Stream<Arrival> get arrivals;
+
+  /// Messages noticed while sealed whose text, once read, does not
+  /// notify: their notice is to be taken back.
+  Stream<MessageRoute> get retractions;
 
   /// Everything that lives in Home, before `homeSections` sorts it.
   List<Channel> get homeRooms;

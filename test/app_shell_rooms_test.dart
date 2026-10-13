@@ -101,6 +101,8 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   Stream<Arrival> get arrivals => const Stream.empty();
   @override
+  Stream<MessageRoute> get retractions => const Stream.empty();
+  @override
   Calls? calls;
   @override
   AvatarImages get avatarImages => const NoAvatarImages();

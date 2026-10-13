@@ -8,6 +8,7 @@ import 'dart:async';
 
 import '../model/arrival.dart';
 import '../model/desktop_notifications.dart';
+import '../model/message_route.dart';
 import '../model/models.dart';
 import '../model/notice.dart';
 import '../rooms/rooms.dart';
@@ -86,6 +87,17 @@ class Noticer {
       );
       if (allRead) _withdraw(id);
     }
+  }
+
+  /// Takes back the notice for [route]'s message: it was noticed sealed,
+  /// and read says it should not have been.
+  void retract(MessageRoute route) {
+    final messages = _shown[route.roomId];
+    if (messages != null) {
+      messages.remove(route.eventId);
+      if (messages.isEmpty) _shown.remove(route.roomId);
+    }
+    unawaited(desktop.retract(route));
   }
 
   void _withdraw(String roomId) {

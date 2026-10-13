@@ -5,6 +5,7 @@ import 'package:loaf_native/ui/mock/mock_rooms.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
 import 'package:loaf_native/ui/model/chime.dart';
 import 'package:loaf_native/ui/model/desktop_notifications.dart';
+import 'package:loaf_native/ui/model/message_route.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/model/notice.dart';
 import 'package:loaf_native/ui/settings/notification_settings.dart';
@@ -168,6 +169,19 @@ void main() {
     rooms.setRead(dm, readAt(600));
     expect(desktop.withdrawn, [dm]);
   });
+
+  test(
+    'a retracted message\'s notice is taken back, the room\'s others stay',
+    () async {
+      await noticer.show(arrival(dm, id: r'$a'), sound: false);
+      await noticer.show(arrival(dm, id: r'$b'), sound: false);
+      noticer.retract(MessageRoute(dm, r'$a'));
+      expect(desktop.retracted, [MessageRoute(dm, r'$a')]);
+      expect(desktop.withdrawn, isEmpty);
+      rooms.setRead(dm, readAt(1));
+      expect(desktop.withdrawn, [dm], reason: r'$b was still up');
+    },
+  );
 
   test('a room that is gone has its notices withdrawn', () async {
     await noticer.show(arrival('!gone:x'), sound: false);

@@ -145,11 +145,18 @@ class FdoNotifications implements DesktopNotifications {
   }
 
   @override
-  Future<void> withdraw(String roomId) async {
-    final ids = [
-      for (final MapEntry(key: id, value: route) in _routes.entries)
-        if (route.roomId == roomId) id,
-    ];
+  Future<void> withdraw(String roomId) => _close([
+    for (final MapEntry(key: id, value: route) in _routes.entries)
+      if (route.roomId == roomId) id,
+  ]);
+
+  @override
+  Future<void> retract(MessageRoute route) => _close([
+    for (final MapEntry(key: id, value: shown) in _routes.entries)
+      if (shown == route) id,
+  ]);
+
+  Future<void> _close(List<int> ids) async {
     for (final id in ids) {
       _routes.remove(id);
       try {

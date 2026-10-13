@@ -22,6 +22,9 @@ abstract interface class DesktopNotifications {
   /// Takes back every notification shown for [roomId].
   Future<void> withdraw(String roomId);
 
+  /// Takes back the one notification shown for [route]'s message, if up.
+  Future<void> retract(MessageRoute route);
+
   /// Where clicked notifications lead.
   Stream<MessageRoute> get clicks;
 
@@ -37,6 +40,7 @@ abstract interface class DesktopNotifications {
 class FakeDesktopNotifications implements DesktopNotifications {
   final shown = <Notice>[];
   final withdrawn = <String>[];
+  final retracted = <MessageRoute>[];
   var prepared = 0;
   var isBlocked = false;
   var settingsOpened = 0;
@@ -52,6 +56,9 @@ class FakeDesktopNotifications implements DesktopNotifications {
 
   @override
   Future<void> withdraw(String roomId) async => withdrawn.add(roomId);
+
+  @override
+  Future<void> retract(MessageRoute route) async => retracted.add(route);
 
   @override
   Stream<MessageRoute> get clicks => _clicks.stream;

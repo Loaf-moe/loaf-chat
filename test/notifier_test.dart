@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
 import 'package:loaf_native/ui/model/chime.dart';
+import 'package:loaf_native/ui/model/message_route.dart';
 import 'package:loaf_native/ui/shell/notifier.dart';
 
 void main() {
@@ -53,6 +54,8 @@ void main() {
     String? open;
     var elapsed = Duration.zero;
     final notices = <(Arrival, bool)>[];
+    late StreamController<MessageRoute> retractions;
+    final retracted = <MessageRoute>[];
 
     Notifier make() => Notifier(
       arrivals: arrivals.stream,
@@ -63,10 +66,14 @@ void main() {
       desktop: true,
       elapsed: () => elapsed,
       notice: (a, {required sound}) => notices.add((a, sound)),
+      retractions: retractions.stream,
+      retract: retracted.add,
     );
 
     setUp(() {
       arrivals = StreamController<Arrival>();
+      retractions = StreamController<MessageRoute>();
+      retracted.clear();
       chime = FakeChime();
       sound = true;
       focused = true;
@@ -173,6 +180,14 @@ void main() {
       await pumpEventQueue();
       expect([for (final (_, sound) in notices) sound], [true, false]);
       expect(chime.plays, 0);
+    });
+
+    test('a retraction reaches the noticer', () async {
+      final n = make();
+      addTearDown(n.dispose);
+      retractions.add(const MessageRoute('!other', r'$sealed'));
+      await pumpEventQueue();
+      expect(retracted, [const MessageRoute('!other', r'$sealed')]);
     });
 
     test('a burst chimes once', () async {

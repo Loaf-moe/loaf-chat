@@ -15,6 +15,7 @@ import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 
 import '../ui/model/arrival.dart';
+import '../ui/model/message_route.dart';
 import '../ui/model/models.dart';
 import 'push_rules.dart';
 import 'unread_rules.dart';
@@ -50,13 +51,19 @@ class MatrixArrivals {
   final _loaded = <String, Future<void>>{};
   late final _rules = PushRules(client);
 
-  /// Messages still sealed when judged, by room and session, the oldest
-  /// let go past [_keptSealed] a room. Their key may still come.
-  final _sealed = <String, Map<String, List<Event>>>{};
+  /// Messages still sealed when judged, by room and session, with whether
+  /// the sealed verdict notified; the oldest let go past [_keptSealed] a
+  /// room. Their key may still come.
+  final _sealed = <String, Map<String, List<(Event, bool)>>>{};
   static const _keptSealed = 50;
   final _keySubs = <String, StreamSubscription<String>>{};
+  final _retractions = StreamController<MessageRoute>.broadcast();
 
   Stream<Arrival> get stream => _arrivals.stream;
+
+  /// Messages noticed while sealed whose text, once read, does not
+  /// notify: their notice is to be taken back.
+  Stream<MessageRoute> get retractions => _retractions.stream;
 
   /// Done when every message of the syncs so far has its verdict.
   @visibleForTesting
@@ -108,19 +115,20 @@ class MatrixArrivals {
       if (joined != null && event.originServerTs.isBefore(joined)) continue;
       await _members(event.room);
       if (_disposed) return;
-      if (event.type == EventTypes.Encrypted) _keep(event);
-      if (!_rules.notifies(event)) continue;
+      final notifies = _rules.notifies(event);
+      if (event.type == EventTypes.Encrypted) _keep(event, noticed: notifies);
+      if (!notifies) continue;
       _arrivals.add(_arrival(event));
     }
   }
 
   /// Keeps [event] for its key, and listens for the room's keys once.
-  void _keep(Event event) {
+  void _keep(Event event, {required bool noticed}) {
     final session = event.content.tryGet<String>('session_id');
     if (session == null) return;
     final room = event.room;
     final byRoom = _sealed.putIfAbsent(room.id, () => {});
-    (byRoom[session] ??= []).add(event);
+    (byRoom[session] ??= []).add((event, noticed));
     var kept = 0;
     for (final events in byRoom.values) {
       kept += events.length;
@@ -137,25 +145,33 @@ class MatrixArrivals {
   }
 
   /// Judges the messages sealed under [session] again, now that its key
-  /// is here: those that open are read as what they say.
+  /// is here: those that open are read as what they say. One noticed
+  /// while sealed whose text does not notify has its notice taken back.
   Future<void> _unseal(Room room, String session) async {
     final events = _sealed[room.id]?.remove(session);
     if (events == null) return;
     final encryption = client.encryption;
     if (encryption == null) return;
-    for (final event in events) {
+    for (final (event, noticed) in events) {
       final open = await encryption.decryptRoomEvent(event);
       if (_disposed) return;
       if (open.type == EventTypes.Encrypted) {
-        _keep(event);
+        _keep(event, noticed: noticed);
         continue;
       }
-      if (client.getRoomById(room.id)?.membership != Membership.join) continue;
-      if (!countsAsMessage(open)) continue;
-      await _members(room);
-      if (_disposed) return;
-      if (!_rules.notifies(open)) continue;
-      _arrivals.add(_arrival(open));
+      var notifies =
+          client.getRoomById(room.id)?.membership == Membership.join &&
+          countsAsMessage(open);
+      if (notifies) {
+        await _members(room);
+        if (_disposed) return;
+        notifies = _rules.notifies(open);
+      }
+      if (notifies) {
+        _arrivals.add(_arrival(open));
+      } else if (noticed) {
+        _retractions.add(MessageRoute(room.id, event.eventId));
+      }
     }
   }
 
@@ -212,6 +228,7 @@ class MatrixArrivals {
     _sealed.clear();
     _pending.clear();
     unawaited(_arrivals.close());
+    unawaited(_retractions.close());
   }
 }
 

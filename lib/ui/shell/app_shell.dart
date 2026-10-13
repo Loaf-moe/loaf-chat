@@ -171,6 +171,8 @@ class _AppShellState extends State<AppShell> {
             ? null
             : (arrival, {required sound}) =>
                   unawaited(noticer.show(arrival, sound: sound)),
+        retractions: _rooms.retractions,
+        retract: noticer?.retract,
       );
       // The first time the shell opens after sign-in is when macOS asks
       // permission; asking again later does nothing.

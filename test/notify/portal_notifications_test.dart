@@ -172,6 +172,15 @@ void main() {
     expect(p.removed, [r'room:!a:x:$e']);
   });
 
+  test('retract removes that one notice', () async {
+    final p = await serve(_FakePortal(2));
+    final n = make();
+    await n.show(_notice(room: '!a:x'));
+    await n.show(_notice(room: '!b:x'));
+    await n.retract(const MessageRoute('!b:x', r'$e'));
+    expect(p.removed, [r'room:!b:x:$e']);
+  });
+
   // A bus nobody listens on, as on a desktop with no session bus.
   DBusClient deadBus() =>
       DBusClient(DBusAddress.unix(path: '${dir.path}/no-such-bus'));

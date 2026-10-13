@@ -173,6 +173,15 @@ void main() {
     expect(s.closed, hasLength(2), reason: 'nothing left to close');
   });
 
+  test('retract closes that one notification', () async {
+    final s = await serve(['actions', 'body']);
+    final n = make();
+    await n.show(_notice(room: '!a:x'));
+    await n.show(_notice(room: '!b:x'));
+    await n.retract(const MessageRoute('!a:x', r'$e'));
+    expect(s.closed, [1]);
+  });
+
   test('no server at all: nothing throws, and the chime still plays', () async {
     final logged = <Object>[];
     final n = FdoNotifications(

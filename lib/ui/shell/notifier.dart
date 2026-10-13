@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 
 import '../model/arrival.dart';
 import '../model/chime.dart';
+import '../model/message_route.dart';
 import '../platform.dart';
 
 enum NoticeAction { none, chime, desktopNotice, push }
@@ -32,6 +33,8 @@ class Notifier {
     required this.soundOn,
     required this.openRoom,
     this.notice,
+    Stream<MessageRoute>? retractions,
+    this.retract,
     bool Function()? focused,
     bool? desktop,
     Duration Function()? elapsed,
@@ -39,7 +42,12 @@ class Notifier {
        _desktop = desktop ?? isDesktop,
        _elapsed = elapsed ?? _clock {
     _sub = arrivals.listen(_on);
+    _retracting = retractions?.listen((route) => retract?.call(route));
   }
+
+  /// Takes back the notice for a message noticed while sealed whose text
+  /// turned out not to notify; null where there are no notices.
+  final void Function(MessageRoute route)? retract;
 
   final Chime chime;
   final bool Function() soundOn;
@@ -54,6 +62,7 @@ class Notifier {
   final bool _desktop;
   final Duration Function() _elapsed;
   late final StreamSubscription<Arrival> _sub;
+  StreamSubscription<MessageRoute>? _retracting;
 
   /// A monotonic clock for the throttle: the wall clock can step backwards,
   /// which would hold the chime back until it caught up.
@@ -110,5 +119,8 @@ class Notifier {
     return true;
   }
 
-  void dispose() => unawaited(_sub.cancel());
+  void dispose() {
+    unawaited(_sub.cancel());
+    unawaited(_retracting?.cancel());
+  }
 }

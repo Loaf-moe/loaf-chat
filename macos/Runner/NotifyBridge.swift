@@ -35,6 +35,11 @@ final class NotifyBridge: NSObject, UNUserNotificationCenterDelegate {
       case "prepare": self.prepare(result)
       case "show": self.show(args, result)
       case "withdraw": self.withdraw(args["roomId"] as? String ?? "", result)
+      case "retract":
+        let roomId = args["roomId"] as? String ?? ""
+        let eventId = args["eventId"] as? String ?? ""
+        self.center.removeDeliveredNotifications(withIdentifiers: ["\(roomId)|\(eventId)"])
+        result(nil)
       case "blocked": self.blocked(result)
       case "openSettings":
         self.openSettings()
