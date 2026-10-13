@@ -66,6 +66,8 @@ dependencies:
     path: packages/loaf_chrome
   loaf_notify:
     path: packages/loaf_notify
+  loaf_push:
+    path: packages/loaf_push
 
 # Until upstream takes it: on iOS and macOS the plugin's calls run on a
 # queue of their own instead of the main thread, where Dart runs too.

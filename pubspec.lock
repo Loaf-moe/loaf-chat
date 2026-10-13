@@ -598,6 +598,13 @@ packages:
       relative: true
     source: path
     version: "0.0.0"
+  loaf_push:
+    dependency: "direct main"
+    description:
+      path: "packages/loaf_push"
+      relative: true
+    source: path
+    version: "0.0.0"
   logger:
     dependency: transitive
     description:

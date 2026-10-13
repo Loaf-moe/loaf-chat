@@ -1,0 +1,10 @@
+name: loaf_push
+description: "Decrypts push notifications for Loaf Chat's iOS Notification Service Extension: a Rust crate bundled by a build hook."
+publish_to: none
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  code_assets: ^2.1.0
+  hooks: ^2.2.0

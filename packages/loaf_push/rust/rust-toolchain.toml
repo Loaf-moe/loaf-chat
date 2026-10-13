@@ -1,0 +1,6 @@
+# Xcode runs the build hook with a bare environment, without the
+# RUSTUP_TOOLCHAIN that mise sets, so rustup would pick its default toolchain,
+# which has no iOS targets. This names the one mise installs; keep it equal to
+# the Rust version in the root mise.toml.
+[toolchain]
+channel = "1.96.1"
