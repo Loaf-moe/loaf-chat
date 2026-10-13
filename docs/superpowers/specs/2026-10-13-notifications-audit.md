@@ -50,12 +50,11 @@ The push rules are the server's `m.push_rules` account data, evaluated
 by the SDK's `PushruleEvaluator`, once the room's members are loaded:
 `room_member_count` and your display name are read from the members the
 room holds in memory, and a room nobody has opened this session holds
-none until asked. The SDK checks the kinds in the order override, room,
-sender, content, underride; the Matrix spec says override, content, room,
-sender, underride (see F4). The SDK applies the legacy body-mention rules
-to an event that carries `m.mentions`; Synapse skips them for such an
-event (see F6). A message still sealed when judged is judged again once
-its key arrives.
+none until asked. The evaluator is handed the rules as the spec and
+Synapse apply them (`lib/matrix/push_rules.dart`): content rules ahead of
+room rules, and for a message carrying `m.mentions` no legacy body-mention
+rules. A message still sealed when judged is judged again once its key
+arrives.
 
 ## Levels and settings
 
@@ -153,7 +152,7 @@ macOS and iOS.
 | Behaviour | Suite | Tests |
 |---|---|---|
 | Gates 1–5 and 7, arrival contents, members loaded or refused | `test/matrix/matrix_arrivals_test.dart` | 19 |
-| Gate 6 against the full default ruleset: account level × room level × room kind × 8 mention shapes; the same through encryption; events the defaults silence | `test/matrix/matrix_arrivals_rules_test.dart` | 245, 13 skipped by finding |
+| Gate 6 against the full default ruleset: account level × room level × room kind × 8 mention shapes; the same through encryption; events the defaults silence | `test/matrix/matrix_arrivals_rules_test.dart` | 245 |
 | The decision and the device settings, from sync to chime or notice, through the real shell: in front × open channel × platform × sound × notifications × text; bursts; preparing the desktop | `test/app_shell_arrivals_test.dart` | 69 |
 | A click opening the channel at the message; withdrawal on reading here, on another device's receipt, on leaving | `test/app_shell_notices_test.dart` | 7 |
 | Levels: reading each rule shape, the six transitions and the calls they send, the account default's writes and rollback, the menu and the row icon | `test/matrix/matrix_rooms_test.dart`, `test/matrix/matrix_profile_test.dart`, `test/mock_rooms_test.dart`, `test/app_shell_test.dart`, `test/notifications_section_test.dart` | 30 |
@@ -174,8 +173,8 @@ playback.
 
 ## Findings
 
-Each finding's cases are in `test/matrix/matrix_arrivals_rules_test.dart`,
-skipped with the finding's name; the commit that fixes one unskips them.
+Every finding below was confirmed by cases in
+`test/matrix/matrix_arrivals_rules_test.dart` before its fix.
 
 **F1. A direct message was silent under "mentions only".** Fixed:
 `MatrixArrivals` loads a room's members (the SDK's store first, the
@@ -195,20 +194,19 @@ did for its counts. It arrives again as what it says; the notifier
 sounds no second time, and the notice, keyed by room and event on every
 platform, is replaced.
 
-**F4. A mentions-only room silences your localpart.** The SDK checks room
-rules before content rules; the spec says content first, so
-`.m.rule.contains_user_name` should win. SDK deviation; fix direction: an
-app-side evaluator order, or an upstream fix.
+**F4. A mentions-only room silenced your localpart.** The SDK checks room
+rules before content rules; the spec says content first. Fixed: Loaf
+hands the evaluator the content rules as overrides, at the end, where
+they come before room rules.
 
 **F5. A legacy name mention was unseen in a room nobody has opened.**
 Fixed with F1: your member event is among the members loaded.
 
-**F6. The SDK applies the legacy body rules beside `m.mentions`.** A
-message carrying `m.mentions` (even empty) should decide by it alone;
-Synapse skips `.m.rule.contains_display_name`, `.m.rule.contains_user_name`
-and `.m.rule.roomnotif` for such an event, and Loaf's unread count does
-the same, but the SDK's evaluator does not. Seven cases, now that names
-are known everywhere. Fix direction: as F4.
+**F6. The SDK applied the legacy body rules beside `m.mentions`.** A
+message carrying `m.mentions` (even empty) decides by it alone: Synapse
+skips `.m.rule.contains_display_name`, `.m.rule.contains_user_name` and
+`.m.rule.roomnotif` for such a message, and so does Loaf's unread count.
+Fixed: such a message is judged by a ruleset without the three.
 
 **Windows, unconfirmed.** No test here can run the native path; these are
 from reading it. Each adapter logs one failure per run, so the second
@@ -252,4 +250,4 @@ In this order; each step says what to send back.
   (`contains_display_name`, `contains_user_name`, `roomnotif`); Synapse
   still serves them, and skips them for events with `m.mentions`. Loaf's
   tests model Synapse.
-- The SDK's rule-kind order differs from the spec (F4).
+- The SDK's rule-kind order differs from the spec; Loaf compensates (F4).

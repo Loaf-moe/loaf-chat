@@ -3,9 +3,7 @@
 /// room level, room kind and way of mentioning you, in one table; then the
 /// same through encryption; then the kinds of event the defaults silence.
 ///
-/// What a case expects is the Matrix spec and Loaf's levels, not what the
-/// SDK does today. A case the SDK fails is skipped by the finding it
-/// confirms, until the fix commit unskips it.
+/// What a case expects is the Matrix spec and Loaf's levels.
 library;
 
 import 'dart:async';
@@ -391,36 +389,6 @@ Map<String, Object?> _serverRules({
   },
 };
 
-/// The finding a case confirms while it fails, or null where it passes.
-/// Its fix commit unskips it.
-///
-/// - F4: the SDK checks room rules before content rules; the spec says
-///   content first, so a mentions-only room silences your localpart.
-/// - F6: the SDK applies the legacy body rules to a message that carries
-///   `m.mentions`; Synapse skips them, and so does Loaf's unread count.
-String? _finding(
-  _Account account,
-  _RoomRule rule,
-  _Kind kind,
-  _Mention mention,
-) {
-  // F6 is a message that notifies when it should not; the rest are
-  // messages that should notify and do not.
-  if (mention == _Mention.emptyMentionsNameInBody &&
-      account != _Account.dnd &&
-      (rule == _RoomRule.mentionsOnly ||
-          (account == _Account.mentionsOnly &&
-              rule == _RoomRule.all &&
-              kind == _Kind.group))) {
-    return 'F6: the SDK applies legacy body rules beside m.mentions';
-  }
-  if (!_expected(account, rule, kind, mention)) return null;
-  if (rule == _RoomRule.mentionsOnly && mention == _Mention.bodyLocalpart) {
-    return 'F4: the SDK checks room rules before content rules';
-  }
-  return null;
-}
-
 Map<String, Object?> _rulesFor(_Account account, _RoomRule rule, String room) =>
     _serverRules(
       master: account == _Account.dnd,
@@ -486,26 +454,22 @@ void main() {
       for (final rule in _RoomRule.values) {
         for (final kind in _Kind.values) {
           for (final mention in _Mention.values) {
-            test(
-              '${account.name} account, ${rule.name} room, '
-              '${kind.name}, ${mention.name}',
-              skip: _finding(account, rule, kind, mention),
-              () async {
-                final client = await _client();
-                final room = await _join(client, kind);
-                await _sync(
-                  client,
-                  accountData: [_rulesFor(account, rule, room)],
-                );
-                final rig = await _rig(client);
-                await _deliver(client, room, [_mentioning(mention, r'$m')]);
-                await rig.reached(r'$m');
-                expect(
-                  rig.got.map((a) => a.eventId),
-                  _expected(account, rule, kind, mention) ? [r'$m'] : isEmpty,
-                );
-              },
-            );
+            test('${account.name} account, ${rule.name} room, '
+                '${kind.name}, ${mention.name}', () async {
+              final client = await _client();
+              final room = await _join(client, kind);
+              await _sync(
+                client,
+                accountData: [_rulesFor(account, rule, room)],
+              );
+              final rig = await _rig(client);
+              await _deliver(client, room, [_mentioning(mention, r'$m')]);
+              await rig.reached(r'$m');
+              expect(
+                rig.got.map((a) => a.eventId),
+                _expected(account, rule, kind, mention) ? [r'$m'] : isEmpty,
+              );
+            });
           }
         }
       }

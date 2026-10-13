@@ -16,6 +16,7 @@ import 'package:matrix/matrix.dart';
 
 import '../ui/model/arrival.dart';
 import '../ui/model/models.dart';
+import 'push_rules.dart';
 import 'unread_rules.dart';
 
 class MatrixArrivals {
@@ -47,6 +48,7 @@ class MatrixArrivals {
 
   /// Rooms whose members have been asked for this session, by room.
   final _loaded = <String, Future<void>>{};
+  late final _rules = PushRules(client);
 
   /// Messages still sealed when judged, by room and session, the oldest
   /// let go past [_keptSealed] a room. Their key may still come.
@@ -107,7 +109,7 @@ class MatrixArrivals {
       await _members(event.room);
       if (_disposed) return;
       if (event.type == EventTypes.Encrypted) _keep(event);
-      if (!client.pushruleEvaluator.match(event).notify) continue;
+      if (!_rules.notifies(event)) continue;
       _arrivals.add(_arrival(event));
     }
   }
@@ -152,7 +154,7 @@ class MatrixArrivals {
       if (!countsAsMessage(open)) continue;
       await _members(room);
       if (_disposed) return;
-      if (!client.pushruleEvaluator.match(open).notify) continue;
+      if (!_rules.notifies(open)) continue;
       _arrivals.add(_arrival(open));
     }
   }
