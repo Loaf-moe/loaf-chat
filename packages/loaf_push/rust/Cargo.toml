@@ -1,0 +1,19 @@
+[package]
+name = "loaf_push"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+# cdylib for the app's Frameworks (the extension dlopens it); rlib for tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The version flutter_vodozemac 0.8.1 pins: the pickles it writes are the ones read here.
+vodozemac = { version = "=0.10.0", features = ["libolm-compat"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
