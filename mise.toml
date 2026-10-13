@@ -45,13 +45,17 @@ run = "swift test --package-path packages/loaf_media/darwin/LoafMediaCore"
 description = "loaf_streams' Rust tests"
 run = "cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml"
 
+[tasks."test:notify"]
+description = "loaf_notify's Rust tests"
+run = "cargo test --locked --manifest-path packages/loaf_notify/rust/Cargo.toml"
+
 [tasks."test:player:linux"]
 description = "The Linux player's Rust tests; needs GStreamer"
 run = "cargo test --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml"
 
 [tasks."test:all"]
 description = "Every test that runs on any platform"
-run = [{ task = "test" }, { task = "test:media" }, { task = "test:streams" }]
+run = [{ task = "test" }, { task = "test:media" }, { task = "test:streams" }, { task = "test:notify" }]
 
 [tasks."build:macos"]
 description = "Debug build for macOS; also the encryption tests' library there"

@@ -27,6 +27,9 @@ import 'mock_profile.dart';
 import 'mock_space_directory.dart';
 
 class MockRooms extends ChangeNotifier implements Rooms {
+  @override
+  Future<String?> noticeAvatar(AvatarRef ref) async => null;
+
   // This session's changes, layered over the fixtures by Space.withSession.
   final _membership = <String, bool>{};
   final _muted = <String, bool>{};

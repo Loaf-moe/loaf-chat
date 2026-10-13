@@ -70,6 +70,8 @@ jobs:
       - if: ${{ !cancelled() }}
         run: mise run test:streams
       - if: ${{ !cancelled() }}
+        run: mise run test:notify
+      - if: ${{ !cancelled() }}
         run: mise run check
 
   windows:

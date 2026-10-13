@@ -1,5 +1,5 @@
 /// What loaf chat does when a message arrives somewhere you aren't looking.
-/// For now that is one switch: the chime.
+/// The chime, desktop notifications, and how much a notification says.
 ///
 /// Saved to a small JSON file beside `appearance.json` in the support
 /// directory. Like appearance, this is per device, not per account: a laptop
@@ -13,25 +13,65 @@ import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../model/chime.dart';
+import '../model/desktop_notifications.dart';
 
 @immutable
 class NotificationSettings {
-  const NotificationSettings({this.sound = true});
+  const NotificationSettings({
+    this.sound = true,
+    this.notifications = true,
+    this.showText = true,
+  });
 
   /// Anything unreadable falls back to that field's default, so a
   /// hand-edited file degrades instead of failing.
   factory NotificationSettings.fromJson(Object? json) {
     if (json is! Map) return const NotificationSettings();
-    final sound = json['sound'];
-    return NotificationSettings(sound: sound is bool ? sound : true);
+    bool flag(String key) => switch (json[key]) {
+      final bool on => on,
+      _ => true,
+    };
+    return NotificationSettings(
+      sound: flag('sound'),
+      notifications: flag('notifications'),
+      showText: flag('showText'),
+    );
   }
 
+  /// The chime, in the app and on notifications.
   final bool sound;
 
-  NotificationSettings copyWith({bool? sound}) =>
-      NotificationSettings(sound: sound ?? this.sound);
+  /// Desktop notifications while the app isn't in front.
+  final bool notifications;
 
-  Map<String, Object> toJson() => {'sound': sound};
+  /// Off, a notification says who wrote but not what.
+  final bool showText;
+
+  NotificationSettings copyWith({
+    bool? sound,
+    bool? notifications,
+    bool? showText,
+  }) => NotificationSettings(
+    sound: sound ?? this.sound,
+    notifications: notifications ?? this.notifications,
+    showText: showText ?? this.showText,
+  );
+
+  Map<String, Object> toJson() => {
+    'sound': sound,
+    'notifications': notifications,
+    'showText': showText,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is NotificationSettings &&
+      other.sound == sound &&
+      other.notifications == notifications &&
+      other.showText == showText;
+
+  @override
+  int get hashCode => Object.hash(sound, notifications, showText);
 }
 
 abstract interface class NotificationStore {
@@ -91,15 +131,18 @@ class NotificationController extends ChangeNotifier {
   NotificationController({
     required this._store,
     required this.chime,
+    this.desktop,
     this._settings = const NotificationSettings(),
   });
 
   static Future<NotificationController> load(
     NotificationStore store, {
     required Chime chime,
+    DesktopNotifications? desktop,
   }) async => NotificationController(
     store: store,
     chime: chime,
+    desktop: desktop,
     settings: await store.load() ?? const NotificationSettings(),
   );
 
@@ -110,12 +153,22 @@ class NotificationController extends ChangeNotifier {
   /// play it from the same place.
   final Chime chime;
 
+  /// The desktop's notifications, for the shell to show and Settings to ask
+  /// after; null on phones, in the mock, and in tests that leave it out.
+  final DesktopNotifications? desktop;
+
   bool get sound => _settings.sound;
 
+  bool get notifications => _settings.notifications;
+  bool get showText => _settings.showText;
+
   void setSound(bool on) => _update(_settings.copyWith(sound: on));
+  void setNotifications(bool on) =>
+      _update(_settings.copyWith(notifications: on));
+  void setShowText(bool on) => _update(_settings.copyWith(showText: on));
 
   void _update(NotificationSettings next) {
-    if (next.sound == sound) return;
+    if (next == _settings) return;
     _settings = next;
     notifyListeners();
     // A pick that can't be saved still applies for this run; losing it at

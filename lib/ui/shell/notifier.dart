@@ -31,6 +31,7 @@ class Notifier {
     required this.chime,
     required this.soundOn,
     required this.openRoom,
+    this.notice,
     bool Function()? focused,
     bool? desktop,
     Duration Function()? elapsed,
@@ -42,6 +43,10 @@ class Notifier {
 
   final Chime chime;
   final bool Function() soundOn;
+
+  /// Shows a desktop notification for [arrival]; null where there are none.
+  /// [sound]: whether this one may sound, by the same throttle as the chime.
+  final void Function(Arrival arrival, {required bool sound})? notice;
 
   /// The room whose messages are on screen, or null.
   final String? Function() openRoom;
@@ -55,8 +60,8 @@ class Notifier {
   static final Stopwatch _stopwatch = Stopwatch()..start();
   static Duration _clock() => _stopwatch.elapsed;
 
-  /// When the chime last played, on that clock: messages within a second of
-  /// it are the same moment, and get one chime.
+  /// When a chime or notification last sounded, on that clock: messages
+  /// within a second of it are the same moment, and get one chime.
   Duration? _lastChime;
 
   /// The same test the channel view uses before it marks anything read.
@@ -74,8 +79,7 @@ class Notifier {
       case NoticeAction.chime:
         _chime();
       case NoticeAction.desktopNotice:
-        // Step D shows these.
-        break;
+        notice?.call(arrival, sound: _sounds());
       case NoticeAction.push:
         // Step E: the push gateway brings it.
         break;
@@ -85,14 +89,18 @@ class Notifier {
   }
 
   void _chime() {
-    if (!soundOn()) return;
+    if (_sounds()) unawaited(chime.play());
+  }
+
+  /// Whether a sound may go now: Sound is on and nothing has sounded in the
+  /// last second. Saying yes counts as sounding.
+  bool _sounds() {
+    if (!soundOn()) return false;
     final now = _elapsed();
     final last = _lastChime;
-    if (last != null && now - last < const Duration(seconds: 1)) {
-      return;
-    }
+    if (last != null && now - last < const Duration(seconds: 1)) return false;
     _lastChime = now;
-    unawaited(chime.play());
+    return true;
   }
 
   void dispose() => unawaited(_sub.cancel());

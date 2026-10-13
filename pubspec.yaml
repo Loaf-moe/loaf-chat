@@ -62,6 +62,8 @@ dependencies:
   flutter_webrtc: ^1.6.2
   loaf_media:
     path: packages/loaf_media
+  loaf_notify:
+    path: packages/loaf_notify
 
 dev_dependencies:
   flutter_test:
@@ -87,6 +89,7 @@ flutter:
   assets:
     - assets/mock/media/
     - assets/sounds/
+    - linux/packaging/moe.loaf.chat.png
 
   fonts:
     # Lora and Outfit are variable fonts: pubspec weights do not instance a
