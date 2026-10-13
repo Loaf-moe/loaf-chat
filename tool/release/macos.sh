@@ -49,6 +49,9 @@ b64url() { base64 | tr -d '=\n' | tr '/+' '_-'; }
 # An App Store Connect token: ES256 over header.payload, valid 15 minutes
 # (Apple allows 20). openssl signs ECDSA as DER SEQUENCE { r, s }; JWS wants
 # r and s as 32 raw bytes each, so the DER is unpacked and padded.
+# Returns 1, printing nothing, when the key cannot sign: it runs inside
+# $(...), where errexit is off and fail would only end the subshell, so
+# the caller fails instead.
 # usage: asc_jwt <key.p8> <key id> <issuer id>
 asc_jwt() {
   local now header payload input r s
@@ -60,19 +63,30 @@ asc_jwt() {
   { read -r r; read -r s; } < <(printf '%s' "$input" \
     | openssl dgst -sha256 -sign "$1" \
     | openssl asn1parse -inform DER | awk -F: '/INTEGER/ { print $NF }')
+  # A P-256 integer is at most 33 DER bytes (66 hex): longer means some
+  # other curve, which the trim below would silently corrupt.
+  [ -n "$r" ] && [ -n "$s" ] && [ "${#r}" -le 66 ] && [ "${#s}" -le 66 ] || return 1
   # DER drops leading zero bytes and adds one before a high bit; both go.
   r="$(printf '%064s' "$r" | tr ' ' 0)"; r="${r: -64}"
   s="$(printf '%064s' "$s" | tr ' ' 0)"; s="${s: -64}"
+  [[ "$r$s" =~ ^[0-9A-Fa-f]{128}$ ]] || return 1
+  [[ "$r" =~ [1-9A-Fa-f] && "$s" =~ [1-9A-Fa-f] ]] || return 1
   printf '%s.%s' "$input" "$(printf '%s%s' "$r" "$s" | xxd -r -p | b64url)"
 }
 
 # The token goes to curl in a header file, never on a command line (where
-# ps shows it) and never into the environment of what runs later.
-printf 'Authorization: Bearer %s\n' \
-  "$(asc_jwt "$work/key.p8" "$NOTARY_KEY_ID" "$NOTARY_ISSUER_ID")" > "$work/asc-auth"
+# ps shows it) and never into the environment of what runs later: the
+# variable is never exported, and is unset once written.
+token="$(asc_jwt "$work/key.p8" "$NOTARY_KEY_ID" "$NOTARY_ISSUER_ID")" \
+  || fail "could not sign the App Store Connect token with NOTARY_KEY_P8"
+printf 'Authorization: Bearer %s\n' "$token" > "$work/asc-auth"
+unset token
 # usage: asc <path after /v1/> <output file>. GET only.
 asc() {
-  curl -fsS -g -H "@$work/asc-auth" -o "$2" \
+  # Retries cover a transient 5xx or 429; the timeouts stop a hung
+  # connection from stalling the job.
+  curl -fsS -g --retry 3 --connect-timeout 10 --max-time 60 \
+    -H "@$work/asc-auth" -o "$2" \
     "https://api.appstoreconnect.apple.com/v1/$1" \
     || fail "App Store Connect refused GET /v1/$1 (curl exit $?): check NOTARY_KEY_ID, NOTARY_ISSUER_ID and the key's access"
 }
@@ -81,7 +95,7 @@ asc() {
 # matches prefixes too, so the exact one is picked out.
 asc "bundleIds?filter[identifier]=$bundle_id&limit=200" "$work/bundles.json"
 bundle_ref="$(jq -r --arg id "$bundle_id" \
-  '.data[] | select(.attributes.identifier == $id) | .id' "$work/bundles.json")"
+  '(.data // [])[] | select(.attributes.identifier == $id) | .id' "$work/bundles.json")"
 [ -n "$bundle_ref" ] || fail "App Store Connect has no bundle id $bundle_id"
 asc "bundleIds/$bundle_ref/profiles?limit=200" "$work/profiles.json"
 rm -f "$work/asc-auth"
@@ -112,7 +126,7 @@ while IFS= read -r content; do
   if [ -z "$profile" ] || [[ "$expiry" > "$profile_expiry" ]]; then
     profile="$candidate"; profile_expiry="$expiry"
   fi
-done < <(jq -r '.data[]
+done < <(jq -r '(.data // [])[]
   | select(.attributes.profileType == "MAC_APP_DIRECT" and .attributes.profileState == "ACTIVE")
   | .attributes.profileContent' "$work/profiles.json")
 [ -n "$profile" ] || fail "no ACTIVE, manually managed Developer ID profile for $bundle_id names certificate $cert_sha1. Create one at developer.apple.com: Profiles, +, Developer ID (macOS), App ID $bundle_id, that certificate. This script never creates one."
