@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_arrivals.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
@@ -10,7 +12,43 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 const _me = '@test:fakeServer.notExisting';
 const _general = '!general:example.com';
+const _dm = '!dm:example.com';
 const _ada = '@ada:example.com';
+
+/// The fake server, with its member list refused the first time it is
+/// asked and, after that, you and Ada.
+class _MembersLater extends FakeMatrixApi {
+  var asked = 0;
+
+  @override
+  FutureOr<http.Response> mockIntercept(http.Request request) {
+    if (request.method == 'GET' && request.url.path.endsWith('/members')) {
+      if (asked++ == 0) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_UNKNOWN', 'error': 'no'}),
+          500,
+        );
+      }
+      return http.Response(
+        jsonEncode({
+          'chunk': [
+            for (final id in [_me, _ada])
+              {
+                'type': 'm.room.member',
+                'state_key': id,
+                'sender': id,
+                'content': {'membership': 'join'},
+                'event_id': '\$member_$id',
+                'origin_server_ts': 1,
+              },
+          ],
+        }),
+        200,
+      );
+    }
+    return super.mockIntercept(request);
+  }
+}
 
 /// "Launch": the instant the shell opens. Events are sent either side of it.
 final _launch = DateTime.utc(2024, 1, 1, 12);
@@ -21,8 +59,8 @@ var _n = 0;
 
 /// A client signed in to the fake server. With [firstSync] false it has not
 /// synced, so `prevBatch` is null, as during a sign-in's first sync.
-Future<Client> _client({bool firstSync = true}) async {
-  final api = FakeMatrixApi();
+Future<Client> _client({bool firstSync = true, FakeMatrixApi? api}) async {
+  api ??= FakeMatrixApi();
   final client = await openClient(
     httpClient: api,
     databasePath: inMemoryDatabasePath,
@@ -61,6 +99,23 @@ Map<String, Object?> _room() => {
       _state('m.room.member', {'membership': 'join'}, key: _me),
     ],
   },
+};
+
+/// A direct message with Ada, two members by the server's count; her
+/// member event comes only when [withAda].
+Map<String, Object?> _directRoom({required bool withAda}) => {
+  'state': {
+    'events': [
+      _state('m.room.create', {'creator': _me}),
+      _state('m.room.member', {'membership': 'join'}, key: _me),
+      if (withAda)
+        {
+          ..._state('m.room.member', {'membership': 'join'}, key: _ada),
+          'sender': _ada,
+        },
+    ],
+  },
+  'summary': {'m.joined_member_count': 2, 'm.invited_member_count': 0},
 };
 
 Map<String, Object?> _msg(
@@ -113,13 +168,15 @@ Future<void> _deliver(Client client, List<Map<String, Object?>> events) =>
       },
     );
 
-/// Push rules as a server holds them: a mention of you notifies, and so does
-/// any message. A room in [mentionsOnly] keeps its mentions, by a room rule;
-/// one in [muted] keeps nothing, by an override rule, which the server
-/// ranks above its own mention rule.
+/// Push rules as a server holds them: a mention of you notifies, so does
+/// a direct message, and so does any other message unless [message] is
+/// off (the account's mentions only). A room in [mentionsOnly] keeps its
+/// mentions, by a room rule; one in [muted] keeps nothing, by an override
+/// rule, which the server ranks above its own mention rule.
 Map<String, Object?> _pushRules({
   List<String> muted = const [],
   List<String> mentionsOnly = const [],
+  bool message = true,
 }) => {
   'type': 'm.push_rules',
   'content': {
@@ -165,9 +222,19 @@ Map<String, Object?> _pushRules({
       'sender': <Object?>[],
       'underride': [
         {
-          'rule_id': '.m.rule.message',
+          'rule_id': '.m.rule.room_one_to_one',
           'default': true,
           'enabled': true,
+          'conditions': [
+            {'kind': 'room_member_count', 'is': '2'},
+            {'kind': 'event_match', 'key': 'type', 'pattern': 'm.room.message'},
+          ],
+          'actions': ['notify'],
+        },
+        {
+          'rule_id': '.m.rule.message',
+          'default': true,
+          'enabled': message,
           'conditions': [
             {'kind': 'event_match', 'key': 'type', 'pattern': 'm.room.message'},
           ],
@@ -201,10 +268,14 @@ class _Rig {
   var closed = false;
   late final List<StreamSubscription<Object?>> _subs;
 
-  /// Waits until the SDK has emitted [id], then lets the arrivals settle.
+  /// Waits until the SDK has emitted [id], then for the arrivals' verdict
+  /// on its sync.
   Future<void> reached(String id) async {
     await _until(() => seen.contains(id));
     expect(seen, contains(id));
+    await Future<void>.delayed(Duration.zero);
+    await arrivals.settled;
+    // The verdict's arrival reaches listeners a beat after it is added.
     await Future<void>.delayed(Duration.zero);
   }
 
@@ -452,6 +523,96 @@ void main() {
       await _deliver(client, [_msg(r'$plain')]);
       await _until(() => rig.got.isNotEmpty);
       expect(rig.got.single.eventId, r'$plain');
+    });
+
+    test('a direct message notifies under mentions only once its members are '
+        'known', () async {
+      final client = await _client();
+      await _sync(
+        client,
+        rooms: {
+          'join': {_dm: _directRoom(withAda: true)},
+        },
+        accountData: [_pushRules(message: false)],
+      );
+      final rig = await _rig(client);
+      await _sync(
+        client,
+        rooms: {
+          'join': {
+            _dm: {
+              'timeline': {
+                'events': [_msg(r'$plain')],
+                'limited': false,
+                'prev_batch': 'p${_n++}',
+              },
+            },
+          },
+        },
+      );
+      await _until(() => rig.got.isNotEmpty);
+      expect(rig.got.map((a) => a.eventId), [r'$plain']);
+    });
+
+    test('members the server refuses leave the rules to what is known, and are '
+        'asked for again with the next message', () async {
+      final api = _MembersLater();
+      final client = await _client(api: api);
+      await _sync(
+        client,
+        rooms: {
+          'join': {_dm: _directRoom(withAda: false)},
+        },
+        accountData: [_pushRules(message: false)],
+      );
+      final rig = await _rig(client);
+      await _sync(
+        client,
+        rooms: {
+          'join': {
+            _dm: {
+              'timeline': {
+                'events': [
+                  _msg(r'$plain'),
+                  _msg(
+                    r'$mention',
+                    mentions: {
+                      'user_ids': [_me],
+                    },
+                  ),
+                ],
+                'limited': false,
+                'prev_batch': 'p${_n++}',
+              },
+            },
+          },
+        },
+      );
+      await rig.reached(r'$mention');
+      // One member known of two when the first message is judged: not a
+      // direct message to the rules, so it stays quiet; the second message
+      // asks again, and the mention gets through either way.
+      expect(rig.got.map((a) => a.eventId), [r'$mention']);
+      expect(api.asked, 2);
+
+      await _sync(
+        client,
+        rooms: {
+          'join': {
+            _dm: {
+              'timeline': {
+                'events': [_msg(r'$again')],
+                'limited': false,
+                'prev_batch': 'p${_n++}',
+              },
+            },
+          },
+        },
+      );
+      await rig.reached(r'$again');
+      // The list is whole now: no third ask, and a direct message again.
+      expect(api.asked, 2);
+      expect(rig.got.map((a) => a.eventId), [r'$mention', r'$again']);
     });
 
     test('a room you have just left does not notify', () async {

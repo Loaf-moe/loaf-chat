@@ -394,15 +394,10 @@ Map<String, Object?> _serverRules({
 /// The finding a case confirms while it fails, or null where it passes.
 /// Its fix commit unskips it.
 ///
-/// - F1: a DM nobody has opened this session keeps no members in memory,
-///   so `room_member_count == 2` never holds and `.m.rule.room_one_to_one`
-///   never matches.
 /// - F3: a message whose key arrives after its sync is decrypted in the
 ///   SDK's queue and never emitted again, so it never arrives.
 /// - F4: the SDK checks room rules before content rules; the spec says
 ///   content first, so a mentions-only room silences your localpart.
-/// - F5: your display name is read from memory, which a room nobody has
-///   opened does not hold, so a legacy body mention goes unseen.
 /// - F6: the SDK applies the legacy body rules to a message that carries
 ///   `m.mentions`; Synapse skips them, and so does Loaf's unread count.
 String? _finding(
@@ -414,30 +409,16 @@ String? _finding(
   // F6 is a message that notifies when it should not; the rest are
   // messages that should notify and do not.
   if (mention == _Mention.emptyMentionsNameInBody &&
-      kind == _Kind.dmOpened &&
-      rule == _RoomRule.mentionsOnly &&
-      account != _Account.dnd) {
+      account != _Account.dnd &&
+      (rule == _RoomRule.mentionsOnly ||
+          (account == _Account.mentionsOnly &&
+              rule == _RoomRule.all &&
+              kind == _Kind.group))) {
     return 'F6: the SDK applies legacy body rules beside m.mentions';
   }
   if (!_expected(account, rule, kind, mention)) return null;
-  // The four left out notify by an override or content rule, which needs
-  // no member count.
-  if (account == _Account.mentionsOnly &&
-      rule == _RoomRule.all &&
-      kind == _Kind.dm &&
-      mention != _Mention.userIds &&
-      mention != _Mention.roomMention &&
-      mention != _Mention.bodyAtRoom &&
-      mention != _Mention.bodyLocalpart) {
-    return 'F1: an unopened DM counts no members';
-  }
   if (rule == _RoomRule.mentionsOnly && mention == _Mention.bodyLocalpart) {
     return 'F4: the SDK checks room rules before content rules';
-  }
-  if (mention == _Mention.bodyName &&
-      kind != _Kind.dmOpened &&
-      (rule == _RoomRule.mentionsOnly || account == _Account.mentionsOnly)) {
-    return 'F5: your display name is unknown in an unopened room';
   }
   return null;
 }
@@ -468,10 +449,14 @@ class _Rig {
   final seen = <String>[];
   late final List<StreamSubscription<Object?>> _subs;
 
-  /// Waits until the SDK has emitted [id], then lets the arrivals settle.
+  /// Waits until the SDK has emitted [id], then for the arrivals' verdict
+  /// on its sync.
   Future<void> reached(String id) async {
     await _until(() => seen.contains(id));
     expect(seen, contains(id));
+    await Future<void>.delayed(Duration.zero);
+    await arrivals.settled;
+    // The verdict's arrival reaches listeners a beat after it is added.
     await Future<void>.delayed(Duration.zero);
   }
 
@@ -575,45 +560,32 @@ void main() {
           // Unreadable, the mention is unseen: only the room's own rule for
           // encrypted messages can say yes.
           final sealedNotifies = account == _Account.all || kind != _Kind.group;
-          final unopenedDm =
-              account == _Account.mentionsOnly && kind == _Kind.dm;
+          test('${account.name} account, ${kind.name}, ${mention.name}: '
+              'readable at once', () async {
+            final (mine, room, content) = await sealed(kind, mention);
+            await _sync(mine, accountData: [rules]);
+            await _giveKey(mine, room, content);
+            final rig = await _rig(mine);
+            await _deliver(mine, room, [_sealedMsg(content, r'$m')]);
+            await rig.reached(r'$m');
+            expect(
+              rig.got.map((a) => (a.eventId, a.kind, a.text)),
+              notifies ? [(r'$m', ArrivalKind.text, 'hi')] : isEmpty,
+            );
+          });
 
-          test(
-            '${account.name} account, ${kind.name}, ${mention.name}: '
-            'readable at once',
-            skip: unopenedDm && mention == _Mention.none
-                ? 'F1: an unopened DM counts no members'
-                : null,
-            () async {
-              final (mine, room, content) = await sealed(kind, mention);
-              await _sync(mine, accountData: [rules]);
-              await _giveKey(mine, room, content);
-              final rig = await _rig(mine);
-              await _deliver(mine, room, [_sealedMsg(content, r'$m')]);
-              await rig.reached(r'$m');
-              expect(
-                rig.got.map((a) => (a.eventId, a.kind, a.text)),
-                notifies ? [(r'$m', ArrivalKind.text, 'hi')] : isEmpty,
-              );
-            },
-          );
-
-          test(
-            '${account.name} account, ${kind.name}, ${mention.name}: '
-            'no key here',
-            skip: unopenedDm ? 'F1: an unopened DM counts no members' : null,
-            () async {
-              final (mine, room, content) = await sealed(kind, mention);
-              await _sync(mine, accountData: [rules]);
-              final rig = await _rig(mine);
-              await _deliver(mine, room, [_sealedMsg(content, r'$m')]);
-              await rig.reached(r'$m');
-              expect(
-                rig.got.map((a) => (a.eventId, a.kind)),
-                sealedNotifies ? [(r'$m', ArrivalKind.encrypted)] : isEmpty,
-              );
-            },
-          );
+          test('${account.name} account, ${kind.name}, ${mention.name}: '
+              'no key here', () async {
+            final (mine, room, content) = await sealed(kind, mention);
+            await _sync(mine, accountData: [rules]);
+            final rig = await _rig(mine);
+            await _deliver(mine, room, [_sealedMsg(content, r'$m')]);
+            await rig.reached(r'$m');
+            expect(
+              rig.got.map((a) => (a.eventId, a.kind)),
+              sealedNotifies ? [(r'$m', ArrivalKind.encrypted)] : isEmpty,
+            );
+          });
 
           test(
             '${account.name} account, ${kind.name}, ${mention.name}: '

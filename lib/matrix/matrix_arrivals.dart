@@ -2,11 +2,14 @@
 /// messages from others, sent after this shell opened, of a kind the
 /// timeline shows, that your push rules say notify: the rules see
 /// decrypted content where a key was here, so a mention in an encrypted
-/// room counts.
+/// room counts. They run with the room's members loaded, so a direct
+/// message is known as one and your name is known: a room nobody has
+/// opened this session holds no members in memory until asked.
 library;
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:matrix/matrix.dart';
 
 import '../ui/model/arrival.dart';
@@ -17,7 +20,10 @@ class MatrixArrivals {
   MatrixArrivals(this.client, {DateTime Function()? now})
     : _startedAt = (now ?? DateTime.now)() {
     _sub = client.onTimelineEvent.stream.listen(_on);
-    _synced = client.onSync.stream.listen((_) => _settle());
+    // Settling waits on members, so syncs are settled in turn.
+    _synced = client.onSync.stream.listen(
+      (_) => _settling = _settling.then((_) => _settle()),
+    );
   }
 
   final Client client;
@@ -36,8 +42,17 @@ class MatrixArrivals {
   /// event out of it.
   final _joinedAt = <String, DateTime>{};
   final _arrivals = StreamController<Arrival>.broadcast();
+  var _settling = Future<void>.value();
+  var _disposed = false;
+
+  /// Rooms whose members have been asked for this session, by room.
+  final _loaded = <String, Future<void>>{};
 
   Stream<Arrival> get stream => _arrivals.stream;
+
+  /// Done when every message of the syncs so far has its verdict.
+  @visibleForTesting
+  Future<void> get settled => _settling;
 
   void _on(Event event) {
     // The SDK sets `prevBatch` only after a sync is handled, so it is still
@@ -57,7 +72,6 @@ class MatrixArrivals {
     if (event.senderId == client.userID) return;
     if (event.originServerTs.isBefore(_startedAt)) return;
     if (!countsAsMessage(event)) return;
-    if (!client.pushruleEvaluator.match(event).notify) return;
     _pending.add(event);
   }
 
@@ -65,16 +79,37 @@ class MatrixArrivals {
   /// but after launch: they are its history. Your join event dates the start
   /// of what is yours, but it comes in the timeline after that history, so
   /// the verdict waits for the end of the sync. A room whose join this
-  /// session never saw has nothing to compare, and is let through.
-  void _settle() {
+  /// session never saw has nothing to compare, and is let through. Then
+  /// the push rules, with the room's members at hand.
+  Future<void> _settle() async {
     final events = List.of(_pending);
     _pending.clear();
     for (final event in events) {
       final joined = _joinedAt[event.room.id];
       if (joined != null && event.originServerTs.isBefore(joined)) continue;
+      await _members(event.room);
+      if (_disposed) return;
+      if (!client.pushruleEvaluator.match(event).notify) continue;
       _arrivals.add(_arrival(event));
     }
   }
+
+  /// Loads [room]'s members once: the SDK's store first, the server only
+  /// when the list is still short of the room's count. The whole list,
+  /// however long: the SDK puts a message's sender in memory by itself,
+  /// so a part of the list can read as a two-person room. A load the
+  /// server refuses is logged, and asked for again with the next message.
+  Future<void> _members(Room room) => _loaded[room.id] ??=
+      (room.participantListComplete
+              ? Future<void>.value()
+              : room.requestParticipants([Membership.join], true, true))
+          .then<void>(
+            (_) {},
+            onError: (Object e) {
+              _loaded.remove(room.id);
+              Logs().w('[loaf] members of ${room.id} not loaded', e);
+            },
+          );
 
   /// What a notification will say about [event]: read now, while the
   /// sender's member event and the decrypted content are at hand.
@@ -101,6 +136,7 @@ class MatrixArrivals {
   }
 
   void dispose() {
+    _disposed = true;
     unawaited(_sub.cancel());
     unawaited(_synced.cancel());
     _pending.clear();

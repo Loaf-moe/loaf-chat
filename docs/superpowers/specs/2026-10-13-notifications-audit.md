@@ -47,15 +47,15 @@ sync ─▶ SDK Client ─▶ MatrixArrivals ─▶ MatrixRooms.arrivals ─▶ 
 7. The room was joined this session and the event is from before the join.
 
 The push rules are the server's `m.push_rules` account data, evaluated
-by the SDK's `PushruleEvaluator`. The SDK checks the kinds in the order
-override, room, sender, content, underride; the Matrix spec says
-override, content, room, sender, underride (see F4). `room_member_count`
-is counted from the members the room holds in memory (see F1). The
-display name for `contains_display_name` is read from memory too (see
-F5). An encrypted event is evaluated as decrypted only when the SDK
-decrypts it during the sync that brought it (see F3). The SDK applies the
-legacy body-mention rules to an event that carries `m.mentions`; Synapse
-skips them for such an event (see F6).
+by the SDK's `PushruleEvaluator`, once the room's members are loaded:
+`room_member_count` and your display name are read from the members the
+room holds in memory, and a room nobody has opened this session holds
+none until asked. The SDK checks the kinds in the order override, room,
+sender, content, underride; the Matrix spec says override, content, room,
+sender, underride (see F4). An encrypted event is evaluated as decrypted
+only when the SDK decrypts it during the sync that brought it (see F3).
+The SDK applies the legacy body-mention rules to an event that carries
+`m.mentions`; Synapse skips them for such an event (see F6).
 
 ## Levels and settings
 
@@ -152,8 +152,8 @@ macOS and iOS.
 
 | Behaviour | Suite | Tests |
 |---|---|---|
-| Gates 1–5 and 7, arrival contents | `test/matrix/matrix_arrivals_test.dart` | 17 |
-| Gate 6 against the full default ruleset: account level × room level × room kind × 8 mention shapes; the same through encryption; events the defaults silence | `test/matrix/matrix_arrivals_rules_test.dart` | 245, 27 skipped by finding |
+| Gates 1–5 and 7, arrival contents, members loaded or refused | `test/matrix/matrix_arrivals_test.dart` | 19 |
+| Gate 6 against the full default ruleset: account level × room level × room kind × 8 mention shapes; the same through encryption; events the defaults silence | `test/matrix/matrix_arrivals_rules_test.dart` | 245, 20 skipped by finding |
 | The decision and the device settings, from sync to chime or notice, through the real shell: in front × open channel × platform × sound × notifications × text; bursts; preparing the desktop | `test/app_shell_arrivals_test.dart` | 69 |
 | A click opening the channel at the message; withdrawal on reading here, on another device's receipt, on leaving | `test/app_shell_notices_test.dart` | 7 |
 | Levels: reading each rule shape, the six transitions and the calls they send, the account default's writes and rollback, the menu and the row icon | `test/matrix/matrix_rooms_test.dart`, `test/matrix/matrix_profile_test.dart`, `test/mock_rooms_test.dart`, `test/app_shell_test.dart`, `test/notifications_section_test.dart` | 30 |
@@ -177,15 +177,13 @@ playback.
 Each finding's cases are in `test/matrix/matrix_arrivals_rules_test.dart`,
 skipped with the finding's name; the commit that fixes one unskips them.
 
-**F1. A direct message is silent under "mentions only".** The SDK counts
-`room_member_count` from members held in memory
-(`pushrule_evaluator.dart`, `getParticipants`), and a room nobody has
-opened this session holds none (`client.dart`, the `partial` check in
-`_handleRoomEvents`). So `.m.rule.room_one_to_one` never matches, the
-message falls to `.m.rule.message`, and the account default has that off.
-Once the room's members are loaded, as showing them does, it works. Fix
-direction: load members before evaluating, or evaluate the member count
-from the room summary.
+**F1. A direct message was silent under "mentions only".** Fixed:
+`MatrixArrivals` loads a room's members (the SDK's store first, the
+server when the list is still short) before the rules run, so
+`room_member_count` holds. The whole list, however long: the SDK puts a
+message's sender in memory by itself, so a part of the list could read
+as a two-person room. A load the server refuses is logged, the rules run
+on what is known, and the next message asks again.
 
 **F2. Mute silenced mentions while its text promised mentions-only.**
 Fixed: three levels, per room and account wide.
@@ -201,16 +199,15 @@ rules before content rules; the spec says content first, so
 `.m.rule.contains_user_name` should win. SDK deviation; fix direction: an
 app-side evaluator order, or an upstream fix.
 
-**F5. A legacy name mention is unseen in a room nobody has opened.** The
-evaluator reads your display name from the room's members in memory,
-which an unopened room does not hold. Same cause as F1; the same fix
-direction covers it.
+**F5. A legacy name mention was unseen in a room nobody has opened.**
+Fixed with F1: your member event is among the members loaded.
 
 **F6. The SDK applies the legacy body rules beside `m.mentions`.** A
 message carrying `m.mentions` (even empty) should decide by it alone;
 Synapse skips `.m.rule.contains_display_name`, `.m.rule.contains_user_name`
 and `.m.rule.roomnotif` for such an event, and Loaf's unread count does
-the same, but the SDK's evaluator does not. Fix direction: as F4.
+the same, but the SDK's evaluator does not. Seven cases, now that names
+are known everywhere. Fix direction: as F4.
 
 **Windows, unconfirmed.** No test here can run the native path; these are
 from reading it. Each adapter logs one failure per run, so the second
