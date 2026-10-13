@@ -20,18 +20,18 @@ separate work.
 - Switching the microphone's echo cancellation, noise suppression,
   automatic gain and high-pass filter.
 - Turning one person up or down.
-- Linux desktop.
+- Linux, macOS and Windows desktop, and iOS.
 
 **Out:**
 
-| Deferred | Why |
-|---|---|
-| Calls in encrypted rooms | Element Call encrypts media per participant there; a client without those keys can neither hear nor be heard |
-| Camera and screen sharing | The Linux libwebrtc build encodes and decodes in software only; needs its own research |
-| DM calls and ringing | Roadmap phase 8 |
-| macOS, iOS, Windows, Android | Each needs microphone permissions and its own check by hand; iOS also needs the audio session shared with `loaf_media` |
-| Calls whose members publish to another homeserver's SFU | loaf.moe has one SFU |
-| Element Call's `matrix_2_0` mode | Needs sticky events (MSC4354), which the homeserver does not have |
+| Deferred                                                | Why                                                                                                          |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Calls in encrypted rooms                                | Element Call encrypts media per participant there; a client without those keys can neither hear nor be heard |
+| Camera and screen sharing                               | The Linux libwebrtc build encodes and decodes in software only; needs its own research                       |
+| DM calls and ringing                                    | Roadmap phase 8                                                                                              |
+| Android                                                 | Needs microphone permissions and its own check by hand                                                       |
+| Calls whose members publish to another homeserver's SFU | loaf.moe has one SFU                                                                                         |
+| Element Call's `matrix_2_0` mode                        | Needs sticky events (MSC4354), which the homeserver does not have                                            |
 
 ## Findings (checked 2026-10-11)
 
@@ -163,11 +163,11 @@ one.
 **The real one.** `MatrixCalls` (`lib/matrix/matrix_calls.dart`) implements
 `Calls` over three parts:
 
-| Part | File | Does |
-|---|---|---|
-| Access | `lib/matrix/call_access.dart` | Finds the call server and gets the LiveKit address and token |
-| Membership | `lib/matrix/call_membership.dart` | Writes, refreshes and empties this device's membership |
-| Media | `CallMedia` in `lib/matrix/call_media.dart`, implemented by `lib/platform/livekit_media.dart` | Connects, sends the microphone, reports who is there, speaking and muted |
+| Part       | File                                                                                          | Does                                                                     |
+| ---------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Access     | `lib/matrix/call_access.dart`                                                                 | Finds the call server and gets the LiveKit address and token             |
+| Membership | `lib/matrix/call_membership.dart`                                                             | Writes, refreshes and empties this device's membership                   |
+| Media      | `CallMedia` in `lib/matrix/call_media.dart`, implemented by `lib/platform/livekit_media.dart` | Connects, sends the microphone, reports who is there, speaking and muted |
 
 `CallMedia` is an interface so that `MatrixCalls` runs under test against an
 in-memory one. `lib/platform/` is the directory the first design spec names
@@ -250,6 +250,32 @@ apart, and a device the system renames reads as not connected. WebRTC lists
 the system default there a second time as `default: <name>`; that entry is
 left out of the list and is what "system default" opens.
 
+On macOS the lists do not come from WebRTC. Its own has nothing but the
+default until a call starts, and during one the echo canceller taps every
+output, which makes each speaker an input as far as WebRTC can tell: a DAC
+shows up as a microphone, and a USB microphone's headphone jack as a second
+microphone of the same name. The Mac app lists its own from CoreAudio
+(`AudioDevicesBridge.swift`, over `loaf/audio`). A microphone is a device
+with an input stream whose terminal is not a speaker's or a headphone's: the
+tap keeps the terminal of the output it is on. A speaker is a device with an
+output stream. Aggregate devices are left out of both, a call's own among
+them. A display's speakers (DisplayPort, HDMI) are left out too: WebRTC does
+not list them, and told to play through one it never finishes starting,
+after which every call into it waits for good. A device's id is its
+CoreAudio UID in these lists and in WebRTC's, so what is chosen from one
+opens in the other.
+
+Changing the speaker goes through the same bridge on macOS. WebRTC rebuilds
+its audio engine before it answers, which takes seconds, and the plugin
+waits for that on the main thread, where Dart runs too: the app stopped and
+the call's signalling with it. The bridge asks from a queue of its own, and
+lists the devices from it as well.
+
+While a call takes up what is chosen, it says so (`Calls.switchingAudio`):
+the call's status reads "switching audio…", and in the voice section the
+row chosen shows a spinner where its check goes. The microphone and the
+speaker are taken up together, so both rows show it whichever was changed.
+
 **Processing.** The voice section has a switch each for echo cancellation,
 noise suppression, automatic gain and the high-pass filter, kept in
 `voice.json` with the devices. The first three start on and the filter off,
@@ -317,8 +343,9 @@ membership is no substitute: it takes them off lists only, their media
 stays connected, and their client writes the membership back.
 
 **Where it is switched on.** `MatrixRooms` claims `RoomAbility.calls` when
-it is given a `CallMedia`, and `main.dart` gives it one on Linux. On other
-platforms a voice channel still reads "voice chat isn't available yet".
+it is given a `CallMedia`, and `main.dart` gives it one where `hasCalls`
+says so: everywhere but Android. There a voice channel still reads
+"voice chat isn't available yet".
 
 ## Platform and build
 
@@ -328,9 +355,40 @@ platforms a voice channel still reads "voice chat isn't available yet".
   WebRTC itself (`LiveKitClient.initialize`) before first use: left to
   start by itself, `flutter_webrtc` asks libwebrtc for a log level, and
   libwebrtc logs to stderr once asked for any.
-- **macOS, iOS, Windows.** Adding the dependency makes these builds link
-  WebRTC too (a Swift package binary on Apple platforms, a downloaded DLL on
-  Windows). Calls stay off there.
+- **macOS.** WebRTC comes as a Swift package binary. The app is sandboxed,
+  and its release is signed for the hardened runtime; both refuse the
+  microphone without the `com.apple.security.device.audio-input`
+  entitlement, so both entitlements files carry it.
+- **iOS.** WebRTC comes as a Swift package binary. The system routes sound
+  there, from Control Center, so the voice section has no microphone or
+  speaker to choose (`picksAudioDevices`) and the call follows the route.
+  Checked in the simulator only so far. A call and an inline video share
+  one audio session there. `loaf_media` sets it to playback while a video
+  plays with its sound on and deactivates it when the video stops, either
+  of which would take the call's sound; so the app tells it when a call has
+  the session (`CallAudioHold`, `LoafMedia.callHoldsAudio`), and until the
+  call is over a video leaves the session as the call set it. A video still
+  making sound when the call ends takes the session back.
+- **Windows.** Switched on without anyone having joined a call there: no
+  one who works on Loaf Chat has a Windows machine. What it rests on:
+  - The plugin's Windows code is its Linux code (`common/cpp`), down to how
+    it lists devices and switches them; only WebRTC's audio backend
+    underneath differs (WASAPI for PulseAudio).
+  - `libwebrtc.dll` has been in the bundle since 0.1.18, and the app loads
+    it at launch, calls or no calls; that release's smoke test installed
+    the app and saw it stay up.
+  - A desktop app needs no manifest entry or entitlement for the
+    microphone on Windows.
+
+  What nobody has seen:
+  - Whether the device lists carry the default a second time, as Linux's
+    do, and under what name.
+  - Whether changing the speaker stalls the app, as it did on macOS.
+  - A microphone switched off for desktop apps in Windows' privacy
+    settings. Windows may hand such an app silence rather than an error,
+    and the call would then show you as unmuted and unheard.
+  - Whether Windows' firewall asks about the app on a first call.
+
 - **Flatpak** already has `--socket=pulseaudio` and `--device=all`.
 
 ## Testing

@@ -104,6 +104,15 @@ public final class LoafMediaPlugin: NSObject, FlutterPlugin {
       #else
         result(false)
       #endif
+    case "audio.call":
+      guard let active = arguments?["active"] as? Bool else {
+        result(Self.badArguments(call))
+        return
+      }
+      #if os(iOS)
+        AudioSession.shared.call(active: active)
+      #endif
+      result(nil)
     case "chime.play":
       guard let asset = arguments?["asset"] as? String else {
         result(Self.badArguments(call))

@@ -24,8 +24,10 @@ Future<void> main(List<String> args) => build(args, (input, output) async {
     cargoDir.toFilePath(),
   ]);
   if (cargo.exitCode != 0) {
-    throw Exception('cargo build of loaf_notify_win failed:\n'
-        '${cargo.stdout}\n${cargo.stderr}');
+    throw Exception(
+      'cargo build of loaf_notify_win failed:\n'
+      '${cargo.stdout}\n${cargo.stderr}',
+    );
   }
 
   output.assets.code.add(

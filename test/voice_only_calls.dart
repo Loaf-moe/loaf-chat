@@ -99,6 +99,9 @@ class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   bool get camera => false;
   @override
   bool micBlocked = false;
+
+  @override
+  bool switchingAudio = false;
   @override
   bool get cameraBlocked => false;
   @override

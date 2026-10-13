@@ -201,7 +201,10 @@ class CallTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
-    final status = callStatus(session.phase);
+    final status = callStatus(
+      session.phase,
+      switchingAudio: calls.switchingAudio,
+    );
     final present = session.participants.where((p) => p.present).length + 1;
     return WindowDragArea(
       child: Container(
@@ -289,12 +292,14 @@ class CallTopBar extends StatelessWidget {
 }
 
 /// The top bar's status words, or null when the call is simply live.
-String? callStatus(CallPhase phase) => switch (phase) {
-  CallPhase.connecting => 'connecting…',
-  CallPhase.reconnecting => 'reconnecting…',
-  CallPhase.ringing => 'ringing…',
-  _ => null,
-};
+String? callStatus(CallPhase phase, {bool switchingAudio = false}) =>
+    switch (phase) {
+      CallPhase.connecting => 'connecting…',
+      CallPhase.reconnecting => 'reconnecting…',
+      CallPhase.ringing => 'ringing…',
+      _ when switchingAudio => 'switching audio…',
+      _ => null,
+    };
 
 class _EncryptedMark extends StatelessWidget {
   static const _explanation = 'calls are end-to-end encrypted';

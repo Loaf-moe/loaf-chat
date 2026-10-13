@@ -251,6 +251,10 @@ abstract interface class Calls implements Listenable {
   /// Whether the system refuses the app the microphone.
   bool get micBlocked;
 
+  /// Whether the call is still taking up a microphone or a speaker chosen.
+  /// Switching one can take seconds, with nothing heard meanwhile.
+  bool get switchingAudio;
+
   /// Whether the system refuses the app the camera.
   bool get cameraBlocked;
 

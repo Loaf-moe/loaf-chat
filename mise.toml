@@ -1,3 +1,91 @@
 [tools]
 flutter = "3.47.5"
 rust = "1.96.1"
+
+[env]
+# Flutter copies Swift packages with rsync and counts on Apple's, which makes
+# the directories above the target. Homebrew's does not, and every Apple
+# build stops at "Failed to copy plugin". tool/bin puts Apple's first.
+_.path = ["tool/bin"]
+
+[tasks.deps]
+description = "Fetch the Dart packages"
+run = "flutter pub get"
+
+[tasks.check]
+description = "Analyze, and fail on unformatted Dart"
+run = [
+  "flutter analyze",
+  # Named directories: build/ holds copies of plugins, formatted their own way.
+  "dart format --output=none --set-exit-if-changed lib test tool packages",
+]
+
+[tasks.format]
+description = "Format the Dart"
+run = "dart format lib test tool packages"
+
+[tasks.vodozemac]
+description = "Build the encryption tests' native library (Linux, Windows)"
+run = "sh tool/build-vodozemac"
+
+[tasks.test]
+description = "The app's tests; arguments go to flutter test"
+run = "flutter test"
+
+[tasks."test:media"]
+description = "loaf_media's Dart tests"
+dir = "packages/loaf_media"
+run = "flutter test"
+
+[tasks."test:media:apple"]
+description = "loaf_media's Swift tests; needs a Mac"
+run = "swift test --package-path packages/loaf_media/darwin/LoafMediaCore"
+
+[tasks."test:streams"]
+description = "loaf_streams' Rust tests"
+run = "cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml"
+
+[tasks."test:notify"]
+description = "loaf_notify's Rust tests"
+run = "cargo test --locked --manifest-path packages/loaf_notify/rust/Cargo.toml"
+
+[tasks."test:player:linux"]
+description = "The Linux player's Rust tests; needs GStreamer"
+run = "cargo test --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml"
+
+[tasks."test:all"]
+description = "Every test that runs on any platform"
+run = [{ task = "test" }, { task = "test:media" }, { task = "test:streams" }, { task = "test:notify" }]
+
+[tasks."build:macos"]
+description = "Debug build for macOS; also the encryption tests' library there"
+run = "flutter build macos --debug"
+
+[tasks."build:linux"]
+description = "Debug build for Linux"
+run = "flutter build linux --debug"
+
+[tasks."build:ios:sim"]
+description = "Debug build for the iOS simulator"
+run = "flutter build ios --debug --simulator"
+
+[tasks."run:macos"]
+description = "Run on this Mac; arguments go to flutter run"
+run = "flutter run -d macos"
+
+[tasks."run:ios"]
+description = "Run on an iPhone or iPad"
+usage = 'arg "<device>" help="Its name or id, as flutter devices lists it"'
+run = 'flutter run -d "{{usage.device}}"'
+
+[tasks."run:ios:sim"]
+description = "Run in an iOS simulator"
+usage = 'flag "--simulator <name>" default="iPhone 17" help="The simulator, by name"'
+run = [
+  # Boots it if it is not, and waits: an install into a simulator still
+  # starting up kills its service.
+  'xcrun simctl bootstatus "{{usage.simulator}}" -b',
+  # Xcode 27 shows simulators in Device Hub; there is no Simulator.app.
+  "open -a DeviceHub",
+  'flutter run -d "{{usage.simulator}}"',
+]

@@ -5,6 +5,7 @@ class MainFlutterWindow: NSWindow {
   private var updaterBridge: UpdaterBridge?
   private var notifyBridge: NotifyBridge?
   private var windowChrome: WindowChromeBridge?
+  private var audioDevices: AudioDevicesBridge?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -18,6 +19,8 @@ class MainFlutterWindow: NSWindow {
       messenger: flutterViewController.engine.binaryMessenger)
     windowChrome = WindowChromeBridge(
       window: self, messenger: flutterViewController.engine.binaryMessenger)
+    audioDevices = AudioDevicesBridge(
+      messenger: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }

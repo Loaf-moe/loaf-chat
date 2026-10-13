@@ -66,6 +66,47 @@ Map<String, bool> _switches(WidgetTester tester) => {
 };
 
 void main() {
+  testWidgets(
+    'iOS has no devices to choose: the system routes its sound',
+    variant: TargetPlatformVariant.only(TargetPlatform.iOS),
+    (tester) async {
+      await _pump(tester);
+
+      expect(find.byType(SettingsChoice), findsNothing);
+      expect(find.text('microphone'), findsNothing);
+      expect(find.text('speaker'), findsNothing);
+      expect(_switches(tester), hasLength(4));
+    },
+  );
+
+  testWidgets('what is chosen is busy while a call takes it up', (
+    tester,
+  ) async {
+    final controller = await _pump(
+      tester,
+      saved: const VoiceSettings(microphone: _rode),
+    );
+
+    controller.applying.value = true;
+    await tester.pump();
+
+    expect(
+      [
+        for (final choice in tester.widgetList<SettingsChoice>(
+          find.byType(SettingsChoice),
+        ))
+          if (choice.busy) choice.title,
+      ],
+      ['RODE NT-USB', 'system default'],
+    );
+
+    controller.applying.value = false;
+    await tester.pump();
+
+    expect(_checked(tester), ['RODE NT-USB', 'system default']);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
   testWidgets('lists the four kinds of processing as they start out', (
     tester,
   ) async {

@@ -263,6 +263,10 @@ class VoiceController extends ChangeNotifier {
   /// settings pages.
   final ValueNotifier<VoiceSettings> settings;
 
+  /// Whether a call is still taking up what is chosen: switching a device
+  /// can take seconds. Set by the calls; the pages only show it.
+  final applying = ValueNotifier(false);
+
   /// What the machine has, as of the last [refresh]. Empty before the first.
   List<AudioDevice> microphones = const [];
   List<AudioDevice> speakers = const [];
@@ -357,6 +361,7 @@ class VoiceController extends ChangeNotifier {
   void dispose() {
     unawaited(_changes?.cancel());
     settings.dispose();
+    applying.dispose();
     super.dispose();
   }
 }

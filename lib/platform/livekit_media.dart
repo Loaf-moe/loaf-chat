@@ -69,7 +69,11 @@ class LiveKitAudioDevices implements AudioDevices {
 }
 
 class LiveKitMedia implements CallMedia {
-  const LiveKitMedia();
+  const LiveKitMedia({this.selectSpeaker});
+
+  /// Points playback at the speaker with this id, where something other
+  /// than the plugin should: see `SystemAudioDevices.selectSpeaker`.
+  final Future<void> Function(String id)? selectSpeaker;
 
   @override
   Future<CallConnection> connect(Uri url, String jwt) async {
@@ -98,7 +102,7 @@ class LiveKitMedia implements CallMedia {
         ),
       );
     }
-    return _LiveKitConnection(room);
+    return _LiveKitConnection(room, selectSpeaker);
   }
 }
 
@@ -117,7 +121,7 @@ class _AlwaysOnline extends ConnectivityPlatform {
 }
 
 class _LiveKitConnection extends ChangeNotifier implements CallConnection {
-  _LiveKitConnection(this._room) {
+  _LiveKitConnection(this._room, this._selectSpeaker) {
     _room.addListener(notifyListeners);
     _events = _room.createListener()
       ..on<TrackSubscribedEvent>((event) async {
@@ -131,6 +135,7 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
   }
 
   final Room _room;
+  final Future<void> Function(String id)? _selectSpeaker;
   late final EventsListener<RoomEvent> _events;
   var _deafened = false;
 
@@ -284,7 +289,13 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
           devices.where((device) => device.deviceId == id).firstOrNull ??
           devices.firstOrNull;
       if (device == null || device.deviceId == _playing) return;
-      await Hardware.instance.selectAudioOutput(device);
+      final select = _selectSpeaker;
+      if (select == null) {
+        await Hardware.instance.selectAudioOutput(device);
+      } else {
+        Hardware.instance.selectedAudioOutput = device;
+        await select(device.deviceId);
+      }
       _playing = device.deviceId;
     } on PlatformException catch (e) {
       throw SpeakerUnavailable(e.toString());

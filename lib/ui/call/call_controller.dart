@@ -91,6 +91,9 @@ class CallController extends ChangeNotifier implements Calls {
   bool encrypted = true;
   @override
   bool micBlocked = false;
+
+  @override
+  bool switchingAudio = false;
   @override
   bool cameraBlocked = false;
   bool _failNext = false;
