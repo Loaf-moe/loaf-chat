@@ -234,4 +234,18 @@ void main() {
     expect(uncaught, isEmpty);
     expect(logged, hasLength(1), reason: 'logged once');
   });
+
+  test('prepare, blocked and open settings ask nothing of the OS', () async {
+    final logged = <Object>[];
+    final n = FdoNotifications(
+      chime: chime,
+      soundFile: '/app/chime.wav',
+      bus: deadBus(),
+      log: logged.add,
+    );
+    await n.prepare();
+    expect(await n.blocked(), isFalse);
+    await n.openSystemSettings();
+    expect(logged, isEmpty);
+  });
 }
