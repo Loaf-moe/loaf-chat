@@ -13,6 +13,7 @@ import 'package:markdown/markdown.dart' as md;
 import '../mock/fixtures.dart';
 import 'media_row.dart';
 import 'mentions.dart';
+import 'message_markup.dart';
 import 'timeline.dart';
 
 export 'timeline.dart'
@@ -25,7 +26,18 @@ class TimelineController extends ChangeNotifier
     List<Message> messages, {
     required this.you,
     this._uploadLimit,
-  }) : _messages = [...messages];
+  }) : _messages = [
+         for (final m in messages)
+           // Text only, as on a real server: a file's caption and a call's
+           // line offer no link.
+           m.media == null && m.callLine == null
+               ? m.copyWith(
+                   body: m.body,
+                   formatted: m.formatted,
+                   previewLink: _linkIn(m.body, m.formatted),
+                 )
+               : m,
+       ];
 
   @override
   final Member you;
@@ -132,13 +144,15 @@ class TimelineController extends ChangeNotifier
     final body = text.trim();
     if (body.isEmpty) return;
     final target = this.target;
+    final formatted = _formatted(body, mentions);
     _messages.add(
       Message(
         id: 'local-${_sent++}',
         author: you,
         sentAt: DateTime.now(),
         body: body,
-        formatted: _formatted(body, mentions),
+        formatted: formatted,
+        previewLink: _linkIn(body, formatted),
         replyTo: target?.mode == ComposerMode.reply ? target!.message : null,
       ),
     );
@@ -193,14 +207,19 @@ class TimelineController extends ChangeNotifier
     final index = _messages.indexWhere((m) => m.id == messageId);
     final body = text.trim();
     if (index >= 0 && body.isNotEmpty && body != _messages[index].body) {
+      final formatted = _formatted(body, mentions);
       _messages[index] = _messages[index].copyWith(
         body: body,
-        formatted: _formatted(body, mentions),
+        formatted: formatted,
+        previewLink: _linkIn(body, formatted),
         edited: true,
       );
     }
     aim(null);
   }
+
+  static Uri? _linkIn(String body, String? formatted) =>
+      firstWebLink(parseMessage(formatted: formatted, body: body));
 
   /// A message with mentions in it comes with HTML, as the server would see
   /// it, so they draw as pills. Without any, the plain body is enough.

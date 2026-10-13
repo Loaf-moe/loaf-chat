@@ -243,6 +243,31 @@ String? mentionOf(Uri link) {
   return null;
 }
 
+/// The first link in [blocks] to a web page, or null: what a message offers
+/// a preview of. A link inside a spoiler would give away what it hides.
+Uri? firstWebLink(List<Block> blocks) {
+  for (final block in blocks) {
+    final link = switch (block) {
+      Paragraph(:final runs) || Heading(:final runs) =>
+        runs
+            .where(
+              (r) =>
+                  r.spoiler == null &&
+                  (r.link?.isScheme('http') == true ||
+                      r.link?.isScheme('https') == true) &&
+                  r.link?.host != 'matrix.to',
+            )
+            .firstOrNull
+            ?.link,
+      Quote(:final children) => firstWebLink(children),
+      ListBlock(:final items) => items.map(firstWebLink).nonNulls.firstOrNull,
+      CodeBlock() || Rule() => null,
+    };
+    if (link != null) return link;
+  }
+  return null;
+}
+
 /// Bare web addresses in [text], as link runs among plain ones. Closing
 /// punctuation is not part of the address — "see https://x.dev." links
 /// x.dev — unless it closes a bracket the address opened, as Wikipedia's
@@ -257,7 +282,9 @@ List<Run> linkify(String text, Run template) {
     if (match.start > at) {
       runs.add(template._withText(text.substring(at, match.start)));
     }
-    runs.add(Run(url, style: template.style, link: link));
+    runs.add(
+      Run(url, style: template.style, link: link, spoiler: template.spoiler),
+    );
     at = match.start + url.length;
   }
   if (runs.isEmpty) return [template._withText(text)];

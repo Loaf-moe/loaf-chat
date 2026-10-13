@@ -17,6 +17,7 @@ import 'package:matrix/src/utils/markdown.dart' show markdown;
 
 import '../ui/auth/loaf_session.dart' show DeviceTrust;
 import '../ui/channel/mentions.dart' as ui;
+import '../ui/channel/message_markup.dart' show firstWebLink, parseMessage;
 import '../ui/channel/sizes.dart' show tooBigToSend;
 import '../ui/channel/timeline.dart' as ui;
 import '../ui/model/models.dart' as ui;
@@ -56,8 +57,8 @@ class MatrixTimeline extends ChangeNotifier
 
   final ui.Member Function(String userId) member;
 
-  /// Whether files linked on other sites are shown. Null: they are. The rows
-  /// are drawn afresh when it changes.
+  /// Whether files linked on other sites are shown, and links previewed.
+  /// Null: they are. The rows are drawn afresh when it changes.
   final ValueListenable<bool>? externalMedia;
 
   Timeline? _timeline;
@@ -212,7 +213,11 @@ class MatrixTimeline extends ChangeNotifier
   List<ui.Message> get messages {
     final timeline = _timeline;
     if (timeline == null) return const [];
-    return _messages ??= [
+    final mapped = _messages;
+    if (mapped != null) return mapped;
+    _linksBefore = _links;
+    _links = {};
+    return _messages = [
       // The SDK keeps its events newest first.
       for (final event in timeline.events.reversed) ?_message(event, timeline),
     ];
@@ -298,22 +303,59 @@ class MatrixTimeline extends ChangeNotifier
       MessageTypes.Emote => '${author.name} $text',
       _ => text,
     };
+    // A message that was only a link has no words left to format.
+    final formatted = linked != null && linked.body.isEmpty
+        ? null
+        : _formatted(display, author, caption: media != null);
+    // Never in an encrypted room: asking would tell the homeserver a link
+    // it cannot otherwise read.
+    final previews =
+        external &&
+        !room.encrypted &&
+        !quoting &&
+        status == ui.MessageStatus.sent &&
+        !display.status.isSending &&
+        media == null &&
+        linked == null &&
+        _previewed.contains(display.messageType);
     return ui.Message(
       id: event.eventId,
       author: author,
       sentAt: event.originServerTs,
       body: body,
       media: media ?? linked?.media,
-      // A message that was only a link has no words left to format.
-      formatted: linked != null && linked.body.isEmpty
-          ? null
-          : _formatted(display, author, caption: media != null),
+      previewLink: previews ? _linkOf(event, display, text) : null,
+      formatted: formatted,
       edited: !identical(display, event),
       reactions: quoting ? const [] : _reactions(event, timeline),
       replyTo: quoting ? null : _replyTo(event, timeline),
       status: status,
       uploaded: event.status.isSending ? _uploads[event.eventId] : null,
     );
+  }
+
+  static const _previewed = {
+    MessageTypes.Text,
+    MessageTypes.Notice,
+    MessageTypes.Emote,
+  };
+
+  /// Each message's first web link, with the event it was read from: every
+  /// row is mapped afresh on each change, and finding a link means parsing
+  /// the message. Only what the last mapping used is kept.
+  var _links = <String, (String, Uri?)>{};
+  var _linksBefore = <String, (String, Uri?)>{};
+
+  /// The first web link in what [display] says. Read from the event's own
+  /// words: an emote's row starts with its author's name, and a name must
+  /// not choose what is previewed.
+  Uri? _linkOf(Event event, Event display, String text) {
+    final known = _links[event.eventId] ?? _linksBefore[event.eventId];
+    final link = known != null && known.$1 == display.eventId
+        ? known.$2
+        : firstWebLink(parseMessage(formatted: _html(display), body: text));
+    _links[event.eventId] = (display.eventId, link);
+    return link;
   }
 
   /// Records an upload's progress, and redraws only when the whole percent
@@ -336,19 +378,21 @@ class MatrixTimeline extends ChangeNotifier
     ui.Member author, {
     required bool caption,
   }) {
-    if (event.content case {
-      'format': 'org.matrix.custom.html',
-      'formatted_body': final String html,
-    }) {
-      return switch (event.messageType) {
-        MessageTypes.Text || MessageTypes.Notice => html,
-        MessageTypes.Emote => '${htmlEscape.convert(author.name)} $html',
-        _ when caption && captionOf(event.content) != null => html,
-        _ => null,
-      };
-    }
-    return null;
+    final html = _html(event);
+    if (html == null) return null;
+    return switch (event.messageType) {
+      MessageTypes.Text || MessageTypes.Notice => html,
+      MessageTypes.Emote => '${htmlEscape.convert(author.name)} $html',
+      _ when caption && captionOf(event.content) != null => html,
+      _ => null,
+    };
   }
+
+  static String? _html(Event event) => switch (event.content) {
+    {'format': 'org.matrix.custom.html', 'formatted_body': final String html} =>
+      html,
+    _ => null,
+  };
 
   /// [event] as its author last edited it. Only the author's own edits
   /// count, and only those the server has: a failed edit snaps back.

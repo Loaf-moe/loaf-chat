@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart' show Colors;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:loaf_native/matrix/call_silence.dart';
 import 'package:loaf_native/matrix/client_factory.dart';
 import 'package:loaf_native/matrix/matrix_rooms.dart';
 import 'package:loaf_native/matrix/unread_tally.dart';
@@ -15,6 +16,8 @@ import 'package:loaf_native/ui/rooms/rooms.dart';
 // The SDK has a Role of its own; the one under test is loaf's.
 import 'package:matrix/matrix.dart' hide MediaKind, Role;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import 'in_memory_call_media.dart';
 
 const _me = '@test:fakeServer.notExisting';
 
@@ -47,6 +50,10 @@ class _Api extends FakeMatrixApi {
   /// When set, the display name every profile answers with.
   String? profileName;
 
+  /// What asking a room for one member's event answers, by user id. The
+  /// fake's own answer for anyone else is a ban.
+  final memberEvents = <String, Map<String, Object?>>{};
+
   /// Each space's `/hierarchy` pages, in order, keyed by space id.
   final hierarchyPages = <String, List<Map<String, Object?>>>{};
 
@@ -62,6 +69,18 @@ class _Api extends FakeMatrixApi {
 
   var _createdRooms = 0;
 
+  /// Each kick asked for: the room and who.
+  final kicks = <(String, String)>[];
+
+  /// Each moderation entry written: the room, its state key, its content.
+  final silences = <(String, String, Map<String, Object?>)>[];
+
+  /// While set, writing a moderation entry is refused.
+  var refuseSilences = false;
+
+  /// While set, a kick is refused.
+  var refuseKicks = false;
+
   /// Set by [_client], since [FakeMatrixApi.client] is a setter only:
   /// [mockIntercept] needs the client itself to push a fake sync.
   Client? ownerClient;
@@ -69,6 +88,46 @@ class _Api extends FakeMatrixApi {
   @override
   FutureOr<http.Response> mockIntercept(http.Request request) async {
     final path = request.url.path;
+    const moderation = '/state/$callSilenceType/';
+    if (request.method == 'PUT' && path.contains(moderation)) {
+      if (refuseSilences) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
+          403,
+        );
+      }
+      silences.add((
+        Uri.decodeComponent(path.split('/rooms/')[1].split('/state/')[0]),
+        Uri.decodeComponent(path.split(moderation)[1]),
+        jsonDecode(request.body) as Map<String, Object?>,
+      ));
+      return http.Response(
+        jsonEncode({'event_id': '\$m${silences.length}'}),
+        200,
+      );
+    }
+    if (request.method == 'POST' && path.endsWith('/kick')) {
+      if (refuseKicks) {
+        return http.Response(
+          jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
+          403,
+        );
+      }
+      kicks.add((
+        Uri.decodeComponent(path.split('/rooms/')[1].split('/kick')[0]),
+        (jsonDecode(request.body) as Map<String, Object?>)['user_id']!
+            as String,
+      ));
+      return http.Response('{}', 200);
+    }
+    if (request.method == 'GET' && path.contains('/state/m.room.member/')) {
+      await hold?.future;
+      final member =
+          memberEvents[Uri.decodeComponent(
+            path.split('/state/m.room.member/')[1],
+          )];
+      if (member != null) return http.Response(jsonEncode(member), 200);
+    }
     if (profileName != null &&
         request.method == 'GET' &&
         path.contains('/profile/')) {
@@ -1497,6 +1556,28 @@ void main() {
     expect(rooms.me.name, 'test');
   });
 
+  test('rooms given something to carry calls have calls', () async {
+    final client = await _client();
+    final rooms = MatrixRooms(
+      client,
+      callMedia: InMemoryCallMedia(
+        InMemoryCallServer(Uri.parse('wss://sfu.example.com')),
+      ),
+    );
+    addTearDown(rooms.dispose);
+
+    expect(rooms.calls, isNotNull);
+    expect(rooms.abilities, contains(RoomAbility.calls));
+  });
+
+  test('rooms given nothing to carry calls have none', () async {
+    final client = await _client();
+    final rooms = await _rooms(client);
+
+    expect(rooms.calls, isNull);
+    expect(rooms.abilities, isNot(contains(RoomAbility.calls)));
+  });
+
   test('you are you, and the wired abilities show', () async {
     final rooms = await _rooms(await _client());
     expect(rooms.me.id, _me);
@@ -1513,6 +1594,8 @@ void main() {
       RoomAbility.addSpace,
       RoomAbility.startDirect,
       RoomAbility.invite,
+      RoomAbility.kick,
+      RoomAbility.silence,
       RoomAbility.devices,
     });
   });
@@ -2304,5 +2387,464 @@ void main() {
     expect(late.media.store, isNull);
     const media = Media(kind: MediaKind.image, name: 'a.png', ref: 'x');
     expect(late.media.preview(media, 300), isNull);
+  });
+
+  group('kicking from a voice channel', () {
+    const oven = '!oven:example.com';
+    const ada = '@ada:example.com';
+
+    Channel channel(MatrixRooms rooms) => rooms.spaces
+        .expand((s) => s.categories)
+        .expand((c) => c.channels)
+        .firstWhere((c) => c.id == oven);
+
+    /// The oven's power levels: yours, and what a kick takes.
+    Future<void> levels(Client client, {required int mine, int? kick}) =>
+        _sync(client, {
+          'join': {
+            oven: {
+              'state': {
+                'events': [
+                  _state('m.room.power_levels', {
+                    'users': {_me: mine},
+                    'kick': ?kick,
+                  }),
+                ],
+              },
+            },
+          },
+        });
+
+    test('you may kick anyone below your level when it reaches what a kick '
+        'takes', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await levels(client, mine: 75, kick: 60);
+      await _until(() => channel(rooms).kickBelow != null);
+
+      expect(channel(rooms).kickBelow, 75);
+    });
+
+    test('you may kick nobody when your level falls short', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await levels(client, mine: 40, kick: 60);
+      await _settle();
+
+      expect(channel(rooms).kickBelow, isNull);
+    });
+
+    test('a kick takes 50 where the room does not say', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await levels(client, mine: 50);
+      await _until(() => channel(rooms).kickBelow != null);
+
+      expect(channel(rooms).kickBelow, 50);
+    });
+
+    test('a kick is asked of the server for that room and person', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await rooms.kick(oven, ada);
+
+      expect(api.kicks, [(oven, ada)]);
+    });
+
+    test('a refused kick throws', () async {
+      final api = _Api()..refuseKicks = true;
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await expectLater(rooms.kick(oven, ada), throwsA(isA<MatrixException>()));
+    });
+  });
+
+  group('muting and deafening for everyone, in a voice channel', () {
+    const oven = '!oven:example.com';
+    const ada = '@ada:example.com';
+
+    Channel channel(MatrixRooms rooms) => rooms.spaces
+        .expand((s) => s.categories)
+        .expand((c) => c.channels)
+        .firstWhere((c) => c.id == oven);
+
+    Future<void> state(Client client, List<Map<String, Object?>> events) =>
+        _sync(client, {
+          'join': {
+            oven: {
+              'state': {'events': events},
+            },
+          },
+        });
+
+    Map<String, Object?> entry(Map<String, Object?> content) => _state(
+      callSilenceType,
+      content,
+      key: '_$ada',
+      sender: '@mod:example.com',
+    );
+
+    test('the channel lists whom a moderator has silenced', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await state(client, [
+        entry({'muted': true, 'deafened': true}),
+      ]);
+      await _until(() => channel(rooms).silenced.isNotEmpty);
+
+      expect(channel(rooms).silenced, {ada: CallSilence.deafened});
+    });
+
+    test('lifting it takes them off the list', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await state(client, [
+        entry({'muted': true}),
+      ]);
+      await _until(() => channel(rooms).silenced.isNotEmpty);
+
+      await state(client, [entry(const {})]);
+      await _until(() => channel(rooms).silenced.isEmpty);
+
+      expect(channel(rooms).silenced, isEmpty);
+    });
+
+    test('you may where your level reaches what writing it takes', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await state(client, [
+        _state('m.room.power_levels', {
+          'users': {_me: 50},
+          'state_default': 50,
+        }),
+      ]);
+      await _until(() => channel(rooms).canSilence);
+
+      expect(channel(rooms).canSilence, isTrue);
+    });
+
+    test('you may not where it falls short', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await state(client, [
+        _state('m.room.power_levels', {
+          'users': {_me: 0},
+          'state_default': 50,
+        }),
+      ]);
+      await _settle();
+
+      expect(channel(rooms).canSilence, isFalse);
+    });
+
+    test('the room can ask more for it than for other state', () async {
+      final client = await _client();
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await state(client, [
+        _state('m.room.power_levels', {
+          'users': {_me: 50},
+          'state_default': 50,
+          'events': {callSilenceType: 100},
+        }),
+      ]);
+      await _settle();
+
+      expect(channel(rooms).canSilence, isFalse);
+    });
+
+    final written = <String, (CallSilence?, Map<String, Object?>)>{
+      'muting': (CallSilence.muted, {'muted': true, 'deafened': false}),
+      'deafening': (CallSilence.deafened, {'muted': true, 'deafened': true}),
+      'lifting it': (null, {}),
+    };
+    for (final MapEntry(key: name, value: (silence, content))
+        in written.entries) {
+      test('$name writes the entry about them', () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _bakery(client);
+
+        await rooms.silence(oven, ada, silence);
+
+        final (room, key, sent) = api.silences.single;
+        expect((room, key), (oven, '_$ada'));
+        expect(sent, content);
+      });
+    }
+
+    test('a refusal throws', () async {
+      final api = _Api()..refuseSilences = true;
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await expectLater(
+        rooms.silence(oven, ada, CallSilence.muted),
+        throwsA(isA<MatrixException>()),
+      );
+    });
+  });
+
+  group('who is in a voice channel', () {
+    const oven = '!oven:example.com';
+    const ada = '@ada:example.com';
+    const hour = 3600000;
+    final noon = DateTime.utc(2026, 10, 11, 12);
+    final noonMs = noon.millisecondsSinceEpoch;
+
+    Channel channel(MatrixRooms rooms, String id) => rooms.spaces
+        .expand((s) => s.categories)
+        .expand((c) => c.channels)
+        .firstWhere((c) => c.id == id);
+
+    /// [sender]'s call membership as Element Call writes it, or their
+    /// leaving when [left].
+    Map<String, Object?> membership({
+      String sender = ada,
+      bool left = false,
+      int expires = 4 * hour,
+    }) => {
+      'type': 'org.matrix.msc3401.call.member',
+      'state_key': '_${sender}_DEVICE_m.call',
+      'sender': sender,
+      'content': left
+          ? const <String, Object?>{}
+          : {
+              'application': 'm.call',
+              'call_id': '',
+              'device_id': 'DEVICE',
+              'expires': expires,
+              'focus_active': {'type': 'livekit'},
+              'scope': 'm.room',
+            },
+      'event_id': '\$c${_events++}',
+      'origin_server_ts': noonMs - hour,
+    };
+
+    /// [user]'s place in the room, as their member event says it.
+    Map<String, Object?> member({
+      String user = ada,
+      String membership = 'join',
+    }) => _state(
+      'm.room.member',
+      {
+        'membership': membership,
+        'displayname': 'Ada',
+        'avatar_url': 'mxc://x/a',
+      },
+      key: user,
+      sender: user,
+    );
+
+    Future<void> state(
+      Client client,
+      String roomId,
+      List<Map<String, Object?>> events,
+    ) => _sync(client, {
+      'join': {
+        roomId: {
+          'state': {'events': events},
+        },
+      },
+    });
+
+    test('someone joining the call is listed under the channel', () async {
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+
+      await state(client, oven, [member(), membership()]);
+      await _settle();
+
+      expect(channel(rooms, oven).occupants.map((m) => m.id), [ada]);
+    });
+
+    test('someone who has left the room is not listed', () async {
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+
+      await state(client, oven, [member(membership: 'leave'), membership()]);
+      await _settle();
+
+      expect(channel(rooms, oven).occupants, isEmpty);
+    });
+
+    test('someone the room has not loaded is named once it has', () async {
+      final api = _Api()
+        ..memberEvents[ada] = {'membership': 'join', 'displayname': 'Countess'};
+      final client = await _client(api: api);
+      // No sync follows the answer: only its arriving can name them.
+      client.backgroundSync = false;
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+      // Whatever the space's arrival sets going is done before she joins.
+      await _settle();
+      api.hold = Completer<void>();
+
+      await state(client, oven, [membership()]);
+      await _settle();
+      expect(channel(rooms, oven).occupants.single.name, isNot('Countess'));
+      api.hold!.complete();
+      await _until(
+        () => channel(rooms, oven).occupants.firstOrNull?.name == 'Countess',
+      );
+
+      expect(channel(rooms, oven).occupants.single.name, 'Countess');
+    });
+
+    test('someone the server says is not in the room is dropped', () async {
+      // The fake answers a ban for anyone it is not told about.
+      final client = await _client(api: _Api());
+      // No sync follows the answer: only its arriving can drop them.
+      client.backgroundSync = false;
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+      await state(client, oven, [membership()]);
+
+      await _until(() => channel(rooms, oven).occupants.isEmpty);
+
+      expect(channel(rooms, oven).occupants, isEmpty);
+    });
+
+    test('someone leaving the call is no longer listed', () async {
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+      await state(client, oven, [member(), membership()]);
+      await _settle();
+      expect(channel(rooms, oven).occupants, hasLength(1));
+
+      await state(client, oven, [membership(left: true)]);
+      await _settle();
+
+      expect(channel(rooms, oven).occupants, isEmpty);
+    });
+
+    test('an occupant carries their name and picture', () async {
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+
+      await state(client, oven, [member(), membership()]);
+      await _settle();
+
+      final occupant = channel(rooms, oven).occupants.single;
+      expect(occupant.name, 'Ada');
+      expect(occupant.avatar, const AvatarRef('mxc://x/a'));
+    });
+
+    test('an occupant goes when their membership expires', () async {
+      var clock = noon;
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => clock);
+      await _bakery(client);
+      // Sent an hour ago, so this runs out 200 ms from noon.
+      await state(client, oven, [member(), membership(expires: hour + 200)]);
+      await _settle();
+      expect(channel(rooms, oven).occupants, hasLength(1));
+
+      clock = noon.add(const Duration(seconds: 1));
+      await _until(() => channel(rooms, oven).occupants.isEmpty);
+
+      expect(channel(rooms, oven).occupants, isEmpty);
+    });
+
+    test('a text channel lists nobody, whatever its state says', () async {
+      const general = '!general:example.com';
+      final client = await _client();
+      final rooms = await _rooms(client, now: () => noon);
+      await _bakery(client);
+
+      await state(client, general, [member(), membership()]);
+      await _settle();
+
+      expect(channel(rooms, general).occupants, isEmpty);
+    });
+
+    test('occupants are there on the next launch', () async {
+      final dir = await Directory.systemTemp.createTemp('loaf-occupants');
+      addTearDown(() => dir.delete(recursive: true));
+      final path = '${dir.path}${Platform.pathSeparator}loaf.sqlite';
+      final first = await openClient(
+        httpClient: FakeMatrixApi(),
+        databasePath: path,
+      );
+      await first.init(
+        newToken: 'abcd',
+        newHomeserver: Uri.parse('https://fakeServer.notExisting'),
+        newUserID: _me,
+        newDeviceID: 'GHTYAJCE',
+        newDeviceName: 'loaf on test',
+      );
+      await _bakery(first);
+      await state(first, oven, [member(), membership()]);
+      await first.dispose();
+
+      final second = await openClient(
+        httpClient: FakeMatrixApi(),
+        databasePath: path,
+      );
+      addTearDown(second.dispose);
+      await second.init(waitForFirstSync: false);
+      final rooms = await _rooms(second, now: () => noon);
+
+      expect(channel(rooms, oven).occupants.map((m) => m.id), [ada]);
+    });
+
+    test('a membership stored by a build that kept none in memory '
+        'is listed', () async {
+      final dir = await Directory.systemTemp.createTemp('loaf-occupants');
+      addTearDown(() => dir.delete(recursive: true));
+      final path = '${dir.path}${Platform.pathSeparator}loaf.sqlite';
+      final old = await openClient(
+        httpClient: FakeMatrixApi(),
+        databasePath: path,
+      );
+      // As before call memberships were among the state kept in memory.
+      old.importantStateEvents.remove('org.matrix.msc3401.call.member');
+      await old.init(
+        newToken: 'abcd',
+        newHomeserver: Uri.parse('https://fakeServer.notExisting'),
+        newUserID: _me,
+        newDeviceID: 'GHTYAJCE',
+        newDeviceName: 'loaf on test',
+      );
+      await _bakery(old);
+      await state(old, oven, [member(), membership()]);
+      await old.dispose();
+
+      final client = await openClient(
+        httpClient: FakeMatrixApi(),
+        databasePath: path,
+      );
+      addTearDown(client.dispose);
+      await client.init(waitForFirstSync: false);
+      final rooms = await _rooms(client, now: () => noon);
+      await _until(() => channel(rooms, oven).occupants.isNotEmpty);
+
+      expect(channel(rooms, oven).occupants.map((m) => m.id), [ada]);
+    });
   });
 }

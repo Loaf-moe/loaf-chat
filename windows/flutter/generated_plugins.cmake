@@ -3,8 +3,11 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  connectivity_plus
   desktop_webview_window
   file_selector_windows
+  flutter_webrtc
+  livekit_client
   loaf_media
   share_plus
   url_launcher_windows

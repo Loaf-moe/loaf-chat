@@ -53,6 +53,13 @@ dependencies:
   # formatted_body; markdown reads a plain body the way the SDK writes one.
   html: ^0.15.6
   markdown: ^7.3.1
+  livekit_client: ^2.13.1
+  # livekit_client asks it for the network's state; Linux gets its own
+  # answer. See lib/platform/livekit_media.dart.
+  connectivity_plus_platform_interface: ^2.1.0
+  # livekit_client has no call for one person's volume; this, which it is
+  # built on, has. See lib/platform/livekit_media.dart.
+  flutter_webrtc: ^1.6.2
   loaf_media:
     path: packages/loaf_media
   loaf_notify:

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -18,9 +19,13 @@ import 'package:loaf_native/ui/mock/mock_devices.dart';
 import 'package:loaf_native/ui/mock/mock_profile.dart';
 import 'package:loaf_native/ui/mock/mock_verifier.dart';
 import 'package:loaf_native/ui/model/models.dart';
+import 'package:loaf_native/ui/call/call_health.dart';
+import 'package:loaf_native/ui/call/calls.dart';
+import 'package:loaf_native/ui/call/connected_call_bar.dart';
 import 'package:loaf_native/ui/rooms/rooms.dart';
 import 'package:loaf_native/ui/settings/settings_page.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
+import 'package:loaf_native/ui/shell/before_quit.dart';
 import 'package:loaf_native/ui/spaces/space_directory.dart';
 import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
@@ -29,8 +34,11 @@ import 'package:loaf_native/ui/verify/verifier.dart';
 import 'package:loaf_native/ui/settings/devices.dart';
 import 'package:loaf_native/ui/shell/profile.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
+import 'package:loaf_native/ui/model/link_previews.dart';
 import 'package:loaf_native/ui/model/media_source.dart';
 import 'package:loaf_native/ui/widgets/avatar_images.dart';
+
+import 'voice_only_calls.dart';
 
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
 final _desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
@@ -93,9 +101,13 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   Stream<Arrival> get arrivals => const Stream.empty();
   @override
+  Calls? calls;
+  @override
   AvatarImages get avatarImages => const NoAvatarImages();
   @override
   MediaSource get media => const NoMediaSource();
+  @override
+  LinkPreviews get linkPreviews => const NoLinkPreviews();
   @override
   Profile get profile => MockProfile();
   @override
@@ -159,6 +171,35 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   Future<Channel> createDirect(List<Member> members) => _unwired();
   @override
   Future<void> invite(String roomId, List<String> userIds) => _unwired();
+
+  /// Each kick asked for: the room and who.
+  final kicked = <(String, String)>[];
+
+  /// While set, a kick is refused.
+  var refuseKicks = false;
+
+  /// Held back until completed, when set: the answer to a kick.
+  Completer<void>? kickAnswer;
+
+  /// Each silence asked for: the room, who, and what (null lifts it).
+  final silences = <(String, String, CallSilence?)>[];
+
+  /// While set, a silence is refused.
+  var refuseSilences = false;
+
+  @override
+  Future<void> silence(String roomId, String userId, CallSilence? to) async {
+    if (refuseSilences) throw Exception('refused');
+    silences.add((roomId, userId, to));
+  }
+
+  @override
+  Future<void> kick(String roomId, String userId) async {
+    if (refuseKicks) throw Exception('refused');
+    kicked.add((roomId, userId));
+    await kickAnswer?.future;
+  }
+
   @override
   SpaceDirectory get directory => _unwired();
 }
@@ -199,6 +240,7 @@ Future<_Session> _pump(
   Size size = const Size(1440, 900),
   bool settle = true,
   Stream<MessageRoute>? routes,
+  BeforeQuit? beforeQuit,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -210,7 +252,12 @@ Future<_Session> _pump(
       theme: loafLightTheme(),
       darkTheme: loafDarkTheme(),
       themeMode: ThemeMode.dark,
-      home: AppShell(session: session, rooms: () => rooms, routes: routes),
+      home: AppShell(
+        session: session,
+        rooms: () => rooms,
+        routes: routes,
+        beforeQuit: beforeQuit,
+      ),
     ),
   );
   // A spinner never settles.
@@ -335,6 +382,187 @@ void main() {
         expect(find.byType(MemberList), findsNothing);
       },
     );
+
+    testWidgets('a voice channel joins through the rooms\' own calls', (
+      tester,
+    ) async {
+      final calls = VoiceOnlyCalls();
+      addTearDown(calls.dispose);
+      final rooms = _FakeRooms(spaces: [_bakery()])
+        ..abilities = {RoomAbility.messages, RoomAbility.calls}
+        ..calls = calls;
+      await _pump(tester, rooms);
+
+      await tester.tap(_inList('oven'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('join voice'));
+      await tester.pumpAndSettle();
+
+      expect(calls.session?.target.name, 'oven');
+      expect(find.byTooltip('Leave call'), findsOneWidget);
+    });
+
+    group('how the call\'s connection is doing', () {
+      Future<VoiceOnlyCalls> joined(WidgetTester tester) async {
+        final calls = VoiceOnlyCalls();
+        addTearDown(calls.dispose);
+        // The bar is drawn over a conversation, so #general has one.
+        final general = TimelineController(const [], you: _me);
+        addTearDown(general.dispose);
+        final rooms = _FakeRooms(spaces: [_bakery()])
+          ..abilities = {RoomAbility.messages, RoomAbility.calls}
+          ..calls = calls
+          ..timelines['!general'] = general;
+        await _pump(tester, rooms);
+        await tester.tap(_inList('oven'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('join voice'));
+        await tester.pumpAndSettle();
+        return calls;
+      }
+
+      testWidgets('shows muted in the call\'s own top bar', (tester) async {
+        await joined(tester);
+
+        final mark = find.byType(CallHealthMark);
+        expect(mark, findsOneWidget);
+        expect(
+          tester
+              .widget<Icon>(
+                find.descendant(of: mark, matching: find.byType(Icon)),
+              )
+              .color,
+          LoafTokens.of(tester.element(mark)).textMuted,
+        );
+      });
+
+      testWidgets('leads the bar that follows you to other channels', (
+        tester,
+      ) async {
+        await joined(tester);
+
+        await tester.tap(_inList('general'));
+        await tester.pumpAndSettle();
+
+        final bar = find.byType(ConnectedCallBar);
+        expect(
+          find.descendant(of: bar, matching: find.byType(CallHealthMark)),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: bar, matching: find.byIcon(LucideIcons.radio)),
+          findsNothing,
+        );
+      });
+
+      testWidgets('shows green on that bar', (tester) async {
+        await joined(tester);
+        await tester.tap(_inList('general'));
+        await tester.pumpAndSettle();
+
+        final mark = find.descendant(
+          of: find.byType(ConnectedCallBar),
+          matching: find.byType(CallHealthMark),
+        );
+        expect(
+          tester
+              .widget<Icon>(
+                find.descendant(of: mark, matching: find.byType(Icon)),
+              )
+              .color,
+          LoafTokens.of(tester.element(mark)).online,
+        );
+      });
+
+      testWidgets('turns the bar to its warning colour when weak', (
+        tester,
+      ) async {
+        final calls = await joined(tester);
+        await tester.tap(_inList('general'));
+        await tester.pumpAndSettle();
+
+        calls
+          ..quality = CallQuality.poor
+          ..show(calls.session);
+        await tester.pump();
+
+        final title = tester.widget<Text>(find.text('Voice connected'));
+        final tokens = LoafTokens.of(
+          tester.element(find.text('Voice connected')),
+        );
+        expect(title.style?.color, tokens.idle);
+      });
+    });
+
+    group('quitting while in a call', () {
+      /// The shell with a voice channel joined on [calls].
+      Future<void> inCall(
+        WidgetTester tester,
+        VoiceOnlyCalls calls, {
+        BeforeQuit? beforeQuit,
+      }) async {
+        addTearDown(calls.dispose);
+        final rooms = _FakeRooms(spaces: [_bakery()])
+          ..abilities = {RoomAbility.messages, RoomAbility.calls}
+          ..calls = calls;
+        await _pump(tester, rooms, beforeQuit: beforeQuit);
+        await tester.tap(_inList('oven'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('join voice'));
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('a window asked to close leaves the call first', (
+        tester,
+      ) async {
+        final calls = VoiceOnlyCalls();
+        await inCall(tester, calls);
+
+        final answer = await tester.binding.handleRequestAppExit();
+
+        expect(calls.session, isNull);
+        expect(answer, AppExitResponse.exit);
+      });
+
+      testWidgets('a signal to quit leaves the call', (tester) async {
+        final calls = VoiceOnlyCalls();
+        final beforeQuit = BeforeQuit();
+        await inCall(tester, calls, beforeQuit: beforeQuit);
+
+        await beforeQuit.run();
+
+        expect(calls.session, isNull);
+      });
+
+      testWidgets('a leave that never finishes holds the window three '
+          'seconds, no longer', (tester) async {
+        final calls = VoiceOnlyCalls(leaving: Completer<void>().future);
+        await inCall(tester, calls);
+        AppExitResponse? answer;
+
+        unawaited(
+          tester.binding.handleRequestAppExit().then((a) => answer = a),
+        );
+        await tester.pump(BeforeQuit.limit - const Duration(milliseconds: 1));
+        final before = answer;
+        await tester.pump(const Duration(milliseconds: 1));
+
+        expect(before, isNull);
+        expect(answer, AppExitResponse.exit);
+      });
+    });
+
+    testWidgets('calls with voice alone offer none in a DM', (tester) async {
+      final calls = VoiceOnlyCalls();
+      addTearDown(calls.dispose);
+      final rooms = _FakeRooms(homeRooms: [_dm])
+        ..abilities = {RoomAbility.messages, RoomAbility.calls}
+        ..calls = calls;
+      await _pump(tester, rooms);
+
+      expect(find.byTooltip('Start a voice call'), findsNothing);
+      expect(find.byTooltip('Start a video call'), findsNothing);
+    });
 
     testWidgets('a DM offers no calls', (tester) async {
       await _pump(tester, _FakeRooms(homeRooms: [_dm]));
@@ -547,6 +775,291 @@ void main() {
       );
       expect(find.text('ADMINS — 1'), findsOneWidget);
       expect(find.text('MEMBERS — 1'), findsOneWidget);
+    });
+  });
+
+  group('being silenced by a moderator', () {
+    /// The shell in the oven's call on [calls], reading a text channel.
+    Future<void> inCall(WidgetTester tester, VoiceOnlyCalls calls) async {
+      addTearDown(calls.dispose);
+      final rooms = _FakeRooms(spaces: [_bakery()])
+        ..abilities = {RoomAbility.messages, RoomAbility.calls}
+        ..calls = calls;
+      await _pump(tester, rooms);
+      await tester.tap(_inList('oven'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('join voice'));
+      await tester.pumpAndSettle();
+    }
+
+    /// Puts [silence] on you, as a sync would.
+    Future<void> put(
+      WidgetTester tester,
+      VoiceOnlyCalls calls,
+      CallSilence? silence,
+    ) async {
+      calls
+        ..silenced = silence
+        ..show(calls.session);
+      // Until the toast is in; it then stays its reading time.
+      await tester.pumpAndSettle();
+    }
+
+    final said = <String, (CallSilence?, CallSilence?, String)>{
+      'muted': (null, CallSilence.muted, 'a moderator muted you'),
+      'deafened': (null, CallSilence.deafened, 'a moderator deafened you'),
+      'unmuted': (CallSilence.muted, null, 'a moderator unmuted you'),
+      'undeafened': (CallSilence.deafened, null, 'a moderator undeafened you'),
+    };
+    for (final MapEntry(key: name, value: (before, after, words))
+        in said.entries) {
+      testWidgets('says so when you are $name', (tester) async {
+        final calls = VoiceOnlyCalls();
+        await inCall(tester, calls);
+        if (before != null) {
+          await put(tester, calls, before);
+          await tester.pumpAndSettle(const Duration(seconds: 5));
+        }
+
+        await put(tester, calls, after);
+
+        expect(find.text(words), findsOneWidget);
+        await tester.pumpAndSettle(const Duration(seconds: 5));
+      });
+    }
+
+    testWidgets('says nothing when you leave the call still silenced', (
+      tester,
+    ) async {
+      final calls = VoiceOnlyCalls();
+      await inCall(tester, calls);
+      await put(tester, calls, CallSilence.muted);
+      await tester.pumpAndSettle(const Duration(seconds: 5));
+
+      calls
+        ..silenced = null
+        ..show(null);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('a moderator unmuted you'), findsNothing);
+    });
+  });
+
+  group('muting someone for everyone', () {
+    const ada = Member(
+      '@ada:loaf.test',
+      'Ada',
+      Color(0xFF884422),
+      presence: Presence.unknown,
+    );
+
+    Future<_FakeRooms> openMenu(
+      WidgetTester tester, {
+      Set<RoomAbility> abilities = const {RoomAbility.silence},
+    }) async {
+      final rooms = _FakeRooms(
+        spaces: [
+          _bakery(
+            channels: const [
+              Channel(id: '!general', name: 'general'),
+              Channel(
+                id: '!oven',
+                name: 'oven',
+                kind: ChannelKind.voice,
+                occupants: [ada],
+                canSilence: true,
+              ),
+            ],
+          ),
+        ],
+      )..abilities = abilities;
+      await _pump(tester, rooms);
+      await tester.tap(
+        find.byKey(const ValueKey('occupant-!oven-@ada:loaf.test')),
+        buttons: kSecondaryButton,
+      );
+      await tester.pumpAndSettle();
+      return rooms;
+    }
+
+    testWidgets('asks the rooms for it, of them, there', variant: _desktop, (
+      tester,
+    ) async {
+      final rooms = await openMenu(tester);
+
+      await tester.tap(find.text('mute for everyone'));
+      await tester.pumpAndSettle();
+
+      expect(rooms.silences, [('!oven', '@ada:loaf.test', CallSilence.muted)]);
+    });
+
+    testWidgets('says so when the server refuses', variant: _desktop, (
+      tester,
+    ) async {
+      final rooms = await openMenu(tester);
+      rooms.refuseSilences = true;
+
+      await tester.tap(find.text('mute for everyone'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text("couldn't do that. try again?"), findsOneWidget);
+      await tester.pumpAndSettle(const Duration(seconds: 5));
+    });
+
+    testWidgets('is not offered by rooms that cannot', variant: _desktop, (
+      tester,
+    ) async {
+      await openMenu(tester, abilities: const {});
+
+      expect(find.text('mute for everyone'), findsNothing);
+    });
+  });
+
+  group('kicking someone from a voice channel', () {
+    const ada = Member(
+      '@ada:loaf.test',
+      'Ada',
+      Color(0xFF884422),
+      presence: Presence.unknown,
+    );
+
+    /// The shell on rooms where you may kick Ada, who is in the oven's
+    /// call, with her menu open.
+    Future<_FakeRooms> openMenu(
+      WidgetTester tester, {
+      Set<RoomAbility> abilities = const {RoomAbility.kick},
+    }) async {
+      final rooms = _FakeRooms(
+        spaces: [
+          _bakery(
+            channels: const [
+              Channel(id: '!general', name: 'general'),
+              Channel(
+                id: '!oven',
+                name: 'oven',
+                kind: ChannelKind.voice,
+                occupants: [ada],
+                kickBelow: 100,
+              ),
+            ],
+          ),
+        ],
+      )..abilities = abilities;
+      await _pump(tester, rooms);
+      await tester.tap(
+        find.byKey(const ValueKey('occupant-!oven-@ada:loaf.test')),
+        buttons: kSecondaryButton,
+      );
+      await tester.pumpAndSettle();
+      return rooms;
+    }
+
+    testWidgets('asks first, naming who and where', variant: _desktop, (
+      tester,
+    ) async {
+      final rooms = await openMenu(tester);
+
+      await tester.tap(find.text('kick from oven'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('kick Ada from oven?'), findsOneWidget);
+      expect(rooms.kicked, isEmpty);
+    });
+
+    testWidgets('kicks them from that room once confirmed', variant: _desktop, (
+      tester,
+    ) async {
+      final rooms = await openMenu(tester);
+      await tester.tap(find.text('kick from oven'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('kick'));
+      await tester.pumpAndSettle();
+
+      expect(rooms.kicked, [('!oven', '@ada:loaf.test')]);
+    });
+
+    testWidgets(
+      'asks the server once, though asked again before it '
+      'answers',
+      variant: _desktop,
+      (tester) async {
+        final rooms = await openMenu(tester);
+        rooms.kickAnswer = Completer();
+        await tester.tap(find.text('kick from oven'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('kick'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.byKey(const ValueKey('occupant-!oven-@ada:loaf.test')),
+          buttons: kSecondaryButton,
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('kick from oven'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('kick Ada from oven?'), findsNothing);
+        expect(rooms.kicked, hasLength(1));
+        rooms.kickAnswer!.complete();
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets('kicks nobody when cancelled', variant: _desktop, (
+      tester,
+    ) async {
+      final rooms = await openMenu(tester);
+      await tester.tap(find.text('kick from oven'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('cancel'));
+      await tester.pumpAndSettle();
+
+      expect(rooms.kicked, isEmpty);
+    });
+
+    testWidgets(
+      'kicks nobody when the question is dismissed',
+      variant: _desktop,
+      (tester) async {
+        final rooms = await openMenu(tester);
+        await tester.tap(find.text('kick from oven'));
+        await tester.pumpAndSettle();
+
+        await tester.tapAt(const Offset(5, 5));
+        await tester.pumpAndSettle();
+
+        expect(find.text('kick Ada from oven?'), findsNothing);
+        expect(rooms.kicked, isEmpty);
+      },
+    );
+
+    testWidgets('says so when the server refuses', variant: _desktop, (
+      tester,
+    ) async {
+      final rooms = await openMenu(tester);
+      rooms.refuseKicks = true;
+      await tester.tap(find.text('kick from oven'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('kick'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text("couldn't kick Ada"), findsOneWidget);
+      // Let the toast go, so no timer outlives the test.
+      await tester.pumpAndSettle(const Duration(seconds: 5));
+    });
+
+    testWidgets('is not offered by rooms that cannot kick', variant: _desktop, (
+      tester,
+    ) async {
+      await openMenu(tester, abilities: const {});
+
+      expect(find.text('kick from oven'), findsNothing);
     });
   });
 

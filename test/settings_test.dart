@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/mock/mock_devices.dart';
 import 'package:loaf_native/ui/settings/devices.dart';
 import 'package:loaf_native/ui/settings/settings_page.dart';
+import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/theme/appearance.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 
@@ -15,6 +17,7 @@ Future<void> _open(
   VoidCallback? onSignOut,
   SettingsSection initial = SettingsSection.account,
   AppearanceController? appearance,
+  VoiceController? voice,
 }) async {
   final Devices? devices = withDevices ? MockDevices() : null;
   addTearDown(() => devices?.dispose());
@@ -43,6 +46,7 @@ Future<void> _open(
   if (appearance != null) {
     app = AppearanceScope(controller: appearance, child: app);
   }
+  if (voice != null) app = VoiceScope(controller: voice, child: app);
   await tester.pumpWidget(app);
   await tester.tap(find.text('open'));
   await tester.pumpAndSettle();
@@ -154,6 +158,7 @@ void main() {
 
     for (final gone in [
       'notifications',
+      'voice',
       'voice & video',
       'stickers',
       'developer',
@@ -164,6 +169,36 @@ void main() {
     expect(find.text('devices'), findsOneWidget);
     expect(find.text('about'), findsOneWidget);
     expect(find.text('sign out'), findsOneWidget);
+  });
+
+  testWidgets('voice is listed with a voice controller in scope', (
+    tester,
+  ) async {
+    final voice = VoiceController(
+      store: MemoryVoiceStore(),
+      devices: MemoryAudioDevices(),
+    );
+    addTearDown(voice.dispose);
+    await _open(tester, const Size(1440, 900), voice: voice);
+
+    expect(find.text('voice'), findsOneWidget);
+  });
+
+  testWidgets('voice opens onto the microphones and the speakers', (
+    tester,
+  ) async {
+    final voice = VoiceController(
+      store: MemoryVoiceStore(),
+      devices: MemoryAudioDevices(),
+    );
+    addTearDown(voice.dispose);
+    await _open(tester, const Size(1440, 900), voice: voice);
+
+    await tester.tap(find.text('voice'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Blue Yeti'), findsOneWidget);
+    expect(find.text('MacBook Pro Speakers'), findsOneWidget);
   });
 
   testWidgets('without devices, there is no devices entry', (tester) async {

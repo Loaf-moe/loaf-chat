@@ -1,8 +1,10 @@
-/// The two controls every settings section is built from: a small caps
-/// label over a group, and a titled checkbox row with a line of detail.
+/// The controls every settings section is built from: a small caps label
+/// over a group, a titled checkbox row with a line of detail, and a row
+/// for one choice among several.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
 
@@ -92,5 +94,58 @@ class SettingsCheck extends StatelessWidget {
       ),
     );
     return enabled ? row : Opacity(opacity: 0.5, child: row);
+  }
+}
+
+/// One of several: a bordered row, checked when it is the one chosen.
+class SettingsChoice extends StatelessWidget {
+  const SettingsChoice({
+    super.key,
+    required this.title,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String title;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: Material(
+        color: selected ? tokens.card : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(LoafRadius.lg),
+          side: BorderSide(
+            color: selected ? tokens.borderStrong : tokens.border,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(LoafSpace.x3),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: loafBody(15, 500).copyWith(color: tokens.textStrong),
+                  ),
+                ),
+                if (selected)
+                  Icon(LucideIcons.check, size: 18, color: tokens.accent),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

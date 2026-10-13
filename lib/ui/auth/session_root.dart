@@ -8,6 +8,7 @@ import '../model/message_route.dart';
 import '../model/updater.dart';
 import '../rooms/rooms.dart';
 import '../shell/app_shell.dart';
+import '../shell/before_quit.dart';
 import 'loaf_session.dart';
 import 'login_page.dart';
 import 'sign_in_controller.dart';
@@ -19,6 +20,7 @@ class SessionRoot extends StatefulWidget {
     this.rooms,
     this.updater,
     this.routes,
+    this.beforeQuit,
   });
 
   final LoafSession session;
@@ -32,6 +34,9 @@ class SessionRoot extends StatefulWidget {
 
   /// The app's one updater. Left out, the shell decides.
   final Updater? updater;
+
+  /// Handed to the shell; see [AppShell.beforeQuit].
+  final BeforeQuit? beforeQuit;
 
   @override
   State<SessionRoot> createState() => _SessionRootState();
@@ -102,6 +107,7 @@ class _SessionRootState extends State<SessionRoot> {
         rooms: widget.rooms,
         updater: widget.updater,
         routes: widget.routes,
+        beforeQuit: widget.beforeQuit,
       );
     }
     return LoginPage(

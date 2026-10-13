@@ -160,6 +160,7 @@ class Message {
     this.edited = false,
     this.replyTo,
     this.media,
+    this.previewLink,
     this.uploaded,
     this.callLine,
     this.status = MessageStatus.sent,
@@ -177,6 +178,7 @@ class Message {
       edited = false,
       replyTo = null,
       media = null,
+      previewLink = null,
       uploaded = null,
       callLine = null,
       status = MessageStatus.sent,
@@ -203,6 +205,10 @@ class Message {
   /// its caption, and empty when there is none.
   final Media? media;
 
+  /// The link this message offers a preview of. Null when it has none, or
+  /// where previews are not asked for: the backend that made it decides.
+  final Uri? previewLink;
+
   /// How much of an outgoing file has gone up, 0 to 1. Set only while sending.
   final double? uploaded;
 
@@ -218,12 +224,14 @@ class Message {
   /// See [Message.stub].
   final bool stub;
 
-  /// New words make the old formatting wrong: [formatted] goes with a new
-  /// [body], and without one the message has none.
+  /// New words make the old formatting and the old link wrong: [formatted]
+  /// and [previewLink] go with a new [body], and without them the message
+  /// has neither.
   Message copyWith({
     List<Reaction>? reactions,
     String? body,
     String? formatted,
+    Uri? previewLink,
     bool? edited,
   }) => Message(
     id: id,
@@ -235,6 +243,7 @@ class Message {
     edited: edited ?? this.edited,
     replyTo: replyTo,
     media: media,
+    previewLink: body == null ? this.previewLink : previewLink,
     uploaded: uploaded,
     callLine: callLine,
     status: status,
@@ -242,6 +251,9 @@ class Message {
     stub: stub,
   );
 }
+
+/// What a moderator has put on someone in a call. Deafened is muted too.
+enum CallSilence { muted, deafened }
 
 class Channel {
   const Channel({
@@ -263,6 +275,9 @@ class Channel {
     this.earlier = const [],
     this.waitingFor = const [],
     this.avatar,
+    this.kickBelow,
+    this.silenced = const {},
+    this.canSilence = false,
   });
 
   final String id;
@@ -310,6 +325,18 @@ class Channel {
   /// Invited to a DM you started, and not in it yet.
   final List<Member> waitingFor;
 
+  /// Your power level here, when it lets you kick: anyone whose own is
+  /// below it can be kicked by you. Null: you can kick nobody.
+  final int? kickBelow;
+
+  /// Whom a moderator has muted or deafened in this channel's call, by
+  /// user id.
+  final Map<String, CallSilence> silenced;
+
+  /// Whether you may mute or deafen people in this channel's call for
+  /// everyone.
+  final bool canSilence;
+
   IconData get icon => switch (kind) {
     ChannelKind.voice => LucideIcons.volume2,
     ChannelKind.direct => LucideIcons.atSign,
@@ -339,6 +366,9 @@ class Channel {
     private: private,
     topic: topic,
     occupants: occupants ?? this.occupants,
+    kickBelow: kickBelow,
+    silenced: silenced,
+    canSilence: canSilence,
     joined: joined ?? this.joined,
     muted: muted ?? this.muted,
     members: members,

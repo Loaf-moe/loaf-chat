@@ -13,6 +13,7 @@ import 'package:flutter/foundation.dart';
 // UI draws.
 import 'package:matrix/matrix.dart' hide Presence, Profile, Timeline;
 import 'package:path_provider/path_provider.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show DatabaseException;
 
 import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
@@ -20,13 +21,20 @@ import '../ui/model/arrival.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/settings/devices.dart';
+import '../ui/settings/voice_settings.dart';
 import '../ui/shell/profile.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
 import '../ui/widgets/avatar_images.dart';
+import '../ui/call/calls.dart';
+import 'call_media.dart';
+import 'call_members.dart';
+import 'call_silence.dart';
+import 'matrix_calls.dart';
 import 'matrix_avatar_images.dart';
 import 'matrix_hierarchy.dart';
 import 'matrix_devices.dart';
+import 'matrix_link_previews.dart';
 import 'matrix_media.dart';
 import 'matrix_profile.dart';
 import 'matrix_space_directory.dart';
@@ -60,6 +68,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   MatrixRooms(
     this.client, {
     this._mediaRoot,
+    this._callMedia,
+    this._voice,
     this.externalMedia,
     @visibleForTesting this._now,
   }) {
@@ -75,6 +85,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       // `SyncStatus.finished` would miss those.
       client.onSync.stream.listen(_onSync),
       client.onSyncStatus.stream.listen(_onStatus),
+      client.onRoomState.stream.listen(_onRoomState),
     ];
     // A restored session has synced before; its rooms are already here.
     _synced = client.prevBatch != null;
@@ -87,6 +98,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final status = client.onSyncStatus.value;
     if (status != null) _onStatus(status);
     unawaited(_loadMe());
+    unawaited(_loadStoredCalls());
   }
 
   final Client client;
@@ -184,10 +196,36 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   var _disposed = false;
   final Directory? _mediaRoot;
 
-  /// The clock the unread counts back off by; tests move it.
+  /// What carries a call's audio. Null: this build has no calls.
+  final CallMedia? _callMedia;
+
+  /// The microphone and the speaker a call uses. Null: the system's
+  /// defaults.
+  final ValueListenable<VoiceSettings>? _voice;
+  MatrixCalls? _calls;
+
+  @override
+  Calls? get calls => switch (_callMedia) {
+    final media? => _calls ??= MatrixCalls(
+      client,
+      media,
+      occupants: _occupants,
+      me: () => me,
+      voice: _voice,
+      now: _now,
+    ),
+    null => null,
+  };
+
+  /// The clock the unread counts back off by, and call memberships run out
+  /// by; tests move it.
   final DateTime Function()? _now;
 
-  /// Whether files linked on other sites are shown. Null: they are.
+  /// Fires when the next call membership runs out, since no sync says so.
+  Timer? _callExpiry;
+
+  /// Whether files linked on other sites are shown, and links previewed.
+  /// Null: they are.
   final ValueListenable<bool>? externalMedia;
 
   var _synced = false;
@@ -237,7 +275,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   final _generation = <(String, String), int>{};
 
   @override
-  Set<RoomAbility> get abilities => const {
+  Set<RoomAbility> get abilities => {
+    if (_callMedia != null) RoomAbility.calls,
     RoomAbility.answerInvites,
     RoomAbility.messages,
     RoomAbility.markRead,
@@ -248,6 +287,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     RoomAbility.addSpace,
     RoomAbility.startDirect,
     RoomAbility.invite,
+    RoomAbility.kick,
+    RoomAbility.silence,
     RoomAbility.editProfile,
     RoomAbility.devices,
   };
@@ -266,6 +307,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       _media ??= _disposed ? MatrixMediaSource.closed(client) : _openMedia();
 
   MatrixMediaSource? _media;
+
+  @override
+  MatrixLinkPreviews get linkPreviews {
+    final made = _linkPreviews ??= MatrixLinkPreviews(client, now: _now);
+    if (_disposed) made.dispose();
+    return made;
+  }
+
+  MatrixLinkPreviews? _linkPreviews;
 
   /// Files are kept in the SDK's own storage folder, which sign-out already
   /// clears. With none (some tests), every file fails with "no media folder".
@@ -359,6 +409,46 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _rebuild();
   }
 
+  /// The member event of someone in a call, fetched because the room had
+  /// not loaded it: it names them, or says they are not in the room. No sync
+  /// follows it.
+  void _onRoomState(({String roomId, StrippedStateEvent state}) update) {
+    if (update.state.type != EventTypes.RoomMember) return;
+    final room = client.getRoomById(update.roomId);
+    if (room == null || !_isVoice(room)) return;
+    if (!_call(room).userIds.contains(update.state.stateKey)) return;
+    _rebuild();
+  }
+
+  /// Call memberships synced before they were among the state kept in
+  /// memory sit where the SDK loads them only for a room that is opened.
+  Future<void> _loadStoredCalls() async {
+    var found = false;
+    for (final room in client.rooms.toList()) {
+      if (_disposed) return;
+      if (room.membership != Membership.join || !_isVoice(room)) continue;
+      final List<Event> stored;
+      try {
+        stored = await client.database.getUnimportantRoomEventStatesForRoom(
+          const [],
+          room,
+        );
+      } on DatabaseException {
+        // Signing out closes the database under a read in flight.
+        if (_disposed) return;
+        rethrow;
+      }
+      for (final event in stored) {
+        final key = event.stateKey;
+        if (event.type != callMemberType || key == null) continue;
+        if (room.getState(callMemberType, key) != null) continue;
+        room.setState(event);
+        found = true;
+      }
+    }
+    if (found && !_disposed) _rebuild();
+  }
+
   void _onStatus(SyncStatusUpdate update) {
     if (_synced) return;
     final progress = update.status == SyncStatus.processing
@@ -439,6 +529,16 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     for (final room in client.rooms) {
       if (room.membership == Membership.invite) _loadInvite(room);
     }
+    final expiries = [
+      for (final room in joined.values)
+        if (_isVoice(room)) ?_call(room).nextExpiry,
+    ]..sort();
+    _callExpiry?.cancel();
+    _callExpiry = expiries.isEmpty
+        ? null
+        : Timer(expiries.first.difference((_now ?? DateTime.now)()), () {
+            if (!_disposed) _rebuild();
+          });
     _notify();
   }
 
@@ -618,11 +718,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   }
 
   Channel _channel(Room room, {bool home = false}) {
-    final type = room
-        .getState(EventTypes.RoomCreate)
-        ?.content
-        .tryGet<String>('type');
-    final kind = _voiceTypes.contains(type)
+    final kind = _isVoice(room)
         ? ChannelKind.voice
         : !home
         ? ChannelKind.text
@@ -657,6 +753,17 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       favouriteOrder: favourite?.order,
       lowPriority: room.isLowPriority,
       lastActivity: room.latestEventReceivedTime,
+      occupants: kind == ChannelKind.voice
+          ? [for (final occupant in _occupants(room)) occupant.member]
+          : const [],
+      kickBelow: room.canKick ? room.ownPowerLevel.level : null,
+      silenced: kind == ChannelKind.voice
+          ? callSilences(
+              (room.states[callSilenceType]?.values ?? const [])
+                  .whereType<Event>(),
+            )
+          : const {},
+      canSilence: room.canChangeStateEvent(callSilenceType),
     );
     final wish = _wishes[room.id];
     if (wish == null) return channel;
@@ -668,6 +775,32 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       joined: wish.joined,
     );
   }
+
+  bool _isVoice(Room room) => _voiceTypes.contains(
+    room.getState(EventTypes.RoomCreate)?.content.tryGet<String>('type'),
+  );
+
+  /// Whether the room knows [userId] to be out of it. Someone it has not
+  /// loaded counts as in: [_member] asks for them, and [_onRoomState] hears.
+  bool _notInRoom(Room room, String userId) {
+    final member = room.getState(EventTypes.RoomMember, userId);
+    return member != null && member.asUser(room).membership != Membership.join;
+  }
+
+  /// Who is in [room]'s call, and on which devices.
+  List<CallOccupant> _occupants(Room room) {
+    final call = _call(room);
+    return [
+      for (final id in call.userIds)
+        if (!_notInRoom(room, id))
+          (member: _member(room, id), devices: call.devices[id]!),
+    ];
+  }
+
+  CallOccupancy _call(Room room) => callOccupancy(
+    (room.states[callMemberType]?.values ?? const []).whereType<Event>(),
+    (_now ?? DateTime.now)(),
+  );
 
   /// Whoever the room has in memory; [loadMembers] fills in the rest.
   List<Member> _members(Room room) => [
@@ -1280,6 +1413,19 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     return _home.firstWhere((c) => c.id == roomId);
   }
 
+  @override
+  Future<void> kick(String roomId, String userId) =>
+      client.kick(roomId, userId);
+
+  @override
+  Future<void> silence(String roomId, String userId, CallSilence? to) =>
+      client.setRoomStateWithKey(
+        roomId,
+        callSilenceType,
+        callSilenceKey(userId),
+        callSilenceContent(to),
+      );
+
   /// Invites everyone in [userIds] to [roomId], one at a time. Throws
   /// [InviteRefused] naming whoever the server turned down; everyone else
   /// still went through.
@@ -1305,6 +1451,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   @override
   void dispose() {
     _disposed = true;
+    _callExpiry?.cancel();
+    _calls?.dispose();
     for (final s in _subscriptions) {
       unawaited(s.cancel());
     }
@@ -1317,6 +1465,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _profile?.dispose();
     _devices?.dispose();
     _media?.dispose();
+    _linkPreviews?.dispose();
     super.dispose();
   }
 }

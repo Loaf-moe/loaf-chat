@@ -31,11 +31,14 @@ import 'notification_settings.dart';
 import 'notifications_section.dart';
 import 'devices.dart';
 import 'devices_section.dart';
+import 'voice_section.dart';
+import 'voice_settings.dart';
 
 enum SettingsSection {
   account('account', LucideIcons.circleUser),
   appearance('appearance', LucideIcons.palette),
   notifications('notifications', LucideIcons.bell),
+  voice('voice', LucideIcons.mic),
   devices('devices', LucideIcons.monitorSmartphone),
   about('about', LucideIcons.info);
 
@@ -123,13 +126,15 @@ class SettingsModal extends StatefulWidget {
 }
 
 class _SettingsModalState extends State<SettingsModal> {
-  /// What this backend can back. The account always; appearance only with a
-  /// controller to change; devices only with something that lists them.
+  /// What this backend can back. The account and about always; appearance,
+  /// notifications and voice only with a controller in scope; devices only
+  /// with something that lists them.
   List<SettingsSection> get _sections => [
     SettingsSection.account,
     if (AppearanceScope.maybeOf(context) != null) SettingsSection.appearance,
     if (NotificationScope.maybeOf(context) != null)
       SettingsSection.notifications,
+    if (VoiceScope.maybeOf(context) != null) SettingsSection.voice,
     if (widget.devices != null) SettingsSection.devices,
     SettingsSection.about,
   ];
@@ -456,6 +461,10 @@ class _Detail extends StatelessWidget {
       context,
     )) {
       final controller? => NotificationsSection(controller: controller),
+      null => AccountSection(profile: profile, me: me, editable: editable),
+    },
+    SettingsSection.voice => switch (VoiceScope.maybeOf(context)) {
+      final controller? => VoiceSection(controller: controller),
       null => AccountSection(profile: profile, me: me, editable: editable),
     },
     // Only offered with devices to show; the null check is the backstop.

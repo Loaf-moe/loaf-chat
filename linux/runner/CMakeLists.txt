@@ -24,4 +24,18 @@ add_definitions(-DAPPLICATION_ID="${APPLICATION_ID}")
 target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
 
+# Flutter's engine needs two GDK Wayland symbols to link and to start. A GTK
+# built for X11 alone has neither, so there the app brings its own. Nothing
+# in the runner refers to them, hence --no-as-needed.
+pkg_get_variable(GDK_TARGETS gtk+-3.0 targets)
+if(GDK_TARGETS AND NOT GDK_TARGETS MATCHES "wayland")
+  add_library(gdk-wayland-stub SHARED "gdk_wayland_stub.cc")
+  target_link_libraries(gdk-wayland-stub PRIVATE PkgConfig::GTK)
+  target_link_libraries(${BINARY_NAME} PRIVATE
+    "-Wl,--push-state,--no-as-needed"
+    gdk-wayland-stub
+    "-Wl,--pop-state"
+  )
+endif()
+
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")

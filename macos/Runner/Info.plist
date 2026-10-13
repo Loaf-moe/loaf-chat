@@ -40,6 +40,10 @@
 	<true/>
 	<key>SUAutomaticallyUpdate</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>talk in voice channels</string>
+	<key>NSCameraUsageDescription</key>
+	<string>turn your camera on in a call</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>3600</integer>
 	<key>SUEnableInstallerLauncherService</key>

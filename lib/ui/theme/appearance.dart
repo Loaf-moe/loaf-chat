@@ -58,7 +58,8 @@ class AppearanceSettings {
   final bool easterEggs;
 
   /// Whether pictures, video and files a bridge links to on other sites are
-  /// fetched and shown. Never in an encrypted room, whatever this says.
+  /// fetched and shown, and links previewed by the homeserver. Never in an
+  /// encrypted room, whatever this says.
   final bool externalMedia;
 
   AppearanceSettings copyWith({

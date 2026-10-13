@@ -8,8 +8,10 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../call/calls.dart';
 import '../channel/timeline_controller.dart';
 import '../model/arrival.dart';
+import '../model/link_previews.dart';
 import '../model/media_source.dart';
 import '../rooms/rooms.dart';
 import '../settings/devices.dart';
@@ -19,6 +21,7 @@ import '../spaces/space_directory.dart';
 import '../widgets/avatar_images.dart';
 import 'fixtures.dart';
 import 'mock_devices.dart';
+import 'mock_link_previews.dart';
 import 'mock_media_source.dart';
 import 'mock_profile.dart';
 import 'mock_space_directory.dart';
@@ -80,10 +83,17 @@ class MockRooms extends ChangeNotifier implements Rooms {
   );
 
   @override
+  final LinkPreviews linkPreviews = MockLinkPreviews();
+
+  @override
   final Profile profile = MockProfile();
 
   @override
   final Devices devices = MockDevices();
+
+  // The shell builds the mock's calls: their records write into its state.
+  @override
+  Calls? get calls => null;
 
   @override
   Set<RoomAbility> get abilities => RoomAbility.values.toSet();
@@ -309,6 +319,15 @@ class MockRooms extends ChangeNotifier implements Rooms {
     });
     return SynchronousFuture(room);
   }
+
+  /// No mock channel says you may kick, so nothing asks.
+  @override
+  Future<void> kick(String roomId, String userId) => SynchronousFuture(null);
+
+  /// No mock channel says you may, so nothing asks.
+  @override
+  Future<void> silence(String roomId, String userId, CallSilence? to) =>
+      SynchronousFuture(null);
 
   /// The mock answers at once and never refuses.
   @override

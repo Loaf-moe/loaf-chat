@@ -5,12 +5,14 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../call/calls.dart';
 import '../channel/timeline.dart';
 import '../model/arrival.dart';
 import '../model/models.dart';
 import '../settings/devices.dart';
 import '../shell/profile.dart';
 import '../spaces/space_directory.dart';
+import '../model/link_previews.dart';
 import '../model/media_source.dart';
 import '../widgets/avatar_images.dart';
 
@@ -36,6 +38,12 @@ enum RoomAbility {
 
   /// Inviting people to a room or space.
   invite,
+
+  /// Kicking someone from a room.
+  kick,
+
+  /// Muting or deafening someone in a call for everyone.
+  silence,
 
   /// Voice channels and DM calls.
   calls,
@@ -93,6 +101,9 @@ abstract interface class Rooms implements Listenable {
   /// disk, the way [avatarImages] does for avatars.
   MediaSource get media;
 
+  /// What the links in this account's messages lead to.
+  LinkPreviews get linkPreviews;
+
   /// Your presence and status, and everyone else's. The rooms own it and
   /// dispose of it with themselves.
   Profile get profile;
@@ -100,6 +111,10 @@ abstract interface class Rooms implements Listenable {
   /// Your signed-in sessions. Like [profile], the rooms own it and dispose
   /// of it with themselves.
   Devices get devices;
+
+  /// The backend's own calls, or null where the shell plays the mock's. The
+  /// rooms own it and dispose of it with themselves.
+  Calls? get calls;
 
   /// The rail, in order.
   List<Space> get spaces;
@@ -151,6 +166,15 @@ abstract interface class Rooms implements Listenable {
 
   /// Throws [InviteRefused] naming who did not go through.
   Future<void> invite(String roomId, List<String> userIds);
+
+  /// Removes [userId] from the room; they may join again where its rules
+  /// let them. Throws when the server says no.
+  Future<void> kick(String roomId, String userId);
+
+  /// Puts [to] on [userId] in the room's call for everyone, or with null
+  /// lifts it. Their own client is what obeys. Throws when the server
+  /// says no.
+  Future<void> silence(String roomId, String userId, CallSilence? to);
 
   SpaceDirectory get directory;
 
