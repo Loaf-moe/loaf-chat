@@ -106,12 +106,17 @@ class MatrixUnread {
         // The by-time reading is what the gate guards against repeating. A
         // receipt on a message that is counted is exact, and applies even
         // when it was recorded before that message arrived, as happens when
-        // the queue lags behind the SDK.
+        // the queue lags behind the SDK. A receipt on the room's newest
+        // event reads everything, whatever is counted: a late message
+        // becomes the newest event when it lands, so it still counts.
         final onCounted = tally.entries.any((e) => e.id == own.eventId);
-        if (fresh || onCounted) {
+        final atLast = own.eventId == room.lastEvent?.eventId;
+        if (fresh || onCounted || atLast) {
           _receipts[roomId] = (eventId: own.eventId, ts: own.ts);
           if (fresh) _scheduleSave();
-          if (_readReceipt(room, tally)) changed = true;
+          if (atLast ? _readAll(tally) : _readReceipt(room, tally)) {
+            changed = true;
+          }
         }
       }
     }
@@ -445,6 +450,26 @@ class MatrixUnread {
   bool _readReceipt(Room room, RoomTally tally) {
     final own = ownReceipt(room);
     return own != null && tally.readUpTo(own.eventId, own.ts);
+  }
+
+  static bool _readAll(RoomTally tally) {
+    final had = !tally.isEmpty;
+    tally.clear();
+    return had;
+  }
+
+  /// Reads [roomId] here when your receipt is already on its newest
+  /// event: a mark-as-read the server has nothing to echo for. Whether
+  /// anything was unread.
+  bool readToLast(String roomId) {
+    final room = client.getRoomById(roomId);
+    final tally = _tallies[roomId];
+    if (room == null || tally == null) return false;
+    if (ownReceipt(room)?.eventId != room.lastEvent?.eventId) return false;
+    if (!_readAll(tally)) return false;
+    _scheduleSave();
+    if (!_disposed) onChange();
+    return true;
   }
 
   void dispose() {

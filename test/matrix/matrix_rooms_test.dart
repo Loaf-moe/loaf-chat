@@ -818,6 +818,76 @@ void main() {
         expect(channel(second, general).unread, 1);
       });
 
+      /// A run that saved two messages as unread and your receipt on a
+      /// later event, as a save that raced the read can leave it.
+      Future<void> stuck(Directory dir) =>
+          File('${dir.path}${Platform.pathSeparator}unread.json').writeAsString(
+            jsonEncode({
+              'user': _me,
+              'rooms': {
+                general: {
+                  'e': [
+                    [r'$one', 1000],
+                    [r'$two', 2000],
+                  ],
+                  'r': [r'$last', 5000],
+                },
+              },
+            }),
+          );
+
+      test(
+        'a receipt already on the newest event reads a restored count',
+        () async {
+          final (client, dir, files) = await launch();
+          await stuck(dir);
+          await _bakery(client);
+          await _timeline(
+            client,
+            general,
+            [
+              _msg('one', id: r'$one', ts: 1000),
+              _msg('two', id: r'$two', ts: 2000),
+              _msg('last', id: r'$last', ts: 3000),
+            ],
+            ephemeral: [_receipt(r'$last', ts: 5000)],
+          );
+          final rooms = MatrixRooms(client, mediaRoot: files);
+          addTearDown(rooms.dispose);
+          await _until(() => channel(rooms, general).unread == 2);
+
+          // A sync touching the room with nothing new.
+          await _timeline(client, general, const []);
+          await _until(() => channel(rooms, general).unread == 0);
+          expect(channel(rooms, general).unread, 0);
+        },
+      );
+
+      test('mark as read with the receipt already on the newest event reads '
+          'the room here', () async {
+        final (client, dir, files) = await launch();
+        await stuck(dir);
+        await _bakery(client);
+        await _timeline(
+          client,
+          general,
+          [
+            _msg('one', id: r'$one', ts: 1000),
+            _msg('two', id: r'$two', ts: 2000),
+            _msg('last', id: r'$last', ts: 3000),
+          ],
+          ephemeral: [_receipt(r'$last', ts: 5000)],
+        );
+        final rooms = MatrixRooms(client, mediaRoot: files);
+        addTearDown(rooms.dispose);
+        await _until(() => channel(rooms, general).unread == 2);
+
+        // The server has nothing to echo: the marker is already there.
+        rooms.markRead(general);
+        await _until(() => channel(rooms, general).unread == 0);
+        expect(channel(rooms, general).unread, 0);
+      });
+
       test('saving at dispose does not bring back a cleared folder', () async {
         // Signing out clears the folder the file lives in.
         final client = await _client(api: _Api());

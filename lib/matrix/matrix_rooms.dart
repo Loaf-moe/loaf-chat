@@ -949,6 +949,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final last = room?.lastEvent;
     // Your own message still on its way has no event id to mark.
     if (room == null || last == null || !last.status.isSent) return;
+    _unread.readToLast(roomId);
     if (_unread.of(roomId).isEmpty && room.fullyRead == last.eventId) return;
     if (!_reading.add(roomId)) {
       _readAgain.add(roomId);
