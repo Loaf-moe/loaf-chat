@@ -64,6 +64,11 @@ class Notifier {
   /// within a second of it are the same moment, and get one chime.
   Duration? _lastChime;
 
+  /// The last arrivals heard, in order. A sealed message read late comes
+  /// again with its text: its notice is replaced, and it sounded already.
+  final _heard = <Arrival>{};
+  static const _remembered = 200;
+
   /// The same test the channel view uses before it marks anything read.
   static bool _resumed() {
     final state = WidgetsBinding.instance.lifecycleState;
@@ -71,15 +76,17 @@ class Notifier {
   }
 
   void _on(Arrival arrival) {
+    final again = !_heard.add(arrival);
+    if (_heard.length > _remembered) _heard.remove(_heard.first);
     switch (decide(
       focused: _focused(),
       open: arrival.roomId == openRoom(),
       desktop: _desktop,
     )) {
       case NoticeAction.chime:
-        _chime();
+        if (!again) _chime();
       case NoticeAction.desktopNotice:
-        notice?.call(arrival, sound: _sounds());
+        notice?.call(arrival, sound: !again && _sounds());
       case NoticeAction.push:
         // Step E: the push gateway brings it.
         break;

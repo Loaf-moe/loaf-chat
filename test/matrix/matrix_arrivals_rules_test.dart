@@ -394,8 +394,6 @@ Map<String, Object?> _serverRules({
 /// The finding a case confirms while it fails, or null where it passes.
 /// Its fix commit unskips it.
 ///
-/// - F3: a message whose key arrives after its sync is decrypted in the
-///   SDK's queue and never emitted again, so it never arrives.
 /// - F4: the SDK checks room rules before content rules; the spec says
 ///   content first, so a mentions-only room silences your localpart.
 /// - F6: the SDK applies the legacy body rules to a message that carries
@@ -587,26 +585,22 @@ void main() {
             );
           });
 
-          test(
-            '${account.name} account, ${kind.name}, ${mention.name}: '
-            'the key comes later',
-            skip: notifies ? 'F3: a message read late never arrives' : null,
-            () async {
-              final (mine, room, content) = await sealed(kind, mention);
-              await _sync(mine, accountData: [rules]);
-              final rig = await _rig(mine);
-              await _deliver(mine, room, [_sealedMsg(content, r'$m')]);
-              await rig.reached(r'$m');
-              final before = rig.got.length;
-              await _giveKey(mine, room, content);
-              if (notifies) await _until(() => rig.got.length > before);
-              final readable = rig.got.where((a) => a.kind == ArrivalKind.text);
-              expect(
-                readable.map((a) => (a.eventId, a.text)),
-                notifies ? [(r'$m', 'hi')] : isEmpty,
-              );
-            },
-          );
+          test('${account.name} account, ${kind.name}, ${mention.name}: '
+              'the key comes later', () async {
+            final (mine, room, content) = await sealed(kind, mention);
+            await _sync(mine, accountData: [rules]);
+            final rig = await _rig(mine);
+            await _deliver(mine, room, [_sealedMsg(content, r'$m')]);
+            await rig.reached(r'$m');
+            final before = rig.got.length;
+            await _giveKey(mine, room, content);
+            if (notifies) await _until(() => rig.got.length > before);
+            final readable = rig.got.where((a) => a.kind == ArrivalKind.text);
+            expect(
+              readable.map((a) => (a.eventId, a.text)),
+              notifies ? [(r'$m', 'hi')] : isEmpty,
+            );
+          });
         }
       }
     }

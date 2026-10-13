@@ -52,10 +52,10 @@ by the SDK's `PushruleEvaluator`, once the room's members are loaded:
 room holds in memory, and a room nobody has opened this session holds
 none until asked. The SDK checks the kinds in the order override, room,
 sender, content, underride; the Matrix spec says override, content, room,
-sender, underride (see F4). An encrypted event is evaluated as decrypted
-only when the SDK decrypts it during the sync that brought it (see F3).
-The SDK applies the legacy body-mention rules to an event that carries
-`m.mentions`; Synapse skips them for such an event (see F6).
+sender, underride (see F4). The SDK applies the legacy body-mention rules
+to an event that carries `m.mentions`; Synapse skips them for such an
+event (see F6). A message still sealed when judged is judged again once
+its key arrives.
 
 ## Levels and settings
 
@@ -153,7 +153,7 @@ macOS and iOS.
 | Behaviour | Suite | Tests |
 |---|---|---|
 | Gates 1–5 and 7, arrival contents, members loaded or refused | `test/matrix/matrix_arrivals_test.dart` | 19 |
-| Gate 6 against the full default ruleset: account level × room level × room kind × 8 mention shapes; the same through encryption; events the defaults silence | `test/matrix/matrix_arrivals_rules_test.dart` | 245, 20 skipped by finding |
+| Gate 6 against the full default ruleset: account level × room level × room kind × 8 mention shapes; the same through encryption; events the defaults silence | `test/matrix/matrix_arrivals_rules_test.dart` | 245, 13 skipped by finding |
 | The decision and the device settings, from sync to chime or notice, through the real shell: in front × open channel × platform × sound × notifications × text; bursts; preparing the desktop | `test/app_shell_arrivals_test.dart` | 69 |
 | A click opening the channel at the message; withdrawal on reading here, on another device's receipt, on leaving | `test/app_shell_notices_test.dart` | 7 |
 | Levels: reading each rule shape, the six transitions and the calls they send, the account default's writes and rollback, the menu and the row icon | `test/matrix/matrix_rooms_test.dart`, `test/matrix/matrix_profile_test.dart`, `test/mock_rooms_test.dart`, `test/app_shell_test.dart`, `test/notifications_section_test.dart` | 30 |
@@ -188,11 +188,12 @@ on what is known, and the next message asks again.
 **F2. Mute silenced mentions while its text promised mentions-only.**
 Fixed: three levels, per room and account wide.
 
-**F3. A message read late never notifies.** When the room key arrives
-after the message, the SDK decrypts it in its queue and re-handles it as
-`decryptedTimelineQueue`, which never reaches `onTimelineEvent`
-(`client.dart`, the emit switch). Fix direction: listen for decrypted
-updates too, or evaluate again when the unread store decrypts.
+**F3. A message read late never notified.** Fixed: a message still
+sealed when judged is kept, by room and session, and judged again when
+`Room.onSessionKeyReceived` brings its key, as the unread store already
+did for its counts. It arrives again as what it says; the notifier
+sounds no second time, and the notice, keyed by room and event on every
+platform, is replaced.
 
 **F4. A mentions-only room silences your localpart.** The SDK checks room
 rules before content rules; the spec says content first, so

@@ -149,6 +149,32 @@ void main() {
       expect(notices.single.$2, isFalse);
     });
 
+    test('a message arriving again does not chime again', () async {
+      final n = make();
+      addTearDown(n.dispose);
+      const again = Arrival(roomId: '!other', eventId: r'$sealed');
+      arrivals.add(again);
+      await pumpEventQueue();
+      elapsed = const Duration(seconds: 5);
+      arrivals.add(again);
+      await pumpEventQueue();
+      expect(chime.plays, 1);
+    });
+
+    test('a message arriving again is noticed again, silent', () async {
+      focused = false;
+      final n = make();
+      addTearDown(n.dispose);
+      const again = Arrival(roomId: '!other', eventId: r'$sealed');
+      arrivals.add(again);
+      await pumpEventQueue();
+      elapsed = const Duration(seconds: 5);
+      arrivals.add(again);
+      await pumpEventQueue();
+      expect([for (final (_, sound) in notices) sound], [true, false]);
+      expect(chime.plays, 0);
+    });
+
     test('a burst chimes once', () async {
       final n = make();
       addTearDown(n.dispose);
