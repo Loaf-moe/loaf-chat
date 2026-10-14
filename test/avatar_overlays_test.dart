@@ -68,8 +68,10 @@ Future<void> _decode(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-Finder _painted(Finder avatar) =>
-    find.descendant(of: avatar, matching: find.byType(RawImage));
+Finder _painted(Finder avatar) => find.descendant(
+  of: find.descendant(of: avatar, matching: find.byType(AvatarPicture)),
+  matching: find.byType(CustomPaint),
+);
 
 void main() {
   testWidgets('settings draws your picture, not initials', (tester) async {

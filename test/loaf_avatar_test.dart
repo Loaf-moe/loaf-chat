@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -65,6 +67,12 @@ Future<void> _settle(WidgetTester tester, Widget widget) async {
   await tester.pumpAndSettle();
 }
 
+/// The picture's painter, there only once it has decoded.
+final _painted = find.descendant(
+  of: find.byType(AvatarPicture),
+  matching: find.byType(CustomPaint),
+);
+
 void main() {
   testWidgets('draws its label on its colour', (tester) async {
     await tester.pumpWidget(
@@ -126,7 +134,7 @@ void main() {
         ),
       ),
     );
-    expect(find.byType(Image), findsNothing);
+    expect(find.byType(AvatarPicture), findsNothing);
     expect(find.text('AB'), findsOneWidget);
   });
 
@@ -136,12 +144,9 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     });
     await tester.pumpAndSettle();
-    expect(find.byType(Image), findsOneWidget);
+    expect(find.byType(AvatarPicture), findsOneWidget);
     // Decoded, so it really is painted: the failing case's contrast.
-    expect(
-      find.descendant(of: find.byType(Image), matching: find.byType(RawImage)),
-      findsOneWidget,
-    );
+    expect(_painted, findsOneWidget);
     expect(find.text('AB'), findsOneWidget);
     expect(tester.getSize(find.byType(LoafAvatar)), const Size(36, 36));
   });
@@ -155,12 +160,9 @@ void main() {
     });
     await tester.pumpAndSettle();
     expect(find.text('AB'), findsOneWidget);
-    // The error builder replaced the image: nothing is painted over the
-    // label (a decoded picture would leave a RawImage here).
-    expect(
-      find.descendant(of: find.byType(Image), matching: find.byType(RawImage)),
-      findsNothing,
-    );
+    // Nothing is painted over the label (a decoded picture would leave its
+    // painter here).
+    expect(_painted, findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -170,24 +172,20 @@ void main() {
         tester,
         _withImage(MemoryImage(_png), whole: MemoryImage(_png), original: true),
       );
-      final images = tester.widgetList<Image>(find.byType(Image)).toList();
-      expect(images, hasLength(2));
-      expect(images.last.image, MemoryImage(_png));
-      expect(images.last.gaplessPlayback, isTrue);
-      expect(
-        find.descendant(
-          of: find.byType(Image),
-          matching: find.byType(RawImage),
-        ),
-        findsNWidgets(2),
-      );
+      final pictures = tester
+          .widgetList<AvatarPicture>(find.byType(AvatarPicture))
+          .toList();
+      expect(pictures, hasLength(2));
+      expect(pictures.last.provider, MemoryImage(_png));
+      expect(pictures.last.gapless, isTrue);
+      expect(_painted, findsNWidgets(2));
     });
 
     testWidgets('with no original to give, the thumbnail stands alone', (
       tester,
     ) async {
       await _settle(tester, _withImage(MemoryImage(_png), original: true));
-      expect(find.byType(Image), findsOneWidget);
+      expect(find.byType(AvatarPicture), findsOneWidget);
     });
 
     testWidgets('a failing original leaves the thumbnail painted', (
@@ -201,14 +199,21 @@ void main() {
           original: true,
         ),
       );
-      expect(
-        find.descendant(
-          of: find.byType(Image),
-          matching: find.byType(RawImage),
-        ),
-        findsOneWidget,
-      );
+      expect(_painted, findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a new original keeps the old one up until it arrives', (
+      tester,
+    ) async {
+      Widget at(ImageProvider whole) =>
+          _host(AvatarPicture(provider: whole, gapless: true));
+      await _settle(tester, at(MemoryImage(_png)));
+      expect(_painted, findsOneWidget);
+      // Never decodes: a gapless picture still shows the last one.
+      await tester.pumpWidget(at(MemoryImage(Uint8List.fromList([1, 2, 3]))));
+      await tester.pump();
+      expect(_painted, findsOneWidget);
     });
 
     testWidgets('not asked, the original is never resolved', (tester) async {
@@ -216,7 +221,7 @@ void main() {
         tester,
         _withImage(MemoryImage(_png), whole: MemoryImage(_png)),
       );
-      expect(find.byType(Image), findsOneWidget);
+      expect(find.byType(AvatarPicture), findsOneWidget);
     });
   });
 
@@ -235,4 +240,103 @@ void main() {
     );
     expect(_decoration(tester).border, border);
   });
+
+  // A clip is a stencil on Impeller's GLES backend, hard-edged without MSAA
+  // (Linux): the picture is the shape's own fill instead.
+  for (final radius in [null, 10.0]) {
+    testWidgets('the picture is not clipped (radius $radius)', (tester) async {
+      await tester.runAsync(() async {
+        await tester.pumpWidget(
+          AvatarImagesScope(
+            images: _Fixed(MemoryImage(_png)),
+            child: _host(
+              LoafAvatar(
+                label: 'AB',
+                color: Colors.red,
+                size: 36,
+                radius: radius,
+                textStyle: loafBody(13, 600),
+                image: const AvatarRef('mxc://x/y'),
+              ),
+            ),
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+      await tester.pumpAndSettle();
+      expect(_painted, findsOneWidget);
+      final avatar = find.byType(LoafAvatar);
+      expect(
+        find.descendant(of: avatar, matching: find.byType(ClipOval)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: avatar, matching: find.byType(ClipRRect)),
+        findsNothing,
+      );
+    });
+  }
+
+  testWidgets('the picture covers the circle, centred, and stays in it', (
+    tester,
+  ) async {
+    // 8x4: red left, blue right. Covering a square crops it to its middle,
+    // so each half of the avatar is one colour.
+    final key = GlobalKey();
+    await tester.runAsync(() async {
+      final recorder = ui.PictureRecorder();
+      Canvas(recorder)
+        ..drawRect(const Rect.fromLTWH(0, 0, 4, 4), Paint()..color = _red)
+        ..drawRect(const Rect.fromLTWH(4, 0, 4, 4), Paint()..color = _blue);
+      final source = await recorder.endRecording().toImage(8, 4);
+      final png = await source.toByteData(format: ui.ImageByteFormat.png);
+      source.dispose();
+      await tester.pumpWidget(
+        AvatarImagesScope(
+          images: _Fixed(MemoryImage(png!.buffer.asUint8List())),
+          child: _host(
+            RepaintBoundary(
+              key: key,
+              child: LoafAvatar(
+                label: '',
+                color: Colors.transparent,
+                size: 36,
+                textStyle: loafBody(13, 600),
+                image: const AvatarRef('mxc://x/y'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pumpAndSettle();
+    final pixels = await tester.runAsync(() async {
+      final boundary =
+          key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+      final image = await boundary.toImage();
+      final data = await image.toByteData();
+      image.dispose();
+      return data!;
+    });
+    Color at(int x, int y) {
+      final i = (y * 36 + x) * 4;
+      return Color.fromARGB(
+        pixels!.getUint8(i + 3),
+        pixels.getUint8(i),
+        pixels.getUint8(i + 1),
+        pixels.getUint8(i + 2),
+      );
+    }
+
+    expect(at(6, 18), _red);
+    expect(at(29, 18), _blue);
+    // The corners are outside the circle: nothing painted there.
+    for (final (x, y) in [(1, 1), (34, 1), (1, 34), (34, 34)]) {
+      expect(at(x, y).a, 0, reason: 'corner ($x, $y)');
+    }
+  });
 }
+
+const _red = Color(0xFFFF0000);
+const _blue = Color(0xFF0000FF);

@@ -3,6 +3,9 @@
 /// and the type; this owns the shape.
 library;
 
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import '../model/models.dart';
@@ -74,37 +77,176 @@ class LoafAvatar extends StatelessWidget {
                 if (provider != null)
                   Padding(
                     padding: border?.dimensions ?? EdgeInsets.zero,
-                    child: _clip(_picture(provider)),
+                    child: AvatarPicture(provider: provider, radius: radius),
                   ),
                 if (whole != null)
                   Padding(
                     padding: border?.dimensions ?? EdgeInsets.zero,
-                    child: _clip(_picture(whole, gapless: true)),
+                    child: AvatarPicture(
+                      provider: whole,
+                      radius: radius,
+                      gapless: true,
+                    ),
                   ),
               ],
             ),
     );
   }
+}
 
-  /// Fades in once decoded, so a slow picture never flashes; a failed one
-  /// leaves what is under it.
-  Widget _picture(ImageProvider provider, {bool gapless = false}) => Image(
-    image: provider,
-    fit: BoxFit.cover,
-    width: size,
-    height: size,
-    gaplessPlayback: gapless,
-    frameBuilder: (_, child, frame, sync) => sync
-        ? child
+/// The picture as the shape's own fill: an image shader on the circle or
+/// rounded square, never a child under a clip. Impeller fills a round shape
+/// with an analytic, antialiased edge, but a clip is a stencil whose edge is
+/// only as smooth as the target's MSAA. Linux's GLES target has none, so a
+/// clipped picture came out stair-stepped, the colour behind showing at the
+/// steps.
+class AvatarPicture extends StatefulWidget {
+  const AvatarPicture({
+    super.key,
+    required this.provider,
+    this.radius,
+    this.gapless = false,
+  });
+
+  final ImageProvider provider;
+
+  /// As [LoafAvatar.radius]: null is a circle.
+  final double? radius;
+
+  /// As [Image.gaplessPlayback]: a new provider keeps the old picture up
+  /// until its own arrives, rather than dropping back to what is under it.
+  final bool gapless;
+
+  @override
+  State<AvatarPicture> createState() => _AvatarPictureState();
+}
+
+class _AvatarPictureState extends State<AvatarPicture> {
+  ImageStream? _stream;
+  ImageInfo? _info;
+
+  // A failed picture leaves the initials; there is nothing to report.
+  late final _listener = ImageStreamListener(_onImage, onError: (_, _) {});
+
+  /// Already decoded when asked for: shown at once rather than faded in.
+  bool _sync = false;
+  bool _resolving = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _resolve();
+  }
+
+  @override
+  void didUpdateWidget(AvatarPicture old) {
+    super.didUpdateWidget(old);
+    if (old.provider != widget.provider) _resolve();
+  }
+
+  void _resolve() {
+    final stream = widget.provider.resolve(
+      createLocalImageConfiguration(context),
+    );
+    if (_stream != null && stream.key == _stream!.key) return;
+    _stream?.removeListener(_listener);
+    if (!widget.gapless) {
+      _replace(null);
+      _sync = false;
+    }
+    _stream = stream;
+    // A cached picture calls back inside addListener, before the first build.
+    _resolving = true;
+    stream.addListener(_listener);
+    _resolving = false;
+  }
+
+  void _onImage(ImageInfo info, bool synchronousCall) {
+    if (_resolving) {
+      _sync = _info == null && synchronousCall;
+      _replace(info);
+    } else {
+      // Every frame of an animated avatar arrives here too.
+      setState(() => _replace(info));
+    }
+  }
+
+  void _replace(ImageInfo? info) {
+    _info?.dispose();
+    _info = info;
+  }
+
+  @override
+  void dispose() {
+    _stream?.removeListener(_listener);
+    _replace(null);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final image = _info?.image;
+    final painted = image == null
+        ? const SizedBox.expand()
+        : CustomPaint(
+            size: Size.infinite,
+            painter: _PicturePainter(image, widget.radius),
+          );
+    // Fades in over the initials once decoded, so a slow avatar never
+    // flashes. A single shaded draw takes the opacity itself: no layer.
+    return _sync
+        ? painted
         : AnimatedOpacity(
-            opacity: frame == null ? 0 : 1,
+            opacity: image == null ? 0 : 1,
             duration: const Duration(milliseconds: 150),
-            child: child,
-          ),
-    errorBuilder: (_, _, _) => const SizedBox.shrink(),
-  );
+            child: painted,
+          );
+  }
+}
 
-  Widget _clip(Widget child) => radius == null
-      ? ClipOval(child: child)
-      : ClipRRect(borderRadius: BorderRadius.circular(radius!), child: child);
+class _PicturePainter extends CustomPainter {
+  _PicturePainter(this.image, this.radius);
+
+  final ui.Image image;
+  final double? radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // BoxFit.cover, centred: the shorter side fills, the longer is cropped.
+    final scale = math.max(
+      size.width / image.width,
+      size.height / image.height,
+    );
+    final transform = Matrix4.identity()
+      ..translateByDouble(
+        (size.width - image.width * scale) / 2,
+        (size.height - image.height * scale) / 2,
+        0,
+        1,
+      )
+      ..scaleByDouble(scale, scale, 1, 1);
+    final paint = Paint()
+      ..shader = ui.ImageShader(
+        image,
+        TileMode.clamp,
+        TileMode.clamp,
+        transform.storage,
+        // Image's default, so the picture filters as it did.
+        filterQuality: FilterQuality.medium,
+      );
+    final rect = Offset.zero & size;
+    final r = radius;
+    if (r == null) {
+      canvas.drawOval(rect, paint);
+    } else {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, Radius.circular(r)),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PicturePainter old) =>
+      old.image != image || old.radius != radius;
 }
