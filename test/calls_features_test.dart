@@ -9,6 +9,7 @@ import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/ui/widgets/loaf_avatar.dart';
 import 'package:loaf_native/ui/widgets/speaking_ring.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -190,6 +191,43 @@ void main() {
         );
 
         expect(find.byTooltip(words), findsOneWidget);
+      });
+    }
+
+    for (final (label, info, dimmed, playing) in [
+      (
+        'plays while they speak',
+        const TileInfo(_ada, speaking: true),
+        false,
+        true,
+      ),
+      ('rests while they are quiet', const TileInfo(_ada), false, false),
+      (
+        'rests on a faded tile, speaking or not',
+        const TileInfo(_ada, speaking: true, ring: RingState.declined),
+        false,
+        false,
+      ),
+      (
+        'rests while the call reconnects, speaking or not',
+        const TileInfo(_ada, speaking: true),
+        true,
+        false,
+      ),
+    ]) {
+      testWidgets('the avatar $label', (tester) async {
+        await _pump(
+          tester,
+          SizedBox(
+            width: 300,
+            height: 200,
+            child: CallTile(info: info, dimmed: dimmed),
+          ),
+        );
+        expect(
+          tester.widget<LoafAvatar>(find.byType(LoafAvatar)).original,
+          playing,
+        );
       });
     }
 

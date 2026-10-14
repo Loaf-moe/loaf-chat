@@ -124,8 +124,8 @@ class _CallTileState extends State<CallTile> {
               color: tokens.sunken,
               child: Center(
                 child: ring == RingState.ringing
-                    ? Pulse(child: _avatar(info.member))
-                    : _avatar(info.member),
+                    ? Pulse(child: _avatar(info.member, playing: false))
+                    : _avatar(info.member, playing: info.speaking && !faded),
               ),
             ),
           Positioned(
@@ -199,7 +199,8 @@ class _CallTileState extends State<CallTile> {
     );
   }
 
-  Widget _avatar(Member member) => LayoutBuilder(
+  /// [playing] draws the upload itself, so a GIF moves with their voice.
+  Widget _avatar(Member member, {required bool playing}) => LayoutBuilder(
     builder: (context, constraints) {
       final size = (constraints.biggest.shortestSide * 0.42).clamp(28.0, 96.0);
       return LoafAvatar(
@@ -207,6 +208,7 @@ class _CallTileState extends State<CallTile> {
         color: member.color,
         size: size,
         image: member.avatar,
+        original: playing,
         textStyle: loafBody(size * 0.36, 600),
       );
     },
