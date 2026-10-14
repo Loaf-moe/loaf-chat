@@ -118,10 +118,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final mxc = Uri.tryParse(ref.value);
     if (mxc == null || !mxc.isScheme('mxc')) return null;
     try {
-      final bytes = await MxcThumbnail(
+      final bytes = await MxcImage(
         client,
         mxc,
-        avatarBuckets[1],
+        size: avatarBuckets[1],
       ).bytes().timeout(const Duration(seconds: 2));
       final dir = Directory(
         '${(await getTemporaryDirectory()).path}'

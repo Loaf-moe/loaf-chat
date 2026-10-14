@@ -117,8 +117,8 @@ class _Hero extends StatelessWidget {
   final LoafTokens tokens;
   final bool compact;
 
-  static const _band = 56.0;
-  static const _avatar = 64.0;
+  static const _band = 88.0;
+  static const _avatar = 128.0;
   static const _ring = 3.0;
 
   @override
@@ -162,7 +162,8 @@ class _Hero extends StatelessWidget {
                         color: member.color,
                         size: _avatar,
                         image: member.avatar,
-                        textStyle: loafBody(22, 600),
+                        textStyle: loafBody(40, 600),
+                        original: true,
                       ),
                     ),
                     Positioned(
@@ -171,7 +172,7 @@ class _Hero extends StatelessWidget {
                       child: PresenceDot(
                         presence: member.presence,
                         ring: tokens.card,
-                        size: 16,
+                        size: 20,
                       ),
                     ),
                   ],

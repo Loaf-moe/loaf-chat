@@ -24,6 +24,9 @@ class _Fixed implements AvatarImages {
   @override
   ImageProvider? resolve(AvatarRef ref, double physicalSize) =>
       MemoryImage(_png);
+
+  @override
+  ImageProvider? original(AvatarRef ref) => null;
 }
 
 const _ref = AvatarRef('mxc://x/y');

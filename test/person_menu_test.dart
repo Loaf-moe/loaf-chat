@@ -8,6 +8,8 @@ import 'package:loaf_native/ui/members/presence_dot.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/verifier.dart';
+import 'package:loaf_native/ui/widgets/avatar_images.dart';
+import 'package:loaf_native/ui/widgets/loaf_avatar.dart';
 
 final _desktop = TargetPlatformVariant.only(TargetPlatform.macOS);
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
@@ -22,6 +24,20 @@ const _lou = Member(
   bridge: Bridge.discord,
 );
 
+/// Records which refs were asked for whole.
+class _Images implements AvatarImages {
+  final originals = <AvatarRef>[];
+  @override
+  ImageProvider? resolve(AvatarRef ref, double physicalSize) => null;
+  @override
+  ImageProvider? original(AvatarRef ref) {
+    originals.add(ref);
+    return null;
+  }
+}
+
+final _images = _Images();
+
 /// A button that opens the menu, at the pointer on a computer.
 Future<void> _pump(
   WidgetTester tester, {
@@ -34,37 +50,41 @@ Future<void> _pump(
   VoidCallback? onEditProfile,
   ({String from, VoidCallback run})? kick,
 }) async {
+  _images.originals.clear();
   await tester.pumpWidget(
     MaterialApp(
       theme: loafDarkTheme(),
-      home: Scaffold(
-        body: Builder(
-          builder: (context) => Center(
-            child: GestureDetector(
-              onTapUp: (d) => showPersonMenu(
-                context,
-                member: member,
-                isYou: isYou,
-                trust: trust,
-                canVerify: canVerify,
-                position: d.globalPosition,
-                onMessage: onMessage,
-                onVerify: onVerify,
-                onEditProfile: onEditProfile,
-                kick: kick,
+      home: AvatarImagesScope(
+        images: _images,
+        child: Scaffold(
+          body: Builder(
+            builder: (context) => Center(
+              child: GestureDetector(
+                onTapUp: (d) => showPersonMenu(
+                  context,
+                  member: member,
+                  isYou: isYou,
+                  trust: trust,
+                  canVerify: canVerify,
+                  position: d.globalPosition,
+                  onMessage: onMessage,
+                  onVerify: onVerify,
+                  onEditProfile: onEditProfile,
+                  kick: kick,
+                ),
+                onLongPress: () => showPersonMenu(
+                  context,
+                  member: member,
+                  isYou: isYou,
+                  trust: trust,
+                  canVerify: canVerify,
+                  onMessage: onMessage,
+                  onVerify: onVerify,
+                  onEditProfile: onEditProfile,
+                  kick: kick,
+                ),
+                child: const Text('open'),
               ),
-              onLongPress: () => showPersonMenu(
-                context,
-                member: member,
-                isYou: isYou,
-                trust: trust,
-                canVerify: canVerify,
-                onMessage: onMessage,
-                onVerify: onVerify,
-                onEditProfile: onEditProfile,
-                kick: kick,
-              ),
-              child: const Text('open'),
             ),
           ),
         ),
@@ -135,9 +155,21 @@ void main() {
           find.byKey(const ValueKey('person-banner')),
         );
         expect(avatar.center.dy, greaterThan(band.top));
-        expect(avatar.center.dy, lessThan(band.bottom + 40));
+        expect(avatar.center.dy, lessThan(band.bottom + 80));
       },
     );
+
+    testWidgets('the avatar is large, and asked for whole', variant: _desktop, (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        member: _ada.copyWith(avatar: const AvatarRef('mxc://x/ada')),
+      );
+      await _open(tester);
+      expect(tester.getSize(find.byType(LoafAvatar)), const Size(128, 128));
+      expect(_images.originals, [const AvatarRef('mxc://x/ada')]);
+    });
 
     testWidgets('presence shows on the avatar', variant: _desktop, (
       tester,
@@ -148,7 +180,7 @@ void main() {
         tester.widget<PresenceDot>(find.byType(PresenceDot)).presence,
         Presence.idle,
       );
-      expect(tester.getSize(find.byType(PresenceDot)).width, 16);
+      expect(tester.getSize(find.byType(PresenceDot)).width, 20);
     });
 
     testWidgets('unknown presence draws no dot', variant: _desktop, (

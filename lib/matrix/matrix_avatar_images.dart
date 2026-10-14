@@ -10,6 +10,7 @@ import 'package:matrix/matrix.dart';
 
 import '../ui/model/models.dart';
 import '../ui/widgets/avatar_images.dart';
+import 'media_images.dart';
 
 /// 64, 128 and 320 physical px: the sizes servers pre-generate, so their
 /// thumbnails are reused rather than made per request.
@@ -29,41 +30,61 @@ class MatrixAvatarImages implements AvatarImages {
 
   @override
   ImageProvider? resolve(AvatarRef ref, double physicalSize) {
+    final uri = _mxc(ref);
+    return uri == null
+        ? null
+        : MxcImage(client, uri, size: bucketFor(physicalSize));
+  }
+
+  @override
+  ImageProvider? original(AvatarRef ref) {
+    final uri = _mxc(ref);
+    return uri == null ? null : MxcImage(client, uri);
+  }
+
+  Uri? _mxc(AvatarRef ref) {
     final uri = Uri.tryParse(ref.value);
-    if (uri == null || !uri.isScheme('mxc')) return null;
-    return MxcThumbnail(client, uri, bucketFor(physicalSize));
+    return uri == null || !uri.isScheme('mxc') ? null : uri;
   }
 }
 
-class MxcThumbnail extends ImageProvider<MxcThumbnail> {
-  MxcThumbnail(this.client, this.mxc, this.size);
+/// A server thumbnail of [mxc] at [size], or with no size the upload itself.
+class MxcImage extends ImageProvider<MxcImage> {
+  MxcImage(this.client, this.mxc, {this.size});
 
   final Client client;
   final Uri mxc;
-  final int size;
+  final int? size;
 
   @override
-  Future<MxcThumbnail> obtainKey(ImageConfiguration configuration) =>
+  Future<MxcImage> obtainKey(ImageConfiguration configuration) =>
       SynchronousFuture(this);
 
   @override
-  ImageStreamCompleter loadImage(
-    MxcThumbnail key,
-    ImageDecoderCallback decode,
-  ) => MultiFrameImageStreamCompleter(codec: _codec(decode), scale: 1);
+  ImageStreamCompleter loadImage(MxcImage key, ImageDecoderCallback decode) =>
+      MultiFrameImageStreamCompleter(codec: _codec(decode), scale: 1);
 
-  Future<Codec> _codec(ImageDecoderCallback decode) async =>
-      decode(await ImmutableBuffer.fromUint8List(await bytes()));
+  /// An upload is drawn at 128 logical at most; this covers 3x with room.
+  static const _originalWidth = 512;
 
-  /// Throws on any failure: the widget keeps its initials, and nothing
-  /// is cached.
+  Future<Codec> _codec(ImageDecoderCallback decode) async {
+    final bytes = await this.bytes();
+    // A thumbnail the server already sized decodes as is.
+    if (size != null) return decode(await ImmutableBuffer.fromUint8List(bytes));
+    return decodeWithFallback(bytes, decode, width: _originalWidth);
+  }
+
+  /// Throws on any failure: the widget keeps what it had, and nothing is
+  /// cached.
   Future<Uint8List> bytes() async {
     try {
-      final uri = await mxc.getThumbnailUri(client, width: size, height: size);
+      final size = this.size;
+      final uri = size == null
+          ? await mxc.getDownloadUri(client)
+          : await mxc.getThumbnailUri(client, width: size, height: size);
       // No homeserver (signed out mid-load) gives an empty uri.
       if (!uri.hasScheme) throw StateError('no media server for $mxc');
-      // The file store is keyed per thumbnail uri, so each bucket keeps its
-      // own.
+      // The file store is keyed per uri, so each size keeps its own.
       final cached = await client.database.getFile(uri);
       if (cached != null) return cached;
       final response = await client.httpClient.get(
@@ -72,7 +93,7 @@ class MxcThumbnail extends ImageProvider<MxcThumbnail> {
       );
       final type = response.headers['content-type'] ?? '';
       if (response.statusCode != 200 || !type.startsWith('image/')) {
-        throw StateError('no thumbnail for $mxc (${response.statusCode})');
+        throw StateError('no image for $mxc (${response.statusCode})');
       }
       await client.database.storeFile(
         uri,
@@ -86,10 +107,10 @@ class MxcThumbnail extends ImageProvider<MxcThumbnail> {
     }
   }
 
-  // Not on [client]: one account's thumbnail is the same picture.
+  // Not on [client]: one account's picture is the same picture.
   @override
   bool operator ==(Object other) =>
-      other is MxcThumbnail && other.mxc == mxc && other.size == size;
+      other is MxcImage && other.mxc == mxc && other.size == size;
 
   @override
   int get hashCode => Object.hash(mxc, size);

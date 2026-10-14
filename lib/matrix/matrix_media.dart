@@ -419,10 +419,10 @@ class MatrixMediaSource implements ui.MediaSource {
       case _Preview.server:
         final mxc = _fullSpec(ref)?.mxc;
         if (mxc == null) return null;
-        return MxcThumbnail(
+        return MxcImage(
           client,
           mxc,
-          bucketFor(physicalWidth, buckets: timelineBuckets),
+          size: bucketFor(physicalWidth, buckets: timelineBuckets),
         );
     }
   }

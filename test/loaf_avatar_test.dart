@@ -29,14 +29,21 @@ final _png = base64Decode(
 );
 
 class _Fixed implements AvatarImages {
-  const _Fixed(this.provider);
+  const _Fixed(this.provider, {this.whole});
   final ImageProvider provider;
+  final ImageProvider? whole;
   @override
   ImageProvider? resolve(AvatarRef ref, double physicalSize) => provider;
+  @override
+  ImageProvider? original(AvatarRef ref) => whole;
 }
 
-Widget _withImage(ImageProvider provider) => AvatarImagesScope(
-  images: _Fixed(provider),
+Widget _withImage(
+  ImageProvider provider, {
+  ImageProvider? whole,
+  bool original = false,
+}) => AvatarImagesScope(
+  images: _Fixed(provider, whole: whole),
   child: _host(
     LoafAvatar(
       label: 'AB',
@@ -44,9 +51,19 @@ Widget _withImage(ImageProvider provider) => AvatarImagesScope(
       size: 36,
       textStyle: loafBody(13, 600),
       image: const AvatarRef('mxc://x/y'),
+      original: original,
     ),
   ),
 );
+
+/// Pumps [widget] and lets its images decode.
+Future<void> _settle(WidgetTester tester, Widget widget) async {
+  await tester.runAsync(() async {
+    await tester.pumpWidget(widget);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+  });
+  await tester.pumpAndSettle();
+}
 
 void main() {
   testWidgets('draws its label on its colour', (tester) async {
@@ -145,6 +162,62 @@ void main() {
       findsNothing,
     );
     expect(tester.takeException(), isNull);
+  });
+
+  group('asked for the original', () {
+    testWidgets('it draws over the thumbnail', (tester) async {
+      await _settle(
+        tester,
+        _withImage(MemoryImage(_png), whole: MemoryImage(_png), original: true),
+      );
+      final images = tester.widgetList<Image>(find.byType(Image)).toList();
+      expect(images, hasLength(2));
+      expect(images.last.image, MemoryImage(_png));
+      expect(images.last.gaplessPlayback, isTrue);
+      expect(
+        find.descendant(
+          of: find.byType(Image),
+          matching: find.byType(RawImage),
+        ),
+        findsNWidgets(2),
+      );
+    });
+
+    testWidgets('with no original to give, the thumbnail stands alone', (
+      tester,
+    ) async {
+      await _settle(tester, _withImage(MemoryImage(_png), original: true));
+      expect(find.byType(Image), findsOneWidget);
+    });
+
+    testWidgets('a failing original leaves the thumbnail painted', (
+      tester,
+    ) async {
+      await _settle(
+        tester,
+        _withImage(
+          MemoryImage(_png),
+          whole: MemoryImage(Uint8List.fromList([1, 2, 3])),
+          original: true,
+        ),
+      );
+      expect(
+        find.descendant(
+          of: find.byType(Image),
+          matching: find.byType(RawImage),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('not asked, the original is never resolved', (tester) async {
+      await _settle(
+        tester,
+        _withImage(MemoryImage(_png), whole: MemoryImage(_png)),
+      );
+      expect(find.byType(Image), findsOneWidget);
+    });
   });
 
   testWidgets('a border is drawn on the same decoration', (tester) async {

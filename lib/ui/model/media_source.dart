@@ -74,8 +74,7 @@ class MediaSourceScope extends InheritedWidget {
       const NoMediaSource();
 
   /// Carries the scope [from] sees into [child], for routes on the root
-  /// navigator that sit above the shell hosting it. See
-  /// `AvatarImagesScope.carry`.
+  /// navigator that sit above the shell hosting it.
   static Widget carry(BuildContext from, {required Widget child}) =>
       MediaSourceScope(source: of(from), child: child);
 
