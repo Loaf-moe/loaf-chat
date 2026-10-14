@@ -115,9 +115,15 @@ class FdoNotifications implements DesktopNotifications {
       _listen();
       final caps = await _capabilities();
       final serverSounds = caps.contains('sound');
+      // The same message again (read late, now with its text) replaces
+      // its notification: the server answers with the id it was given.
+      final replaces = _routes.entries
+          .where((e) => e.value == notice.route)
+          .map((e) => e.key)
+          .firstOrNull;
       final reply = await _server.callMethod(_name, 'Notify', [
         const DBusString('Loaf Chat'),
-        const DBusUint32(0),
+        DBusUint32(replaces ?? 0),
         const DBusString('moe.loaf.chat'),
         DBusString(notice.title),
         DBusString(

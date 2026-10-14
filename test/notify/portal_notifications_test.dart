@@ -123,6 +123,15 @@ void main() {
     expect(chime.plays, 1);
   });
 
+  test('an avatar gone by the show still shows the notice, without a '
+      'picture', () async {
+    final p = await serve(_FakePortal(2));
+    await make().show(_notice(avatar: '${dir.path}/gone.png'));
+    expect(p.added.single.$2.containsKey('icon'), isFalse);
+    expect(p.added.single.$2['body'], const DBusString('hi'));
+    expect(chime.plays, 1);
+  });
+
   test('version 1: no sound field, and the app plays the chime', () async {
     final p = await serve(_FakePortal(1));
     await make().show(_notice());

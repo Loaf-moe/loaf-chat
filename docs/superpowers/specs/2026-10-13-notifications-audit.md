@@ -141,8 +141,11 @@ to stay silent and the app plays the chime. `blocked` is always false.
 
 **Linux**: `org.freedesktop.Notifications`: `Notify` with the
 `desktop-entry` hint, `sound-file` where the server supports sound (else
-the app plays the chime), a `default` action, `CloseNotification` to
-withdraw. `blocked` is always false.
+the app plays the chime), a `default` action, the same message again
+replacing its notification by id, `CloseNotification` to withdraw.
+`blocked` is always false. A notification left by a previous run is
+inert: the spec keeps the `default` action key for the body click, so
+no route rides on it, and nothing lists a run's notifications after.
 
 **Chime**: `lib/ui/model/chime.dart` over `loaf_media`'s method channel:
 `PlaySound` on Windows, GStreamer on Linux, System Sound Services on
