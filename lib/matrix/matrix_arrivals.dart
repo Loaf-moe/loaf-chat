@@ -22,7 +22,7 @@ import 'unread_rules.dart';
 
 class MatrixArrivals {
   MatrixArrivals(this.client, {DateTime Function()? now})
-    : _startedAt = (now ?? DateTime.now)() {
+    : _startedAt = _launch((now ?? DateTime.now)(), client) {
     _sub = client.onTimelineEvent.stream.listen(_on);
     // Settling waits on members, so syncs are settled in turn.
     _synced = client.onSync.stream.listen((_) => _chain(_settle));
@@ -32,6 +32,19 @@ class MatrixArrivals {
 
   /// Messages sent before this are the backlog a launch catches up on.
   final DateTime _startedAt;
+
+  /// [now] by this device's clock, or the newest message already here
+  /// by the servers' clocks, whichever is later: a clock behind would
+  /// otherwise read the whole catch-up as new.
+  static DateTime _launch(DateTime now, Client client) {
+    var latest = now;
+    for (final room in client.rooms) {
+      final sent = room.lastEvent?.originServerTs;
+      if (sent != null && sent.isAfter(latest)) latest = sent;
+    }
+    return latest;
+  }
+
   late final StreamSubscription<Event> _sub;
   late final StreamSubscription<SyncUpdate> _synced;
 

@@ -360,6 +360,26 @@ void main() {
       expect(rig.got.map((a) => a.eventId), [r'$new']);
     });
 
+    test('a clock behind the servers does not replay the backlog', () async {
+      final client = await _client();
+      await _join(client);
+      // What was here before launch, stamped a second before it.
+      await _deliver(client, [
+        _msg(r'$known', ts: _launch.millisecondsSinceEpoch - 1000),
+      ]);
+      // This device thinks it is a day earlier.
+      final rig = await _rig(
+        client,
+        now: () => _launch.subtract(const Duration(days: 1)),
+      );
+      await _deliver(client, [
+        _msg(r'$old', ts: _before),
+        _msg(r'$new', ts: _after),
+      ]);
+      await rig.reached(r'$new');
+      expect(rig.got.map((a) => a.eventId), [r'$new']);
+    });
+
     test('a room joined mid-session is quiet about its history', () async {
       final client = await _client();
       await _join(client);

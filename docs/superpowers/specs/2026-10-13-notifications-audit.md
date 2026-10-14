@@ -40,7 +40,10 @@ sync ─▶ SDK Client ─▶ MatrixArrivals ─▶ MatrixRooms.arrivals ─▶ 
 1. `client.prevBatch == null`: the sign-in's first sync is history.
 2. The client does not hold the room as joined.
 3. You sent it.
-4. `origin_server_ts` is before the moment the rooms opened.
+4. `origin_server_ts` is before the moment the rooms opened, by this
+   device's clock or the newest message already here, whichever is
+   later: a clock behind would otherwise read the catch-up as new. A
+   clock ahead still drops what arrives in the gap.
 5. It is not something the timeline shows (`countsAsMessage` in
    `lib/matrix/unread_rules.dart`): redactions, edits, reactions and state
    are out; messages, stickers and still-encrypted events are in.
