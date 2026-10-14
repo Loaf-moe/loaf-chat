@@ -70,6 +70,31 @@ void main() {
     expect(find.byType(Image), findsNothing);
   });
 
+  testWidgets('the UI face by default, the display serif on request', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: loafDarkTheme(),
+        home: const Scaffold(
+          body: Column(
+            children: [
+              PersonName(Member('@a', 'Ann', _avatar), size: 15, weight: 600),
+              PersonName(
+                Member('@b', 'Bea', _avatar),
+                size: 20,
+                weight: 600,
+                serif: true,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(tester.widget<Text>(find.text('Ann')).style?.fontFamily, 'Outfit');
+    expect(tester.widget<Text>(find.text('Bea')).style?.fontFamily, 'Lora');
+  });
+
   test('copyWith keeps the bridge', () {
     const lou = Member('@x', 'lou', _avatar, bridge: Bridge.discord);
     expect(lou.copyWith(name: 'louis').bridge, Bridge.discord);

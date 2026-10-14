@@ -18,6 +18,7 @@ class PersonName extends StatelessWidget {
     required this.weight,
     this.maxLines,
     this.overflow,
+    this.serif = false,
   });
 
   final Member member;
@@ -25,6 +26,9 @@ class PersonName extends StatelessWidget {
   final int weight;
   final int? maxLines;
   final TextOverflow? overflow;
+
+  /// Lora, for a name that heads a card.
+  final bool serif;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +42,7 @@ class PersonName extends StatelessWidget {
             member.name,
             maxLines: maxLines,
             overflow: overflow,
-            style: loafBody(
+            style: (serif ? loafDisplay : loafBody)(
               size,
               weight,
             ).copyWith(color: tokens.nameColor(member.role)),

@@ -10,6 +10,7 @@ import '../theme/loaf_theme.dart';
 import '../verify/verifier.dart';
 import '../widgets/loaf_avatar.dart';
 import 'person_name.dart';
+import 'presence_dot.dart';
 import 'role_colors.dart';
 
 class PersonCard extends StatelessWidget {
@@ -42,63 +43,142 @@ class PersonCard extends StatelessWidget {
     final status = member.statusMessage;
     final trust = this.trust;
     final role = member.role;
-    return Padding(
-      padding: EdgeInsets.all(compact ? LoafSpace.x4 : LoafSpace.x5),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: LoafAvatar(
-              label: member.initials,
-              color: member.color,
-              size: 64,
-              image: member.avatar,
-              textStyle: loafBody(22, 600),
-            ),
-          ),
-          const SizedBox(height: LoafSpace.x3),
-          Center(
-            child: PersonName(
-              member,
-              size: 17,
-              weight: 600,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (role != Role.member) ...[
-            const SizedBox(height: LoafSpace.x1),
-            Center(
-              child: _RoleChip(role: role, tokens: tokens),
-            ),
-          ],
-          const SizedBox(height: LoafSpace.x1),
-          SelectableText(
-            member.id,
-            textAlign: TextAlign.center,
-            style: loafMono(12).copyWith(color: tokens.textMuted),
-          ),
-          if (status != null) ...[
-            const SizedBox(height: LoafSpace.x2),
-            Text(
-              status,
-              textAlign: TextAlign.center,
-              style: loafBody(14, 400).copyWith(color: tokens.textBody),
-            ),
-          ],
-          if (!isYou && trust != null) ...[
-            const SizedBox(height: LoafSpace.x4),
-            _TrustLine(trust: trust, tokens: tokens),
-            if (trust == PersonTrust.unverified && !canVerify) ...[
-              const SizedBox(height: LoafSpace.x2),
-              Text(
-                'verify this session first, so it can vouch for them.',
-                textAlign: TextAlign.center,
-                style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+    final inset = compact ? LoafSpace.x4 : LoafSpace.x5;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _Hero(member: member, tokens: tokens, compact: compact),
+        Padding(
+          padding: EdgeInsets.fromLTRB(inset, LoafSpace.x3, inset, inset),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: PersonName(
+                  member,
+                  size: 20,
+                  weight: 600,
+                  serif: true,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
+              if (role != Role.member) ...[
+                const SizedBox(height: LoafSpace.x1),
+                Center(
+                  child: _RoleChip(role: role, tokens: tokens),
+                ),
+              ],
+              const SizedBox(height: LoafSpace.x2),
+              SelectableText(
+                member.id,
+                textAlign: TextAlign.center,
+                style: loafMono(12).copyWith(color: tokens.textMuted),
+              ),
+              if (status != null) ...[
+                const SizedBox(height: LoafSpace.x2),
+                Text(
+                  status,
+                  textAlign: TextAlign.center,
+                  style: loafBody(14, 400).copyWith(color: tokens.textBody),
+                ),
+              ],
+              if (!isYou && trust != null) ...[
+                const SizedBox(height: LoafSpace.x3),
+                _TrustLine(trust: trust, tokens: tokens),
+                if (trust == PersonTrust.unverified && !canVerify) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'verify this session first, so it can vouch for them.',
+                    textAlign: TextAlign.center,
+                    style: loafBody(12, 400).copyWith(color: tokens.textMuted),
+                  ),
+                ],
+              ],
             ],
-          ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A band in their colour, the avatar overlapping its bottom edge.
+class _Hero extends StatelessWidget {
+  const _Hero({
+    required this.member,
+    required this.tokens,
+    required this.compact,
+  });
+
+  final Member member;
+  final LoafTokens tokens;
+  final bool compact;
+
+  static const _band = 56.0;
+  static const _avatar = 64.0;
+  static const _ring = 3.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = Radius.circular(LoafRadius.lg);
+    return SizedBox(
+      height: _band + _avatar / 2 + _ring,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            key: const ValueKey('person-banner'),
+            height: _band,
+            decoration: BoxDecoration(
+              color: member.color.withValues(alpha: 0.35),
+              // Flush with the menu's own corners; its own card in a sheet.
+              borderRadius: compact
+                  ? BorderRadius.vertical(top: radius)
+                  : BorderRadius.all(radius),
+            ),
+          ),
+          Positioned(
+            top: _band - _avatar / 2 - _ring,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: SizedBox(
+                width: _avatar + _ring * 2,
+                height: _avatar + _ring * 2,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: tokens.card,
+                      ),
+                      padding: const EdgeInsets.all(_ring),
+                      child: LoafAvatar(
+                        label: member.initials,
+                        color: member.color,
+                        size: _avatar,
+                        image: member.avatar,
+                        textStyle: loafBody(22, 600),
+                      ),
+                    ),
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: PresenceDot(
+                        presence: member.presence,
+                        ring: tokens.card,
+                        size: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -154,14 +234,17 @@ class _RoleChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     key: ValueKey('role-${role.name}'),
-    padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x2, vertical: 2),
+    padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3, vertical: 2),
     decoration: BoxDecoration(
       color: tokens.sunken,
-      borderRadius: BorderRadius.circular(LoafRadius.sm),
+      borderRadius: BorderRadius.circular(LoafRadius.full),
     ),
     child: Text(
       role.name,
-      style: loafBody(11, 600).copyWith(color: tokens.nameColor(role)),
+      style: loafBody(
+        11,
+        600,
+      ).copyWith(color: tokens.nameColor(role), letterSpacing: 0.04 * 11),
     ),
   );
 }
@@ -195,36 +278,33 @@ class _TrustLine extends StatelessWidget {
         "they haven't set up encryption, or you share no encrypted room.",
       ),
     };
-    return Container(
+    return Column(
       key: ValueKey('trust-${trust.name}'),
-      padding: const EdgeInsets.all(LoafSpace.x3),
-      decoration: BoxDecoration(
-        color: tokens.sunken,
-        borderRadius: BorderRadius.circular(LoafRadius.md),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: LoafSpace.x2),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  lead,
-                  style: loafBody(14, 600).copyWith(color: tokens.textStrong),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  note,
-                  style: loafBody(13, 400).copyWith(color: tokens.textMuted),
-                ),
-              ],
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: LoafSpace.x2),
+            Flexible(
+              child: Text(
+                lead,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: loafBody(13, 600).copyWith(color: tokens.textStrong),
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(
+          note,
+          textAlign: TextAlign.center,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
+          style: loafBody(12, 400).copyWith(color: tokens.textMuted),
+        ),
+      ],
     );
   }
 }

@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/members/person_card.dart';
 import 'package:loaf_native/ui/members/person_menu.dart';
+import 'package:loaf_native/ui/members/presence.dart';
+import 'package:loaf_native/ui/members/presence_dot.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/verify/verifier.dart';
@@ -107,6 +109,55 @@ void main() {
       expect(find.text('Ada'), findsOneWidget);
       expect(find.text('@ada:loaf.moe'), findsOneWidget);
       expect(find.text('baking'), findsOneWidget);
+    });
+
+    testWidgets('the name is set in the display serif', variant: _desktop, (
+      tester,
+    ) async {
+      await _pump(tester);
+      await _open(tester);
+      expect(tester.widget<Text>(find.text('Ada')).style?.fontFamily, 'Lora');
+    });
+
+    testWidgets(
+      'a banner in their colour sits behind the avatar',
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester);
+        await _open(tester);
+        final banner = tester.widget<Container>(
+          find.byKey(const ValueKey('person-banner')),
+        );
+        final decoration = banner.decoration! as BoxDecoration;
+        expect(decoration.color, _grey.withValues(alpha: 0.35));
+        final avatar = tester.getRect(find.text('A'));
+        final band = tester.getRect(
+          find.byKey(const ValueKey('person-banner')),
+        );
+        expect(avatar.center.dy, greaterThan(band.top));
+        expect(avatar.center.dy, lessThan(band.bottom + 40));
+      },
+    );
+
+    testWidgets('presence shows on the avatar', variant: _desktop, (
+      tester,
+    ) async {
+      await _pump(tester, member: _ada.copyWith(presence: Presence.idle));
+      await _open(tester);
+      expect(
+        tester.widget<PresenceDot>(find.byType(PresenceDot)).presence,
+        Presence.idle,
+      );
+      expect(tester.getSize(find.byType(PresenceDot)).width, 16);
+    });
+
+    testWidgets('unknown presence draws no dot', variant: _desktop, (
+      tester,
+    ) async {
+      await _pump(tester, member: _ada.copyWith(presence: Presence.unknown));
+      await _open(tester);
+      expect(find.byType(PresenceDot), findsOneWidget);
+      expect(tester.getSize(find.byType(PresenceDot)), Size.zero);
     });
 
     testWidgets('an admin wears a role chip', variant: _desktop, (
