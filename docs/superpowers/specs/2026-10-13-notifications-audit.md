@@ -208,7 +208,8 @@ they come before room rules.
 Fixed with F1: your member event is among the members loaded.
 
 **F6. The SDK applied the legacy body rules beside `m.mentions`.** A
-message carrying `m.mentions` (even empty) decides by it alone: Synapse
+message carrying `m.mentions` (present, whatever its shape) decides by it
+alone: Synapse
 skips `.m.rule.contains_display_name`, `.m.rule.contains_user_name` and
 `.m.rule.roomnotif` for such a message, and so does Loaf's unread count.
 Fixed: such a message is judged by a ruleset without the three.

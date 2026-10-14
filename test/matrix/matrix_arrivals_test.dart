@@ -16,14 +16,18 @@ const _dm = '!dm:example.com';
 const _ada = '@ada:example.com';
 
 /// The fake server, with its member list refused the first time it is
-/// asked and, after that, you and Ada.
+/// asked (unless [refuseFirst] is off) and, after that, you and Ada; each
+/// answer waits on [hold] when set.
 class _MembersLater extends FakeMatrixApi {
   var asked = 0;
+  var refuseFirst = true;
+  Completer<void>? hold;
 
   @override
-  FutureOr<http.Response> mockIntercept(http.Request request) {
+  FutureOr<http.Response> mockIntercept(http.Request request) async {
     if (request.method == 'GET' && request.url.path.endsWith('/members')) {
-      if (asked++ == 0) {
+      await hold?.future;
+      if (asked++ == 0 && refuseFirst) {
         return http.Response(
           jsonEncode({'errcode': 'M_UNKNOWN', 'error': 'no'}),
           500,
@@ -102,12 +106,20 @@ Map<String, Object?> _room() => {
 };
 
 /// A direct message with Ada, [count] members by the server's summary
-/// (none said when null); her member event comes only when [withAda].
-Map<String, Object?> _directRoom({required bool withAda, int? count = 2}) => {
+/// (none said when null); her member event comes only when [withAda];
+/// you are named [myName] when given.
+Map<String, Object?> _directRoom({
+  required bool withAda,
+  int? count = 2,
+  String? myName,
+}) => {
   'state': {
     'events': [
       _state('m.room.create', {'creator': _me}),
-      _state('m.room.member', {'membership': 'join'}, key: _me),
+      _state('m.room.member', {
+        'membership': 'join',
+        'displayname': ?myName,
+      }, key: _me),
       if (withAda)
         {
           ..._state('m.room.member', {'membership': 'join'}, key: _ada),
@@ -178,11 +190,25 @@ Map<String, Object?> _pushRules({
   List<String> muted = const [],
   List<String> mentionsOnly = const [],
   bool message = true,
+  bool displayName = false,
 }) => {
   'type': 'm.push_rules',
   'content': {
     'global': {
       'override': [
+        if (displayName)
+          {
+            'rule_id': '.m.rule.contains_display_name',
+            'default': true,
+            'enabled': true,
+            'conditions': [
+              {'kind': 'contains_display_name'},
+            ],
+            'actions': [
+              'notify',
+              {'set_tweak': 'highlight'},
+            ],
+          },
         for (final id in muted)
           {
             'rule_id': id,
@@ -648,6 +674,158 @@ void main() {
         expect(api.asked, 0);
       },
     );
+
+    test('a message deleted in the same sync does not notify', () async {
+      final client = await _client();
+      await _join(client);
+      final rig = await _rig(client);
+      await _deliver(client, [
+        _msg(r'$gone'),
+        {
+          'type': 'm.room.redaction',
+          'sender': _ada,
+          'redacts': r'$gone',
+          'content': <String, Object?>{},
+          'event_id': r'$why',
+          'origin_server_ts': _after + 1,
+        },
+      ]);
+      await rig.reached(r'$why');
+      expect(rig.got, isEmpty);
+    });
+
+    test('a room left and rejoined is judged afresh', () async {
+      final client = await _client();
+      await _sync(
+        client,
+        rooms: {
+          'join': {_dm: _directRoom(withAda: true, myName: 'Mochi')},
+        },
+        accountData: [_pushRules(message: false, displayName: true)],
+      );
+      final rig = await _rig(client);
+      await _sync(
+        client,
+        rooms: {
+          'leave': {
+            _dm: {
+              'timeline': {
+                'events': [
+                  {
+                    'type': 'm.room.member',
+                    'state_key': _me,
+                    'sender': _me,
+                    'content': {'membership': 'leave'},
+                    'event_id': r'$left',
+                    'origin_server_ts': _after,
+                  },
+                ],
+                'limited': false,
+                'prev_batch': 'p${_n++}',
+              },
+            },
+          },
+        },
+      );
+      expect(client.getRoomById(_dm), isNull);
+      // Rejoined: the SDK builds the room anew. Your join dates your
+      // start in it, so the message comes after.
+      await _sync(
+        client,
+        rooms: {
+          'join': {_dm: _directRoom(withAda: true, myName: 'Mochi')},
+        },
+      );
+      final room = client.getRoomById(_dm)!;
+      await _sync(
+        client,
+        rooms: {
+          'join': {
+            _dm: {
+              'timeline': {
+                'events': [
+                  {
+                    'type': 'm.room.member',
+                    'state_key': _me,
+                    'sender': _me,
+                    'content': {'membership': 'join', 'displayname': 'Mochi'},
+                    'event_id': r'$rejoined',
+                    'origin_server_ts': _after + 1000,
+                  },
+                  {
+                    ..._msg(r'$named', ts: _after + 2000),
+                    'content': {'msgtype': 'm.text', 'body': 'hi Mochi'},
+                  },
+                ],
+                'limited': false,
+                'prev_batch': 'p${_n++}',
+              },
+            },
+          },
+        },
+      );
+      await rig.reached(r'$named');
+      // Your name in the body notifies only with your member event at hand
+      // for the room object judged.
+      expect(room.getState('m.room.member', _me), isNotNull);
+      expect(rig.got.map((a) => a.eventId), [r'$named']);
+    });
+
+    test('a room left while its verdict waits does not notify', () async {
+      final api = _MembersLater()
+        ..refuseFirst = false
+        ..hold = Completer();
+      final client = await _client(api: api);
+      await _sync(
+        client,
+        rooms: {
+          'join': {_dm: _directRoom(withAda: false, count: null)},
+        },
+        accountData: [_pushRules()],
+      );
+      final rig = await _rig(client);
+      await _sync(
+        client,
+        rooms: {
+          'join': {
+            _dm: {
+              'timeline': {
+                'events': [_msg(r'$plain')],
+                'limited': false,
+                'prev_batch': 'p${_n++}',
+              },
+            },
+          },
+        },
+      );
+      await _until(() => api.asked == 1);
+      await _sync(
+        client,
+        rooms: {
+          'leave': {
+            _dm: {
+              'timeline': {
+                'events': [
+                  {
+                    'type': 'm.room.member',
+                    'state_key': _me,
+                    'sender': _me,
+                    'content': {'membership': 'leave'},
+                    'event_id': r'$left',
+                    'origin_server_ts': _after + 1,
+                  },
+                ],
+                'limited': false,
+                'prev_batch': 'p${_n++}',
+              },
+            },
+          },
+        },
+      );
+      api.hold!.complete();
+      await rig.reached(r'$plain');
+      expect(rig.got, isEmpty);
+    });
 
     test('a room you have just left does not notify', () async {
       final client = await _client();

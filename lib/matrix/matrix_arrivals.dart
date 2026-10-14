@@ -47,17 +47,25 @@ class MatrixArrivals {
   var _settling = Future<void>.value();
   var _disposed = false;
 
-  /// Rooms whose members have been asked for this session, by room.
-  final _loaded = <String, Future<void>>{};
+  /// Rooms whose members have been asked for this session, by room id,
+  /// with the room object asked: a room left and rejoined is a new one,
+  /// which the SDK builds afresh.
+  final _loaded = <String, (Room, Future<void>)>{};
   late final _rules = PushRules(client);
 
   /// Messages still sealed when judged, by room and session, with whether
   /// the sealed verdict notified; the oldest let go past [_keptSealed] a
   /// room. Their key may still come.
   final _sealed = <String, Map<String, List<(Event, bool)>>>{};
-  static const _keptSealed = 50;
-  final _keySubs = <String, StreamSubscription<String>>{};
+  static const _keptSealed = 200;
+  final _keySubs = <String, (Room, StreamSubscription<String>)>{};
   final _retractions = StreamController<MessageRoute>.broadcast();
+
+  /// Messages deleted this session, by id, the oldest let go past
+  /// [_keptRedacted]: a deletion in the same sync as its message must
+  /// not leave the message to notify with what was deleted.
+  final _redacted = <String>{};
+  static const _keptRedacted = 500;
 
   Stream<Arrival> get stream => _arrivals.stream;
 
@@ -90,6 +98,14 @@ class MatrixArrivals {
     if (client.getRoomById(event.room.id)?.membership != Membership.join) {
       return;
     }
+    if (event.type == EventTypes.Redaction) {
+      final id = event.redacts;
+      if (id != null) {
+        _redacted.add(id);
+        if (_redacted.length > _keptRedacted) _redacted.remove(_redacted.first);
+      }
+      return;
+    }
     // Only a real arrival dates your start in the room: a name or avatar
     // change is a join too, and would wrongly cut off messages before it.
     if (isOwnJoin(event, client.userID)) {
@@ -115,6 +131,11 @@ class MatrixArrivals {
       if (joined != null && event.originServerTs.isBefore(joined)) continue;
       await _members(event.room);
       if (_disposed) return;
+      // Both could have changed while the members loaded.
+      if (event.redacted || _redacted.contains(event.eventId)) continue;
+      if (client.getRoomById(event.room.id)?.membership != Membership.join) {
+        continue;
+      }
       final notifies = _rules.notifies(event);
       if (event.type == EventTypes.Encrypted) _keep(event, noticed: notifies);
       if (!notifies) continue;
@@ -122,11 +143,23 @@ class MatrixArrivals {
     }
   }
 
-  /// Keeps [event] for its key, and listens for the room's keys once.
+  /// Keeps [event] for its key, and listens for the room's keys once per
+  /// room object: a rejoined room is a new one, with keys of its own.
   void _keep(Event event, {required bool noticed}) {
     final session = event.content.tryGet<String>('session_id');
     if (session == null) return;
     final room = event.room;
+    final known = _keySubs[room.id];
+    if (known == null || !identical(known.$1, room)) {
+      unawaited(known?.$2.cancel());
+      _sealed.remove(room.id);
+      _keySubs[room.id] = (
+        room,
+        room.onSessionKeyReceived.stream.listen(
+          (session) => _chain(() => _unseal(room, session)),
+        ),
+      );
+    }
     final byRoom = _sealed.putIfAbsent(room.id, () => {});
     (byRoom[session] ??= []).add((event, noticed));
     var kept = 0;
@@ -139,9 +172,6 @@ class MatrixArrivals {
       if (oldest.value.isEmpty) byRoom.remove(oldest.key);
       kept--;
     }
-    _keySubs[room.id] ??= room.onSessionKeyReceived.stream.listen(
-      (session) => _chain(() => _unseal(room, session)),
-    );
   }
 
   /// Judges the messages sealed under [session] again, now that its key
@@ -161,6 +191,7 @@ class MatrixArrivals {
       }
       var notifies =
           client.getRoomById(room.id)?.membership == Membership.join &&
+          !_redacted.contains(event.eventId) &&
           countsAsMessage(open);
       if (notifies) {
         await _members(room);
@@ -182,14 +213,19 @@ class MatrixArrivals {
   /// never misstates your membership the way a lone state answer can. A
   /// load the server refuses is logged, and asked for again with the
   /// next message.
-  Future<void> _members(Room room) =>
-      _loaded[room.id] ??= _load(room).then<void>(
-        (_) {},
-        onError: (Object e) {
-          _loaded.remove(room.id);
-          Logs().w('[loaf] members of ${room.id} not loaded', e);
-        },
-      );
+  Future<void> _members(Room room) {
+    final known = _loaded[room.id];
+    if (known != null && identical(known.$1, room)) return known.$2;
+    final loading = _load(room).then<void>(
+      (_) {},
+      onError: (Object e) {
+        if (identical(_loaded[room.id]?.$1, room)) _loaded.remove(room.id);
+        Logs().w('[loaf] members of ${room.id} not loaded', e);
+      },
+    );
+    _loaded[room.id] = (room, loading);
+    return loading;
+  }
 
   Future<void> _load(Room room) async {
     final me = client.userID!;
@@ -235,7 +271,7 @@ class MatrixArrivals {
     _disposed = true;
     unawaited(_sub.cancel());
     unawaited(_synced.cancel());
-    for (final sub in _keySubs.values) {
+    for (final (_, sub) in _keySubs.values) {
       unawaited(sub.cancel());
     }
     _keySubs.clear();

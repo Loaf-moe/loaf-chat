@@ -54,15 +54,14 @@ Room _joined(Client client, {int? count, bool withAda = true}) {
   return room;
 }
 
-Event _message(Room room, String body, {Map<String, Object?>? mentions}) =>
-    Event(
-      type: EventTypes.Message,
-      content: {'msgtype': 'm.text', 'body': body, 'm.mentions': ?mentions},
-      senderId: '@ada:example.com',
-      eventId: '\$e${_n++}',
-      originServerTs: DateTime(2026),
-      room: room,
-    );
+Event _message(Room room, String body, {Object? mentions}) => Event(
+  type: EventTypes.Message,
+  content: {'msgtype': 'm.text', 'body': body, 'm.mentions': ?mentions},
+  senderId: '@ada:example.com',
+  eventId: '\$e${_n++}',
+  originServerTs: DateTime(2026),
+  room: room,
+);
 
 Map<String, Object?> _rule(
   String id,
@@ -185,6 +184,11 @@ void main() {
       ),
       isFalse,
       reason: 'no rule for user_ids here: the legacy rule alone is skipped',
+    );
+    expect(
+      rules.notifies(_message(room, 'hi Mochi', mentions: 'yes')),
+      isFalse,
+      reason: 'present, whatever its shape',
     );
   });
 

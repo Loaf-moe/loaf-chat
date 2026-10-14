@@ -43,7 +43,8 @@ class PushRules {
       _build(client.globalPushRules ?? PushRuleSet());
       _built = true;
     }
-    final intentional = event.content['m.mentions'] is Map;
+    // Present, whatever its shape, as Synapse reads it.
+    final intentional = event.content.containsKey('m.mentions');
     final count = event.room.summary.mJoinedMemberCount;
     final evaluator = _evaluators[(intentional, count)] ??= _evaluator(
       intentional: intentional,
