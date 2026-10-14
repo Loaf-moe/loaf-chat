@@ -577,6 +577,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.13.1"
+  loaf_chrome:
+    dependency: "direct main"
+    description:
+      path: "packages/loaf_chrome"
+      relative: true
+    source: path
+    version: "0.0.0"
   loaf_media:
     dependency: "direct main"
     description:

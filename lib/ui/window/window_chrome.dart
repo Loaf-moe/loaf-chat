@@ -1,56 +1,45 @@
 /// Loaf's own window controls, where the OS title bar used to be.
 ///
-/// The runners hide their frames and answer `loaf/window`; everything a
-/// person sees and clicks is drawn here, in the app's palette. Behaviour
-/// stays the OS's: a drag is the OS's own window move (so snapping works),
-/// and a double-click does what the OS's title bar would.
+/// The runners hide their frames and report through a [WindowRunner];
+/// everything a person sees and clicks is drawn here, in the app's palette.
+/// Behaviour stays the OS's: a drag is the OS's own window move (so
+/// snapping works), and a double-click does what the OS's title bar would.
 library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import 'window_runner.dart';
 import 'window_state.dart';
 
+export 'window_runner.dart' show WindowRunner, pickWindowRunner;
 export 'window_state.dart' show WindowButton, WindowState;
 
 /// Talks to the runner's window: sends what the buttons ask for, and keeps
 /// the [state] it reports.
 class WindowChromeController extends ChangeNotifier {
-  WindowChromeController({this._channel = const MethodChannel('loaf/window')});
+  /// [runner] defaults to the `loaf/window` channel; the app picks the
+  /// platform's with [pickWindowRunner].
+  WindowChromeController({WindowRunner? runner})
+    : _runner = runner ?? ChannelWindowRunner();
 
-  final MethodChannel _channel;
+  final WindowRunner _runner;
   WindowState _state = WindowState.hidden;
   bool _disposed = false;
 
   WindowState get state => _state;
 
   /// Asks the runner where things stand and listens for changes. On a phone,
-  /// or under a runner without the channel, the window stays
+  /// or under a runner without a window to report, the window stays
   /// [WindowState.hidden]: no buttons, which is what those cases want.
   Future<void> start() async {
     if (!isDesktop) return;
-    _channel.setMethodCallHandler(_onCall);
-    try {
-      _apply(await _channel.invokeMapMethod<Object?, Object?>('state'));
-    } on MissingPluginException {
-      // A runner that predates the channel keeps its own frame.
-    } on PlatformException catch (e) {
-      debugPrint('[loaf window] no window state: $e');
-    }
-  }
-
-  Future<Object?> _onCall(MethodCall call) async {
-    if (call.method == 'stateChanged') {
-      final args = call.arguments;
-      if (args is Map) _apply(args);
-    }
-    return null;
+    _apply(await _runner.attach(_apply));
   }
 
   void _apply(Map<Object?, Object?>? report) {
@@ -61,36 +50,25 @@ class WindowChromeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> minimize() => _send('minimize');
-  Future<void> toggleMaximize() => _send('toggleMaximize');
-  Future<void> close() => _send('close');
-  Future<void> startDrag() => _send('startDrag');
-  Future<void> titlebarDoubleClick() => _send('titlebarDoubleClick');
+  Future<void> minimize() => _runner.send('minimize');
+  Future<void> toggleMaximize() => _runner.send('toggleMaximize');
+  Future<void> close() => _runner.send('close');
+  Future<void> startDrag() => _runner.send('startDrag');
+  Future<void> titlebarDoubleClick() => _runner.send('titlebarDoubleClick');
 
   /// Where the maximize button is, in logical pixels from the window's
   /// top-left. Windows needs it to offer snap layouts over that button.
-  Future<void> setMaxButtonRect(Rect r) => _send('setMaxButtonRect', {
+  Future<void> setMaxButtonRect(Rect r) => _runner.send('setMaxButtonRect', {
     'x': r.left,
     'y': r.top,
     'w': r.width,
     'h': r.height,
   });
 
-  // A button that does nothing beats an exception on every click.
-  Future<void> _send(String method, [Object? arguments]) async {
-    try {
-      await _channel.invokeMethod<void>(method, arguments);
-    } on MissingPluginException {
-      // No runner channel: nothing to tell.
-    } on PlatformException catch (e) {
-      debugPrint('[loaf window] $method failed: $e');
-    }
-  }
-
   @override
   void dispose() {
     _disposed = true;
-    _channel.setMethodCallHandler(null);
+    _runner.detach();
     super.dispose();
   }
 }

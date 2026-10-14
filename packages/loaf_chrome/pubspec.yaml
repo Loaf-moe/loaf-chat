@@ -1,0 +1,10 @@
+name: loaf_chrome
+description: "Windows window chrome for Loaf Chat: a frameless window with its own title-bar buttons, Dart over dart:ffi into a Rust crate built by a build hook."
+publish_to: none
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  code_assets: ^2.1.0
+  hooks: ^2.2.0
