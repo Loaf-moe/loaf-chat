@@ -32,6 +32,8 @@ that can be undone with one more tap.
 - A tap on a timeline name puts `@Name` into the composer.
 - Removing someone from a call, leaving them in the channel.
 - Copy that reads as between friends.
+- The upload itself, not the thumbnail, on the card and on a speaking call
+  tile, fetched ahead for everyone in your rooms, so a GIF avatar plays.
 
 **Out:**
 
@@ -102,6 +104,16 @@ cinny at `~/dev/build/loaf-chat-cinny`.
   Icons publishes `discord.svg` under CC0: a 24×24 viewBox, one path with
   arcs. `rsvg-convert` is installed here, and `tool/icons/` already renders
   PNGs from SVGs beside it.
+- A room the SDK has only partly loaded keeps just `importantStateEvents`
+  in memory (`client.dart`, `Room.partial`): member state is not among
+  them, so `getParticipants` sees nobody until `requestParticipants` has
+  read the store or the server.
+- `showMenu`, `showDialog` and `showModalBottomSheet` capture
+  `InheritedTheme`s from the opening context into the route
+  (`popup_menu.dart`, `dialog.dart`, `bottom_sheet.dart` in Flutter
+  3.47.5). A plain `InheritedWidget` is not carried.
+- Every avatar was `MxcThumbnail`: a server thumbnail at 64, 128 or 320,
+  always still, decoded at its native size.
 
 **cinny**
 
@@ -150,10 +162,24 @@ the call tile's name chip keep calling `nameColor` and draw no badge.
 the card as a leading entry; on a phone, `showActionSheet` with the card as
 its header.
 
-**The card** (`person_card.dart`, now the header alone): avatar at 64,
-`PersonName` at 17, a role chip reading `admin` or `moderator` in the role's
-colour (none for a member), the id in mono, the status line, and for someone
-else the trust line as today.
+**The card** (`person_card.dart`, now the header alone), top to bottom:
+
+- A banner 88 high in `member.color` at 35% alpha. In a menu its top
+  corners match the menu's; in a sheet all four are rounded, since the
+  sheet pads its header.
+- The avatar at 128, overlapping the banner's bottom edge, in a 3px ring of
+  the card's colour, with a 20px presence dot at its bottom right (none
+  when presence is unknown). It is the upload itself, drawn over the
+  thumbnail, so a GIF plays.
+- `PersonName` at 20 in Lora, the display serif, in the role's colour, the
+  badge after it.
+- A role pill reading `admin` or `moderator` in the role's colour; none for
+  a member.
+- The id in mono, then the status line.
+- For someone else, where a verifier is at hand: one trust line (shield and
+  lead) with a muted note under it, and for an unverified person while this
+  session cannot vouch, "verify this session first, so it can vouch for
+  them." A puppet gets no trust line.
 
 **The actions**, in this order. The caller passes what it can honour; an
 item whose callback is null is not drawn.
@@ -169,7 +195,7 @@ item whose callback is null is not drawn.
 | remove from call | opened from a call; `RoomAbility.silence` |
 | copy user id | always |
 | edit profile | you; opens settings on the account section |
-| kick from space | not you; `RoomAbility.kick`; drawn destructive; asks `confirmKick` first |
+| kick from space | not you; a space is open; `RoomAbility.kick`; drawn destructive; asks first, then kicks with a spinner |
 
 No headings between groups. "message" opens `createDirect([member])`.
 
@@ -183,6 +209,49 @@ No headings between groups. "message" opens `createDirect([member])`.
 | Call tile, voice occupant row | as today; the menu gains the card | as today; the sheet gains the card |
 
 A tap on your own name in the timeline does nothing.
+
+**Kick from space** (decided 2026-10-14). A Matrix space is a room; a kick is
+per room and the server cascades nothing. `Rooms.kickFromSpace` kicks them
+from every joined room under the space they are in, deepest first, then
+the space, leaving out any room another joined top-level space also lists,
+the walk `leaveSpace` makes. Each room's member state is loaded first,
+since a partly loaded room holds none. Every kick is attempted; the rooms
+that refused come back as `PartlyDone`, and the shell toasts "couldn't
+kick X from everything in Y". `confirmKickFromSpace` asks, then runs the
+kick inside the dialog: the button becomes a spinner, cancel is disabled
+and the dialog cannot be dismissed until it is done.
+
+## Original avatars
+
+`AvatarImages.original(ref)` is the picture as uploaded, every frame. On
+the Matrix side `MxcImage(client, mxc, {size})` serves both: a size fetches
+the server thumbnail as before, none fetches `getDownloadUri`. Same bearer
+token, same file store keyed by uri, same refusal of anything not
+`image/`. An original decodes no wider than 512 through
+`decodeWithFallback`, which also gives Windows its WIC fallback; the
+widest it is ever drawn is 128 logical.
+
+`LoafAvatar.original` draws it over the thumbnail, gapless, fading in once
+decoded; a failed original leaves the thumbnail. The card and the speaking
+call tile ask for it; rows never do.
+
+**Warming.** `MatrixAvatarImages.warm(ref)` queues an original once per
+mxc. `MatrixRooms` calls it for every member it builds and for you. One
+serial queue: the first fetch waits five seconds so the sync lands first;
+later asks fetch at once; each fetch is bounded by sixty seconds on a timer
+of its own; a failure or timeout is skipped; disposing the rooms cancels
+the timers and stops the drain. A relaunch costs one store read per
+avatar.
+
+`AvatarImagesScope` is an `InheritedTheme`, so a menu, dialog or sheet
+captures it with the themes. The hand-carrying helper is gone.
+
+## Calls
+
+The call tile draws the original while `speaking && !faded`, the gate the
+speaking ring uses, and never while ringing. A GIF moves with their voice.
+When they stop, the layer goes and the GIF snaps to the thumbnail's frame:
+Flutter cannot pause a GIF.
 
 ## Mentioning from a name
 
@@ -231,8 +300,22 @@ Menu labels stay lowercase.
 - **`PersonName`**: the colour per role; the badge drawn for a puppet and
   not otherwise; the tooltip; `copyWith` keeping the bridge.
 - **The timeline and the member list**: a puppet's name carries the badge.
-- **The menu**: the card's fields; each item's rule from the table, you and
-  not you; a puppet hiding message and verify; "message" opening the DM.
+- **The menu**: the card's fields, serif name, banner colour and presence
+  dot; each item's rule from the table, you and not you; a puppet hiding
+  message and verify; copy user id copying; "message" opening the DM;
+  kick asking first, showing a spinner while it runs, and toasting a
+  half-done kick.
+- **Kick from space**: the rooms they are in then the space; rooms another
+  space lists spared; a refused room in `PartlyDone` with the rest done.
+- **Original avatars**: fetched from the download uri with the token;
+  cached apart from the thumbnail; a failure caches nothing; decoded no
+  wider than 512; two layers in `LoafAvatar`, a failing original leaving
+  the thumbnail, none resolved when not asked.
+- **Warming**: once per ref; past a failure; non-mxc ignored; nothing after
+  dispose; waits its delay; a hung download given up on; a member's avatar
+  seen on the download path.
+- **The call tile**: plays while they speak; rests while quiet, faded or
+  reconnecting.
 - **Mentioning**: a tap puts `@Name ` at the cursor and the sent message
   carries the mention; a tap on your own name does nothing; a request with
   no composer is not offered.
@@ -248,7 +331,8 @@ call and watching them stay in the channel and rejoin.
 
 ## Order
 
-1. The bridge and the badge, with `PersonName`.
-2. The person menu.
+1. The bridge and the badge, with `PersonName`. Landed.
+2. The person menu, then the card's look, original avatars, warming, and
+   the call tile. Landed.
 3. Mentioning from a name.
 4. Removing someone from a call, and the copy.
