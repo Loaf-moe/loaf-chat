@@ -175,22 +175,36 @@ class MatrixArrivals {
     }
   }
 
-  /// Loads [room]'s members once: the SDK's store first, the server only
-  /// when the list is still short of the room's count. The whole list,
-  /// however long: the SDK puts a message's sender in memory by itself,
-  /// so a part of the list can read as a two-person room. A load the
-  /// server refuses is logged, and asked for again with the next message.
-  Future<void> _members(Room room) => _loaded[room.id] ??=
-      (room.participantListComplete
-              ? Future<void>.value()
-              : room.requestParticipants([Membership.join], true, true))
-          .then<void>(
-            (_) {},
-            onError: (Object e) {
-              _loaded.remove(room.id);
-              Logs().w('[loaf] members of ${room.id} not loaded', e);
-            },
-          );
+  /// Loads what the rules read of [room]'s members, once. With the room's
+  /// count in its summary, that is your own member event alone, for your
+  /// name: memory, then the store. Without a count, or with your event in
+  /// neither, the whole list, which the evaluator can count and which
+  /// never misstates your membership the way a lone state answer can. A
+  /// load the server refuses is logged, and asked for again with the
+  /// next message.
+  Future<void> _members(Room room) =>
+      _loaded[room.id] ??= _load(room).then<void>(
+        (_) {},
+        onError: (Object e) {
+          _loaded.remove(room.id);
+          Logs().w('[loaf] members of ${room.id} not loaded', e);
+        },
+      );
+
+  Future<void> _load(Room room) async {
+    final me = client.userID!;
+    if (room.summary.mJoinedMemberCount != null) {
+      if (room.getState(EventTypes.RoomMember, me) != null) return;
+      final mine = await client.database.getUser(me, room);
+      if (mine != null) {
+        room.setState(mine);
+        return;
+      }
+    }
+    if (!room.participantListComplete) {
+      await room.requestParticipants([Membership.join], true, true);
+    }
+  }
 
   /// What a notification will say about [event]: read now, while the
   /// sender's member event and the decrypted content are at hand.

@@ -49,13 +49,13 @@ sync ─▶ SDK Client ─▶ MatrixArrivals ─▶ MatrixRooms.arrivals ─▶ 
 
 The push rules are the server's `m.push_rules` account data, evaluated
 by the SDK's `PushruleEvaluator`, once the room's members are loaded:
-`room_member_count` and your display name are read from the members the
-room holds in memory, and a room nobody has opened this session holds
-none until asked. The evaluator is handed the rules as the spec and
-Synapse apply them (`lib/matrix/push_rules.dart`): content rules ahead of
-room rules, and for a message carrying `m.mentions` no legacy body-mention
-rules. A message still sealed when judged is judged again once its key
-arrives.
+your display name is read from your member event, loaded first, and
+`room_member_count` is decided against the server's count in the room
+summary. The evaluator is handed the rules as the spec and Synapse apply
+them (`lib/matrix/push_rules.dart`): content rules ahead of room rules,
+for a message carrying `m.mentions` no legacy body-mention rules, and
+member-count conditions already decided. A message still sealed when
+judged is judged again once its key arrives.
 
 ## Levels and settings
 
@@ -178,12 +178,13 @@ Every finding below was confirmed by cases in
 `test/matrix/matrix_arrivals_rules_test.dart` before its fix.
 
 **F1. A direct message was silent under "mentions only".** Fixed:
-`MatrixArrivals` loads a room's members (the SDK's store first, the
-server when the list is still short) before the rules run, so
-`room_member_count` holds. The whole list, however long: the SDK puts a
-message's sender in memory by itself, so a part of the list could read
-as a two-person room. A load the server refuses is logged, the rules run
-on what is known, and the next message asks again.
+`PushRules` decides every `room_member_count` condition against the
+server's own count in the room summary, so the members in memory never
+matter to it. The only member the rules read is yours, for your name,
+loaded once from memory, the store or the server. A room whose summary
+has no count gets its whole list loaded instead, as the evaluator then
+counts memory; a load the server refuses is logged, the rules run on
+what is known, and the next message asks again.
 
 **F2. Mute silenced mentions while its text promised mentions-only.**
 Fixed: three levels, per room and account wide.

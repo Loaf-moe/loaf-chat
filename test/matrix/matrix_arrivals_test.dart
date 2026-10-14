@@ -101,9 +101,9 @@ Map<String, Object?> _room() => {
   },
 };
 
-/// A direct message with Ada, two members by the server's count; her
-/// member event comes only when [withAda].
-Map<String, Object?> _directRoom({required bool withAda}) => {
+/// A direct message with Ada, [count] members by the server's summary
+/// (none said when null); her member event comes only when [withAda].
+Map<String, Object?> _directRoom({required bool withAda, int? count = 2}) => {
   'state': {
     'events': [
       _state('m.room.create', {'creator': _me}),
@@ -115,7 +115,8 @@ Map<String, Object?> _directRoom({required bool withAda}) => {
         },
     ],
   },
-  'summary': {'m.joined_member_count': 2, 'm.invited_member_count': 0},
+  if (count != null)
+    'summary': {'m.joined_member_count': count, 'm.invited_member_count': 0},
 };
 
 Map<String, Object?> _msg(
@@ -561,7 +562,7 @@ void main() {
       await _sync(
         client,
         rooms: {
-          'join': {_dm: _directRoom(withAda: false)},
+          'join': {_dm: _directRoom(withAda: false, count: null)},
         },
         accountData: [_pushRules(message: false)],
       );
@@ -614,6 +615,39 @@ void main() {
       expect(api.asked, 2);
       expect(rig.got.map((a) => a.eventId), [r'$mention', r'$again']);
     });
+
+    test(
+      'a direct message by the server\'s count asks for no member list',
+      () async {
+        final api = _MembersLater();
+        final client = await _client(api: api);
+        await _sync(
+          client,
+          rooms: {
+            'join': {_dm: _directRoom(withAda: false)},
+          },
+          accountData: [_pushRules(message: false)],
+        );
+        final rig = await _rig(client);
+        await _sync(
+          client,
+          rooms: {
+            'join': {
+              _dm: {
+                'timeline': {
+                  'events': [_msg(r'$plain')],
+                  'limited': false,
+                  'prev_batch': 'p${_n++}',
+                },
+              },
+            },
+          },
+        );
+        await rig.reached(r'$plain');
+        expect(rig.got.map((a) => a.eventId), [r'$plain']);
+        expect(api.asked, 0);
+      },
+    );
 
     test('a room you have just left does not notify', () async {
       final client = await _client();

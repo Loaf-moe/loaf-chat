@@ -26,10 +26,19 @@ Future<Client> _client() async {
   return client;
 }
 
-/// A room you are in as Mochi, with Ada.
-Room _joined(Client client) {
-  final room = Room(id: _room, client: client);
-  for (final (id, name) in [(_me, 'Mochi'), ('@ada:example.com', 'Ada')]) {
+/// A room you are in as Mochi, with Ada in memory too unless [withAda]
+/// is off, and [count] joined by the server's summary. Your own member
+/// event is always in memory, as the arrivals load it before judging.
+Room _joined(Client client, {int? count, bool withAda = true}) {
+  final room = Room(
+    id: _room,
+    client: client,
+    summary: RoomSummary.fromJson({'m.joined_member_count': ?count}),
+  );
+  for (final (id, name) in [
+    (_me, 'Mochi'),
+    if (withAda) ('@ada:example.com', 'Ada'),
+  ]) {
     room.setState(
       Event(
         type: EventTypes.RoomMember,
@@ -70,10 +79,15 @@ Map<String, Object?> _rule(
   'pattern': ?pattern,
 };
 
+/// The rules: a name mention, your localpart, a direct message, any
+/// message unless [message] is off, and a rule for rooms whose member
+/// count [countRule] says.
 Future<void> _rules(
   Client client, {
   bool message = true,
   List<String> mentionsOnly = const [],
+  String? countRule,
+  bool oneToOne = false,
 }) => client.handleSync(
   SyncUpdate.fromJson({
     'next_batch': 'b${_n++}',
@@ -100,6 +114,27 @@ Future<void> _rules(
               'room': [for (final id in mentionsOnly) _rule(id, [], [])],
               'sender': <Object?>[],
               'underride': [
+                if (countRule != null)
+                  _rule(
+                    '.loaf.count',
+                    [
+                      {'kind': 'room_member_count', 'is': countRule},
+                    ],
+                    ['notify'],
+                  ),
+                if (oneToOne)
+                  _rule(
+                    '.m.rule.room_one_to_one',
+                    [
+                      {'kind': 'room_member_count', 'is': '2'},
+                      {
+                        'kind': 'event_match',
+                        'key': 'type',
+                        'pattern': 'm.room.message',
+                      },
+                    ],
+                    ['notify'],
+                  ),
                 _rule(
                   '.m.rule.message',
                   [
@@ -151,6 +186,48 @@ void main() {
       isFalse,
       reason: 'no rule for user_ids here: the legacy rule alone is skipped',
     );
+  });
+
+  test('a two-person room by the server\'s count is a direct message to '
+      'the rules', () async {
+    final client = await _client();
+    await _rules(client, message: false, oneToOne: true);
+    final room = _joined(client, count: 2, withAda: false);
+    expect(PushRules(client).notifies(_message(room, 'hi')), isTrue);
+  });
+
+  test(
+    'a bigger room by the server\'s count is not, whatever memory holds',
+    () async {
+      final client = await _client();
+      await _rules(client, message: false, oneToOne: true);
+      final room = _joined(client, count: 3);
+      expect(PushRules(client).notifies(_message(room, 'hi')), isFalse);
+    },
+  );
+
+  test(
+    'a count condition with an operator follows the server\'s count',
+    () async {
+      final client = await _client();
+      await _rules(client, message: false, countRule: '>=100');
+      final rules = PushRules(client);
+      expect(
+        rules.notifies(_message(_joined(client, count: 150), 'hi')),
+        isTrue,
+      );
+      expect(
+        rules.notifies(_message(_joined(client, count: 50), 'hi')),
+        isFalse,
+      );
+    },
+  );
+
+  test('without a server\'s count the members in memory decide', () async {
+    final client = await _client();
+    await _rules(client, message: false, oneToOne: true);
+    final room = _joined(client);
+    expect(PushRules(client).notifies(_message(room, 'hi')), isTrue);
   });
 
   test('new rules on a sync apply', () async {
