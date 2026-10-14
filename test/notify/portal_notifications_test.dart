@@ -162,11 +162,18 @@ void main() {
       final p = await serve(_FakePortal(2));
       final n = make();
       final clicks = <MessageRoute>[];
-      n.clicks.listen(clicks.add);
+      final clicked = Completer<void>();
+      n.clicks.listen((route) {
+        clicks.add(route);
+        if (!clicked.isCompleted) clicked.complete();
+      });
       // Listening sends the match rule without awaiting it; the bus answers
       // a ping on the same connection only once it has that rule.
       await appSide.ping();
       await p.invoke(r'room:!old:x:$z', ['!old:x', r'$z']);
+      // The signal crosses a real socket, so a fixed pump can finish
+      // before it arrives.
+      await clicked.future.timeout(const Duration(seconds: 5));
       await pumpEventQueue();
       expect(clicks, [const MessageRoute('!old:x', r'$z')]);
     },
