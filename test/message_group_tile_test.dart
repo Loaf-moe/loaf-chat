@@ -138,4 +138,66 @@ void main() {
       );
     });
   }
+
+  Future<void> pumpAuthor(WidgetTester tester, Member author) =>
+      tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: MessageGroupTile(
+              group: MessageGroup([
+                Message(
+                  id: '1',
+                  author: author,
+                  sentAt: DateTime(2026, 9, 24, 10),
+                  body: 'hello',
+                ),
+              ]),
+            ),
+          ),
+        ),
+      );
+
+  testWidgets('a Discord puppet\'s name carries the badge', (tester) async {
+    await pumpAuthor(
+      tester,
+      const Member('@x', 'lou', Color(0xFF00FF00), bridge: Bridge.discord),
+    );
+    expect(find.bySemanticsLabel('from Discord'), findsOneWidget);
+  });
+
+  testWidgets('anyone else\'s name carries none', (tester) async {
+    await pumpAuthor(tester, const Member('@x', 'Pat', Color(0xFF00FF00)));
+    expect(find.bySemanticsLabel('from Discord'), findsNothing);
+  });
+
+  for (final (label, author) in [
+    ('without a badge', const Member('@x', 'Pat', Color(0xFF00FF00))),
+    (
+      'with a badge',
+      const Member('@x', 'Pat', Color(0xFF00FF00), bridge: Bridge.discord),
+    ),
+  ]) {
+    testWidgets('the time sits on the name\'s baseline $label', (tester) async {
+      await pumpAuthor(tester, author);
+      // Top of the text, plus where its style puts the baseline.
+      double baselineOf(String text) {
+        final finder = find.text(text);
+        final widget = tester.widget<Text>(finder);
+        final style = DefaultTextStyle.of(tester.element(finder)).style
+            .merge(widget.style);
+        final painter = TextPainter(
+          text: TextSpan(text: text, style: style),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        return tester.getRect(finder).top +
+            painter.computeDistanceToActualBaseline(TextBaseline.alphabetic);
+      }
+
+      expect(
+        baselineOf('10:00'),
+        moreOrLessEquals(baselineOf('Pat'), epsilon: 0.5),
+      );
+    });
+  }
 }

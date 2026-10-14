@@ -492,6 +492,12 @@ Future<void> _bakery(Client client) => _sync(client, {
           key: '@mod:example.com',
           sender: '@mod:example.com',
         ),
+        _state(
+          'm.room.member',
+          {'membership': 'join', 'displayname': 'lou'},
+          key: '@_ooye_lou:example.com',
+          sender: '@_ooye_lou:example.com',
+        ),
       ],
     ),
     '!annex:example.com': _room('annex', type: 'm.space'),
@@ -1366,6 +1372,19 @@ void main() {
     expect(members['@mod:example.com']!.role, Role.moderator);
     expect(members['@mod:example.com']!.name, 'Moddy');
     expect(members['@mod:example.com']!.presence, loaf.Presence.unknown);
+  });
+
+  test('a Discord puppet carries its bridge, and nobody else does', () async {
+    final client = await _client();
+    final rooms = await _rooms(client);
+    await _bakery(client);
+    await _settle();
+    rooms.loadMembers('!bakery:example.com');
+    await _settle();
+    final members = {for (final m in rooms.spaces.last.members) m.id: m};
+    expect(members['@_ooye_lou:example.com']!.bridge, Bridge.discord);
+    expect(members['@mod:example.com']!.bridge, isNull);
+    expect(members[_me]!.bridge, isNull);
   });
 
   test('a member list is asked for once, however often it is wanted', () async {

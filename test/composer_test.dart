@@ -407,6 +407,12 @@ void main() {
 
     const ada = Member('@ada:loaf.moe', 'Ada', Color(0xFF7C3AED));
     const adam = Member('@adam:loaf.moe', 'Adam Crumb', Color(0xFF0891B2));
+    const lou = Member(
+      '@_ooye_lou:loaf.moe',
+      'lou',
+      Color(0xFF5865F2),
+      bridge: Bridge.discord,
+    );
     const kitchen = Channel(id: '!kitchen:loaf.moe', name: 'kitchen');
     const ovens = Channel(id: '!ovens:loaf.moe', name: 'ovens');
 
@@ -425,7 +431,7 @@ void main() {
               child: Composer(
                 channelName: 'general',
                 timeline: timeline,
-                people: const [currentUser, ada, adam],
+                people: const [currentUser, ada, adam, lou],
                 channels: const [kitchen, ovens],
               ),
             ),
@@ -458,6 +464,19 @@ void main() {
       await type(tester, 'hi @crumb');
       expect(offered('Ada'), findsNothing);
       expect(offered('Adam Crumb'), findsOneWidget);
+    });
+
+    testWidgets('a Discord puppet is offered with the badge', (tester) async {
+      await pump(tester);
+      await type(tester, 'hi @lou');
+      expect(offered('lou'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: suggestions,
+          matching: find.bySemanticsLabel('from Discord'),
+        ),
+        findsOneWidget,
+      );
     });
 
     testWidgets('# lists the channels', (tester) async {

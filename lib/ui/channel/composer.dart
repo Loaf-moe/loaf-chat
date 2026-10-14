@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../members/role_colors.dart';
+import '../members/person_name.dart';
 import '../model/models.dart';
 import '../widgets/loaf_avatar.dart';
 import '../widgets/toast.dart';
@@ -767,16 +767,20 @@ class _MentionRow extends StatelessWidget {
         leading,
         const SizedBox(width: LoafSpace.x2),
         Flexible(
-          child: Text(
-            candidate.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: loafBody(14, 600).copyWith(
-              color: member != null
-                  ? tokens.nameColor(member.role)
-                  : tokens.textStrong,
-            ),
-          ),
+          child: member != null
+              ? PersonName(
+                  member,
+                  size: 14,
+                  weight: 600,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                )
+              : Text(
+                  candidate.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: loafBody(14, 600).copyWith(color: tokens.textStrong),
+                ),
         ),
         if (member != null) ...[
           const SizedBox(width: LoafSpace.x2),
@@ -819,14 +823,12 @@ class _TargetChip extends StatelessWidget {
                 style: loafBody(13, 500).copyWith(color: tokens.textBody),
               ),
               Flexible(
-                child: Text(
-                  author.name,
+                child: PersonName(
+                  author,
+                  size: 13,
+                  weight: 600,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: loafBody(
-                    13,
-                    600,
-                  ).copyWith(color: tokens.nameColor(author.role)),
                 ),
               ),
             ],

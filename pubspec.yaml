@@ -95,6 +95,7 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/icons/
     - assets/mock/media/
     - assets/sounds/
     - linux/packaging/moe.loaf.chat.png

@@ -127,6 +127,17 @@ void main() {
       // Three roles, three distinct colours.
       expect({colorOf('zed'), colorOf('Mo'), colorOf('bea')}, hasLength(3));
     });
+
+    testWidgets('a Discord puppet\'s row carries the badge', (tester) async {
+      await pump(tester, [
+        const Member('@l', 'lou', _grey, bridge: Bridge.discord),
+        _bea,
+      ]);
+      expect(find.bySemanticsLabel('from Discord'), findsOneWidget);
+      final name = tester.getRect(find.text('lou'));
+      final badge = tester.getRect(find.bySemanticsLabel('from Discord'));
+      expect(badge.left, greaterThan(name.right));
+    });
   });
 
   group('unknown presence', () {

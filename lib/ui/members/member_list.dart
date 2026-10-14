@@ -8,9 +8,9 @@ import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
 import '../window/window_chrome.dart';
+import 'person_name.dart';
 import 'presence.dart';
 import 'presence_dot.dart';
-import 'role_colors.dart';
 
 /// Splits [members] into the two sections the list shows. Moderators stay
 /// with members: their name colour already sets them apart, and a third
@@ -156,14 +156,12 @@ class _MemberRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  member.name,
+                PersonName(
+                  member,
+                  size: 15,
+                  weight: 500,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: loafBody(
-                    15,
-                    500,
-                  ).copyWith(color: tokens.nameColor(member.role)),
                 ),
                 if (status != null)
                   Text(

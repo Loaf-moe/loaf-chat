@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../members/person_name.dart';
 import '../members/role_colors.dart';
 import '../mock/fixtures.dart';
 import '../model/media_source.dart';
@@ -65,13 +66,7 @@ class MessageGroupTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.baseline,
                 textBaseline: TextBaseline.alphabetic,
                 children: [
-                  Text(
-                    author.name,
-                    style: loafBody(
-                      15,
-                      600,
-                    ).copyWith(color: tokens.nameColor(author.role)),
-                  ),
+                  PersonName(author, size: 15, weight: 600),
                   const SizedBox(width: LoafSpace.x2),
                   Text(
                     _formatTime(group.sentAt),

@@ -28,6 +28,7 @@ import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
 import '../ui/widgets/avatar_images.dart';
 import '../ui/call/calls.dart';
+import 'bridges.dart';
 import 'call_media.dart';
 import 'call_members.dart';
 import 'call_silence.dart';
@@ -858,6 +859,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       presence: Presence.unknown,
       powerLevel: room.getPowerLevelByUserId(userId).level,
       avatar: AvatarRef.maybe(user.avatarUrl?.toString()),
+      bridge: bridgeOf(userId),
     );
   }
 
