@@ -38,6 +38,7 @@ class MessageGroupTile extends StatelessWidget {
     this.controller,
     this.focus,
     this.onPerson,
+    this.onMention,
   });
 
   final MessageGroup group;
@@ -45,6 +46,10 @@ class MessageGroupTile extends StatelessWidget {
   /// Opens the author's menu: from the avatar, or the name's right-click
   /// or long press. At the pointer on a computer. Null leaves both plain.
   final void Function(Member member, Offset? position)? onPerson;
+
+  /// A click or tap on the name. Null where there is no composer to put
+  /// them in.
+  final ValueChanged<Member>? onMention;
 
   /// When set, each message offers its actions: long press on a phone,
   /// hover and right-click on a computer. Left null, the tile is
@@ -92,6 +97,9 @@ class MessageGroupTile extends StatelessWidget {
                       member: author,
                       onPerson: onPerson,
                       primary: false,
+                      onTap: onMention == null
+                          ? null
+                          : () => onMention!(author),
                       child: name,
                     ),
                   const SizedBox(width: LoafSpace.x2),
@@ -152,39 +160,48 @@ class MessageGroupTile extends StatelessWidget {
   }
 }
 
-/// Opens [member]'s menu. [primary] takes the tap or click too; otherwise
-/// only a right-click or a long press, the tap being someone else's.
+/// Opens [member]'s menu on a right-click or a long press. A tap or click
+/// opens it too when [primary]; otherwise it runs [onTap], if any.
 class _PersonGesture extends StatelessWidget {
   const _PersonGesture({
     required this.member,
     required this.onPerson,
     required this.primary,
+    this.onTap,
     required this.child,
   });
 
   final Member member;
   final void Function(Member member, Offset? position) onPerson;
   final bool primary;
+  final VoidCallback? onTap;
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => isDesktop
-      ? MouseRegion(
-          cursor: primary ? SystemMouseCursors.click : MouseCursor.defer,
-          child: GestureDetector(
-            onTapUp: primary ? (d) => onPerson(member, d.globalPosition) : null,
-            onSecondaryTapUp: (d) => onPerson(member, d.globalPosition),
+  Widget build(BuildContext context) {
+    final clickable = primary || onTap != null;
+    return isDesktop
+        ? MouseRegion(
+            cursor: clickable ? SystemMouseCursors.click : MouseCursor.defer,
+            child: GestureDetector(
+              onTapUp: primary
+                  ? (d) => onPerson(member, d.globalPosition)
+                  : onTap == null
+                  ? null
+                  : (_) => onTap!(),
+              onSecondaryTapUp: (d) => onPerson(member, d.globalPosition),
+              child: child,
+            ),
+          )
+        : GestureDetector(
+            onTap: primary ? () => onPerson(member, null) : onTap,
+            onLongPress: () {
+              HapticFeedback.mediumImpact();
+              onPerson(member, null);
+            },
             child: child,
-          ),
-        )
-      : GestureDetector(
-          onTap: primary ? () => onPerson(member, null) : null,
-          onLongPress: () {
-            HapticFeedback.mediumImpact();
-            onPerson(member, null);
-          },
-          child: child,
-        );
+          );
+  }
 }
 
 class _Avatar extends StatelessWidget {

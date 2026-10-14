@@ -56,6 +56,27 @@ Future<void> _openMenu(WidgetTester tester, String id) async {
 }
 
 void main() {
+  testWidgets('mention puts them in the composer', variant: _desktop, (
+    tester,
+  ) async {
+    await _pumpShell(tester);
+    await _openMenu(tester, '@jun');
+    await tester.tap(find.text('mention'));
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller!.text, '@Jun Levain ');
+    expect(field.focusNode?.hasFocus, isTrue);
+  });
+
+  testWidgets('there is no mentioning yourself', variant: _desktop, (
+    tester,
+  ) async {
+    await _pumpShell(tester);
+    await _openMenu(tester, '@faore');
+    expect(find.text('mention'), findsNothing);
+  });
+
   testWidgets('message opens a DM with them', variant: _desktop, (
     tester,
   ) async {

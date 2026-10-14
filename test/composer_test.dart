@@ -541,6 +541,93 @@ void main() {
       await tester.pumpAndSettle();
       expect(timeline.messages.single.formatted, isNull);
     });
+
+    group('asked from outside', () {
+      testWidgets('a request puts the mention at the cursor', (tester) async {
+        final timeline = await pump(tester);
+        await type(tester, 'hi ');
+        timeline.mention(ada);
+        await tester.pumpAndSettle();
+        expect(field(tester), 'hi @Ada ');
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).focusNode?.hasFocus,
+          isTrue,
+        );
+      });
+
+      testWidgets('mid-text, it lands where the cursor is', (tester) async {
+        final timeline = await pump(tester);
+        await type(tester, 'hi  there');
+        final controller = tester
+            .widget<TextField>(find.byType(TextField))
+            .controller!;
+        controller.selection = const TextSelection.collapsed(offset: 3);
+        timeline.mention(ada);
+        await tester.pumpAndSettle();
+        expect(field(tester), 'hi @Ada there');
+      });
+
+      testWidgets('with nothing typed, it is the first word', (tester) async {
+        final timeline = await pump(tester);
+        timeline.mention(ada);
+        await tester.pumpAndSettle();
+        expect(field(tester), '@Ada ');
+      });
+
+      testWidgets('the same person asked twice is there twice', (tester) async {
+        final timeline = await pump(tester);
+        timeline.mention(ada);
+        await tester.pumpAndSettle();
+        timeline.mention(ada);
+        await tester.pumpAndSettle();
+        expect(field(tester), '@Ada @Ada ');
+      });
+
+      testWidgets('a request from before the composer opened is not taken', (
+        tester,
+      ) async {
+        tester.view.physicalSize = const Size(800, 800);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        final timeline = TimelineController(const [], you: currentUser);
+        addTearDown(timeline.dispose);
+        timeline.mention(ada);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: loafDarkTheme(),
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.bottomCenter,
+                child: Composer(
+                  channelName: 'general',
+                  timeline: timeline,
+                  people: const [currentUser, ada],
+                ),
+              ),
+            ),
+          ),
+        );
+        // Any notify at all: a message arriving would do the same.
+        timeline.send('hi');
+        await tester.pumpAndSettle();
+        expect(field(tester), isEmpty);
+      });
+
+      testWidgets('it sends as a pill', (tester) async {
+        final timeline = await pump(tester);
+        timeline.mention(ada);
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), '${field(tester)}yo');
+        await tester.tap(find.byIcon(LucideIcons.send));
+        await tester.pumpAndSettle();
+        final sent = timeline.messages.single;
+        expect(sent.body, '@Ada yo');
+        expect(
+          sent.formatted,
+          contains('href="https://matrix.to/#/@ada:loaf.moe"'),
+        );
+      });
+    });
   });
 }
 

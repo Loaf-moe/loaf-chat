@@ -45,6 +45,7 @@ Future<void> _pump(
   bool isYou = false,
   PersonTrust? trust,
   bool canVerify = false,
+  VoidCallback? onMention,
   VoidCallback? onMessage,
   VoidCallback? onVerify,
   VoidCallback? onEditProfile,
@@ -67,6 +68,7 @@ Future<void> _pump(
                   trust: trust,
                   canVerify: canVerify,
                   position: d.globalPosition,
+                  onMention: onMention,
                   onMessage: onMessage,
                   onVerify: onVerify,
                   onEditProfile: onEditProfile,
@@ -78,6 +80,7 @@ Future<void> _pump(
                   isYou: isYou,
                   trust: trust,
                   canVerify: canVerify,
+                  onMention: onMention,
                   onMessage: onMessage,
                   onVerify: onVerify,
                   onEditProfile: onEditProfile,
@@ -243,6 +246,7 @@ void main() {
       await _pump(tester);
       await _open(tester);
       expect(find.text('copy user id'), findsOneWidget);
+      expect(find.text('mention'), findsNothing);
       expect(find.text('message'), findsNothing);
       expect(find.text('verify'), findsNothing);
       expect(find.text('edit profile'), findsNothing);
@@ -256,12 +260,14 @@ void main() {
         tester,
         trust: PersonTrust.unverified,
         canVerify: true,
+        onMention: () {},
         onMessage: () {},
         onVerify: () {},
         onEditProfile: () {},
         kick: (from: 'The Starter Pack', run: () {}),
       );
       await _open(tester);
+      expect(find.text('mention'), findsOneWidget);
       expect(find.text('message'), findsOneWidget);
       expect(find.text('verify'), findsOneWidget);
       expect(find.text('copy user id'), findsOneWidget);
@@ -329,6 +335,7 @@ void main() {
     });
 
     for (final label in [
+      'mention',
       'message',
       'verify',
       'edit profile',
@@ -353,6 +360,7 @@ void main() {
             tester,
             trust: PersonTrust.unverified,
             canVerify: true,
+            onMention: label == 'mention' ? cb : null,
             onMessage: label == 'message' ? cb : null,
             onVerify: label == 'verify' ? cb : null,
             onEditProfile: label == 'edit profile' ? cb : null,

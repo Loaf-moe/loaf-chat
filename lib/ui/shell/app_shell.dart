@@ -1522,6 +1522,10 @@ class _AppShellState extends State<AppShell> {
     final isYou = member.id == _me.id;
     final real = member.bridge == null;
     final space = _home ? null : _space;
+    final channel = _channel;
+    final timeline = channel == null || channel.kind == ChannelKind.voice
+        ? null
+        : _rooms.timeline(channel.id);
     await showPersonMenu(
       context,
       member: member,
@@ -1530,6 +1534,12 @@ class _AppShellState extends State<AppShell> {
       trust: real ? _session.verifier.personTrust(member.id) : null,
       canVerify: _session.trust == DeviceTrust.verified,
       position: position,
+      onMention: !isYou && timeline != null && timeline.writable
+          ? () {
+              timeline.mention(member);
+              _scaffoldKey.currentState?.closeEndDrawer();
+            }
+          : null,
       onMessage: !isYou && real && _can(RoomAbility.startDirect)
           ? () => unawaited(_messagePerson(member))
           : null,

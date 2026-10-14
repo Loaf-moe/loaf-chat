@@ -12,7 +12,7 @@ import '../widgets/action_menu.dart';
 import '../widgets/toast.dart';
 import 'person_card.dart';
 
-enum _PersonAction { message, verify, copyId, editProfile, kick }
+enum _PersonAction { mention, message, verify, copyId, editProfile, kick }
 
 /// Each callback null leaves its item out; the caller knows who you are and
 /// what the room allows. [position] null opens a sheet instead of a menu.
@@ -23,12 +23,19 @@ Future<void> showPersonMenu(
   PersonTrust? trust,
   bool canVerify = false,
   Offset? position,
+  VoidCallback? onMention,
   VoidCallback? onMessage,
   VoidCallback? onVerify,
   VoidCallback? onEditProfile,
   ({String from, VoidCallback run})? kick,
 }) async {
   final items = [
+    if (onMention != null)
+      const ActionItem(
+        value: _PersonAction.mention,
+        icon: LucideIcons.atSign,
+        label: 'mention',
+      ),
     if (onMessage != null)
       const ActionItem(
         value: _PersonAction.message,
@@ -88,6 +95,8 @@ Future<void> showPersonMenu(
     );
   }
   switch (action) {
+    case _PersonAction.mention:
+      onMention!();
     case _PersonAction.message:
       onMessage!();
     case _PersonAction.verify:

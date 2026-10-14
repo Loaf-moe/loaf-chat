@@ -175,7 +175,10 @@ void main() {
   group('opening the author', () {
     const pat = Member('@x', 'Pat', Color(0xFF00FF00));
 
-    Future<List<(Member, Offset?)>> pump(WidgetTester tester) async {
+    Future<List<(Member, Offset?)>> pump(
+      WidgetTester tester, {
+      ValueChanged<Member>? onMention,
+    }) async {
       final opened = <(Member, Offset?)>[];
       await tester.pumpWidget(
         MaterialApp(
@@ -191,12 +194,52 @@ void main() {
                 ),
               ]),
               onPerson: (m, at) => opened.add((m, at)),
+              onMention: onMention,
             ),
           ),
         ),
       );
       return opened;
     }
+
+    testWidgets(
+      'on a computer, clicking the name mentions them',
+      variant: TargetPlatformVariant.desktop(),
+      (tester) async {
+        final mentioned = <Member>[];
+        final opened = await pump(tester, onMention: mentioned.add);
+        await tester.tap(find.text('Pat'));
+        expect(mentioned, [pat]);
+        expect(opened, isEmpty);
+      },
+    );
+
+    testWidgets(
+      'on a computer, right-clicking the name still opens the menu',
+      variant: TargetPlatformVariant.desktop(),
+      (tester) async {
+        final mentioned = <Member>[];
+        final opened = await pump(tester, onMention: mentioned.add);
+        await tester.tapAt(
+          tester.getCenter(find.text('Pat')),
+          buttons: kSecondaryButton,
+        );
+        expect(opened, hasLength(1));
+        expect(mentioned, isEmpty);
+      },
+    );
+
+    testWidgets(
+      'on a phone, tapping the name mentions them',
+      variant: TargetPlatformVariant.mobile(),
+      (tester) async {
+        final mentioned = <Member>[];
+        final opened = await pump(tester, onMention: mentioned.add);
+        await tester.tap(find.text('Pat'));
+        expect(mentioned, [pat]);
+        expect(opened, isEmpty);
+      },
+    );
 
     final avatar = find.byKey(const ValueKey('author-avatar'));
 

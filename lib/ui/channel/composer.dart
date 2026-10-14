@@ -103,6 +103,9 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
   /// starts in the text.
   Object? _query;
   int? _queryStart;
+
+  /// The last mention request taken, so a rebuild never inserts it twice.
+  MentionRequest? _seenMention;
   int _highlight = 0;
 
   /// Where the shortcode or mention Escape waved away starts. It stays
@@ -126,6 +129,8 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     // Coming back to a room still aimed at a reply or an edit: show it, since
     // that is what sending here would do.
     _target = widget.timeline?.target;
+    // A request made before this composer existed is not for it.
+    _seenMention = widget.timeline?.mentionRequest;
     if (_target case ComposerTarget(mode: ComposerMode.edit, :final message)) {
       _controller.text = message.body;
       _picked = mentionsOf(message);
@@ -247,21 +252,27 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
           selection: TextSelection.collapsed(offset: start + emoji.length),
         );
       case _MentionSuggestion(:final candidate):
-        final label = candidate.label;
-        // A space already after the cursor is the one to step over.
-        final spaced =
-            end < value.text.length && value.text[end].trim().isEmpty;
-        final text = value.text.replaceRange(
-          start,
-          end,
-          spaced ? label : '$label ',
-        );
-        _picked = [..._picked, candidate.mention];
-        _controller.value = TextEditingValue(
-          text: text,
-          selection: TextSelection.collapsed(offset: start + label.length + 1),
-        );
+        _insertMention(candidate, start, end);
     }
+  }
+
+  /// Puts [candidate]'s label over `[start, end)` of the text, a space after
+  /// it, and remembers the mention for sending.
+  void _insertMention(MentionCandidate candidate, int start, int end) {
+    final value = _controller.value;
+    final label = candidate.label;
+    // A space already after the cursor is the one to step over.
+    final spaced = end < value.text.length && value.text[end].trim().isEmpty;
+    final text = value.text.replaceRange(
+      start,
+      end,
+      spaced ? label : '$label ',
+    );
+    _picked = [..._picked, candidate.mention];
+    _controller.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: start + label.length + 1),
+    );
   }
 
   /// Arrow keys move through the suggestions, Enter or Tab takes one, and
@@ -430,6 +441,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     if (oldWidget.timeline != widget.timeline) {
       oldWidget.timeline?.removeListener(_onTimeline);
       widget.timeline?.addListener(_onTimeline);
+      _seenMention = widget.timeline?.mentionRequest;
     }
   }
 
@@ -437,6 +449,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
   /// and leaving an edit clears it again rather than stranding the old text.
   /// Either way the field takes focus, since typing is the next thing you do.
   void _onTimeline() {
+    _onMentionRequest();
     final next = widget.timeline?.target;
     if (identical(next, _target)) return;
     final wasEditing = _target?.mode == ComposerMode.edit;
@@ -450,6 +463,20 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
       _controller.clear();
     }
     if (next != null) _focus.requestFocus();
+  }
+
+  /// A new request goes in at the cursor, over any selection.
+  void _onMentionRequest() {
+    final request = widget.timeline?.mentionRequest;
+    if (request == null || identical(request, _seenMention)) return;
+    _seenMention = request;
+    final selection = _controller.selection;
+    final length = _controller.text.length;
+    final (start, end) = selection.isValid
+        ? (selection.start, selection.end)
+        : (length, length);
+    _insertMention(MentionCandidate.person(request.member), start, end);
+    _focus.requestFocus();
   }
 
   @override

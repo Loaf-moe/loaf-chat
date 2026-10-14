@@ -110,6 +110,11 @@ abstract interface class Timeline implements Listenable {
   void startEdit(Message message);
   void clearTarget();
 
+  /// The last person asked into the composer, from a name or a menu. A new
+  /// object each time: the composer tells requests apart by identity.
+  MentionRequest? get mentionRequest;
+  void mention(Member member);
+
   /// Posts [text], quoting the reply target if there is one. Blank text
   /// never sends. [mentions] are the people and channels picked into it,
   /// already narrowed to the ones [text] still holds: each goes as a pill,
@@ -148,12 +153,26 @@ abstract interface class Timeline implements Listenable {
   void discard(String messageId);
 }
 
+/// Someone to put into the composer as `@Name`.
+class MentionRequest {
+  MentionRequest(this.member);
+  final Member member;
+}
+
 /// The composer's aim, which is the same whatever the backend: it is what
 /// the person is doing, not anything the server knows.
 mixin ComposerAiming on ChangeNotifier {
   ComposerTarget? _target;
+  MentionRequest? _mentionRequest;
 
   ComposerTarget? get target => _target;
+
+  MentionRequest? get mentionRequest => _mentionRequest;
+
+  void mention(Member member) {
+    _mentionRequest = MentionRequest(member);
+    notifyListeners();
+  }
 
   void startReply(Message message) =>
       aim(ComposerTarget(ComposerMode.reply, message));

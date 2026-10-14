@@ -158,6 +158,9 @@ class ChannelView extends StatelessWidget {
                         controller: timeline!,
                         onRead: onRead,
                         onPerson: onPerson,
+                        onMention: timeline!.writable
+                            ? timeline!.mention
+                            : null,
                       ),
                     ),
                   ],
@@ -372,11 +375,13 @@ class _Timeline extends StatefulWidget {
     required this.controller,
     this.onRead,
     this.onPerson,
+    this.onMention,
   });
 
   final Timeline controller;
   final VoidCallback? onRead;
   final void Function(Member member, Offset? position)? onPerson;
+  final ValueChanged<Member>? onMention;
 
   @override
   State<_Timeline> createState() => _TimelineState();
@@ -712,6 +717,7 @@ class _TimelineState extends State<_Timeline> {
                 ? (id: split, key: _focusKey, lit: _lit)
                 : null,
             onPerson: widget.onPerson,
+            onMention: widget.onMention,
           ),
         ),
       },
