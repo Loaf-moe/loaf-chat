@@ -1116,7 +1116,7 @@ class _MentionController extends TextEditingController {
     final unsettled = composing.isValid && !composing.isCollapsed;
     _rangesKey = key;
     return _ranges = [
-      for (final r in mentionRanges(text, mentionsIn(text, _mentions)))
+      for (final r in mentionRanges(text, _mentions))
         if (!unsettled || r.end <= composing.start || r.start >= composing.end)
           TextRange(start: r.start, end: r.end),
     ];

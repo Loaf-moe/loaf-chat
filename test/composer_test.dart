@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/channel/composer.dart';
+import 'package:loaf_native/ui/channel/mention_pill.dart';
 import 'package:loaf_native/ui/channel/timeline_controller.dart';
 import 'package:loaf_native/ui/mock/fixtures.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -638,12 +639,25 @@ void main() {
               w.painter.runtimeType.toString() == '_PillPainter',
         ),
       );
-      // Clipped to the field before any pill is drawn.
+      // Scrolled to the end, the first line's pill sits above the field;
+      // the clip, set before any pill is drawn, keeps it inside, with only
+      // the pill's own padding of room either side.
+      final size = pills.size;
       expect(
         pills,
         paints
-          ..clipRect()
-          ..rrect(),
+          ..clipRect(
+            rect: Rect.fromLTRB(
+              -mentionPillPadX,
+              0,
+              size.width + mentionPillPadX,
+              size.height,
+            ),
+          )
+          ..something(
+            (method, args) =>
+                method == #drawRRect && (args.first as RRect).top < 0,
+          ),
       );
     });
 
