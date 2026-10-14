@@ -10,7 +10,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../window/window_chrome.dart';
-import 'call_controller.dart';
+import 'calls.dart';
 import 'call_view.dart';
 
 class DmCallPanel extends StatefulWidget {
@@ -21,7 +21,7 @@ class DmCallPanel extends StatefulWidget {
     required this.onToggleExpanded,
   });
 
-  final CallController calls;
+  final Calls calls;
 
   /// Fills the conversation. The caller lays the panel out accordingly:
   /// expanded, it takes the space the timeline and composer had.

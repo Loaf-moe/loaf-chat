@@ -1,12 +1,43 @@
 import 'package:flutter/foundation.dart';
 
-/// A new message that should notify you: which room, and which event.
+import 'models.dart';
+
+/// What a message is, as far as a notification says: its text, a
+/// picture, a file, or something not yet decrypted.
+enum ArrivalKind { text, picture, file, encrypted }
+
+/// A new message that should notify you: which room and event, and what a
+/// notification needs to say about it. The same message is the same
+/// arrival, whatever was read off it.
 @immutable
 class Arrival {
-  const Arrival({required this.roomId, required this.eventId});
+  const Arrival({
+    required this.roomId,
+    required this.eventId,
+    this.senderId = '',
+    this.senderName = '',
+    this.senderAvatar,
+    this.kind = ArrivalKind.text,
+    this.text = '',
+    this.sentAt,
+  });
 
   final String roomId;
   final String eventId;
+  final String senderId;
+
+  /// Their display name in the room; empty when there is none.
+  final String senderName;
+  final AvatarRef? senderAvatar;
+  final ArrivalKind kind;
+
+  /// The message as plain text, reply quote left out. Only for
+  /// [ArrivalKind.text].
+  final String text;
+
+  /// When the message was sent, by its server; what a read receipt's time
+  /// is held against.
+  final DateTime? sentAt;
 
   @override
   bool operator ==(Object other) =>

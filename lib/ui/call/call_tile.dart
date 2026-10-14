@@ -9,7 +9,8 @@ import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
-import 'call_controller.dart';
+import '../widgets/speaking_ring.dart';
+import 'calls.dart';
 
 /// What a tile draws. Built from a [CallParticipant], or from your own
 /// state for your own tile.
@@ -24,17 +25,20 @@ class TileInfo {
     this.screen = false,
     this.speaking = false,
     this.ring,
+    this.silenced,
   });
 
   TileInfo.of(CallParticipant p)
     : this(
         p.member,
-        muted: p.muted,
-        deafened: p.deafened,
+        // A moderator's silence shows as the state it puts them in.
+        muted: p.muted || p.silenced != null,
+        deafened: p.deafened || p.silenced == CallSilence.deafened,
         camera: p.camera,
         screen: p.screen,
         speaking: p.speaking,
         ring: p.ring,
+        silenced: p.silenced,
       );
 
   final Member member;
@@ -45,6 +49,10 @@ class TileInfo {
   final bool screen;
   final bool speaking;
   final RingState? ring;
+
+  /// What a moderator has put on them, if anything. [muted] and [deafened]
+  /// already say so; this says whose doing it is.
+  final CallSilence? silenced;
 
   String get id => member.id;
 
@@ -116,8 +124,8 @@ class _CallTileState extends State<CallTile> {
               color: tokens.sunken,
               child: Center(
                 child: ring == RingState.ringing
-                    ? Pulse(child: _avatar(info.member))
-                    : _avatar(info.member),
+                    ? Pulse(child: _avatar(info.member, playing: false))
+                    : _avatar(info.member, playing: info.speaking && !faded),
               ),
             ),
           Positioned(
@@ -157,16 +165,10 @@ class _CallTileState extends State<CallTile> {
       ),
     );
 
-    body = AnimatedContainer(
-      duration: LoafMotion.fast,
-      curve: LoafMotion.ease,
-      foregroundDecoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(LoafRadius.xl),
-        border: Border.all(
-          color: info.speaking && !faded ? tokens.online : Colors.transparent,
-          width: 3,
-        ),
-      ),
+    body = SpeakingRing(
+      speaking: info.speaking && !faded,
+      radius: LoafRadius.xl,
+      width: 3,
       child: AnimatedOpacity(
         duration: LoafMotion.normal,
         opacity: faded ? 0.45 : 1,
@@ -197,7 +199,8 @@ class _CallTileState extends State<CallTile> {
     );
   }
 
-  Widget _avatar(Member member) => LayoutBuilder(
+  /// [playing] draws the upload itself, so a GIF moves with their voice.
+  Widget _avatar(Member member, {required bool playing}) => LayoutBuilder(
     builder: (context, constraints) {
       final size = (constraints.biggest.shortestSide * 0.42).clamp(28.0, 96.0);
       return LoafAvatar(
@@ -205,6 +208,7 @@ class _CallTileState extends State<CallTile> {
         color: member.color,
         size: size,
         image: member.avatar,
+        original: playing,
         textStyle: loafBody(size * 0.36, 600),
       );
     },
@@ -262,22 +266,32 @@ class _NameChip extends StatelessWidget {
               style: loafBody(size, 400).copyWith(color: tokens.onRail),
             ),
           ],
-          if (info.deafened) ...[
+          if (info.deafened || info.muted) ...[
             const SizedBox(width: 4),
-            Icon(
-              LucideIcons.headphoneOff,
-              size: iconSize,
-              color: tokens.accent,
+            _forEveryone(
+              info,
+              Icon(
+                info.deafened ? LucideIcons.headphoneOff : LucideIcons.micOff,
+                size: iconSize,
+                color: tokens.accent,
+              ),
             ),
-          ] else if (info.muted) ...[
-            const SizedBox(width: 4),
-            Icon(LucideIcons.micOff, size: iconSize, color: tokens.accent),
           ],
         ],
       ),
     );
   }
 }
+
+/// [icon] saying on hover that someone did it for everyone, where one did.
+Widget _forEveryone(TileInfo info, Widget icon) => switch (info.silenced) {
+  null => icon,
+  CallSilence.muted => Tooltip(message: 'Muted for everyone', child: icon),
+  CallSilence.deafened => Tooltip(
+    message: 'Deafened for everyone',
+    child: icon,
+  ),
+};
 
 class _CornerButton extends StatelessWidget {
   const _CornerButton({

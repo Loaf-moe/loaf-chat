@@ -74,6 +74,11 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# These plugins take this file's -Werror through apply_standard_settings,
+# and their sources warn under newer clangs.
+target_compile_options(flutter_webrtc_plugin PRIVATE -Wno-error)
+target_compile_options(livekit_client_plugin PRIVATE -Wno-error)
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build
@@ -99,6 +104,11 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
+
+if(TARGET gdk-wayland-stub)
+  install(TARGETS gdk-wayland-stub LIBRARY DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()
 
 foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
   install(FILES "${bundled_library}"

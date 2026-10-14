@@ -168,6 +168,24 @@ void main() {
     expect(shown.color, tokens.textBody);
   });
 
+  testWidgets('a link inside a spoiler opens only once it is shown', (
+    tester,
+  ) async {
+    final opened = _captureLinks();
+    await _pump(
+      tester,
+      formatted: 'see <span data-mx-spoiler>https://loaf.moe/end</span>',
+      body: 'see https://loaf.moe/end',
+    );
+    await tester.tapAt(_centreOf(tester, 'https://loaf.moe/end'));
+    await tester.pumpAndSettle();
+    expect(opened, isEmpty);
+
+    await tester.tapAt(_centreOf(tester, 'https://loaf.moe/end'));
+    await tester.pumpAndSettle();
+    expect(opened, [Uri.parse('https://loaf.moe/end')]);
+  });
+
   testWidgets('code, quotes and lists draw as blocks', (tester) async {
     await _pump(
       tester,

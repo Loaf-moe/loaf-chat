@@ -32,6 +32,13 @@ abstract final class LoafMedia {
   static Future<void> playChime(String asset) =>
       _channel.invokeMethod<void>('chime.play', {'asset': asset});
 
+  /// iOS: whether a call has the audio session. While one does, an inline
+  /// video with its sound on leaves the session as the call set it.
+  static Future<void> callHoldsAudio(bool holds) async {
+    if (defaultTargetPlatform != TargetPlatform.iOS) return;
+    await _channel.invokeMethod<void>('audio.call', {'active': holds});
+  }
+
   /// Whether the clipboard holds a picture or files. It reads neither, so
   /// asking is cheap and, on iOS, shows no "Allow Paste" prompt. The three
   /// clipboard calls are for macOS, iOS and Linux, and carry a map since the

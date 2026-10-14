@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/mock/fixtures.dart';
 import 'package:loaf_native/ui/mock/mock_rooms.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
 import 'package:loaf_native/ui/model/chime.dart';
+import 'package:loaf_native/ui/model/desktop_notifications.dart';
 import 'package:loaf_native/ui/settings/notification_settings.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
@@ -28,6 +30,7 @@ class _Rooms extends MockRooms {
 void main() {
   late _Rooms rooms;
   late FakeChime chime;
+  late FakeDesktopNotifications desktop;
   late NotificationController notifications;
   var n = 0;
 
@@ -37,9 +40,11 @@ void main() {
     addTearDown(tester.view.reset);
     rooms = _Rooms();
     chime = FakeChime();
+    desktop = FakeDesktopNotifications();
     notifications = await NotificationController.load(
       MemoryNotificationStore(),
       chime: chime,
+      desktop: desktop,
     );
     await tester.pumpWidget(
       NotificationScope(
@@ -100,5 +105,35 @@ void main() {
     await tester.pumpAndSettle();
     await arrive(tester, id);
     expect(chime.plays, 1);
+  });
+
+  testWidgets('on a desktop the shell prepares notifications as it opens', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      await pump(tester);
+      expect(desktop.prepared, 1);
+    } finally {
+      // Not addTearDown: the binding checks this before teardowns run.
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('in the background, a message becomes a notification', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      await pump(tester);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await arrive(tester, openId());
+      await tester.pump();
+      expect(desktop.shown.single.route.roomId, openId());
+      expect(chime.plays, 0);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 }

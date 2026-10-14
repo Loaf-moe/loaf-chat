@@ -4,26 +4,38 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 // The SDK has a Presence and a Timeline of its own; loaf's are the ones the
 // UI draws.
 import 'package:matrix/matrix.dart' hide Presence, Profile, Timeline;
+import 'package:path_provider/path_provider.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show DatabaseException;
 
 import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
 import '../ui/model/arrival.dart';
+import '../ui/model/message_route.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/settings/devices.dart';
+import '../ui/settings/voice_settings.dart';
 import '../ui/shell/profile.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
-import '../ui/widgets/avatar_images.dart';
+import '../ui/call/calls.dart';
+import 'bridges.dart';
+import 'call_media.dart';
+import 'call_members.dart';
+import 'call_silence.dart';
+import 'matrix_calls.dart';
 import 'matrix_avatar_images.dart';
 import 'matrix_hierarchy.dart';
 import 'matrix_devices.dart';
+import 'matrix_link_previews.dart';
 import 'matrix_media.dart';
 import 'matrix_profile.dart';
 import 'matrix_space_directory.dart';
@@ -31,6 +43,7 @@ import 'matrix_timeline.dart';
 import 'matrix_arrivals.dart';
 import 'matrix_unread.dart';
 import 'media_store.dart';
+import 'unread_rules.dart';
 import 'unread_tally.dart';
 
 /// `m.room.create` types that make a room a voice channel: Element's video
@@ -40,13 +53,13 @@ const _voiceTypes = {'m.call', 'org.matrix.msc3417.call'};
 /// What a row should show while its change is on its way. A field is
 /// cleared when a sync shows it, or when its call fails.
 class _Wish {
-  bool? muted;
+  NotifyLevel? notify;
   bool? favourite;
   double? favouriteOrder;
   bool? lowPriority;
   bool? joined;
   bool get isEmpty =>
-      muted == null &&
+      notify == null &&
       favourite == null &&
       favouriteOrder == null &&
       lowPriority == null &&
@@ -57,9 +70,16 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   MatrixRooms(
     this.client, {
     this._mediaRoot,
+    this._callMedia,
+    this._voice,
+    this._voiceApplying,
     this.externalMedia,
     @visibleForTesting this._now,
-  }) {
+    @visibleForTesting Duration? warmAvatarsAfter,
+  }) : avatarImages = MatrixAvatarImages(
+         client,
+         warmAfter: warmAvatarsAfter ?? MatrixAvatarImages.defaultWarmAfter,
+       ) {
     _hierarchy = MatrixHierarchy(
       client,
       onChange: () {
@@ -72,6 +92,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       // `SyncStatus.finished` would miss those.
       client.onSync.stream.listen(_onSync),
       client.onSyncStatus.stream.listen(_onStatus),
+      client.onRoomState.stream.listen(_onRoomState),
     ];
     // A restored session has synced before; its rooms are already here.
     _synced = client.prevBatch != null;
@@ -84,6 +105,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final status = client.onSyncStatus.value;
     if (status != null) _onStatus(status);
     unawaited(_loadMe());
+    unawaited(_loadStoredCalls());
   }
 
   final Client client;
@@ -91,8 +113,63 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// The messages that may notify, from the moment the rooms open.
   late final MatrixArrivals _arrivals = MatrixArrivals(client, now: _now);
 
+  /// The thumbnail the rail draws, from the SDK's file store or the server,
+  /// written once to the temp directory under a hash of its uri. A slow
+  /// server gives no picture rather than a late notification.
+  @override
+  Future<String?> noticeAvatar(AvatarRef ref) async {
+    final mxc = Uri.tryParse(ref.value);
+    if (mxc == null || !mxc.isScheme('mxc')) return null;
+    try {
+      final bytes = await MxcImage(
+        client,
+        mxc,
+        size: avatarBuckets[1],
+      ).bytes().timeout(const Duration(seconds: 2));
+      final dir = Directory(
+        '${(await getTemporaryDirectory()).path}'
+        '${Platform.pathSeparator}loaf-notice-avatars',
+      );
+      await dir.create(recursive: true);
+      final name = sha256.convert(utf8.encode(ref.value)).toString();
+      // A picture Windows can't name by extension is no picture.
+      final ext = imageExtension(bytes);
+      if (ext == null) return null;
+      final file = File('${dir.path}${Platform.pathSeparator}$name.$ext');
+      if (!await file.exists()) {
+        // Written beside, then renamed in: a reader (the OS, reading the
+        // toast's picture) never sees half a file.
+        final part = File('${file.path}.${bytes.hashCode}.part');
+        await part.writeAsBytes(bytes, flush: true);
+        await part.rename(file.path);
+      }
+      return file.path;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Windows reads a toast's picture by its extension, so this names the
+  /// format by its magic bytes; null when it is none of the four.
+  @visibleForTesting
+  static String? imageExtension(Uint8List b) {
+    bool at(int i, List<int> m) =>
+        b.length >= i + m.length &&
+        [for (var k = 0; k < m.length; k++) b[i + k] == m[k]].every((x) => x);
+    if (at(0, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) return 'png';
+    if (at(0, [0xFF, 0xD8, 0xFF])) return 'jpg';
+    if (at(0, [0x47, 0x49, 0x46, 0x38])) return 'gif';
+    if (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])) {
+      return 'webp';
+    }
+    return null;
+  }
+
   @override
   Stream<Arrival> get arrivals => _arrivals.stream;
+
+  @override
+  Stream<MessageRoute> get retractions => _arrivals.retractions;
 
   /// A space's children the SDK doesn't have state for: unjoined channels,
   /// and the children of an unjoined subspace. The hierarchy cache: the
@@ -129,10 +206,38 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   var _disposed = false;
   final Directory? _mediaRoot;
 
-  /// The clock the unread counts back off by; tests move it.
+  /// What carries a call's audio. Null: this build has no calls.
+  final CallMedia? _callMedia;
+
+  /// The microphone and the speaker a call uses. Null: the system's
+  /// defaults.
+  final ValueListenable<VoiceSettings>? _voice;
+  final ValueNotifier<bool>? _voiceApplying;
+  MatrixCalls? _calls;
+
+  @override
+  Calls? get calls => switch (_callMedia) {
+    final media? => _calls ??= MatrixCalls(
+      client,
+      media,
+      occupants: _occupants,
+      me: () => me,
+      voice: _voice,
+      voiceApplying: _voiceApplying,
+      now: _now,
+    ),
+    null => null,
+  };
+
+  /// The clock the unread counts back off by, and call memberships run out
+  /// by; tests move it.
   final DateTime Function()? _now;
 
-  /// Whether files linked on other sites are shown. Null: they are.
+  /// Fires when the next call membership runs out, since no sync says so.
+  Timer? _callExpiry;
+
+  /// Whether files linked on other sites are shown, and links previewed.
+  /// Null: they are.
   final ValueListenable<bool>? externalMedia;
 
   var _synced = false;
@@ -182,17 +287,20 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   final _generation = <(String, String), int>{};
 
   @override
-  Set<RoomAbility> get abilities => const {
+  Set<RoomAbility> get abilities => {
+    if (_callMedia != null) RoomAbility.calls,
     RoomAbility.answerInvites,
     RoomAbility.messages,
     RoomAbility.markRead,
-    RoomAbility.mute,
+    RoomAbility.notify,
     RoomAbility.tag,
     RoomAbility.join,
     RoomAbility.leave,
     RoomAbility.addSpace,
     RoomAbility.startDirect,
     RoomAbility.invite,
+    RoomAbility.kick,
+    RoomAbility.silence,
     RoomAbility.editProfile,
     RoomAbility.devices,
   };
@@ -204,13 +312,22 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   double? get syncProgress => _progress;
 
   @override
-  late final AvatarImages avatarImages = MatrixAvatarImages(client);
+  final MatrixAvatarImages avatarImages;
 
   @override
   MatrixMediaSource get media =>
       _media ??= _disposed ? MatrixMediaSource.closed(client) : _openMedia();
 
   MatrixMediaSource? _media;
+
+  @override
+  MatrixLinkPreviews get linkPreviews {
+    final made = _linkPreviews ??= MatrixLinkPreviews(client, now: _now);
+    if (_disposed) made.dispose();
+    return made;
+  }
+
+  MatrixLinkPreviews? _linkPreviews;
 
   /// Files are kept in the SDK's own storage folder, which sign-out already
   /// clears. With none (some tests), every file fails with "no media folder".
@@ -274,7 +391,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final profile = _profile;
     // A profile nobody asked for has nothing to add.
     if (profile == null) return _baseMe;
-    return _baseMe.copyWith(name: profile.loadedName, avatar: profile.avatar);
+    final avatar = profile.avatar;
+    if (avatar != null) avatarImages.warm(avatar);
+    return _baseMe.copyWith(name: profile.loadedName, avatar: avatar);
   }
 
   @override
@@ -302,6 +421,46 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _synced = true;
     _progress = null;
     _rebuild();
+  }
+
+  /// The member event of someone in a call, fetched because the room had
+  /// not loaded it: it names them, or says they are not in the room. No sync
+  /// follows it.
+  void _onRoomState(({String roomId, StrippedStateEvent state}) update) {
+    if (update.state.type != EventTypes.RoomMember) return;
+    final room = client.getRoomById(update.roomId);
+    if (room == null || !_isVoice(room)) return;
+    if (!_call(room).userIds.contains(update.state.stateKey)) return;
+    _rebuild();
+  }
+
+  /// Call memberships synced before they were among the state kept in
+  /// memory sit where the SDK loads them only for a room that is opened.
+  Future<void> _loadStoredCalls() async {
+    var found = false;
+    for (final room in client.rooms.toList()) {
+      if (_disposed) return;
+      if (room.membership != Membership.join || !_isVoice(room)) continue;
+      final List<Event> stored;
+      try {
+        stored = await client.database.getUnimportantRoomEventStatesForRoom(
+          const [],
+          room,
+        );
+      } on DatabaseException {
+        // Signing out closes the database under a read in flight.
+        if (_disposed) return;
+        rethrow;
+      }
+      for (final event in stored) {
+        final key = event.stateKey;
+        if (event.type != callMemberType || key == null) continue;
+        if (room.getState(callMemberType, key) != null) continue;
+        room.setState(event);
+        found = true;
+      }
+    }
+    if (found && !_disposed) _rebuild();
   }
 
   void _onStatus(SyncStatusUpdate update) {
@@ -384,6 +543,16 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     for (final room in client.rooms) {
       if (room.membership == Membership.invite) _loadInvite(room);
     }
+    final expiries = [
+      for (final room in joined.values)
+        if (_isVoice(room)) ?_call(room).nextExpiry,
+    ]..sort();
+    _callExpiry?.cancel();
+    _callExpiry = expiries.isEmpty
+        ? null
+        : Timer(expiries.first.difference((_now ?? DateTime.now)()), () {
+            if (!_disposed) _rebuild();
+          });
     _notify();
   }
 
@@ -395,10 +564,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     for (final id in _wishes.keys.toList()) {
       final wish = _wishes[id]!;
       final room = client.getRoomById(id);
-      if (wish.muted != null &&
+      if (wish.notify != null &&
           room != null &&
-          (room.pushRuleState != PushRuleState.notify) == wish.muted) {
-        wish.muted = null;
+          _levelOf(room.pushRuleState) == wish.notify) {
+        wish.notify = null;
       }
       if (wish.favourite != null &&
           room != null &&
@@ -425,18 +594,31 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   /// Brings back an invite's own membership event and its inviter, which a
   /// relaunch leaves on disk: without them a DM invite reads as a room, the
-  /// inviter as nobody, and accepting skips `m.direct`. The SDK's own
-  /// `loadHeroUsers` does exactly this for invites, from the database first.
+  /// inviter as nobody, and accepting skips `m.direct`. Your own event
+  /// comes from memory or the store, never the server: a server asked about
+  /// a room you are not in answers with nothing true, and an answer landing
+  /// after the sync's own event would replace it.
   void _loadInvite(Room room) {
     if (!_invitesLoaded.add(room.id)) return;
     unawaited(
-      room
-          .loadHeroUsers()
+      _inviteMembers(room)
           .then<void>((_) {}, onError: (Object _) {})
           .whenComplete(() {
             if (!_disposed) _rebuild();
           }),
     );
+  }
+
+  Future<void> _inviteMembers(Room room) async {
+    final me = client.userID!;
+    var mine = room.getState(EventTypes.RoomMember, me)?.asUser(room);
+    if (mine == null) {
+      mine = await client.database.getUser(me, room);
+      if (mine != null) room.setState(mine);
+    }
+    final inviter = mine?.senderId;
+    if (inviter == null || inviter == me) return;
+    await room.requestUser(inviter, ignoreErrors: true, requestState: false);
   }
 
   Space _space(Room space, Map<String, Room> joined) {
@@ -563,11 +745,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   }
 
   Channel _channel(Room room, {bool home = false}) {
-    final type = room
-        .getState(EventTypes.RoomCreate)
-        ?.content
-        .tryGet<String>('type');
-    final kind = _voiceTypes.contains(type)
+    final kind = _isVoice(room)
         ? ChannelKind.voice
         : !home
         ? ChannelKind.text
@@ -592,7 +770,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         JoinRules.knock,
       }.contains(room.joinRules),
       topic: topic.isEmpty ? null : topic,
-      muted: room.pushRuleState != PushRuleState.notify,
+      notify: _levelOf(room.pushRuleState),
       members: switch (kind) {
         ChannelKind.direct => _others(room),
         ChannelKind.room => _members(room),
@@ -602,17 +780,57 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       favouriteOrder: favourite?.order,
       lowPriority: room.isLowPriority,
       lastActivity: room.latestEventReceivedTime,
+      read: switch (ownReceipt(room)) {
+        final own? => ReadMark(
+          eventId: own.eventId,
+          at: DateTime.fromMillisecondsSinceEpoch(own.ts),
+        ),
+        null => null,
+      },
+      occupants: kind == ChannelKind.voice
+          ? [for (final occupant in _occupants(room)) occupant.member]
+          : const [],
+      silenced: kind == ChannelKind.voice
+          ? callSilences(callModeration(room))
+          : const {},
+      canSilence: room.canChangeStateEvent(callSilenceType),
     );
     final wish = _wishes[room.id];
     if (wish == null) return channel;
     return channel.copyWith(
-      muted: wish.muted,
+      notify: wish.notify,
       favourite: wish.favourite,
       favouriteOrder: wish.favouriteOrder,
       lowPriority: wish.lowPriority,
       joined: wish.joined,
     );
   }
+
+  bool _isVoice(Room room) => _voiceTypes.contains(
+    room.getState(EventTypes.RoomCreate)?.content.tryGet<String>('type'),
+  );
+
+  /// Whether the room knows [userId] to be out of it. Someone it has not
+  /// loaded counts as in: [_member] asks for them, and [_onRoomState] hears.
+  bool _notInRoom(Room room, String userId) {
+    final member = room.getState(EventTypes.RoomMember, userId);
+    return member != null && member.asUser(room).membership != Membership.join;
+  }
+
+  /// Who is in [room]'s call, and on which devices.
+  List<CallOccupant> _occupants(Room room) {
+    final call = _call(room);
+    return [
+      for (final id in call.userIds)
+        if (!_notInRoom(room, id))
+          (member: _member(room, id), devices: call.devices[id]!),
+    ];
+  }
+
+  CallOccupancy _call(Room room) => callOccupancy(
+    (room.states[callMemberType]?.values ?? const []).whereType<Event>(),
+    (_now ?? DateTime.now)(),
+  );
 
   /// Whoever the room has in memory; [loadMembers] fills in the rest.
   List<Member> _members(Room room) => [
@@ -635,13 +853,16 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   Member _member(Room room, String userId) {
     final user = room.unsafeGetUserFromMemoryOrFallback(userId);
+    final avatar = AvatarRef.maybe(user.avatarUrl?.toString());
+    if (avatar != null) avatarImages.warm(avatar);
     return Member(
       userId,
       user.calcDisplayname(),
       spaceColorFor(userId),
       presence: Presence.unknown,
       powerLevel: room.getPowerLevelByUserId(userId).level,
-      avatar: AvatarRef.maybe(user.avatarUrl?.toString()),
+      avatar: avatar,
+      bridge: bridgeOf(userId),
     );
   }
 
@@ -758,6 +979,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final last = room?.lastEvent;
     // Your own message still on its way has no event id to mark.
     if (room == null || last == null || !last.status.isSent) return;
+    _unread.readToLast(roomId);
     if (_unread.of(roomId).isEmpty && room.fullyRead == last.eventId) return;
     if (!_reading.add(roomId)) {
       _readAgain.add(roomId);
@@ -821,17 +1043,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
-  Future<void> setMuted(String roomId, bool muted) {
+  Future<void> setNotify(String roomId, NotifyLevel level) {
     final room = client.getRoomById(roomId);
     if (room == null) return Future.value();
     return _wished(
       roomId,
-      'muted',
-      (wish) => wish.muted = muted,
-      (wish) => wish.muted = null,
-      () => room.setPushRuleState(
-        muted ? PushRuleState.dontNotify : PushRuleState.notify,
-      ),
+      'notify',
+      (wish) => wish.notify = level,
+      (wish) => wish.notify = null,
+      () => room.setPushRuleState(_stateOf(level)),
     );
   }
 
@@ -1034,41 +1254,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   Future<void> leaveSpace(String spaceId) async {
     final space = client.getRoomById(spaceId);
     if (space == null) return;
-
-    final joinedSpaces = [
-      for (final room in client.rooms)
-        if (room.isSpace && room.membership == Membership.join) room,
-    ];
-    final childIds = {
-      for (final s in joinedSpaces)
-        for (final c in s.spaceChildren) ?c.roomId,
-    };
-    final otherTops = [
-      for (final s in joinedSpaces)
-        if (s.id != spaceId && !childIds.contains(s.id)) s,
-    ];
-    final protected = <String>{};
-    for (final top in otherTops) {
-      protected.addAll(_listedRoomIds(top, {}));
-    }
-
-    final descendants = <String>{};
-    void collect(Room room, Set<String> seen) {
-      if (!seen.add(room.id) || !room.isSpace) return;
-      for (final child in room.spaceChildren) {
-        final id = child.roomId;
-        if (id == null) continue;
-        final childRoom = client.getRoomById(id);
-        if (childRoom == null || childRoom.membership != Membership.join) {
-          continue;
-        }
-        if (childRoom.isSpace) collect(childRoom, seen);
-        if (!protected.contains(id)) descendants.add(id);
-      }
-    }
-
-    collect(space, {});
-    final order = [...descendants, spaceId];
+    final order = _spaceOrder(space);
 
     for (final id in order) {
       _wishes.putIfAbsent(id, _Wish.new).joined = false;
@@ -1093,6 +1279,70 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _invalidateHierarchies();
     if (!_disposed) _rebuild();
     if (missing.isNotEmpty) throw PartlyDone(missing: missing);
+  }
+
+  @override
+  Future<void> kickFromSpace(String spaceId, String userId) async {
+    final space = client.getRoomById(spaceId);
+    if (space == null) return;
+    final missing = <String>[];
+    for (final id in _spaceOrder(space)) {
+      final room = client.getRoomById(id);
+      if (room == null) continue;
+      try {
+        // Member state is not in memory until asked for.
+        final members = await room.requestParticipants(
+          const [Membership.join],
+          true,
+          true,
+        );
+        if (!members.any((u) => u.id == userId)) continue;
+        await room.kick(userId);
+      } on Object {
+        missing.add(room.getLocalizedDisplayname());
+      }
+    }
+    if (missing.isNotEmpty) throw PartlyDone(missing: missing);
+  }
+
+  /// Every joined room under [space], deepest first, then the space: the
+  /// order to leave or kick in. Rooms another joined top-level space also
+  /// lists, at any depth, are left out.
+  List<String> _spaceOrder(Room space) {
+    final joinedSpaces = [
+      for (final room in client.rooms)
+        if (room.isSpace && room.membership == Membership.join) room,
+    ];
+    final childIds = {
+      for (final s in joinedSpaces)
+        for (final c in s.spaceChildren) ?c.roomId,
+    };
+    final otherTops = [
+      for (final s in joinedSpaces)
+        if (s.id != space.id && !childIds.contains(s.id)) s,
+    ];
+    final protected = <String>{};
+    for (final top in otherTops) {
+      protected.addAll(_listedRoomIds(top, {}));
+    }
+
+    final descendants = <String>{};
+    void collect(Room room, Set<String> seen) {
+      if (!seen.add(room.id) || !room.isSpace) return;
+      for (final child in room.spaceChildren) {
+        final id = child.roomId;
+        if (id == null) continue;
+        final childRoom = client.getRoomById(id);
+        if (childRoom == null || childRoom.membership != Membership.join) {
+          continue;
+        }
+        if (childRoom.isSpace) collect(childRoom, seen);
+        if (!protected.contains(id)) descendants.add(id);
+      }
+    }
+
+    collect(space, {});
+    return [...descendants, space.id];
   }
 
   /// Every room [space] lists, at any depth, through joined rooms only —
@@ -1225,6 +1475,29 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     return _home.firstWhere((c) => c.id == roomId);
   }
 
+  @override
+  Future<void> hangUp(String roomId, String userId) {
+    final room = client.getRoomById(roomId);
+    final current = room == null
+        ? null
+        : callSilences(callModeration(room))[userId];
+    return client.setRoomStateWithKey(
+      roomId,
+      callSilenceType,
+      callSilenceKey(userId),
+      callHangUpContent(current),
+    );
+  }
+
+  @override
+  Future<void> silence(String roomId, String userId, CallSilence? to) =>
+      client.setRoomStateWithKey(
+        roomId,
+        callSilenceType,
+        callSilenceKey(userId),
+        callSilenceContent(to),
+      );
+
   /// Invites everyone in [userIds] to [roomId], one at a time. Throws
   /// [InviteRefused] naming whoever the server turned down; everyone else
   /// still went through.
@@ -1250,6 +1523,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   @override
   void dispose() {
     _disposed = true;
+    avatarImages.dispose();
+    _callExpiry?.cancel();
+    _calls?.dispose();
     for (final s in _subscriptions) {
       unawaited(s.cancel());
     }
@@ -1262,6 +1538,19 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _profile?.dispose();
     _devices?.dispose();
     _media?.dispose();
+    _linkPreviews?.dispose();
     super.dispose();
   }
 }
+
+NotifyLevel _levelOf(PushRuleState state) => switch (state) {
+  PushRuleState.notify => NotifyLevel.all,
+  PushRuleState.mentionsOnly => NotifyLevel.mentions,
+  PushRuleState.dontNotify => NotifyLevel.none,
+};
+
+PushRuleState _stateOf(NotifyLevel level) => switch (level) {
+  NotifyLevel.all => PushRuleState.notify,
+  NotifyLevel.mentions => PushRuleState.mentionsOnly,
+  NotifyLevel.none => PushRuleState.dontNotify,
+};

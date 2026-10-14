@@ -7,12 +7,19 @@
 library;
 
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:loaf_media/loaf_media.dart';
 
+import '../call/call_audio_hold.dart';
 import '../call/call_controller.dart';
+import '../call/call_health.dart';
+import '../call/call_sounds.dart';
+import '../call/call_tile.dart';
+import '../call/call_view.dart';
 import '../call/connected_call_bar.dart';
 import '../call/dm_call_panel.dart';
 import '../call/incoming_call_card.dart';
@@ -25,11 +32,12 @@ import '../spaces/add_space.dart';
 import '../home/invite_preview.dart';
 import '../members/invite_panel.dart';
 import '../members/member_list.dart';
-import '../members/person_card.dart';
+import '../members/person_menu.dart';
 import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
 import '../mock/mock_rooms.dart';
+import 'noticer.dart';
 import 'notifier.dart';
 import '../channel/timeline.dart' show messageUnavailable;
 import '../model/message_route.dart';
@@ -44,6 +52,7 @@ import '../mock/mock_session.dart';
 import '../verify/verification_controller.dart';
 import '../verify/verify_panel.dart';
 import '../verify/verify_state.dart';
+import '../model/link_previews.dart';
 import '../model/media_source.dart';
 import '../widgets/avatar_images.dart';
 import '../widgets/toast.dart';
@@ -57,6 +66,7 @@ import 'profile.dart';
 import 'profile_controller.dart';
 import 'shell_faces.dart';
 import 'space_actions.dart';
+import 'before_quit.dart';
 import 'status_picker.dart';
 import 'spaces_rail.dart';
 import 'user_bar.dart';
@@ -71,6 +81,7 @@ class AppShell extends StatefulWidget {
     this.rooms,
     this.updater,
     this.routes,
+    this.beforeQuit,
   });
 
   /// Who is signed in, and how far this device is trusted. The app passes
@@ -89,6 +100,10 @@ class AppShell extends StatefulWidget {
   /// Messages to open, as notifications are clicked or tapped. One that
   /// comes before the first sync waits for it.
   final Stream<MessageRoute>? routes;
+
+  /// Where the shell says what it must do before the app ends by a signal.
+  /// A window closing asks the shell itself.
+  final BeforeQuit? beforeQuit;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -116,14 +131,23 @@ class _AppShellState extends State<AppShell> {
   /// the latest is kept: of two clicks before the sync, the last one wins.
   MessageRoute? _heldRoute;
 
-  late final _calls = CallController(
-    me: currentUser,
-    rings: mockRings,
-    flags: mockCallFlags,
-    onRecord: _onCallRecord,
-  );
+  /// The mock's calls, played by the shell because their records write
+  /// into its state. Null when the rooms have calls of their own.
+  late final CallController? _mockCalls = _rooms.calls == null
+      ? CallController(
+          me: currentUser,
+          rings: mockRings,
+          flags: mockCallFlags,
+          onRecord: _onCallRecord,
+        )
+      : null;
+
+  late final Calls _calls = _rooms.calls ?? _mockCalls!;
 
   Notifier? _notifier;
+  Noticer? _noticer;
+  CallSounds? _callSounds;
+  late final CallAudioHold _audioHold;
 
   @override
   void didChangeDependencies() {
@@ -133,18 +157,66 @@ class _AppShellState extends State<AppShell> {
     // rebuilds the shell.
     final notifications = NotificationScope.find(context);
     if (_notifier == null && notifications != null) {
+      final desktop = notifications.desktop;
+      final noticer = desktop == null
+          ? null
+          : Noticer(desktop: desktop, rooms: _rooms, settings: notifications);
+      _noticer = noticer;
       _notifier = Notifier(
         arrivals: _rooms.arrivals,
         chime: notifications.chime,
         soundOn: () => notifications.sound,
         openRoom: () => _openMessagesRoom,
+        notice: noticer == null
+            ? null
+            : (arrival, {required sound}) =>
+                  unawaited(noticer.show(arrival, sound: sound)),
+        retractions: _rooms.retractions,
+        retract: noticer?.retract,
+      );
+      // The first time the shell opens after sign-in is when macOS asks
+      // permission; asking again later does nothing.
+      if (desktop != null && notifications.notifications) {
+        unawaited(desktop.prepare());
+      }
+    }
+    if (_callSounds == null && notifications != null) {
+      _callSounds = CallSounds(
+        _calls,
+        notifications.chime,
+        soundOn: () => notifications.sound,
       );
     }
+  }
+
+  late final AppLifecycleListener _exitRequests;
+
+  /// Tells everyone else you have left before the app goes, so that you are
+  /// not listed in a call you are no longer in.
+  Future<void> _leaveCall() => _calls.leave();
+
+  Future<AppExitResponse> _onExitRequested() async {
+    try {
+      await _leaveCall().timeout(BeforeQuit.limit, onTimeout: () {});
+    } on Object catch (e, s) {
+      // Whatever goes wrong, the window the user closed must still close.
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: e,
+          stack: s,
+          library: 'loaf',
+          context: ErrorDescription('while leaving a call to quit'),
+        ),
+      );
+    }
+    return AppExitResponse.exit;
   }
 
   @override
   void initState() {
     super.initState();
+    _exitRequests = AppLifecycleListener(onExitRequested: _onExitRequested);
+    widget.beforeQuit?.add(_leaveCall);
     // The channel the app opens on is being read from the first frame.
     // Before listening: nothing is built yet to hear it.
     final opening = _channel;
@@ -154,6 +226,10 @@ class _AppShellState extends State<AppShell> {
     _rooms.addListener(_onChange);
     _profile.addListener(_onChange);
     _calls.addListener(_onChange);
+    _audioHold = CallAudioHold(
+      _calls,
+      hold: (held) => unawaited(LoafMedia.callHoldsAudio(held)),
+    );
     _session.addListener(_onSessionChange);
     _updater.addListener(_onChange);
     _routes = widget.routes?.listen(_follow);
@@ -165,7 +241,39 @@ class _AppShellState extends State<AppShell> {
       _heldRoute = null;
       _follow(held);
     }
+    _saySilenced();
+    _sayHungUp();
     setState(() {});
+  }
+
+  /// What someone had put on you when the calls last changed.
+  CallSilence? _silenced;
+
+  /// Says when someone mutes, deafens or frees you during a call. Nothing
+  /// else would, short of trying a locked button.
+  void _saySilenced() {
+    final before = _silenced;
+    final now = _silenced = _calls.silenced;
+    // Leaving a call drops it without anyone having lifted it.
+    if (now == before || !_calls.inCall || !mounted) return;
+    showToast(context, switch (now) {
+      CallSilence.deafened => 'someone deafened you',
+      CallSilence.muted => 'someone muted you for everyone',
+      null => 'you can talk again',
+    });
+  }
+
+  /// The call's phase when the calls last changed.
+  CallPhase? _phase;
+
+  /// Says when someone hangs up for you; the call page says it too, but
+  /// you may be reading elsewhere.
+  void _sayHungUp() {
+    final before = _phase;
+    final now = _phase = _calls.session?.phase;
+    if (now == CallPhase.hungUp && before != CallPhase.hungUp && mounted) {
+      showToast(context, 'someone hung up for you');
+    }
   }
 
   /// A presence or status write the server refused: the profile has already
@@ -180,6 +288,8 @@ class _AppShellState extends State<AppShell> {
               ProfileCall.presence =>
                 "couldn't change your presence. try again?",
               ProfileCall.status => "couldn't save your status. try again?",
+              ProfileCall.notifications =>
+                "couldn't change your notifications. try again?",
             },
     );
   }
@@ -187,6 +297,9 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     _notifier?.dispose();
+    _noticer?.dispose();
+    _callSounds?.dispose();
+    _audioHold.dispose();
     unawaited(_routes?.cancel());
     _session.removeListener(_onSessionChange);
     _updater.removeListener(_onChange);
@@ -201,9 +314,10 @@ class _AppShellState extends State<AppShell> {
     _profile
       ..removeListener(_onChange)
       ..dispose();
-    _calls
-      ..removeListener(_onChange)
-      ..dispose();
+    _exitRequests.dispose();
+    widget.beforeQuit?.remove(_leaveCall);
+    _calls.removeListener(_onChange);
+    _mockCalls?.dispose();
     super.dispose();
   }
 
@@ -283,7 +397,11 @@ class _AppShellState extends State<AppShell> {
       ChannelAction.notLowPriority,
     ],
     ChannelAction.olderConversations,
-    if (_can(RoomAbility.mute)) ...[ChannelAction.mute, ChannelAction.unmute],
+    if (_can(RoomAbility.notify)) ...[
+      ChannelAction.notifyAll,
+      ChannelAction.notifyMentions,
+      ChannelAction.notifyNone,
+    ],
     if (_can(RoomAbility.invite)) ChannelAction.invite,
     if (_can(RoomAbility.leave)) ChannelAction.leave,
   };
@@ -316,6 +434,15 @@ class _AppShellState extends State<AppShell> {
       members: mockHome.members,
       categories: homeSections(collapseDuplicates(_homeRooms)),
     ).withSession(occupants: _callOccupants);
+  }
+
+  /// The call you are in and how each of its people is heard, while it is
+  /// connected: before that nobody's microphone is known, and while it
+  /// reconnects what is known is from before the link dropped.
+  ({String channelId, List<TileInfo> people})? get _heardCall {
+    final session = _calls.session;
+    if (session == null || session.phase != CallPhase.live) return null;
+    return (channelId: session.target.id, people: callTiles(_calls, session));
   }
 
   /// Who is in the call you are in, you included — so its channel or DM
@@ -390,7 +517,8 @@ class _AppShellState extends State<AppShell> {
       if (channel.kind == ChannelKind.voice &&
           !joining &&
           isDesktop &&
-          _can(RoomAbility.calls)) {
+          _can(RoomAbility.calls) &&
+          _calls.joinable(channel)) {
         final here = _calls.inCall && _calls.session!.target.id == id;
         if (!here) _joinVoice(channel);
       }
@@ -437,10 +565,14 @@ class _AppShellState extends State<AppShell> {
         break; // Handled before any state changes: it asks first.
       case ChannelAction.invite:
         break; // Handled before any state changes: it opens the panel first.
-      case ChannelAction.mute:
-        unawaited(_rooms.setMuted(id, true).catchError(_refused));
-      case ChannelAction.unmute:
-        unawaited(_rooms.setMuted(id, false).catchError(_refused));
+      case ChannelAction.notifyAll:
+        unawaited(_rooms.setNotify(id, NotifyLevel.all).catchError(_refused));
+      case ChannelAction.notifyMentions:
+        unawaited(
+          _rooms.setNotify(id, NotifyLevel.mentions).catchError(_refused),
+        );
+      case ChannelAction.notifyNone:
+        unawaited(_rooms.setNotify(id, NotifyLevel.none).catchError(_refused));
       case ChannelAction.leave:
         // Leaving the channel you are reading falls through to the space's
         // first joined text channel: see _channel.
@@ -776,7 +908,7 @@ class _AppShellState extends State<AppShell> {
   void _ring(String chatId, String callerId) {
     final chat = mockHome.allChannels.firstWhere((c) => c.id == chatId);
     final caller = chat.members.firstWhere((m) => m.id == callerId);
-    _calls.receive(chat, from: caller);
+    _mockCalls?.receive(chat, from: caller);
     if (_callKit) _accept();
   }
 
@@ -816,25 +948,25 @@ class _AppShellState extends State<AppShell> {
       case MockDebug.ringFromCrew:
         _ring('dm-crew', '@jun');
       case MockDebug.reconnecting:
-        _calls.toggleReconnecting();
+        _mockCalls?.toggleReconnecting();
       case MockDebug.failNext:
         // One "make the next thing fail" lever: the next call, sign-in or
         // verification, whichever comes first for each.
-        _calls.failNextConnection();
+        _mockCalls?.failNextConnection();
         if (_session case final MockSession mock) mock.failNext();
       case MockDebug.encryption:
-        _calls.toggleEncryption();
+        _mockCalls?.toggleEncryption();
       case MockDebug.micBlocked:
-        _calls.toggleMicBlocked();
+        _mockCalls?.toggleMicBlocked();
       case MockDebug.cameraBlocked:
-        _calls.toggleCameraBlocked();
+        _mockCalls?.toggleCameraBlocked();
       case MockDebug.presence:
         _profile.togglePresenceShared();
       case MockDebug.remoteShare:
         final someone = _calls.session?.participants
             .where((p) => p.present)
             .firstOrNull;
-        if (someone != null) _calls.toggleRemoteShare(someone.member.id);
+        if (someone != null) _mockCalls?.toggleRemoteShare(someone.member.id);
       case MockDebug.signOut:
         _session.signOut();
       // The account levers only move the mock; a real account's state
@@ -932,19 +1064,22 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  void _openDevices() {
+  void _openDevices() =>
+      unawaited(_openSettings(initial: SettingsSection.devices));
+
+  Future<void> _openSettings({
+    SettingsSection initial = SettingsSection.account,
+  }) async {
     if (!mounted) return;
-    unawaited(
-      showSettings(
-        context,
-        initial: SettingsSection.devices,
-        devices: _rooms.devices,
-        profile: _profile,
-        me: _me,
-        editable: _can(RoomAbility.editProfile),
-        onSignOut: _session.signOut,
-        updater: _updater,
-      ),
+    await showSettings(
+      context,
+      initial: initial,
+      profile: _profile,
+      me: _me,
+      editable: _can(RoomAbility.editProfile),
+      onSignOut: _session.signOut,
+      devices: _can(RoomAbility.devices) ? _rooms.devices : null,
+      updater: _updater,
     );
   }
 
@@ -1027,12 +1162,19 @@ class _AppShellState extends State<AppShell> {
       CallPhase.ringing => 'Ringing…',
       CallPhase.connecting => 'Connecting…',
       CallPhase.reconnecting => 'Reconnecting…',
+      _ when _calls.switchingAudio => 'Switching audio…',
       _ => session.direct ? 'Call connected' : 'Voice connected',
     };
     return ConnectedCallBar(
       title: title,
       subtitle: subtitle,
-      warning: session.phase == CallPhase.reconnecting,
+      warning:
+          session.phase == CallPhase.reconnecting ||
+          _calls.quality == CallQuality.poor ||
+          _calls.quality == CallQuality.bad,
+      leading: CallHealthMark.shows(_calls)
+          ? CallHealthMark(calls: _calls, size: 18)
+          : null,
       occupants: present,
       muted: _calls.muted,
       onToggleMute: _calls.toggleMute,
@@ -1121,6 +1263,7 @@ class _AppShellState extends State<AppShell> {
     return ChannelView(
       channel: channel,
       timeline: _rooms.timeline(channel.id),
+      onPerson: _openPerson,
       onRead: _can(RoomAbility.markRead)
           ? () => _rooms.markRead(channel.id)
           : null,
@@ -1136,7 +1279,10 @@ class _AppShellState extends State<AppShell> {
       onToggleMembers: wide
           ? () => setState(() => _showMembers = !_showMembers)
           : () => _scaffoldKey.currentState?.openEndDrawer(),
-      onStartCall: callHere || !_can(RoomAbility.calls)
+      onStartCall:
+          callHere ||
+              !_can(RoomAbility.calls) ||
+              !_calls.features.contains(CallFeature.direct)
           ? null
           : ({required video}) {
               _dmPanelExpanded = false;
@@ -1176,7 +1322,8 @@ class _AppShellState extends State<AppShell> {
       if (_calls.inCall) ...{
         combo(LogicalKeyboardKey.keyM): _calls.toggleMute,
         combo(LogicalKeyboardKey.keyD): _calls.toggleDeafen,
-        combo(LogicalKeyboardKey.keyV): _calls.toggleCamera,
+        if (_calls.features.contains(CallFeature.camera))
+          combo(LogicalKeyboardKey.keyV): _calls.toggleCamera,
       },
       if (_fullscreen)
         const SingleActivator(LogicalKeyboardKey.escape): () =>
@@ -1294,25 +1441,28 @@ class _AppShellState extends State<AppShell> {
       images: _rooms.avatarImages,
       child: MediaSourceScope(
         source: _rooms.media,
-        child: PresenceScope(
-          shared: _profile.presenceShared,
-          child: CallbackShortcuts(
-            bindings: _shortcuts,
-            child: Focus(
-              autofocus: true,
-              child: Stack(
-                children: [
-                  shell,
-                  if (ring != null && !_callKit)
-                    _IncomingPosition(
-                      child: IncomingCallCard(
-                        ring: ring,
-                        onAccept: _accept,
-                        onDecline: _calls.decline,
-                        onOpen: _openIncoming,
+        child: LinkPreviewsScope(
+          previews: _rooms.linkPreviews,
+          child: PresenceScope(
+            shared: _profile.presenceShared,
+            child: CallbackShortcuts(
+              bindings: _shortcuts,
+              child: Focus(
+                autofocus: true,
+                child: Stack(
+                  children: [
+                    shell,
+                    if (ring != null && !_callKit)
+                      _IncomingPosition(
+                        child: IncomingCallCard(
+                          ring: ring,
+                          onAccept: _accept,
+                          onDecline: _calls.decline,
+                          onOpen: _openIncoming,
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1358,17 +1508,75 @@ class _AppShellState extends State<AppShell> {
     return MemberList(members: members, onOpen: _openPerson);
   }
 
-  /// Someone's card, and verifying them if that is what it was opened for.
-  Future<void> _openPerson(Member member) async {
-    final verifier = _session.verifier;
-    final verify = await showPersonCard(
+  /// Someone's menu, with what this shell can do about them.
+  Future<void> _openPerson(Member member, Offset? position) async {
+    final isYou = member.id == _me.id;
+    final real = member.bridge == null;
+    final space = _home ? null : _space;
+    final channel = _channel;
+    final timeline = channel == null || channel.kind == ChannelKind.voice
+        ? null
+        : _rooms.timeline(channel.id);
+    await showPersonMenu(
       context,
       member: member,
-      trust: verifier.personTrust(member.id),
-      isYou: member.id == _me.id,
+      isYou: isYou,
+      // A puppet has no identity to vouch for; a trust line would mislead.
+      trust: real ? _session.verifier.personTrust(member.id) : null,
       canVerify: _session.trust == DeviceTrust.verified,
+      position: position,
+      onMention: !isYou && timeline != null && timeline.writable
+          ? () {
+              timeline.mention(member);
+              _scaffoldKey.currentState?.closeEndDrawer();
+            }
+          : null,
+      onMessage: !isYou && real && _can(RoomAbility.startDirect)
+          ? () => unawaited(_messagePerson(member))
+          : null,
+      onVerify: !isYou && real ? () => unawaited(_verifyPerson(member)) : null,
+      onEditProfile: isYou && _can(RoomAbility.editProfile)
+          ? () => unawaited(_openSettings())
+          : null,
+      kick: !isYou && space != null && _can(RoomAbility.kick)
+          ? (
+              from: space.name,
+              run: () => unawaited(_kickFromSpace(member, space)),
+            )
+          : null,
     );
-    if (verify != true || !mounted) return;
+  }
+
+  Future<void> _messagePerson(Member member) async {
+    final dm = await _rooms.createDirect([member]);
+    if (!mounted) return;
+    setState(() => _open(mockHome.id, dm.id));
+    _scaffoldKey.currentState?.closeDrawer();
+    _scaffoldKey.currentState?.closeEndDrawer();
+  }
+
+  Future<void> _kickFromSpace(Member member, Space space) async {
+    if (!mounted) return;
+    final error = await confirmKickFromSpace(
+      context,
+      member,
+      space,
+      kick: () => _rooms.kickFromSpace(space.id, member.id),
+    );
+    if (error == null || !mounted) return;
+    if (error is PartlyDone) {
+      showToast(
+        context,
+        "couldn't kick ${member.name} from everything in ${space.name}",
+      );
+    } else {
+      _refused(error);
+    }
+  }
+
+  Future<void> _verifyPerson(Member member) async {
+    if (!mounted) return;
+    final verifier = _session.verifier;
     final v = VerificationController(
       purpose: VerifyPurpose.person,
       verifier: verifier,
@@ -1426,6 +1634,22 @@ class _AppShellState extends State<AppShell> {
             Expanded(
               child: ChannelList(
                 space: _space,
+                call: _heardCall,
+                myId: _me.id,
+                onHangUp: _can(RoomAbility.silence)
+                    ? (channel, member) => unawaited(
+                        _rooms
+                            .hangUp(channel.id, member.id)
+                            .catchError(_refused),
+                      )
+                    : null,
+                onSilence: _can(RoomAbility.silence)
+                    ? (channel, member, silence) => unawaited(
+                        _rooms
+                            .silence(channel.id, member.id, silence)
+                            .catchError(_refused),
+                      )
+                    : null,
                 selectedChannelId: _channel?.id ?? '',
                 onSelect: _selectChannel,
                 onAction: _channelAction,
@@ -1455,15 +1679,7 @@ class _AppShellState extends State<AppShell> {
             onToggleMute: _calls.toggleMute,
             onToggleDeafen: _calls.toggleDeafen,
             callControls: _can(RoomAbility.calls),
-            onSettings: () => showSettings(
-              context,
-              profile: _profile,
-              me: _me,
-              editable: _can(RoomAbility.editProfile),
-              onSignOut: _session.signOut,
-              devices: _can(RoomAbility.devices) ? _rooms.devices : null,
-              updater: _updater,
-            ),
+            onSettings: () => unawaited(_openSettings()),
             me: _me,
             onAvatarTap: _can(RoomAbility.editProfile)
                 ? (anchor) =>

@@ -173,7 +173,7 @@ void main() {
       final preview = source.preview(media, 500);
       expect(
         preview,
-        isA<MxcThumbnail>()
+        isA<MxcImage>()
             .having((t) => t.mxc, 'mxc', Uri.parse('mxc://example.com/pic'))
             .having((t) => t.size, 'size', 640),
       );
@@ -421,7 +421,7 @@ void main() {
           unsigned: {'transaction_id': 'tx3'},
         ),
       )!;
-      expect(source.preview(media, 300), isA<MxcThumbnail>());
+      expect(source.preview(media, 300), isA<MxcImage>());
     });
   });
 
@@ -453,9 +453,9 @@ void main() {
     test('a GIF over the cap, or of unknown size, keeps a still', () {
       expect(
         source.preview(gif(size: inlinePreviewCap + 1), 300),
-        isA<MxcThumbnail>(),
+        isA<MxcImage>(),
       );
-      expect(source.preview(gif(size: null), 300), isA<MxcThumbnail>());
+      expect(source.preview(gif(size: null), 300), isA<MxcImage>());
       expect(
         gif(encrypted: true, size: inlinePreviewCap + 1).hasPreview,
         isFalse,

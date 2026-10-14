@@ -5,12 +5,15 @@ library;
 
 import 'package:flutter/foundation.dart';
 
+import '../call/calls.dart';
 import '../channel/timeline.dart';
 import '../model/arrival.dart';
+import '../model/message_route.dart';
 import '../model/models.dart';
 import '../settings/devices.dart';
 import '../shell/profile.dart';
 import '../spaces/space_directory.dart';
+import '../model/link_previews.dart';
 import '../model/media_source.dart';
 import '../widgets/avatar_images.dart';
 
@@ -20,7 +23,9 @@ import '../widgets/avatar_images.dart';
 enum RoomAbility {
   /// Mark as read, and reading by opening.
   markRead,
-  mute,
+
+  /// Choosing a channel's [NotifyLevel].
+  notify,
   leave,
 
   /// Joining an unjoined channel from its row.
@@ -36,6 +41,12 @@ enum RoomAbility {
 
   /// Inviting people to a room or space.
   invite,
+
+  /// Kicking someone from a room.
+  kick,
+
+  /// Muting or deafening someone in a call for everyone.
+  silence,
 
   /// Voice channels and DM calls.
   calls,
@@ -86,12 +97,15 @@ abstract interface class Rooms implements Listenable {
   Member get me;
 
   /// Turns the avatar refs on this account's people, rooms and spaces into
-  /// images.
+  /// images. The originals of people in your rooms are fetched ahead.
   AvatarImages get avatarImages;
 
   /// Turns the media on this account's messages into pictures and files on
   /// disk, the way [avatarImages] does for avatars.
   MediaSource get media;
+
+  /// What the links in this account's messages lead to.
+  LinkPreviews get linkPreviews;
 
   /// Your presence and status, and everyone else's. The rooms own it and
   /// dispose of it with themselves.
@@ -101,12 +115,20 @@ abstract interface class Rooms implements Listenable {
   /// of it with themselves.
   Devices get devices;
 
+  /// The backend's own calls, or null where the shell plays the mock's. The
+  /// rooms own it and dispose of it with themselves.
+  Calls? get calls;
+
   /// The rail, in order.
   List<Space> get spaces;
 
   /// New messages that the push rules say should notify you, as they
   /// arrive. Never the backlog a launch catches up on.
   Stream<Arrival> get arrivals;
+
+  /// Messages noticed while sealed whose text, once read, does not
+  /// notify: their notice is to be taken back.
+  Stream<MessageRoute> get retractions;
 
   /// Everything that lives in Home, before `homeSections` sorts it.
   List<Channel> get homeRooms;
@@ -123,7 +145,7 @@ abstract interface class Rooms implements Listenable {
   Timeline? timeline(String roomId);
 
   void markRead(String roomId);
-  Future<void> setMuted(String roomId, bool muted);
+  Future<void> setNotify(String roomId, NotifyLevel level);
   Future<void> setJoined(String roomId, bool joined);
   Future<void> setFavourite(String roomId, bool favourite);
 
@@ -152,7 +174,26 @@ abstract interface class Rooms implements Listenable {
   /// Throws [InviteRefused] naming who did not go through.
   Future<void> invite(String roomId, List<String> userIds);
 
+  /// Takes [userId] out of the room's call, leaving them in the room; they
+  /// may join again. Their own client is what obeys. Throws when the server
+  /// says no.
+  Future<void> hangUp(String roomId, String userId);
+
+  /// Removes [userId] from every joined room under [spaceId] they are in,
+  /// then the space itself. Every kick is attempted; throws [PartlyDone]
+  /// naming the rooms that refused.
+  Future<void> kickFromSpace(String spaceId, String userId);
+
+  /// Puts [to] on [userId] in the room's call for everyone, or with null
+  /// lifts it, and lifts any hang-up. Their own client is what obeys.
+  /// Throws when the server says no.
+  Future<void> silence(String roomId, String userId, CallSilence? to);
+
   SpaceDirectory get directory;
 
   void dispose();
+
+  /// [ref]'s picture as a file, for a desktop notification to show; null
+  /// when there is none to be had within a moment.
+  Future<String?> noticeAvatar(AvatarRef ref);
 }

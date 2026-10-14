@@ -386,13 +386,36 @@ void main() {
           findsOneWidget,
         );
         expect(inRow('kitchen', find.text('3')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'the menu offers the two other levels, and the row shows the one set',
+      variant: desktop,
+      (tester) async {
+        await _pumpShell(tester, const Size(1440, 900));
+        final bellOff = inRow('kitchen', find.byIcon(LucideIcons.bellOff));
+        final bellMinus = inRow('kitchen', find.byIcon(LucideIcons.bellMinus));
 
         await rightClick(tester, 'kitchen');
-        await pick(tester, 'Unmute channel');
-        expect(
-          inRow('kitchen', find.byIcon(LucideIcons.bellOff)),
-          findsNothing,
-        );
+        expect(find.text('All messages'), findsNothing);
+        expect(find.text('Mentions only'), findsOneWidget);
+        await pick(tester, 'Mute channel');
+        expect(bellOff, findsOneWidget);
+
+        await rightClick(tester, 'kitchen');
+        expect(find.text('Mute channel'), findsNothing);
+        expect(find.text('All messages'), findsOneWidget);
+        await pick(tester, 'Mentions only');
+        expect(bellOff, findsNothing);
+        expect(bellMinus, findsOneWidget);
+
+        await rightClick(tester, 'kitchen');
+        expect(find.text('Mentions only'), findsNothing);
+        expect(find.text('Mute channel'), findsOneWidget);
+        await pick(tester, 'All messages');
+        expect(bellOff, findsNothing);
+        expect(bellMinus, findsNothing);
       },
     );
 

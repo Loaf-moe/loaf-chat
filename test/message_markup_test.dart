@@ -124,6 +124,13 @@ void main() {
       expect(blocks[1], isA<Rule>());
     });
 
+    test('a bare address inside a spoiler is hidden with it', () {
+      final runs = _runs(
+        parseFormatted('<span data-mx-spoiler>see https://a.dev</span>'),
+      );
+      expect(_only(runs, 'https://a.dev').spoiler, 0);
+    });
+
     test('each spoiler is numbered, and hides everything inside it', () {
       final runs = _runs(
         parseFormatted(
@@ -302,6 +309,64 @@ void main() {
     test('only web and mail addresses', () {
       expect(safeLink('mailto:a@b.c'), isNotNull);
       expect(safeLink('javascript:alert(1)'), isNull);
+    });
+  });
+
+  group('the first web link', () {
+    Uri? plain(String body) => firstWebLink(parsePlain(body));
+    Uri? formatted(String html) => firstWebLink(parseFormatted(html));
+
+    test('a bare address is it', () {
+      expect(
+        plain('see https://loaf.moe/a now'),
+        Uri.parse('https://loaf.moe/a'),
+      );
+    });
+
+    test('an anchor is it', () {
+      expect(
+        formatted('read <a href="https://loaf.moe/a">this</a>'),
+        Uri.parse('https://loaf.moe/a'),
+      );
+    });
+
+    test('of several, the first', () {
+      expect(
+        plain('https://a.dev then https://b.dev'),
+        Uri.parse('https://a.dev'),
+      );
+    });
+
+    test('inside a quote or a list it still counts', () {
+      expect(
+        formatted('<blockquote>https://a.dev</blockquote>'),
+        Uri.parse('https://a.dev'),
+      );
+      expect(
+        formatted('<ul><li>one</li><li>https://b.dev</li></ul>'),
+        Uri.parse('https://b.dev'),
+      );
+    });
+
+    test('what is not a page to preview is passed over', () {
+      for (final (html, why) in [
+        ('<a href="https://matrix.to/#/@ada:loaf.moe">Ada</a>', 'a mention'),
+        ('<a href="https://matrix.to/#/!room:loaf.moe">room</a>', 'a room'),
+        ('<code>https://a.dev</code>', 'inline code'),
+        ('<pre><code>https://a.dev</code></pre>', 'a code block'),
+        ('<span data-mx-spoiler>https://a.dev</span>', 'a spoiler'),
+        ('<a href="mailto:a@b.c">mail</a>', 'mail'),
+        ('no links here', 'no link'),
+      ]) {
+        expect(formatted(html), isNull, reason: why);
+      }
+    });
+
+    test('a link after one passed over is it', () {
+      expect(
+        formatted('<span data-mx-spoiler>https://a.dev</span> https://b.dev'),
+        Uri.parse('https://b.dev'),
+      );
     });
   });
 }

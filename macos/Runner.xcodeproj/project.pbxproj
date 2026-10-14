@@ -22,7 +22,10 @@
 
 /* Begin PBXBuildFile section */
 		A1B2C3D4E5F60718293A4B01 /* UpdaterBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B02 /* UpdaterBridge.swift */; };
+		A1B2C3D4E5F60718293A4D01 /* NotifyBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4D02 /* NotifyBridge.swift */; };
+		A1B2C3D4E5F60718293A4E01 /* chime.wav in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4E02 /* chime.wav */; };
 		A1B2C3D4E5F60718293A4C01 /* WindowChromeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C02 /* WindowChromeBridge.swift */; };
+		A1B2C3D4E5F60718293A4C03 /* AudioDevicesBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C04 /* AudioDevicesBridge.swift */; };
 		A1B2C3D4E5F60718293A4B03 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60718293A4B04 /* Sparkle */; };
 		331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C80D7294CF71000263BE5 /* RunnerTests.swift */; };
 		335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */; };
@@ -65,7 +68,10 @@
 
 /* Begin PBXFileReference section */
 		A1B2C3D4E5F60718293A4B02 /* UpdaterBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterBridge.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4D02 /* NotifyBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotifyBridge.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4E02 /* chime.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; name = chime.wav; path = ../assets/sounds/chime.wav; sourceTree = SOURCE_ROOT; };
 		A1B2C3D4E5F60718293A4C02 /* WindowChromeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowChromeBridge.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4C04 /* AudioDevicesBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDevicesBridge.swift; sourceTree = "<group>"; };
 		331C80D5294CF71000263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		331C80D7294CF71000263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		333000ED22D3DE5D00554162 /* Warnings.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Warnings.xcconfig; sourceTree = "<group>"; };
@@ -175,7 +181,10 @@
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				A1B2C3D4E5F60718293A4B02 /* UpdaterBridge.swift */,
+				A1B2C3D4E5F60718293A4D02 /* NotifyBridge.swift */,
+				A1B2C3D4E5F60718293A4E02 /* chime.wav */,
 				A1B2C3D4E5F60718293A4C02 /* WindowChromeBridge.swift */,
+				A1B2C3D4E5F60718293A4C04 /* AudioDevicesBridge.swift */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
 				33E51914231749380026EE4D /* Release.entitlements */,
 				33CC11242044D66E0003C045 /* Resources */,
@@ -305,6 +314,7 @@
 			files = (
 				33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */,
 				33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */,
+				A1B2C3D4E5F60718293A4E01 /* chime.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -366,7 +376,9 @@
 			files = (
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				A1B2C3D4E5F60718293A4B01 /* UpdaterBridge.swift in Sources */,
+				A1B2C3D4E5F60718293A4D01 /* NotifyBridge.swift in Sources */,
 				A1B2C3D4E5F60718293A4C01 /* WindowChromeBridge.swift in Sources */,
+				A1B2C3D4E5F60718293A4C03 /* AudioDevicesBridge.swift in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
 			);
@@ -498,8 +510,10 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 6W2A5N37N3;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -630,8 +644,10 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 6W2A5N37N3;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -650,8 +666,10 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = Runner/Release.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 6W2A5N37N3;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

@@ -21,3 +21,18 @@ bool get ssoInBrowser => switch (defaultTargetPlatform) {
   TargetPlatform.linux || TargetPlatform.windows => true,
   _ => false,
 };
+
+/// Whether the app offers a choice of microphone and speaker. On iOS the
+/// system routes sound, from Control Center, and the app follows.
+bool get picksAudioDevices => defaultTargetPlatform != TargetPlatform.iOS;
+
+/// Whether voice channels are live. Each platform needs its microphone
+/// permission and a check by hand before it joins this list; see "Scope" in
+/// the voice design spec.
+bool get hasCalls => switch (defaultTargetPlatform) {
+  TargetPlatform.linux ||
+  TargetPlatform.macOS ||
+  TargetPlatform.iOS ||
+  TargetPlatform.windows => true,
+  _ => false,
+};

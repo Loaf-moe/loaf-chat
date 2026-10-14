@@ -4,11 +4,22 @@ A Matrix client for loaf.moe, shaped like a place you hang out.
 
 ## Running the tests
 
+Tools, environment and tasks all come from `mise.toml`: `mise install` once,
+then `mise tasks` lists what there is to run.
+
 Encryption tests load vodozemac's native library, and fail saying so without
-it. On macOS, build the app once with `mise exec -- flutter build macos
---debug`. On Linux, build just the library once with `sh tool/build-vodozemac`
-(it needs `flutter pub get` first, and Rust). Then run
-`mise exec -- flutter test`.
+it. On macOS, build the app once with `mise run build:macos`. On Linux, build
+just the library once with `mise run vodozemac` (it needs `mise run deps`
+first). Then run `mise run test:all`, and `mise run check` for the analyzer
+and the formatter.
+
+## Building on macOS
+
+Xcode, selected with `sudo xcode-select -s
+/Applications/Xcode.app/Contents/Developer`, and for iOS its platform:
+`xcodebuild -downloadPlatform iOS`. Plugins come as Swift packages, so
+CocoaPods is not needed. `mise run run:macos` runs the app on the Mac and
+`mise run run:ios:sim` in a simulator.
 
 ## Building on Linux
 
@@ -21,7 +32,20 @@ mise install
 ```
 
 `mise install` brings Rust (pinned in `mise.toml`) along with Flutter. Run the
-build as `mise exec -- flutter build linux` so cargo is on the path.
+build as `mise run build:linux` so cargo is on the path.
+
+Flutter's engine expects GTK's Wayland backend. Where GTK is built for X11
+alone, the build adds `libgdk-wayland-stub.so` to the bundle to stand in for
+it.
+
+Voice channels use LiveKit's client, which links WebRTC. On Linux the build
+fetches a prebuilt `libwebrtc.so` from
+<https://github.com/webrtc-sdk/libwebrtc/releases> while CMake configures,
+keeps the zip in `flutter_webrtc`'s own directory in the pub cache
+(`third_party/downloads/`), and copies the library into the bundle's `lib/`.
+A zip already there is used as it is. The library needs libX11, libXcomposite,
+libXdamage, libXext, libXfixes, libXrandr, libgbm and libdrm to load, and
+PulseAudio's or ALSA's client library to open a microphone.
 
 ## Installing
 

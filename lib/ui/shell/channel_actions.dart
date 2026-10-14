@@ -18,8 +18,9 @@ enum ChannelAction {
   lowPriority,
   notLowPriority,
   olderConversations,
-  mute,
-  unmute,
+  notifyAll,
+  notifyMentions,
+  notifyNone,
   invite,
   leave,
 }
@@ -47,7 +48,10 @@ List<ChannelAction> actionsFor(
           : ChannelAction.lowPriority,
       if (channel.earlier.isNotEmpty) ChannelAction.olderConversations,
     ],
-    channel.muted ? ChannelAction.unmute : ChannelAction.mute,
+    // The two levels the channel is not at, as favourite offers its flip.
+    if (channel.notify != NotifyLevel.all) ChannelAction.notifyAll,
+    if (channel.notify != NotifyLevel.mentions) ChannelAction.notifyMentions,
+    if (channel.notify != NotifyLevel.none) ChannelAction.notifyNone,
     // A 1:1 DM has exactly one person to invite already there: nobody else
     // could be added to it.
     if (!(channel.kind == ChannelKind.direct && channel.members.length == 1))
@@ -97,17 +101,21 @@ ActionItem<ChannelAction> _item(ChannelAction action, String noun) =>
         icon: LucideIcons.history,
         label: 'Older conversations',
       ),
-      // Muting keeps mentions: it maps to a mentions-only push rule, synced to
-      // every device, with no expiry — Matrix has none to offer.
-      ChannelAction.mute => ActionItem(
-        value: ChannelAction.mute,
+      // Push rules, synced to every device, with no expiry: Matrix has none.
+      ChannelAction.notifyAll => const ActionItem(
+        value: ChannelAction.notifyAll,
+        icon: LucideIcons.bell,
+        label: 'All messages',
+      ),
+      ChannelAction.notifyMentions => const ActionItem(
+        value: ChannelAction.notifyMentions,
+        icon: LucideIcons.bellMinus,
+        label: 'Mentions only',
+      ),
+      ChannelAction.notifyNone => ActionItem(
+        value: ChannelAction.notifyNone,
         icon: LucideIcons.bellOff,
         label: 'Mute $noun',
-      ),
-      ChannelAction.unmute => ActionItem(
-        value: ChannelAction.unmute,
-        icon: LucideIcons.bell,
-        label: 'Unmute $noun',
       ),
       ChannelAction.invite => const ActionItem(
         value: ChannelAction.invite,
@@ -245,4 +253,89 @@ Future<String?> showOlderConversations(BuildContext context, Channel channel) {
       ],
     ),
   );
+}
+
+/// Asks before kicking [member] out of [space] and everything in it, then
+/// runs [kick] with a spinner up until it is done. Completes with what
+/// [kick] threw, or null when it went through or was cancelled.
+Future<Object?> confirmKickFromSpace(
+  BuildContext context,
+  Member member,
+  Space space, {
+  required Future<void> Function() kick,
+}) => showDialog<Object?>(
+  context: context,
+  builder: (context) =>
+      _KickFromSpaceDialog(member: member, space: space, kick: kick),
+);
+
+class _KickFromSpaceDialog extends StatefulWidget {
+  const _KickFromSpaceDialog({
+    required this.member,
+    required this.space,
+    required this.kick,
+  });
+
+  final Member member;
+  final Space space;
+  final Future<void> Function() kick;
+
+  @override
+  State<_KickFromSpaceDialog> createState() => _KickFromSpaceDialogState();
+}
+
+class _KickFromSpaceDialogState extends State<_KickFromSpaceDialog> {
+  var _kicking = false;
+
+  Future<void> _kick() async {
+    setState(() => _kicking = true);
+    Object? error;
+    try {
+      await widget.kick();
+    } on Object catch (e) {
+      error = e;
+    }
+    if (mounted) Navigator.pop(context, error);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return PopScope(
+      // Dismissing mid-kick would lose the outcome: no cancel while busy.
+      canPop: !_kicking,
+      child: AlertDialog(
+        backgroundColor: tokens.card,
+        title: Text(
+          'kick ${widget.member.name} from ${widget.space.name}?',
+          style: loafBody(17, 600).copyWith(color: tokens.textStrong),
+        ),
+        content: Text(
+          'they leave the space and every channel in it, and need a new '
+          'invite to come back.',
+          style: loafBody(14, 400).copyWith(color: tokens.textBody),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _kicking ? null : () => Navigator.pop(context),
+            child: Text('cancel', style: TextStyle(color: tokens.textMuted)),
+          ),
+          if (_kicking)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: LoafSpace.x4),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+              ),
+            )
+          else
+            TextButton(
+              onPressed: _kick,
+              child: Text('kick', style: TextStyle(color: tokens.accent)),
+            ),
+        ],
+      ),
+    );
+  }
 }

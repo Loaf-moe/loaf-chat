@@ -1,5 +1,7 @@
-/// The middle column: a space's categories and channels, mockup only.
+/// The middle column: a space's categories and channels.
 library;
+
+import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -7,12 +9,17 @@ import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../call/call_tile.dart';
+import '../call/volume_slider.dart';
+import '../members/person_card.dart';
 import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
+import '../settings/voice_settings.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/action_menu.dart';
 import '../widgets/count_label.dart';
 import '../widgets/loaf_avatar.dart';
+import '../widgets/speaking_ring.dart';
 import '../window/window_chrome.dart';
 import 'channel_actions.dart';
 import 'user_bar.dart';
@@ -32,9 +39,29 @@ class ChannelList extends StatefulWidget {
     this.onReorderFavourites,
     this.onNewMessage,
     this.allowedActions,
+    this.call,
+    required this.myId,
+    this.onHangUp,
+    this.onSilence,
   });
 
   final Space space;
+
+  /// Asked to take [member] out of [channel]'s call. Left null, nobody's
+  /// menu offers it.
+  final void Function(Channel channel, Member member)? onHangUp;
+
+  /// Asked to put [silence] on [member] in [channel]'s call for everyone,
+  /// or with null to lift it. Left null, nobody's menu offers it.
+  final void Function(Channel channel, Member member, CallSilence? silence)?
+  onSilence;
+
+  /// Your own user id: your row under a voice channel has no menu.
+  final String myId;
+
+  /// The call you are in: its channel, and how each of its people is heard,
+  /// you among them. Null in no call, or one that is not connected.
+  final ({String channelId, List<TileInfo> people})? call;
 
   /// Home only: the "+" on the direct messages heading.
   final VoidCallback? onNewMessage;
@@ -133,6 +160,10 @@ class _ChannelListState extends State<ChannelList> {
                       onAction: widget.onAction,
                       allowedActions: widget.allowedActions,
                       ringingId: widget.ringingId,
+                      call: widget.call,
+                      myId: widget.myId,
+                      onHangUp: widget.onHangUp,
+                      onSilence: widget.onSilence,
                       home: widget.home,
                       onReorder: widget.home && category.name == 'favourites'
                           ? widget.onReorderFavourites
@@ -292,6 +323,10 @@ class _CategorySection extends StatelessWidget {
     required this.onAction,
     this.allowedActions,
     this.ringingId,
+    this.call,
+    required this.myId,
+    this.onHangUp,
+    this.onSilence,
     this.home = false,
     this.onReorder,
     this.onAdd,
@@ -303,6 +338,11 @@ class _CategorySection extends StatelessWidget {
   /// Home's direct messages only: starts a new one.
   final VoidCallback? onAdd;
   final String? ringingId;
+  final ({String channelId, List<TileInfo> people})? call;
+  final String myId;
+  final void Function(Channel channel, Member member)? onHangUp;
+  final void Function(Channel channel, Member member, CallSilence? silence)?
+  onSilence;
   final bool collapsed;
   final String? selectedChannelId;
   final LoafTokens tokens;
@@ -323,6 +363,10 @@ class _CategorySection extends StatelessWidget {
             channel.id == selectedChannelId ||
             channel.earlier.any((c) => c.id == selectedChannelId),
         ringing: channel.id == ringingId,
+        people: channel.id == call?.channelId ? call!.people : const [],
+        myId: myId,
+        onHangUp: onHangUp,
+        onSilence: onSilence,
         tokens: tokens,
         home: home,
         longPressActions: longPressActions,
@@ -477,6 +521,10 @@ class _ChannelEntry extends StatelessWidget {
     required this.onAction,
     this.allowedActions,
     this.ringing = false,
+    this.people = const [],
+    required this.myId,
+    this.onHangUp,
+    this.onSilence,
     this.home = false,
     this.longPressActions = true,
   });
@@ -485,6 +533,33 @@ class _ChannelEntry extends StatelessWidget {
   final Set<ChannelAction>? allowedActions;
   final bool selected;
   final bool ringing;
+
+  /// How each person in this channel's call is heard, when it is the call
+  /// you are in. Empty otherwise.
+  final List<TileInfo> people;
+  final String myId;
+  final void Function(Channel channel, Member member)? onHangUp;
+  final void Function(Channel channel, Member member, CallSilence? silence)?
+  onSilence;
+
+  /// Mutes or deafens [member] for everyone in this channel's call, or
+  /// null where you may not: the app does none of it, your level here does
+  /// not reach, or it is you.
+  ValueChanged<CallSilence?>? _silence(Member member) {
+    final onSilence = this.onSilence;
+    if (onSilence == null || !channel.canSilence || member.id == myId) {
+      return null;
+    }
+    return (silence) => onSilence(channel, member, silence);
+  }
+
+  /// Takes [member] out of this channel's call, or null where you may not:
+  /// the app does none of it, or it is you.
+  VoidCallback? _hangUp(Member member) {
+    final onHangUp = this.onHangUp;
+    if (onHangUp == null || member.id == myId) return null;
+    return () => onHangUp(channel, member);
+  }
 
   /// A Home row: its actions include favourite and low priority.
   final bool home;
@@ -514,7 +589,7 @@ class _ChannelEntry extends StatelessWidget {
     final joined = channel.joined;
     final direct = channel.kind == ChannelKind.direct;
     final room = channel.kind == ChannelKind.room;
-    // Mute quiets notifications and sound, not what's unread.
+    // A level quiets notifications and sound, not what's unread.
     final unread = joined && channel.unread > 0;
     final iconData = channel.icon;
     final fg = selected
@@ -581,10 +656,12 @@ class _ChannelEntry extends StatelessWidget {
                                   .copyWith(color: fg),
                         ),
                       ),
-                      if (channel.muted) ...[
+                      if (channel.notify != NotifyLevel.all) ...[
                         const SizedBox(width: 6),
                         Icon(
-                          LucideIcons.bellOff,
+                          channel.notify == NotifyLevel.none
+                              ? LucideIcons.bellOff
+                              : LucideIcons.bellMinus,
                           size: 14,
                           color: tokens.textMuted,
                         ),
@@ -624,22 +701,17 @@ class _ChannelEntry extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   for (final member in channel.occupants)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Row(
-                        children: [
-                          _MemberAvatar(member: member, size: 20),
-                          const SizedBox(width: 8),
-                          Text(
-                            member.name,
-                            overflow: TextOverflow.ellipsis,
-                            style: loafBody(
-                              13,
-                              400,
-                            ).copyWith(color: tokens.textMuted),
-                          ),
-                        ],
-                      ),
+                    _Occupant(
+                      key: ValueKey('occupant-${channel.id}-${member.id}'),
+                      member: member,
+                      heard: people
+                          .where((person) => person.id == member.id)
+                          .firstOrNull,
+                      you: member.id == myId,
+                      onHangUp: _hangUp(member),
+                      silenced: channel.silenced[member.id],
+                      onSilence: _silence(member),
+                      tokens: tokens,
                     ),
                 ],
               ),
@@ -650,6 +722,218 @@ class _ChannelEntry extends StatelessWidget {
   }
 }
 
+/// Someone in a voice channel's call. In the call you are in, [heard] says
+/// whether they are talking or muted; elsewhere nobody can tell.
+class _Occupant extends StatelessWidget {
+  const _Occupant({
+    super.key,
+    required this.member,
+    required this.heard,
+    required this.you,
+    required this.onHangUp,
+    required this.silenced,
+    required this.onSilence,
+    required this.tokens,
+  });
+
+  final Member member;
+  final TileInfo? heard;
+  final bool you;
+
+  /// Null where you may not take them out of the call.
+  final VoidCallback? onHangUp;
+
+  /// What someone has put on them for everyone, if anything.
+  final CallSilence? silenced;
+
+  /// Null where you may not mute or deafen them for everyone.
+  final ValueChanged<CallSilence?>? onSilence;
+  final LoafTokens tokens;
+
+  /// Their volume, where [voice] keeps one, and what you may do to them for
+  /// everyone: a menu at [position] on a computer, a sheet on a phone.
+  Future<void> _openMenu(
+    BuildContext context,
+    VoiceController? voice, {
+    Offset? position,
+  }) async {
+    final onHangUp = this.onHangUp;
+    final onSilence = this.onSilence;
+    final items = [
+      if (onSilence != null) ...[
+        if (silenced == null)
+          const ActionItem(
+            value: _OccupantAction.mute,
+            icon: LucideIcons.micOff,
+            label: 'mute for everyone',
+          ),
+        if (silenced == CallSilence.muted)
+          const ActionItem(
+            value: _OccupantAction.lift,
+            icon: LucideIcons.mic,
+            label: 'unmute for everyone',
+          ),
+        if (silenced == CallSilence.deafened)
+          const ActionItem(
+            value: _OccupantAction.lift,
+            icon: LucideIcons.headphones,
+            label: 'undeafen for everyone',
+          )
+        else
+          const ActionItem(
+            value: _OccupantAction.deafen,
+            icon: LucideIcons.headphoneOff,
+            label: 'deafen for everyone',
+          ),
+      ],
+      if (onHangUp != null)
+        const ActionItem(
+          value: _OccupantAction.hangUp,
+          icon: LucideIcons.phoneOff,
+          label: 'remove from call',
+        ),
+    ];
+    final _OccupantAction? action;
+    if (position != null) {
+      action = await showActionMenu(
+        context,
+        position: position,
+        leading: [
+          PersonCardEntry(member: member, isYou: you),
+          if (voice != null) VolumeMenuEntry(voice: voice, id: member.id),
+        ],
+        items: items,
+      );
+    } else {
+      action = await showActionSheet(
+        context,
+        header: (context) => Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            PersonCard(member: member, isYou: you),
+            if (voice != null) VolumeSlider(voice: voice, id: member.id),
+          ],
+        ),
+        items: items,
+      );
+    }
+    switch (action) {
+      case _OccupantAction.mute:
+        onSilence?.call(CallSilence.muted);
+      case _OccupantAction.deafen:
+        onSilence?.call(CallSilence.deafened);
+      case _OccupantAction.lift:
+        onSilence?.call(null);
+      case _OccupantAction.hangUp:
+        onHangUp?.call();
+      case null:
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final speaking = heard?.speaking ?? false;
+    final deafened =
+        silenced == CallSilence.deafened || (heard?.deafened ?? false);
+    final muted = silenced != null || (heard?.muted ?? false);
+    // Your own sound is never played to you, so there is nothing to set.
+    // Found, not watched: whether the app keeps voice settings never
+    // changes while it runs.
+    final voice = you ? null : VoiceScope.find(context);
+    final hasMenu = voice != null || onHangUp != null || onSilence != null;
+    return Semantics(
+      label: [
+        member.name,
+        if (speaking) 'speaking',
+        // Deafened is muted too; the one word says both.
+        if (silenced != null)
+          '${deafened ? 'deafened' : 'muted'} for everyone'
+        else if (deafened)
+          'deafened'
+        else if (muted)
+          'muted',
+      ].join(', '),
+      // One node a row, not one for the whole list of people.
+      container: true,
+      excludeSemantics: true,
+      // A screen reader has no right-click; it opens the menu where the
+      // row is.
+      onLongPress: !hasMenu
+          ? null
+          : () {
+              final box = context.findRenderObject()! as RenderBox;
+              unawaited(
+                _openMenu(
+                  context,
+                  voice,
+                  position: isDesktop
+                      ? box.localToGlobal(Offset(0, box.size.height))
+                      : null,
+                ),
+              );
+            },
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          // Long press on a phone, right-click on a computer, as for a
+          // channel's own actions.
+          onLongPress: !isDesktop && hasMenu
+              ? () {
+                  HapticFeedback.mediumImpact();
+                  unawaited(_openMenu(context, voice));
+                }
+              : null,
+          onSecondaryTapUp: isDesktop && hasMenu
+              ? (details) => unawaited(
+                  _openMenu(context, voice, position: details.globalPosition),
+                )
+              : null,
+          hoverColor: tokens.card.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(LoafRadius.md),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              children: [
+                SpeakingRing(
+                  speaking: speaking,
+                  child: _MemberAvatar(member: member, size: 20),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    member.name,
+                    overflow: TextOverflow.ellipsis,
+                    style: loafBody(13, 400).copyWith(color: tokens.textMuted),
+                  ),
+                ),
+                if (deafened || muted)
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      left: 6,
+                      right: LoafSpace.x3,
+                    ),
+                    child: Icon(
+                      deafened ? LucideIcons.headphoneOff : LucideIcons.micOff,
+                      size: 14,
+                      // A moderator's doing stands out from their own.
+                      color: silenced != null
+                          ? tokens.accent
+                          : tokens.textMuted,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the menu on someone in a voice channel can do.
+enum _OccupantAction { mute, deafen, lift, hangUp }
+
+/// A line of plain text heading a menu.
 /// Marks a channel you can join with one tap. Not a separate button: the
 /// whole row joins, and this says so.
 /// A standalone room's face: a rounded square with its initial, since it is

@@ -12,7 +12,7 @@ import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
 import '../window/window_chrome.dart';
-import 'call_controller.dart';
+import 'calls.dart';
 import 'call_controls.dart';
 import 'call_stage.dart';
 import 'call_tile.dart';
@@ -30,7 +30,7 @@ class VoiceChannelPage extends StatelessWidget {
   });
 
   final Channel channel;
-  final CallController calls;
+  final Calls calls;
   final VoidCallback onJoin;
 
   /// The phone layout's way back to the channel list.
@@ -39,8 +39,9 @@ class VoiceChannelPage extends StatelessWidget {
   final bool fullscreen;
   final VoidCallback? onToggleFullscreen;
 
-  bool get _connectedHere =>
-      calls.inCall && calls.session!.target.id == channel.id;
+  /// Whether this channel's call is the one on screen: connecting, live,
+  /// or failed and waiting to be tried again or closed.
+  bool get _connectedHere => calls.session?.target.id == channel.id;
 
   @override
   Widget build(BuildContext context) {
@@ -92,7 +93,7 @@ class _Lobby extends StatelessWidget {
   });
 
   final Channel channel;
-  final CallController calls;
+  final Calls calls;
   final VoidCallback onJoin;
   final Widget? leading;
 
@@ -170,23 +171,33 @@ class _Lobby extends StatelessWidget {
                 alert: calls.muted,
                 onTap: calls.micBlocked ? null : calls.toggleMute,
               ),
-              const SizedBox(width: LoafSpace.x3),
-              CallButton(
-                icon: calls.camera ? LucideIcons.video : LucideIcons.videoOff,
-                tooltip: calls.camera ? 'Turn camera off' : 'Turn camera on',
-                active: calls.camera,
-                onTap: calls.cameraBlocked ? null : calls.toggleCamera,
-              ),
+              if (calls.features.contains(CallFeature.camera)) ...[
+                const SizedBox(width: LoafSpace.x3),
+                CallButton(
+                  icon: calls.camera ? LucideIcons.video : LucideIcons.videoOff,
+                  tooltip: calls.camera ? 'Turn camera off' : 'Turn camera on',
+                  active: calls.camera,
+                  onTap: calls.cameraBlocked ? null : calls.toggleCamera,
+                ),
+              ],
               const SizedBox(width: LoafSpace.x4),
               Flexible(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 220),
-                  child: LoafButton(
-                    label: 'join voice',
-                    icon: LucideIcons.phone,
-                    onTap: onJoin,
-                  ),
-                ),
+                child: calls.joinable(channel)
+                    ? ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 220),
+                        child: LoafButton(
+                          label: 'join voice',
+                          icon: LucideIcons.phone,
+                          onTap: onJoin,
+                        ),
+                      )
+                    : Text(
+                        "calls in encrypted rooms aren't supported yet",
+                        style: loafBody(
+                          13,
+                          500,
+                        ).copyWith(color: tokens.textMuted),
+                      ),
               ),
             ],
           ),

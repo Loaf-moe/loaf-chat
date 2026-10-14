@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 
 import '../theme/loaf_theme.dart';
 import '../model/media_source.dart';
-import 'avatar_images.dart';
 
 /// One row of an action list. [value] is what the sheet or menu returns.
 class ActionItem<T> {
@@ -45,54 +44,51 @@ Future<T?> showActionSheet<T>(
         top: Radius.circular(LoafRadius.xxxl),
       ),
     ),
-    // The header may draw avatars, and the sheet sits above the shell.
-    builder: (context) => AvatarImagesScope.carry(
+    // The header may draw media, and the sheet sits above the shell.
+    builder: (context) => MediaSourceScope.carry(
       from,
-      child: MediaSourceScope.carry(
-        from,
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (header != null) ...[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    LoafSpace.x4,
-                    0,
-                    LoafSpace.x4,
-                    LoafSpace.x3,
-                  ),
-                  child: header(context),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (header != null) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  LoafSpace.x4,
+                  0,
+                  LoafSpace.x4,
+                  LoafSpace.x3,
                 ),
-                Divider(height: 1, color: tokens.border),
-              ],
-              // A long list scrolls rather than overflowing the sheet's height
-              // cap; a short one still hugs its content.
-              Flexible(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (final item in items)
-                        InkWell(
-                          onTap: () => Navigator.pop(context, item.value),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: LoafSpace.x5,
-                              vertical: 14,
-                            ),
-                            child: ActionLabel(item: item, compact: false),
+                child: header(context),
+              ),
+              Divider(height: 1, color: tokens.border),
+            ],
+            // A long list scrolls rather than overflowing the sheet's height
+            // cap; a short one still hugs its content.
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (final item in items)
+                      InkWell(
+                        onTap: () => Navigator.pop(context, item.value),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: LoafSpace.x5,
+                            vertical: 14,
                           ),
+                          child: ActionLabel(item: item, compact: false),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     ),
@@ -100,8 +96,8 @@ Future<T?> showActionSheet<T>(
 }
 
 /// Pointer: a menu at [position], in global coordinates. Escape or a click
-/// elsewhere closes it. [leading] entries go above the actions — a divider
-/// is added between them.
+/// elsewhere closes it. [leading] entries go above the actions, with a
+/// divider between them when there are both.
 Future<T?> showActionMenu<T>(
   BuildContext context, {
   required Offset position,
@@ -124,7 +120,8 @@ Future<T?> showActionMenu<T>(
     ),
     items: [
       ...leading,
-      if (leading.isNotEmpty) const PopupMenuDivider(height: 9),
+      if (leading.isNotEmpty && items.isNotEmpty)
+        const PopupMenuDivider(height: 9),
       for (final item in items)
         PopupMenuItem<T>(
           value: item.value,

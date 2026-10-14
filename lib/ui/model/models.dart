@@ -38,6 +38,9 @@ class AvatarRef {
   int get hashCode => value.hashCode;
 }
 
+/// Where a puppet's messages come from; null means a real Matrix account.
+enum Bridge { discord }
+
 class Member {
   const Member(
     this.id,
@@ -47,10 +50,14 @@ class Member {
     this.statusMessage,
     this.powerLevel = 0,
     this.avatar,
+    this.bridge,
   });
 
   final String id;
   final String name;
+
+  /// Set by the backend from the user id; the UI reads this alone.
+  final Bridge? bridge;
 
   /// Null draws the initials.
   final AvatarRef? avatar;
@@ -102,6 +109,7 @@ class Member {
         ? this.statusMessage
         : (statusMessage.isEmpty ? null : statusMessage),
     powerLevel: powerLevel,
+    bridge: bridge,
   );
 }
 
@@ -160,6 +168,7 @@ class Message {
     this.edited = false,
     this.replyTo,
     this.media,
+    this.previewLink,
     this.uploaded,
     this.callLine,
     this.status = MessageStatus.sent,
@@ -177,6 +186,7 @@ class Message {
       edited = false,
       replyTo = null,
       media = null,
+      previewLink = null,
       uploaded = null,
       callLine = null,
       status = MessageStatus.sent,
@@ -203,6 +213,10 @@ class Message {
   /// its caption, and empty when there is none.
   final Media? media;
 
+  /// The link this message offers a preview of. Null when it has none, or
+  /// where previews are not asked for: the backend that made it decides.
+  final Uri? previewLink;
+
   /// How much of an outgoing file has gone up, 0 to 1. Set only while sending.
   final double? uploaded;
 
@@ -218,12 +232,14 @@ class Message {
   /// See [Message.stub].
   final bool stub;
 
-  /// New words make the old formatting wrong: [formatted] goes with a new
-  /// [body], and without one the message has none.
+  /// New words make the old formatting and the old link wrong: [formatted]
+  /// and [previewLink] go with a new [body], and without them the message
+  /// has neither.
   Message copyWith({
     List<Reaction>? reactions,
     String? body,
     String? formatted,
+    Uri? previewLink,
     bool? edited,
   }) => Message(
     id: id,
@@ -235,6 +251,7 @@ class Message {
     edited: edited ?? this.edited,
     replyTo: replyTo,
     media: media,
+    previewLink: body == null ? this.previewLink : previewLink,
     uploaded: uploaded,
     callLine: callLine,
     status: status,
@@ -242,6 +259,29 @@ class Message {
     stub: stub,
   );
 }
+
+/// What a moderator has put on someone in a call. Deafened is muted too.
+enum CallSilence { muted, deafened }
+
+/// Your read receipt in a room: the event it sits on, where known, and the
+/// server's time for it. A message is read when the receipt is on it or
+/// later.
+@immutable
+class ReadMark {
+  const ReadMark({this.eventId, required this.at});
+
+  final String? eventId;
+  final DateTime at;
+
+  bool covers(String eventId, DateTime? sentAt) =>
+      this.eventId == eventId || (sentAt != null && !sentAt.isAfter(at));
+}
+
+/// How much of a room reaches you: everything, mentions alone, or nothing.
+/// Unread state is untouched either way. On Matrix, [mentions] is a
+/// room-kind push rule with no actions and [none] an override rule, which
+/// the mention rules can't get past.
+enum NotifyLevel { all, mentions, none }
 
 class Channel {
   const Channel({
@@ -254,15 +294,18 @@ class Channel {
     this.topic,
     this.occupants = const [],
     this.joined = true,
-    this.muted = false,
+    this.notify = NotifyLevel.all,
     this.members = const [],
     this.favourite = false,
     this.favouriteOrder,
     this.lowPriority = false,
     this.lastActivity,
+    this.read,
     this.earlier = const [],
     this.waitingFor = const [],
     this.avatar,
+    this.silenced = const {},
+    this.canSilence = false,
   });
 
   final String id;
@@ -285,9 +328,7 @@ class Channel {
   /// space's members) are ever listed — see "Joining a space" in the spec.
   final bool joined;
 
-  /// Mentions still reach you; nothing else does. A single toggle with no
-  /// expiry, mapping to a mentions-only push rule.
-  final bool muted;
+  final NotifyLevel notify;
 
   /// For a direct chat: everyone in it except you. One person is a 1:1
   /// DM, more is a group DM.
@@ -303,12 +344,23 @@ class Channel {
   /// The newest event, which is what orders DMs.
   final DateTime? lastActivity;
 
+  /// Your receipt here; null while nothing is known of it.
+  final ReadMark? read;
+
   /// Older 1:1 rooms with the same person, folded into this row so Home
   /// shows each person once. Matrix allows duplicates; loaf hides them.
   final List<Channel> earlier;
 
   /// Invited to a DM you started, and not in it yet.
   final List<Member> waitingFor;
+
+  /// Whom someone has muted or deafened for everyone in this channel's
+  /// call, by user id.
+  final Map<String, CallSilence> silenced;
+
+  /// Whether you may mute or deafen people in this channel's call for
+  /// everyone.
+  final bool canSilence;
 
   IconData get icon => switch (kind) {
     ChannelKind.voice => LucideIcons.volume2,
@@ -320,7 +372,7 @@ class Channel {
 
   Channel copyWith({
     bool? joined,
-    bool? muted,
+    NotifyLevel? notify,
     int? unread,
     int? mentions,
     List<Member>? occupants,
@@ -328,6 +380,7 @@ class Channel {
     double? favouriteOrder,
     bool? lowPriority,
     DateTime? lastActivity,
+    ReadMark? read,
     List<Channel>? earlier,
   }) => Channel(
     id: id,
@@ -339,13 +392,16 @@ class Channel {
     private: private,
     topic: topic,
     occupants: occupants ?? this.occupants,
+    silenced: silenced,
+    canSilence: canSilence,
     joined: joined ?? this.joined,
-    muted: muted ?? this.muted,
+    notify: notify ?? this.notify,
     members: members,
     favourite: favourite ?? this.favourite,
     favouriteOrder: favouriteOrder ?? this.favouriteOrder,
     lowPriority: lowPriority ?? this.lowPriority,
     lastActivity: lastActivity ?? this.lastActivity,
+    read: read ?? this.read,
     earlier: earlier ?? this.earlier,
     waitingFor: waitingFor,
   );
@@ -399,7 +455,7 @@ class Space {
   /// This space with this session's changes layered over the fixtures — the
   /// mock's stand-in for membership, read markers and push rules arriving
   /// over sync. [membership] maps channel ids to joined (true) or left
-  /// (false); [muted] likewise; channels in [read] have nothing unread.
+  /// (false); [notify] likewise; channels in [read] were read at that time.
   ///
   /// A left invite-only channel is dropped entirely: only channels you could
   /// join in one tap are ever listed.
@@ -408,8 +464,8 @@ class Space {
   /// adds to a channel's count, for the missed calls a DM has picked up.
   Space withSession({
     Map<String, bool> membership = const {},
-    Map<String, bool> muted = const {},
-    Set<String> read = const {},
+    Map<String, NotifyLevel> notify = const {},
+    Map<String, DateTime> read = const {},
     Map<String, List<Member>> occupants = const {},
     Map<String, int> unread = const {},
   }) => Space(
@@ -425,13 +481,17 @@ class Space {
             if (!(channel.private && membership[channel.id] == false))
               channel.copyWith(
                 joined: membership[channel.id],
-                muted: muted[channel.id],
+                notify: notify[channel.id],
                 // Reading clears what the fixture had; anything that lands
                 // afterwards, such as a missed call, counts again.
                 unread:
-                    (read.contains(channel.id) ? 0 : channel.unread) +
+                    (read.containsKey(channel.id) ? 0 : channel.unread) +
                     (unread[channel.id] ?? 0),
-                mentions: read.contains(channel.id) ? 0 : null,
+                mentions: read.containsKey(channel.id) ? 0 : null,
+                read: switch (read[channel.id]) {
+                  final at? => ReadMark(at: at),
+                  null => null,
+                },
                 occupants: occupants[channel.id],
               ),
         ]),

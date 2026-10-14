@@ -9,6 +9,10 @@ public struct AudioClaim: Equatable {
   /// Views that are playing, and whether each is muted.
   private var playing: [Int64: Bool] = [:]
 
+  /// Whether a call has the session. It needs play and record for as long
+  /// as it lasts, so a video neither takes the session then nor lets it go.
+  private var inCall = false
+
   public init() {}
 
   /// Whether some video is playing with its sound on.
@@ -30,7 +34,16 @@ public struct AudioClaim: Equatable {
     return transition(from: before)
   }
 
+  /// A call beginning or ending. Beginning asks nothing of the session: the
+  /// call takes it for itself. Ending hands it back to a video still making
+  /// sound.
+  public mutating func call(_ active: Bool) -> Transition? {
+    inCall = active
+    return !active && isClaimed ? .claim : nil
+  }
+
   private func transition(from before: Bool) -> Transition? {
+    if inCall { return nil }
     switch (before, isClaimed) {
     case (false, true): return .claim
     case (true, false): return .release

@@ -6,16 +6,20 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../members/person_card.dart';
 import '../members/role_colors.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
+import '../settings/voice_settings.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
 import '../widgets/loaf_button.dart';
 import '../widgets/toast.dart';
 import '../window/window_chrome.dart';
-import 'call_controller.dart';
+import 'calls.dart';
+import 'volume_slider.dart';
 import 'call_controls.dart';
+import 'call_health.dart';
 import 'call_stage.dart';
 import 'call_tile.dart';
 
@@ -28,7 +32,7 @@ class CallView extends StatelessWidget {
     this.trailing = const [],
   });
 
-  final CallController calls;
+  final Calls calls;
 
   /// The DM panel's compact size: a slim top bar, one row of tiles.
   final bool compact;
@@ -115,7 +119,7 @@ class CallView extends StatelessWidget {
 }
 
 /// You, then everyone else, as the stage draws them.
-List<TileInfo> callTiles(CallController calls, CallSession session) => [
+List<TileInfo> callTiles(Calls calls, CallSession session) => [
   TileInfo(
     calls.me,
     you: true,
@@ -123,6 +127,8 @@ List<TileInfo> callTiles(CallController calls, CallSession session) => [
     deafened: calls.deafened,
     camera: calls.camera,
     screen: calls.sharing != null,
+    speaking: calls.speaking,
+    silenced: calls.silenced,
   ),
   for (final p in session.participants) TileInfo.of(p),
 ];
@@ -133,11 +139,13 @@ enum _TileAction { pin, unpin }
 /// entry: there is no profile view to open yet.
 Future<void> showTileActions(
   BuildContext context,
-  CallController calls,
+  Calls calls,
   TileInfo info,
   Offset? position,
 ) async {
   final pinned = calls.pinned == info.id;
+  // Your own sound is never played to you.
+  final voice = info.you ? null : VoiceScope.find(context);
   final items = [
     ActionItem(
       value: pinned ? _TileAction.unpin : _TileAction.pin,
@@ -150,15 +158,23 @@ Future<void> showTileActions(
     action = await showActionMenu(
       context,
       position: position,
-      leading: [if (!info.you) _VolumeEntry(calls: calls, id: info.id)],
+      leading: [
+        PersonCardEntry<_TileAction>(member: info.member, isYou: info.you),
+        if (voice != null)
+          VolumeMenuEntry<_TileAction>(voice: voice, id: info.id),
+      ],
       items: items,
     );
   } else {
     action = await showActionSheet(
       context,
-      header: info.you
-          ? null
-          : (context) => _VolumeSlider(calls: calls, id: info.id),
+      header: (context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PersonCard(member: info.member, isYou: info.you),
+          if (voice != null) VolumeSlider(voice: voice, id: info.id),
+        ],
+      ),
       items: items,
     );
   }
@@ -172,76 +188,6 @@ Future<void> showTileActions(
   }
 }
 
-/// Per-person volume. Local only: it changes what you hear, not them.
-class _VolumeSlider extends StatefulWidget {
-  const _VolumeSlider({required this.calls, required this.id});
-
-  final CallController calls;
-  final String id;
-
-  @override
-  State<_VolumeSlider> createState() => _VolumeSliderState();
-}
-
-class _VolumeSliderState extends State<_VolumeSlider> {
-  late double _value = widget.calls.volumeOf(widget.id);
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = LoafTokens.of(context);
-    return Row(
-      children: [
-        Icon(LucideIcons.volume1, size: 18, color: tokens.textMuted),
-        Expanded(
-          child: Slider(
-            value: _value,
-            max: 2,
-            onChanged: (v) {
-              setState(() => _value = v);
-              widget.calls.setVolume(widget.id, v);
-            },
-          ),
-        ),
-        SizedBox(
-          width: 44,
-          child: Text(
-            '${(_value * 100).round()}%',
-            textAlign: TextAlign.end,
-            style: loafBody(13, 500).copyWith(color: tokens.textBody),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _VolumeEntry extends PopupMenuEntry<_TileAction> {
-  const _VolumeEntry({required this.calls, required this.id});
-
-  final CallController calls;
-  final String id;
-
-  @override
-  double get height => 48;
-
-  @override
-  bool represents(_TileAction? value) => false;
-
-  @override
-  State<_VolumeEntry> createState() => _VolumeEntryState();
-}
-
-class _VolumeEntryState extends State<_VolumeEntry> {
-  @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 240,
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: LoafSpace.x3),
-      child: _VolumeSlider(calls: widget.calls, id: widget.id),
-    ),
-  );
-}
-
 class CallTopBar extends StatelessWidget {
   const CallTopBar({
     super.key,
@@ -252,7 +198,7 @@ class CallTopBar extends StatelessWidget {
     this.trailing = const [],
   });
 
-  final CallController calls;
+  final Calls calls;
   final CallSession session;
   final bool compact;
   final Widget? leading;
@@ -261,7 +207,10 @@ class CallTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
-    final status = callStatus(session.phase);
+    final status = callStatus(
+      session.phase,
+      switchingAudio: calls.switchingAudio,
+    );
     final present = session.participants.where((p) => p.present).length + 1;
     return WindowDragArea(
       child: Container(
@@ -319,6 +268,10 @@ class CallTopBar extends StatelessWidget {
                       ),
                     ),
                   ],
+                  if (CallHealthMark.shows(calls)) ...[
+                    const SizedBox(width: LoafSpace.x2),
+                    CallHealthMark(calls: calls, quiet: true),
+                  ],
                   if (calls.encrypted) ...[
                     const SizedBox(width: LoafSpace.x2),
                     _EncryptedMark(),
@@ -345,12 +298,14 @@ class CallTopBar extends StatelessWidget {
 }
 
 /// The top bar's status words, or null when the call is simply live.
-String? callStatus(CallPhase phase) => switch (phase) {
-  CallPhase.connecting => 'connecting…',
-  CallPhase.reconnecting => 'reconnecting…',
-  CallPhase.ringing => 'ringing…',
-  _ => null,
-};
+String? callStatus(CallPhase phase, {bool switchingAudio = false}) =>
+    switch (phase) {
+      CallPhase.connecting => 'connecting…',
+      CallPhase.reconnecting => 'reconnecting…',
+      CallPhase.ringing => 'ringing…',
+      _ when switchingAudio => 'switching audio…',
+      _ => null,
+    };
 
 class _EncryptedMark extends StatelessWidget {
   static const _explanation = 'calls are end-to-end encrypted';
@@ -397,7 +352,7 @@ class TopBarButton extends StatelessWidget {
 class _ShareStrip extends StatelessWidget {
   const _ShareStrip({required this.calls});
 
-  final CallController calls;
+  final Calls calls;
 
   @override
   Widget build(BuildContext context) {
@@ -435,12 +390,12 @@ class _ShareStrip extends StatelessWidget {
   }
 }
 
-/// A call that has ended without you hanging up: failed, declined, or
-/// nobody answered.
+/// A call that has ended without you hanging up: failed, declined, nobody
+/// answered, or someone hung up for you.
 class _EndState extends StatelessWidget {
   const _EndState({required this.calls, required this.session});
 
-  final CallController calls;
+  final Calls calls;
   final CallSession session;
 
   @override
@@ -463,6 +418,12 @@ class _EndState extends StatelessWidget {
         session.target.members.length > 1 ? 'no one answered' : 'no answer',
         'call again',
         calls.callAgain,
+      ),
+      CallPhase.hungUp => (
+        LucideIcons.phoneOff,
+        'someone hung up for you',
+        'join again',
+        calls.retry,
       ),
       _ => (LucideIcons.wifiOff, "couldn't connect", 'retry', calls.retry),
     };
@@ -491,7 +452,7 @@ class _EndState extends StatelessWidget {
                   label: 'close',
                   size: LoafButtonSize.small,
                   emphasis: LoafButtonEmphasis.outlined,
-                  onTap: calls.close,
+                  onTap: calls.leave,
                 ),
               ],
             ),
@@ -504,12 +465,12 @@ class _EndState extends StatelessWidget {
 
 /// The channel's occupants plus your preview, for a voice channel you have
 /// not connected to — drawn dimmed, since you are not hearing them yet.
-List<TileInfo> lobbyTiles(CallController calls, Channel channel) => [
+List<TileInfo> lobbyTiles(Calls calls, Channel channel) => [
   TileInfo(calls.me, you: true, muted: calls.muted, camera: calls.camera),
   // How they are set up is visible without joining, like who is there.
   for (final m in channel.occupants)
-    if (calls.flags[m.id] case final flags?)
-      TileInfo.of(flags)
+    if (calls.lobbyState(m.id) case final state?)
+      TileInfo.of(state)
     else
       TileInfo(m),
 ];

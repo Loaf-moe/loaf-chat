@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/client_factory.dart';
@@ -13,13 +16,23 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 /// answers with whatever [status] and [contentType] say.
 class _Api extends FakeMatrixApi {
   final requests = <Map<String, String>>[];
+  final paths = <String>[];
   var status = 200;
+
+  /// While set, a download of a path containing it waits on the completer.
+  (String, Completer<void>)? hold;
   var contentType = 'image/png';
 
   @override
   Future<http.Response> mockIntercept(http.Request request) async {
-    if (request.method == 'GET' && request.url.path.contains('/thumbnail/')) {
+    final path = request.url.path;
+    if (request.method == 'GET' &&
+        (path.contains('/thumbnail/') || path.contains('/download/'))) {
+      paths.add(path);
       requests.add(request.headers);
+      if (hold case (final part, final gate) when path.contains(part)) {
+        await gate.future;
+      }
       return http.Response.bytes(
         utf8.encode('pixels'),
         status,
@@ -29,6 +42,19 @@ class _Api extends FakeMatrixApi {
     return super.mockIntercept(request);
   }
 }
+
+/// A 1x1 transparent PNG.
+final _png = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+);
+
+/// Decodes [_png] whatever it is given, noting the size asked of a 4000 by
+/// 3000 picture.
+ImageDecoderCallback _recording(List<TargetImageSize?> asked) =>
+    (buffer, {getTargetSize}) async {
+      asked.add(getTargetSize?.call(4000, 3000));
+      return instantiateImageCodec(_png);
+    };
 
 Future<Client> _client(_Api api) async {
   // The file store needs a directory; it is what makes a fetch stick.
@@ -66,14 +92,14 @@ void main() {
   test('a thumbnail is fetched with the access token', () async {
     final api = _Api();
     final client = await _client(api);
-    await MxcThumbnail(client, mxc, 64).bytes();
+    await MxcImage(client, mxc, size: 64).bytes();
     expect(api.requests.single['authorization'], 'Bearer abcd');
   });
 
   test('a second fetch comes from the file store', () async {
     final api = _Api();
     final client = await _client(api);
-    final thumbnail = MxcThumbnail(client, mxc, 64);
+    final thumbnail = MxcImage(client, mxc, size: 64);
     await thumbnail.bytes();
     await thumbnail.bytes();
     expect(api.requests, hasLength(1));
@@ -82,7 +108,7 @@ void main() {
   test('a thumbnail that fails leaves nothing cached', () async {
     final api = _Api();
     final client = await _client(api);
-    final thumbnail = MxcThumbnail(client, mxc, 64);
+    final thumbnail = MxcImage(client, mxc, size: 64);
     api.status = 404;
     await expectLater(thumbnail.bytes(), throwsA(anything));
     api
@@ -91,6 +117,153 @@ void main() {
     await expectLater(thumbnail.bytes(), throwsA(anything));
     final uri = await mxc.getThumbnailUri(client, width: 64, height: 64);
     expect(await client.database.getFile(uri), isNull);
+  });
+
+  test('an original is fetched whole, with the access token', () async {
+    final api = _Api();
+    final client = await _client(api);
+    await MxcImage(client, mxc).bytes();
+    expect(api.paths.single, contains('/download/'));
+    expect(api.paths.single, isNot(contains('/thumbnail/')));
+    expect(api.requests.single['authorization'], 'Bearer abcd');
+  });
+
+  test('a second original comes from the file store', () async {
+    final api = _Api();
+    final client = await _client(api);
+    final original = MxcImage(client, mxc);
+    await original.bytes();
+    await original.bytes();
+    expect(api.requests, hasLength(1));
+  });
+
+  test('an original and a thumbnail are cached apart', () async {
+    final api = _Api();
+    final client = await _client(api);
+    await MxcImage(client, mxc).bytes();
+    await MxcImage(client, mxc, size: 64).bytes();
+    expect(api.requests, hasLength(2));
+  });
+
+  test('an original that fails leaves nothing cached', () async {
+    final api = _Api()..status = 500;
+    final client = await _client(api);
+    await expectLater(MxcImage(client, mxc).bytes(), throwsA(anything));
+    expect(
+      await client.database.getFile(await mxc.getDownloadUri(client)),
+      isNull,
+    );
+  });
+
+  test('an original decodes no wider than 512', () async {
+    final client = await _client(_Api());
+    final asked = <TargetImageSize?>[];
+    final image = MxcImage(client, mxc);
+    final completer = image.loadImage(image, _recording(asked));
+    final done = Completer<void>();
+    completer.addListener(ImageStreamListener((_, _) => done.complete()));
+    await done.future;
+    expect(asked.single?.width, 512);
+    expect(asked.single?.height, isNull);
+  });
+
+  test('a thumbnail decodes as the server sized it', () async {
+    final client = await _client(_Api());
+    final asked = <TargetImageSize?>[];
+    final image = MxcImage(client, mxc, size: 64);
+    final completer = image.loadImage(image, _recording(asked));
+    final done = Completer<void>();
+    completer.addListener(ImageStreamListener((_, _) => done.complete()));
+    await done.future;
+    expect(asked.single, isNull);
+  });
+
+  group('warming', () {
+    List<String> downloads(_Api api) =>
+        api.paths.where((p) => p.contains('/download/')).toList();
+
+    test('fetches an original once, however often it is asked', () async {
+      final api = _Api();
+      final client = await _client(api);
+      final images = MatrixAvatarImages(client, warmAfter: Duration.zero);
+      addTearDown(images.dispose);
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(downloads(api), hasLength(1));
+    });
+
+    test('goes on past one that fails', () async {
+      final api = _Api()..status = 500;
+      final client = await _client(api);
+      final images = MatrixAvatarImages(client, warmAfter: Duration.zero);
+      addTearDown(images.dispose);
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      images.warm(const AvatarRef('mxc://fake/def'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(downloads(api), hasLength(2));
+    });
+
+    test('ignores a ref that is not mxc', () async {
+      final api = _Api();
+      final client = await _client(api);
+      final images = MatrixAvatarImages(client, warmAfter: Duration.zero);
+      addTearDown(images.dispose);
+      images.warm(const AvatarRef('https://x/y'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(downloads(api), isEmpty);
+    });
+
+    test('fetches nothing once disposed', () async {
+      final api = _Api();
+      final client = await _client(api);
+      final images = MatrixAvatarImages(client, warmAfter: Duration.zero);
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      images.dispose();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(downloads(api), isEmpty);
+    });
+
+    test('waits its delay before the first fetch', () async {
+      final api = _Api();
+      final client = await _client(api);
+      final images = MatrixAvatarImages(
+        client,
+        warmAfter: const Duration(seconds: 5),
+      );
+      addTearDown(images.dispose);
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(downloads(api), isEmpty);
+    });
+
+    test('gives up on a download that hangs and fetches the next', () async {
+      final gate = Completer<void>();
+      final api = _Api()..hold = ('abc', gate);
+      addTearDown(gate.complete);
+      final client = await _client(api);
+      final images = MatrixAvatarImages(
+        client,
+        warmAfter: Duration.zero,
+        fetchTimeout: const Duration(milliseconds: 100),
+      );
+      addTearDown(images.dispose);
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      images.warm(const AvatarRef('mxc://fake/def'));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(downloads(api), hasLength(2));
+      expect(downloads(api).last, contains('def'));
+    });
+  });
+
+  test('an mxc ref has an original; another scheme has none', () async {
+    final client = await _client(_Api());
+    final images = MatrixAvatarImages(client);
+    expect(
+      images.original(const AvatarRef('mxc://fake/abc')),
+      MxcImage(client, mxc),
+    );
+    expect(images.original(const AvatarRef('https://x/y')), isNull);
   });
 
   test('a non-mxc ref resolves to nothing', () async {
@@ -105,6 +278,6 @@ void main() {
     final client = await _client(_Api());
     final provider = MatrixAvatarImages(client)
         .resolve(const AvatarRef('mxc://fake/abc'), 100);
-    expect(provider, MxcThumbnail(client, mxc, 128));
+    expect(provider, MxcImage(client, mxc, size: 128));
   });
 }

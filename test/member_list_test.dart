@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/members/member_list.dart';
@@ -126,6 +127,71 @@ void main() {
       expect(colorOf('bea'), tokens.nameColor(Role.member));
       // Three roles, three distinct colours.
       expect({colorOf('zed'), colorOf('Mo'), colorOf('bea')}, hasLength(3));
+    });
+
+    Future<List<(Member, Offset?)>> pumpOpenable(WidgetTester tester) async {
+      final opened = <(Member, Offset?)>[];
+      tester.view.physicalSize = const Size(320, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: MemberList(
+              members: const [_bea],
+              onOpen: (m, at) => opened.add((m, at)),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return opened;
+    }
+
+    testWidgets(
+      'on a computer a click opens at the pointer',
+      variant: TargetPlatformVariant.desktop(),
+      (tester) async {
+        final opened = await pumpOpenable(tester);
+        final at = tester.getCenter(find.text('bea'));
+        await tester.tapAt(at);
+        expect(opened.single.$1.id, _bea.id);
+        expect(opened.single.$2, at);
+      },
+    );
+
+    testWidgets(
+      'on a computer a right-click opens at the pointer too',
+      variant: TargetPlatformVariant.desktop(),
+      (tester) async {
+        final opened = await pumpOpenable(tester);
+        final at = tester.getCenter(find.text('bea'));
+        await tester.tapAt(at, buttons: kSecondaryButton);
+        expect(opened.single.$2, at);
+      },
+    );
+
+    testWidgets(
+      'on a phone a tap opens with nowhere to anchor',
+      variant: TargetPlatformVariant.mobile(),
+      (tester) async {
+        final opened = await pumpOpenable(tester);
+        await tester.tap(find.text('bea'));
+        expect(opened.single.$1.id, _bea.id);
+        expect(opened.single.$2, isNull);
+      },
+    );
+
+    testWidgets('a Discord puppet\'s row carries the badge', (tester) async {
+      await pump(tester, [
+        const Member('@l', 'lou', _grey, bridge: Bridge.discord),
+        _bea,
+      ]);
+      expect(find.bySemanticsLabel('from Discord'), findsOneWidget);
+      final name = tester.getRect(find.text('lou'));
+      final badge = tester.getRect(find.bySemanticsLabel('from Discord'));
+      expect(badge.left, greaterThan(name.right));
     });
   });
 

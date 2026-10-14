@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
 import 'package:loaf_native/ui/model/chime.dart';
+import 'package:loaf_native/ui/model/message_route.dart';
 import 'package:loaf_native/ui/shell/notifier.dart';
 
 void main() {
@@ -52,6 +53,9 @@ void main() {
     var focused = true;
     String? open;
     var elapsed = Duration.zero;
+    final notices = <(Arrival, bool)>[];
+    late StreamController<MessageRoute> retractions;
+    final retracted = <MessageRoute>[];
 
     Notifier make() => Notifier(
       arrivals: arrivals.stream,
@@ -61,15 +65,21 @@ void main() {
       focused: () => focused,
       desktop: true,
       elapsed: () => elapsed,
+      notice: (a, {required sound}) => notices.add((a, sound)),
+      retractions: retractions.stream,
+      retract: retracted.add,
     );
 
     setUp(() {
       arrivals = StreamController<Arrival>();
+      retractions = StreamController<MessageRoute>();
+      retracted.clear();
       chime = FakeChime();
       sound = true;
       focused = true;
       open = '!open';
       elapsed = Duration.zero;
+      notices.clear();
     });
 
     var id = 0;
@@ -101,12 +111,83 @@ void main() {
       expect(chime.plays, 0);
     });
 
-    test('unfocused, the chime waits for step D', () async {
+    test(
+      'unfocused on a desktop, a notification instead of the chime',
+      () async {
+        focused = false;
+        final n = make();
+        addTearDown(n.dispose);
+        await arrive('!other');
+        expect(chime.plays, 0);
+        expect(notices.single.$1.roomId, '!other');
+        expect(notices.single.$2, isTrue);
+      },
+    );
+
+    test('unfocused, the open channel notifies too', () async {
+      focused = false;
+      final n = make();
+      addTearDown(n.dispose);
+      await arrive('!open');
+      expect(notices, hasLength(1));
+    });
+
+    test(
+      'one throttle for chimes and notifications: a burst sounds once',
+      () async {
+        final n = make();
+        addTearDown(n.dispose);
+        await arrive('!other'); // chimes
+        focused = false;
+        await arrive('!other'); // a notice, within the second: silent
+        elapsed = const Duration(seconds: 1);
+        await arrive('!other'); // a notice, a second on: sounds
+        expect(chime.plays, 1);
+        expect([for (final (_, sound) in notices) sound], [false, true]);
+      },
+    );
+
+    test('with sound off, notices are silent', () async {
+      sound = false;
       focused = false;
       final n = make();
       addTearDown(n.dispose);
       await arrive('!other');
+      expect(notices.single.$2, isFalse);
+    });
+
+    test('a message arriving again does not chime again', () async {
+      final n = make();
+      addTearDown(n.dispose);
+      const again = Arrival(roomId: '!other', eventId: r'$sealed');
+      arrivals.add(again);
+      await pumpEventQueue();
+      elapsed = const Duration(seconds: 5);
+      arrivals.add(again);
+      await pumpEventQueue();
+      expect(chime.plays, 1);
+    });
+
+    test('a message arriving again is noticed again, silent', () async {
+      focused = false;
+      final n = make();
+      addTearDown(n.dispose);
+      const again = Arrival(roomId: '!other', eventId: r'$sealed');
+      arrivals.add(again);
+      await pumpEventQueue();
+      elapsed = const Duration(seconds: 5);
+      arrivals.add(again);
+      await pumpEventQueue();
+      expect([for (final (_, sound) in notices) sound], [true, false]);
       expect(chime.plays, 0);
+    });
+
+    test('a retraction reaches the noticer', () async {
+      final n = make();
+      addTearDown(n.dispose);
+      retractions.add(const MessageRoute('!other', r'$sealed'));
+      await pumpEventQueue();
+      expect(retracted, [const MessageRoute('!other', r'$sealed')]);
     });
 
     test('a burst chimes once', () async {

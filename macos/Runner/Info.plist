@@ -28,6 +28,10 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INSendMessageIntent</string>
+	</array>
 	<key>SUFeedURL</key>
 	<string>https://get.loaf.moe/appcast.xml</string>
 	<key>SUPublicEDKey</key>
@@ -36,6 +40,10 @@
 	<true/>
 	<key>SUAutomaticallyUpdate</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>talk in voice channels</string>
+	<key>NSCameraUsageDescription</key>
+	<string>turn your camera on in a call</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>3600</integer>
 	<key>SUEnableInstallerLauncherService</key>

@@ -10,7 +10,6 @@ import 'package:flutter/material.dart';
 
 import '../theme/loaf_theme.dart';
 import '../model/media_source.dart';
-import 'avatar_images.dart';
 
 /// Opens [builder]'s popover next to [anchor] (global coordinates). A click
 /// outside or Escape closes it.
@@ -36,10 +35,7 @@ Future<T?> showAnchoredPopover<T>(
         ),
         clipBehavior: Clip.antiAlias,
         // The route is on the root navigator, above the shell's scope.
-        child: AvatarImagesScope.carry(
-          from,
-          child: MediaSourceScope.carry(from, child: builder(context)),
-        ),
+        child: MediaSourceScope.carry(from, child: builder(context)),
       ),
     ),
   );

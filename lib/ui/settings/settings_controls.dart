@@ -1,8 +1,10 @@
-/// The two controls every settings section is built from: a small caps
-/// label over a group, and a titled checkbox row with a line of detail.
+/// The controls every settings section is built from: a small caps label
+/// over a group, a titled checkbox row with a line of detail, and a row
+/// for one choice among several.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
 
@@ -34,6 +36,7 @@ class SettingsCheck extends StatelessWidget {
     required this.detail,
     required this.value,
     required this.onChanged,
+    this.enabled = true,
   });
 
   final String title;
@@ -41,13 +44,16 @@ class SettingsCheck extends StatelessWidget {
   final bool value;
   final ValueChanged<bool> onChanged;
 
+  /// Off, the row is greyed and ignores taps; its value still shows.
+  final bool enabled;
+
   @override
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
-    return MergeSemantics(
+    final row = MergeSemantics(
       child: InkWell(
         borderRadius: BorderRadius.circular(LoafRadius.lg),
-        onTap: () => onChanged(!value),
+        onTap: enabled ? () => onChanged(!value) : null,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: LoafSpace.x2),
           child: Row(
@@ -57,7 +63,7 @@ class SettingsCheck extends StatelessWidget {
                 value: value,
                 activeColor: tokens.accent,
                 checkColor: tokens.textOnAccent,
-                onChanged: (v) => onChanged(v ?? true),
+                onChanged: enabled ? (v) => onChanged(v ?? true) : null,
               ),
               const SizedBox(width: LoafSpace.x2),
               Expanded(
@@ -83,6 +89,72 @@ class SettingsCheck extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+    return enabled ? row : Opacity(opacity: 0.5, child: row);
+  }
+}
+
+/// One of several: a bordered row, checked when it is the one chosen.
+class SettingsChoice extends StatelessWidget {
+  const SettingsChoice({
+    super.key,
+    required this.title,
+    required this.selected,
+    required this.onTap,
+    this.busy = false,
+  });
+
+  final String title;
+  final bool selected;
+  final VoidCallback onTap;
+
+  /// Chosen, and not yet in place: a spinner stands in for the check.
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return Semantics(
+      selected: selected,
+      button: true,
+      child: Material(
+        color: selected ? tokens.card : Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(LoafRadius.lg),
+          side: BorderSide(
+            color: selected ? tokens.borderStrong : tokens.border,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(LoafSpace.x3),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: loafBody(15, 500).copyWith(color: tokens.textStrong),
+                  ),
+                ),
+                if (busy)
+                  SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: tokens.accent,
+                    ),
+                  )
+                else if (selected)
+                  Icon(LucideIcons.check, size: 18, color: tokens.accent),
+              ],
+            ),
           ),
         ),
       ),

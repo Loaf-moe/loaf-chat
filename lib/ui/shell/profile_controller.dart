@@ -12,7 +12,7 @@ import '../model/models.dart';
 import 'profile.dart';
 
 /// Which write failed, so the toast can say so.
-enum ProfileCall { presence, status }
+enum ProfileCall { presence, status, notifications }
 
 class ProfileController extends ChangeNotifier {
   ProfileController({Profile? profile, this.onError})
@@ -47,6 +47,8 @@ class ProfileController extends ChangeNotifier {
   AvatarRef? get avatar => _profile.avatar;
   bool get savingAccount => _profile.savingAccount;
   bool get uploadingAvatar => _profile.uploadingAvatar;
+  ChannelDefault get channelDefault => _profile.channelDefault;
+  bool get settingChannelDefault => _profile.settingChannelDefault;
 
   /// Saves name and status together. Throws [AccountSaveFailed] naming what
   /// didn't save; the caller owns the toast, since the fields it keeps are
@@ -69,6 +71,9 @@ class ProfileController extends ChangeNotifier {
 
   /// Automatic idle, from the shell's watcher.
   void away(bool away) => _profile.away(away);
+
+  void setChannelDefault(ChannelDefault level) =>
+      _report(ProfileCall.notifications, _profile.setChannelDefault(level));
 
   /// Empty clears the status. No expiry: Matrix has none.
   void setStatus(String status) =>

@@ -21,7 +21,6 @@ import '../shell/profile_controller.dart';
 import '../theme/appearance.dart';
 import '../theme/loaf_theme.dart';
 import '../model/media_source.dart';
-import '../widgets/avatar_images.dart';
 import '../widgets/loaf_button.dart';
 import '../model/updater.dart';
 import 'about_section.dart';
@@ -31,11 +30,14 @@ import 'notification_settings.dart';
 import 'notifications_section.dart';
 import 'devices.dart';
 import 'devices_section.dart';
+import 'voice_section.dart';
+import 'voice_settings.dart';
 
 enum SettingsSection {
   account('account', LucideIcons.circleUser),
   appearance('appearance', LucideIcons.palette),
   notifications('notifications', LucideIcons.bell),
+  voice('voice', LucideIcons.mic),
   devices('devices', LucideIcons.monitorSmartphone),
   about('about', LucideIcons.info);
 
@@ -66,20 +68,17 @@ Future<void> showSettings(
 }) => showDialog<void>(
   context: context,
   barrierColor: const Color(0x99000016),
-  // The dialog is a root-navigator route, above the shell's avatar scope.
-  builder: (_) => AvatarImagesScope.carry(
+  // The dialog is a root-navigator route, above the shell's media scope.
+  builder: (_) => MediaSourceScope.carry(
     context,
-    child: MediaSourceScope.carry(
-      context,
-      child: SettingsModal(
-        initial: initial,
-        devices: devices,
-        updater: updater,
-        profile: profile,
-        me: me,
-        editable: editable,
-        onSignOut: onSignOut,
-      ),
+    child: SettingsModal(
+      initial: initial,
+      devices: devices,
+      updater: updater,
+      profile: profile,
+      me: me,
+      editable: editable,
+      onSignOut: onSignOut,
     ),
   ),
 );
@@ -123,13 +122,15 @@ class SettingsModal extends StatefulWidget {
 }
 
 class _SettingsModalState extends State<SettingsModal> {
-  /// What this backend can back. The account always; appearance only with a
-  /// controller to change; devices only with something that lists them.
+  /// What this backend can back. The account and about always; appearance,
+  /// notifications and voice only with a controller in scope; devices only
+  /// with something that lists them.
   List<SettingsSection> get _sections => [
     SettingsSection.account,
     if (AppearanceScope.maybeOf(context) != null) SettingsSection.appearance,
     if (NotificationScope.maybeOf(context) != null)
       SettingsSection.notifications,
+    if (VoiceScope.maybeOf(context) != null) SettingsSection.voice,
     if (widget.devices != null) SettingsSection.devices,
     SettingsSection.about,
   ];
@@ -455,7 +456,14 @@ class _Detail extends StatelessWidget {
     SettingsSection.notifications => switch (NotificationScope.maybeOf(
       context,
     )) {
-      final controller? => NotificationsSection(controller: controller),
+      final controller? => NotificationsSection(
+        controller: controller,
+        profile: profile,
+      ),
+      null => AccountSection(profile: profile, me: me, editable: editable),
+    },
+    SettingsSection.voice => switch (VoiceScope.maybeOf(context)) {
+      final controller? => VoiceSection(controller: controller),
       null => AccountSection(profile: profile, me: me, editable: editable),
     },
     // Only offered with devices to show; the null check is the backstop.

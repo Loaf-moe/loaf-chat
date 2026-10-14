@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 
 import '../model/arrival.dart';
 import '../model/chime.dart';
+import '../model/message_route.dart';
 import '../platform.dart';
 
 enum NoticeAction { none, chime, desktopNotice, push }
@@ -31,6 +32,9 @@ class Notifier {
     required this.chime,
     required this.soundOn,
     required this.openRoom,
+    this.notice,
+    Stream<MessageRoute>? retractions,
+    this.retract,
     bool Function()? focused,
     bool? desktop,
     Duration Function()? elapsed,
@@ -38,10 +42,19 @@ class Notifier {
        _desktop = desktop ?? isDesktop,
        _elapsed = elapsed ?? _clock {
     _sub = arrivals.listen(_on);
+    _retracting = retractions?.listen((route) => retract?.call(route));
   }
+
+  /// Takes back the notice for a message noticed while sealed whose text
+  /// turned out not to notify; null where there are no notices.
+  final void Function(MessageRoute route)? retract;
 
   final Chime chime;
   final bool Function() soundOn;
+
+  /// Shows a desktop notification for [arrival]; null where there are none.
+  /// [sound]: whether this one may sound, by the same throttle as the chime.
+  final void Function(Arrival arrival, {required bool sound})? notice;
 
   /// The room whose messages are on screen, or null.
   final String? Function() openRoom;
@@ -49,15 +62,21 @@ class Notifier {
   final bool _desktop;
   final Duration Function() _elapsed;
   late final StreamSubscription<Arrival> _sub;
+  StreamSubscription<MessageRoute>? _retracting;
 
   /// A monotonic clock for the throttle: the wall clock can step backwards,
   /// which would hold the chime back until it caught up.
   static final Stopwatch _stopwatch = Stopwatch()..start();
   static Duration _clock() => _stopwatch.elapsed;
 
-  /// When the chime last played, on that clock: messages within a second of
-  /// it are the same moment, and get one chime.
+  /// When a chime or notification last sounded, on that clock: messages
+  /// within a second of it are the same moment, and get one chime.
   Duration? _lastChime;
+
+  /// The last arrivals heard, in order. A sealed message read late comes
+  /// again with its text: its notice is replaced, and it sounded already.
+  final _heard = <Arrival>{};
+  static const _remembered = 200;
 
   /// The same test the channel view uses before it marks anything read.
   static bool _resumed() {
@@ -66,16 +85,17 @@ class Notifier {
   }
 
   void _on(Arrival arrival) {
+    final again = !_heard.add(arrival);
+    if (_heard.length > _remembered) _heard.remove(_heard.first);
     switch (decide(
       focused: _focused(),
       open: arrival.roomId == openRoom(),
       desktop: _desktop,
     )) {
       case NoticeAction.chime:
-        _chime();
+        if (!again) _chime();
       case NoticeAction.desktopNotice:
-        // Step D shows these.
-        break;
+        notice?.call(arrival, sound: !again && _sounds());
       case NoticeAction.push:
         // Step E: the push gateway brings it.
         break;
@@ -85,15 +105,22 @@ class Notifier {
   }
 
   void _chime() {
-    if (!soundOn()) return;
-    final now = _elapsed();
-    final last = _lastChime;
-    if (last != null && now - last < const Duration(seconds: 1)) {
-      return;
-    }
-    _lastChime = now;
-    unawaited(chime.play());
+    if (_sounds()) unawaited(chime.play());
   }
 
-  void dispose() => unawaited(_sub.cancel());
+  /// Whether a sound may go now: Sound is on and nothing has sounded in the
+  /// last second. Saying yes counts as sounding.
+  bool _sounds() {
+    if (!soundOn()) return false;
+    final now = _elapsed();
+    final last = _lastChime;
+    if (last != null && now - last < const Duration(seconds: 1)) return false;
+    _lastChime = now;
+    return true;
+  }
+
+  void dispose() {
+    unawaited(_sub.cancel());
+    unawaited(_retracting?.cancel());
+  }
 }

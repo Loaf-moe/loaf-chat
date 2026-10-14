@@ -51,8 +51,10 @@ dependency named by a build setting.
   `lib/ui/shell/spaces_rail.dart` (`mentions`, falling back to `unread`).
 - **Read marking is focus-aware already**: `channel_view.dart` marks read
   only while the app is resumed, and catches up on resume.
-- **Mute** is `pushRuleState != PushRuleState.notify`; setting it writes
-  `PushRuleState.dontNotify` (a mentions-only room rule).
+- **Mute** was one toggle: `pushRuleState != PushRuleState.notify` read as
+  muted, and setting it wrote `PushRuleState.dontNotify`, an override rule
+  that silences mentions too. Since 2026-10-13 a channel has three levels;
+  see "Settings".
 - **No jump-to-event** exists. The SDK's `room.getTimeline(eventContextId:)`
   loads a timeline around an event.
 - **The SDK database** (`matrix` 13.0.0, `MatrixSdkDatabase` over
@@ -82,8 +84,9 @@ notifications only.
   A message without `m.mentions` (an older client) mentions you when its
   body contains your display name or user id. Encrypted messages are
   checked after decryption.
-- **Channel**: bold when it has unreads, muted or not; the bell-off icon
-  stays. Badge: the unread count in a DM, the mention count elsewhere.
+- **Channel**: bold when it has unreads, whatever its level; the bell-off
+  (mute) or bell-minus (mentions only) icon stays. Badge: the unread count
+  in a DM, the mention count elsewhere.
 - **Space**: a pip at the rail's left edge (the `_SelectionPill` slot) when
   any joined channel has unreads; a badge of total mentions. No unread
   count on a space.
@@ -281,7 +284,10 @@ A Notifications section beside Account, Appearance, Devices and About.
   entitlement above).
 - Direct messages: always notify. Shown, not configurable.
 
-A channel's mute in its menu stays as it is and overrides the default.
+A channel's own level, from its menu, overrides the default: all messages,
+mentions only (a room rule with no actions), or mute (an override rule
+with no actions, which silences mentions too). The menu offers the two
+levels the channel is not at.
 
 ## Build order
 
