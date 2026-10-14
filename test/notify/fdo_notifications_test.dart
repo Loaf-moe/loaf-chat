@@ -157,11 +157,19 @@ void main() {
     final s = await serve(['actions', 'body']);
     final n = make();
     final clicks = <MessageRoute>[];
-    n.clicks.listen(clicks.add);
+    final clicked = Completer<void>();
+    n.clicks.listen((route) {
+      clicks.add(route);
+      if (!clicked.isCompleted) clicked.complete();
+    });
     await n.show(_notice());
-    await s.invoke(1, 'default');
+    // The signals cross a real socket, so a fixed pump can finish before
+    // they arrive. One sender's signals arrive in order: once the click
+    // sent last is in, the two before it have been seen and ignored.
     await s.invoke(1, 'something-else');
     await s.invoke(99, 'default');
+    await s.invoke(1, 'default');
+    await clicked.future.timeout(const Duration(seconds: 5));
     await pumpEventQueue();
     expect(clicks, [const MessageRoute('!r:x', r'$e')]);
   });
