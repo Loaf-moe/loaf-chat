@@ -268,7 +268,7 @@ class _NameChip extends StatelessWidget {
           ],
           if (info.deafened || info.muted) ...[
             const SizedBox(width: 4),
-            _byModerator(
+            _forEveryone(
               info,
               Icon(
                 info.deafened ? LucideIcons.headphoneOff : LucideIcons.micOff,
@@ -283,12 +283,12 @@ class _NameChip extends StatelessWidget {
   }
 }
 
-/// [icon] saying on hover that a moderator did it, where one did.
-Widget _byModerator(TileInfo info, Widget icon) => switch (info.silenced) {
+/// [icon] saying on hover that someone did it for everyone, where one did.
+Widget _forEveryone(TileInfo info, Widget icon) => switch (info.silenced) {
   null => icon,
-  CallSilence.muted => Tooltip(message: 'Muted by a moderator', child: icon),
+  CallSilence.muted => Tooltip(message: 'Muted for everyone', child: icon),
   CallSilence.deafened => Tooltip(
-    message: 'Deafened by a moderator',
+    message: 'Deafened for everyone',
     child: icon,
   ),
 };

@@ -174,9 +174,10 @@ abstract interface class Rooms implements Listenable {
   /// Throws [InviteRefused] naming who did not go through.
   Future<void> invite(String roomId, List<String> userIds);
 
-  /// Removes [userId] from the room; they may join again where its rules
-  /// let them. Throws when the server says no.
-  Future<void> kick(String roomId, String userId);
+  /// Takes [userId] out of the room's call, leaving them in the room; they
+  /// may join again. Their own client is what obeys. Throws when the server
+  /// says no.
+  Future<void> hangUp(String roomId, String userId);
 
   /// Removes [userId] from every joined room under [spaceId] they are in,
   /// then the space itself. Every kick is attempted; throws [PartlyDone]
@@ -184,8 +185,8 @@ abstract interface class Rooms implements Listenable {
   Future<void> kickFromSpace(String spaceId, String userId);
 
   /// Puts [to] on [userId] in the room's call for everyone, or with null
-  /// lifts it. Their own client is what obeys. Throws when the server
-  /// says no.
+  /// lifts it, and lifts any hang-up. Their own client is what obeys.
+  /// Throws when the server says no.
   Future<void> silence(String roomId, String userId, CallSilence? to);
 
   SpaceDirectory get directory;

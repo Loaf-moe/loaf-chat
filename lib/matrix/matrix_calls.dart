@@ -134,8 +134,12 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   @override
   void retry() {
     final session = _session;
-    if (session?.phase != CallPhase.failed) return;
-    _start(session!.target, session.spaceName ?? '');
+    if (session == null ||
+        (session.phase != CallPhase.failed &&
+            session.phase != CallPhase.hungUp)) {
+      return;
+    }
+    _start(session.target, session.spaceName ?? '');
   }
 
   void _start(Channel channel, String spaceName) {
@@ -336,13 +340,33 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       live.silenced = silenced;
       _applyAudio(live);
     }
+    final hungUp = _hangUps(live.room)[_client.userID];
+    final created = live.membership.created;
+    if (hungUp != null &&
+        created != null &&
+        hungUp.millisecondsSinceEpoch > created) {
+      unawaited(_hungUp(_attempt));
+      return;
+    }
     _refresh(live);
   }
 
-  /// Whom [room]'s moderators have muted or deafened, by user id.
-  Map<String, CallSilence> _silences(Room room) => callSilences(
-    (room.states[callSilenceType]?.values ?? const []).whereType<Event>(),
-  );
+  /// Someone hung up for you: out of the call, with the end shown.
+  Future<void> _hungUp(int attempt) async {
+    if (attempt != _attempt) return;
+    _attempt++;
+    final live = _detach();
+    _phase(CallPhase.hungUp);
+    await _end(live);
+  }
+
+  /// Whom someone has muted or deafened for everyone in [room], by user id.
+  Map<String, CallSilence> _silences(Room room) =>
+      callSilences(callModeration(room));
+
+  /// Whom someone has hung up for in [room], and when.
+  Map<String, DateTime> _hangUps(Room room) =>
+      callHangUps(callModeration(room));
 
   void _onMedia() {
     final live = _live;

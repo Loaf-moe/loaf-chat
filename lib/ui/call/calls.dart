@@ -22,6 +22,9 @@ enum CallPhase {
 
   /// A 1:1 DM ring the other person declined. Offers call again.
   declined,
+
+  /// Someone in the call hung up for you. Offers join again.
+  hungUp,
 }
 
 /// Where one invitee of an outgoing DM call has got to.
@@ -148,7 +151,8 @@ class CallSession {
   bool get over =>
       phase == CallPhase.failed ||
       phase == CallPhase.unanswered ||
-      phase == CallPhase.declined;
+      phase == CallPhase.declined ||
+      phase == CallPhase.hungUp;
 
   CallParticipant? find(String id) =>
       participants.where((p) => p.member.id == id).firstOrNull;

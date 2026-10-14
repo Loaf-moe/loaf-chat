@@ -790,12 +790,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       occupants: kind == ChannelKind.voice
           ? [for (final occupant in _occupants(room)) occupant.member]
           : const [],
-      kickBelow: room.canKick ? room.ownPowerLevel.level : null,
       silenced: kind == ChannelKind.voice
-          ? callSilences(
-              (room.states[callSilenceType]?.values ?? const [])
-                  .whereType<Event>(),
-            )
+          ? callSilences(callModeration(room))
           : const {},
       canSilence: room.canChangeStateEvent(callSilenceType),
     );
@@ -1480,8 +1476,18 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
-  Future<void> kick(String roomId, String userId) =>
-      client.kick(roomId, userId);
+  Future<void> hangUp(String roomId, String userId) {
+    final room = client.getRoomById(roomId);
+    final current = room == null
+        ? null
+        : callSilences(callModeration(room))[userId];
+    return client.setRoomStateWithKey(
+      roomId,
+      callSilenceType,
+      callSilenceKey(userId),
+      callHangUpContent(current),
+    );
+  }
 
   @override
   Future<void> silence(String roomId, String userId, CallSilence? to) =>

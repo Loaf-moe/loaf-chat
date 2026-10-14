@@ -2759,87 +2759,6 @@ void main() {
     expect(late.media.preview(media, 300), isNull);
   });
 
-  group('kicking from a voice channel', () {
-    const oven = '!oven:example.com';
-    const ada = '@ada:example.com';
-
-    Channel channel(MatrixRooms rooms) => rooms.spaces
-        .expand((s) => s.categories)
-        .expand((c) => c.channels)
-        .firstWhere((c) => c.id == oven);
-
-    /// The oven's power levels: yours, and what a kick takes.
-    Future<void> levels(Client client, {required int mine, int? kick}) =>
-        _sync(client, {
-          'join': {
-            oven: {
-              'state': {
-                'events': [
-                  _state('m.room.power_levels', {
-                    'users': {_me: mine},
-                    'kick': ?kick,
-                  }),
-                ],
-              },
-            },
-          },
-        });
-
-    test('you may kick anyone below your level when it reaches what a kick '
-        'takes', () async {
-      final client = await _client();
-      final rooms = await _rooms(client);
-      await _bakery(client);
-
-      await levels(client, mine: 75, kick: 60);
-      await _until(() => channel(rooms).kickBelow != null);
-
-      expect(channel(rooms).kickBelow, 75);
-    });
-
-    test('you may kick nobody when your level falls short', () async {
-      final client = await _client();
-      final rooms = await _rooms(client);
-      await _bakery(client);
-
-      await levels(client, mine: 40, kick: 60);
-      await _settle();
-
-      expect(channel(rooms).kickBelow, isNull);
-    });
-
-    test('a kick takes 50 where the room does not say', () async {
-      final client = await _client();
-      final rooms = await _rooms(client);
-      await _bakery(client);
-
-      await levels(client, mine: 50);
-      await _until(() => channel(rooms).kickBelow != null);
-
-      expect(channel(rooms).kickBelow, 50);
-    });
-
-    test('a kick is asked of the server for that room and person', () async {
-      final api = _Api();
-      final client = await _client(api: api);
-      final rooms = await _rooms(client);
-      await _bakery(client);
-
-      await rooms.kick(oven, ada);
-
-      expect(api.kicks, [(oven, ada)]);
-    });
-
-    test('a refused kick throws', () async {
-      final api = _Api()..refuseKicks = true;
-      final client = await _client(api: api);
-      final rooms = await _rooms(client);
-      await _bakery(client);
-
-      await expectLater(rooms.kick(oven, ada), throwsA(isA<MatrixException>()));
-    });
-  });
-
   group('muting and deafening for everyone, in a voice channel', () {
     const oven = '!oven:example.com';
     const ada = '@ada:example.com';
@@ -2962,6 +2881,32 @@ void main() {
         expect(sent, content);
       });
     }
+
+    test('hanging up for them keeps the silence they are under', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await state(client, [entry(callSilenceContent(CallSilence.deafened))]);
+      await _settle();
+
+      await rooms.hangUp(oven, ada);
+
+      final (room, key, sent) = api.silences.single;
+      expect((room, key), (oven, '_$ada'));
+      expect(sent, {'muted': true, 'deafened': true, 'hung_up': true});
+    });
+
+    test('hanging up for someone unsilenced writes the flag alone', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await rooms.hangUp(oven, ada);
+
+      expect(api.silences.single.$3, {'hung_up': true});
+    });
 
     test('a refusal throws', () async {
       final api = _Api()..refuseSilences = true;

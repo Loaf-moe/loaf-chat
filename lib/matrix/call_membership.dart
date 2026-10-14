@@ -144,6 +144,10 @@ class OwnCallMembership {
     if (_joined != null) _schedule(timings.refreshAfter);
   }
 
+  /// When this membership began, in milliseconds since the epoch; null
+  /// while not joined.
+  int? get created => _joined == null ? null : _created(_joined!);
+
   /// When the membership began: the server's time on the first write once a
   /// sync has brought it back, else when [join] returned.
   int _created(DateTime joined) {

@@ -242,25 +242,38 @@ class _AppShellState extends State<AppShell> {
       _follow(held);
     }
     _saySilenced();
+    _sayHungUp();
     setState(() {});
   }
 
-  /// What a moderator had put on you when the calls last changed.
+  /// What someone had put on you when the calls last changed.
   CallSilence? _silenced;
 
-  /// Says when a moderator mutes, deafens or frees you during a call.
-  /// Nothing else would, short of trying a locked button.
+  /// Says when someone mutes, deafens or frees you during a call. Nothing
+  /// else would, short of trying a locked button.
   void _saySilenced() {
     final before = _silenced;
     final now = _silenced = _calls.silenced;
     // Leaving a call drops it without anyone having lifted it.
     if (now == before || !_calls.inCall || !mounted) return;
-    showToast(context, switch ((before, now)) {
-      (_, CallSilence.deafened) => 'a moderator deafened you',
-      (_, CallSilence.muted) => 'a moderator muted you',
-      (CallSilence.deafened, null) => 'a moderator undeafened you',
-      (_, null) => 'a moderator unmuted you',
+    showToast(context, switch (now) {
+      CallSilence.deafened => 'someone deafened you',
+      CallSilence.muted => 'someone muted you for everyone',
+      null => 'you can talk again',
     });
+  }
+
+  /// The call's phase when the calls last changed.
+  CallPhase? _phase;
+
+  /// Says when someone hangs up for you; the call page says it too, but
+  /// you may be reading elsewhere.
+  void _sayHungUp() {
+    final before = _phase;
+    final now = _phase = _calls.session?.phase;
+    if (now == CallPhase.hungUp && before != CallPhase.hungUp && mounted) {
+      showToast(context, 'someone hung up for you');
+    }
   }
 
   /// A presence or status write the server refused: the profile has already
@@ -571,28 +584,6 @@ class _AppShellState extends State<AppShell> {
 
   /// A quick toggle's refusal: the change snaps back once the listener
   /// hears the backend's own state again, and a toast says to try again.
-  /// The kicks the server has yet to answer: the room and who.
-  final _kicking = <(String, String)>{};
-
-  /// Kicks [member] from [channel], once you have said you mean it.
-  Future<void> _kick(Channel channel, Member member) async {
-    final kick = (channel.id, member.id);
-    // They stay listed until a sync says otherwise; asking again meanwhile
-    // would only be refused.
-    if (_kicking.contains(kick)) return;
-    final confirmed = await confirmKick(context, member, channel);
-    if (!confirmed || !mounted || !_kicking.add(kick)) return;
-    try {
-      await _rooms.kick(channel.id, member.id);
-    } on Exception {
-      // The server said no, or could not be reached; either way they are
-      // still there.
-      if (mounted) showToast(context, "couldn't kick ${member.name}");
-    } finally {
-      _kicking.remove(kick);
-    }
-  }
-
   void _refused(Object error) {
     if (mounted) showToast(context, "couldn't do that. try again?");
   }
@@ -1645,7 +1636,13 @@ class _AppShellState extends State<AppShell> {
                 space: _space,
                 call: _heardCall,
                 myId: _me.id,
-                onKick: _can(RoomAbility.kick) ? _kick : null,
+                onHangUp: _can(RoomAbility.silence)
+                    ? (channel, member) => unawaited(
+                        _rooms
+                            .hangUp(channel.id, member.id)
+                            .catchError(_refused),
+                      )
+                    : null,
                 onSilence: _can(RoomAbility.silence)
                     ? (channel, member, silence) => unawaited(
                         _rooms

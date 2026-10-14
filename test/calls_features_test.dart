@@ -170,8 +170,8 @@ void main() {
     });
 
     for (final (silence, words) in [
-      (CallSilence.muted, 'Muted by a moderator'),
-      (CallSilence.deafened, 'Deafened by a moderator'),
+      (CallSilence.muted, 'Muted for everyone'),
+      (CallSilence.deafened, 'Deafened for everyone'),
     ]) {
       testWidgets('on a tile says "$words"', (tester) async {
         await _pump(
@@ -242,7 +242,7 @@ void main() {
         ),
       );
 
-      expect(find.byTooltip('Muted by a moderator'), findsNothing);
+      expect(find.byTooltip('Muted for everyone'), findsNothing);
     });
 
     testWidgets(
@@ -443,6 +443,23 @@ void main() {
       expect(find.text("couldn't connect"), findsOneWidget);
       expect(find.text('retry'), findsOneWidget);
       expect(find.text('join voice'), findsNothing);
+    },
+    variant: _desktop,
+  );
+
+  testWidgets(
+    'a voice channel someone hung up for you says so, and offers to join again',
+    (tester) async {
+      final calls = VoiceOnlyCalls()
+        ..session = const CallSession(
+          target: _oven,
+          phase: CallPhase.hungUp,
+          participants: [],
+        );
+      await _pump(tester, _lobby(calls));
+
+      expect(find.text('someone hung up for you'), findsOneWidget);
+      expect(find.text('join again'), findsOneWidget);
     },
     variant: _desktop,
   );

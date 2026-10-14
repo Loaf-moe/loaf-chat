@@ -176,14 +176,11 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   Future<void> invite(String roomId, List<String> userIds) => _unwired();
 
-  /// Each kick asked for: the room and who.
-  final kicked = <(String, String)>[];
+  /// Each hang-up asked for: the room and who.
+  final hungUp = <(String, String)>[];
 
-  /// While set, a kick is refused.
-  var refuseKicks = false;
-
-  /// Held back until completed, when set: the answer to a kick.
-  Completer<void>? kickAnswer;
+  /// While set, a hang-up is refused.
+  var refuseHangUps = false;
 
   /// Each silence asked for: the room, who, and what (null lifts it).
   final silences = <(String, String, CallSilence?)>[];
@@ -198,10 +195,9 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
-  Future<void> kick(String roomId, String userId) async {
-    if (refuseKicks) throw Exception('refused');
-    kicked.add((roomId, userId));
-    await kickAnswer?.future;
+  Future<void> hangUp(String roomId, String userId) async {
+    if (refuseHangUps) throw Exception('refused');
+    hungUp.add((roomId, userId));
   }
 
   @override
@@ -782,7 +778,7 @@ void main() {
     });
   });
 
-  group('being silenced by a moderator', () {
+  group('being silenced by someone', () {
     /// The shell in the oven's call on [calls], reading a text channel.
     Future<void> inCall(WidgetTester tester, VoiceOnlyCalls calls) async {
       addTearDown(calls.dispose);
@@ -810,10 +806,10 @@ void main() {
     }
 
     final said = <String, (CallSilence?, CallSilence?, String)>{
-      'muted': (null, CallSilence.muted, 'a moderator muted you'),
-      'deafened': (null, CallSilence.deafened, 'a moderator deafened you'),
-      'unmuted': (CallSilence.muted, null, 'a moderator unmuted you'),
-      'undeafened': (CallSilence.deafened, null, 'a moderator undeafened you'),
+      'muted': (null, CallSilence.muted, 'someone muted you for everyone'),
+      'deafened': (null, CallSilence.deafened, 'someone deafened you'),
+      'unmuted': (CallSilence.muted, null, 'you can talk again'),
+      'undeafened': (CallSilence.deafened, null, 'you can talk again'),
     };
     for (final MapEntry(key: name, value: (before, after, words))
         in said.entries) {
@@ -846,7 +842,26 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text('a moderator unmuted you'), findsNothing);
+      expect(find.text('you can talk again'), findsNothing);
+    });
+
+    testWidgets('says so when someone hangs up for you', (tester) async {
+      final calls = VoiceOnlyCalls();
+      await inCall(tester, calls);
+
+      calls.show(calls.session!.copyWith(phase: CallPhase.hungUp));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // The call page says it too; the toast is the one asserted.
+      expect(
+        find.descendant(
+          of: find.byType(SnackBar),
+          matching: find.text('someone hung up for you'),
+        ),
+        findsOneWidget,
+      );
+      await tester.pumpAndSettle(const Duration(seconds: 5));
     });
   });
 
@@ -921,7 +936,7 @@ void main() {
     });
   });
 
-  group('kicking someone from a voice channel', () {
+  group('removing someone from a call', () {
     const ada = Member(
       '@ada:loaf.test',
       'Ada',
@@ -929,11 +944,10 @@ void main() {
       presence: Presence.unknown,
     );
 
-    /// The shell on rooms where you may kick Ada, who is in the oven's
-    /// call, with her menu open.
+    /// The shell on rooms with Ada in the oven's call, her menu open.
     Future<_FakeRooms> openMenu(
       WidgetTester tester, {
-      Set<RoomAbility> abilities = const {RoomAbility.kick},
+      Set<RoomAbility> abilities = const {RoomAbility.silence},
     }) async {
       final rooms = _FakeRooms(
         spaces: [
@@ -945,7 +959,6 @@ void main() {
                 name: 'oven',
                 kind: ChannelKind.voice,
                 occupants: [ada],
-                kickBelow: 100,
               ),
             ],
           ),
@@ -960,110 +973,38 @@ void main() {
       return rooms;
     }
 
-    testWidgets('asks first, naming who and where', variant: _desktop, (
+    testWidgets('asks nothing, and hangs up for them', variant: _desktop, (
       tester,
     ) async {
       final rooms = await openMenu(tester);
 
-      await tester.tap(find.text('kick from oven'));
+      await tester.tap(find.text('remove from call'));
       await tester.pumpAndSettle();
 
-      expect(find.text('kick Ada from oven?'), findsOneWidget);
-      expect(rooms.kicked, isEmpty);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(rooms.hungUp, [('!oven', '@ada:loaf.test')]);
     });
-
-    testWidgets('kicks them from that room once confirmed', variant: _desktop, (
-      tester,
-    ) async {
-      final rooms = await openMenu(tester);
-      await tester.tap(find.text('kick from oven'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('kick'));
-      await tester.pumpAndSettle();
-
-      expect(rooms.kicked, [('!oven', '@ada:loaf.test')]);
-    });
-
-    testWidgets(
-      'asks the server once, though asked again before it '
-      'answers',
-      variant: _desktop,
-      (tester) async {
-        final rooms = await openMenu(tester);
-        rooms.kickAnswer = Completer();
-        await tester.tap(find.text('kick from oven'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('kick'));
-        await tester.pumpAndSettle();
-
-        await tester.tap(
-          find.byKey(const ValueKey('occupant-!oven-@ada:loaf.test')),
-          buttons: kSecondaryButton,
-        );
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('kick from oven'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('kick Ada from oven?'), findsNothing);
-        expect(rooms.kicked, hasLength(1));
-        rooms.kickAnswer!.complete();
-        await tester.pumpAndSettle();
-      },
-    );
-
-    testWidgets('kicks nobody when cancelled', variant: _desktop, (
-      tester,
-    ) async {
-      final rooms = await openMenu(tester);
-      await tester.tap(find.text('kick from oven'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('cancel'));
-      await tester.pumpAndSettle();
-
-      expect(rooms.kicked, isEmpty);
-    });
-
-    testWidgets(
-      'kicks nobody when the question is dismissed',
-      variant: _desktop,
-      (tester) async {
-        final rooms = await openMenu(tester);
-        await tester.tap(find.text('kick from oven'));
-        await tester.pumpAndSettle();
-
-        await tester.tapAt(const Offset(5, 5));
-        await tester.pumpAndSettle();
-
-        expect(find.text('kick Ada from oven?'), findsNothing);
-        expect(rooms.kicked, isEmpty);
-      },
-    );
 
     testWidgets('says so when the server refuses', variant: _desktop, (
       tester,
     ) async {
       final rooms = await openMenu(tester);
-      rooms.refuseKicks = true;
-      await tester.tap(find.text('kick from oven'));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('kick'));
+      rooms.refuseHangUps = true;
+      await tester.tap(find.text('remove from call'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text("couldn't kick Ada"), findsOneWidget);
+      expect(find.text("couldn't do that. try again?"), findsOneWidget);
       // Let the toast go, so no timer outlives the test.
       await tester.pumpAndSettle(const Duration(seconds: 5));
     });
 
-    testWidgets('is not offered by rooms that cannot kick', variant: _desktop, (
+    testWidgets('is not offered by rooms that cannot', variant: _desktop, (
       tester,
     ) async {
       await openMenu(tester, abilities: const {});
 
-      expect(find.text('kick from oven'), findsNothing);
+      expect(find.text('remove from call'), findsNothing);
     });
   });
 

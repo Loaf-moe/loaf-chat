@@ -390,8 +390,8 @@ class _ShareStrip extends StatelessWidget {
   }
 }
 
-/// A call that has ended without you hanging up: failed, declined, or
-/// nobody answered.
+/// A call that has ended without you hanging up: failed, declined, nobody
+/// answered, or someone hung up for you.
 class _EndState extends StatelessWidget {
   const _EndState({required this.calls, required this.session});
 
@@ -418,6 +418,12 @@ class _EndState extends StatelessWidget {
         session.target.members.length > 1 ? 'no one answered' : 'no answer',
         'call again',
         calls.callAgain,
+      ),
+      CallPhase.hungUp => (
+        LucideIcons.phoneOff,
+        'someone hung up for you',
+        'join again',
+        calls.retry,
       ),
       _ => (LucideIcons.wifiOff, "couldn't connect", 'retry', calls.retry),
     };

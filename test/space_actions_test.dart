@@ -134,7 +134,7 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
-  Future<void> kick(String roomId, String userId) => _unwired();
+  Future<void> hangUp(String roomId, String userId) => _unwired();
   @override
   Future<void> silence(String roomId, String userId, CallSilence? to) =>
       _unwired();
