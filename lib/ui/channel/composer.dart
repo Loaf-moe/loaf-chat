@@ -4,6 +4,7 @@
 library;
 
 import 'package:file_selector/file_selector.dart' show XFile;
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderEditable;
 import 'package:flutter/services.dart';
@@ -94,6 +95,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
   final _controller = _MentionController();
   final _focus = FocusNode();
   final _fieldKey = GlobalKey();
+  final _pillKey = GlobalKey();
 
   /// The field's own scroll, past five lines: the pills move with it.
   final _fieldScroll = ScrollController();
@@ -122,10 +124,6 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
   /// at once, so it can't wait to ask.
   bool _clipboardHasFiles = false;
 
-  /// Mentions picked into the field. Sending keeps only those the text
-  /// still holds.
-  List<Mention> _picked = const [];
-
   final _fieldLink = LayerLink();
   final _suggestionsPortal = OverlayPortalController();
 
@@ -139,8 +137,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     _seenMention = widget.timeline?.mentionRequest;
     if (_target case ComposerTarget(mode: ComposerMode.edit, :final message)) {
       _controller.text = message.body;
-      _picked = mentionsOf(message);
-      _controller.mentions = _picked;
+      _controller.mentions = mentionsOf(message);
       _hasText = message.body.trim().isNotEmpty;
     }
     _controller.addListener(() {
@@ -275,8 +272,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
       end,
       spaced ? label : '$label ',
     );
-    _picked = [..._picked, candidate.mention];
-    _controller.mentions = _picked;
+    _controller.mentions = [..._controller.mentions, candidate.mention];
     _controller.value = TextEditingValue(
       text: text,
       selection: TextSelection.collapsed(offset: start + label.length + 1),
@@ -424,7 +420,7 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     // A complete :shortcode: goes as its emoji, whether or not it was
     // picked from the suggestions.
     final text = shortcodes.expand(_controller.text);
-    final mentions = mentionsIn(text, _picked);
+    final mentions = mentionsIn(text, _controller.mentions);
     final target = _target;
 
     if (target != null && target.mode == ComposerMode.edit) {
@@ -439,7 +435,6 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
 
     if (text.trim().isEmpty) return;
     timeline.send(text, mentions: mentions);
-    _picked = const [];
     _controller.mentions = const [];
     _controller.clear();
   }
@@ -465,11 +460,9 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
     setState(() => _target = next);
 
     if (next?.mode == ComposerMode.edit) {
-      _picked = mentionsOf(next!.message);
-      _controller.mentions = _picked;
+      _controller.mentions = mentionsOf(next!.message);
       _controller.text = next.message.body;
     } else if (wasEditing) {
-      _picked = const [];
       _controller.mentions = const [];
       _controller.clear();
     }
@@ -583,9 +576,11 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
                       Positioned.fill(
                         child: IgnorePointer(
                           child: CustomPaint(
+                            key: _pillKey,
                             painter: _PillPainter(
                               controller: _controller,
                               field: _fieldKey,
+                              self: _pillKey,
                               scroll: _fieldScroll,
                               height:
                                   MediaQuery.textScalerOf(context)
@@ -611,8 +606,6 @@ class _ComposerState extends State<Composer> with WidgetsBindingObserver {
                         contextMenuBuilder: _contextMenu,
                         minLines: 1,
                         maxLines: 5,
-                        // An explicit line height keeps the field's height
-                        // independent of whatever the theme's bodyLarge happens to be.
                         style: fieldStyle,
                         decoration: InputDecoration(
                           // Collapsed so the field is exactly its line box and the
@@ -1097,38 +1090,44 @@ class _SendButtonState extends State<_SendButton> {
   }
 }
 
-/// The field's controller, which sets each picked mention in the pill's
-/// colour and weight. The pill's rounded, padded box is not drawn by the text
-/// (a span's background is a square, and anything that padded the glyphs
-/// would shift the cursor and the offsets) but behind the field, by
-/// [_PillPainter], from [pillRanges].
+/// The field's controller, which holds the mentions picked into it and sets
+/// each in the pill's colour and weight. The pill's rounded, padded box is not
+/// drawn by the text (a span's background is a square, and anything that
+/// padded the glyphs would shift the cursor and the offsets) but behind the
+/// field, by [_PillPainter], from [pillRanges].
 class _MentionController extends TextEditingController {
-  List<Mention> mentions = const [];
+  /// Mentions picked into the field. Sending keeps only those the text still
+  /// holds. Setting them repaints the pills.
+  List<Mention> get mentions => _mentions;
+  List<Mention> _mentions = const [];
+  set mentions(List<Mention> value) {
+    if (listEquals(value, _mentions)) return;
+    _mentions = value;
+    notifyListeners();
+  }
 
-  /// Where each picked mention sits in the text. None while the keyboard has
-  /// text under composition: it is not settled, and the plain span is used.
+  /// Where each picked mention sits in the text: exactly what sending links,
+  /// so no pill is drawn on text that will not go as a mention. One the
+  /// keyboard has under composition is left plain, since it is not settled.
   List<TextRange> get pillRanges {
-    if (value.composing.isValid && !value.composing.isCollapsed) {
-      return const [];
-    }
-    final labels = {for (final m in mentionsIn(text, mentions)) m.label};
-    if (labels.isEmpty) return const [];
-    final pattern = RegExp(
-      (labels.toList()..sort((a, b) => b.length.compareTo(a.length)))
-          .map(RegExp.escape)
-          .join('|'),
-    );
-    return [
-      for (final m in pattern.allMatches(text))
-        TextRange(start: m.start, end: m.end),
+    final key = (text, _mentions, value.composing);
+    if (key == _rangesKey) return _ranges;
+    final composing = value.composing;
+    final unsettled = composing.isValid && !composing.isCollapsed;
+    _rangesKey = key;
+    return _ranges = [
+      for (final r in mentionRanges(text, mentionsIn(text, _mentions)))
+        if (!unsettled || r.end <= composing.start || r.start >= composing.end)
+          TextRange(start: r.start, end: r.end),
     ];
   }
 
-  TextSpan spanFor(TextStyle? style, Color pillColor) {
-    final ranges = pillRanges;
-    if (ranges.isEmpty) return TextSpan(style: style, text: text);
-    final pill = (style ?? const TextStyle()).copyWith(
-      color: pillColor,
+  (String, List<Mention>, TextRange)? _rangesKey;
+  List<TextRange> _ranges = const [];
+
+  TextSpan _spanFor(List<TextRange> ranges, TextStyle? style, Color pill) {
+    final strong = (style ?? const TextStyle()).copyWith(
+      color: pill,
       fontWeight: FontWeight.w600,
     );
     // The spaces either side are widened, so the pill's box has room to
@@ -1144,7 +1143,7 @@ class _MentionController extends TextEditingController {
       final head = before ? r.start - 1 : r.start;
       if (head > at) spans.add(TextSpan(text: text.substring(at, head)));
       if (before) spans.add(TextSpan(text: ' ', style: room));
-      spans.add(TextSpan(text: r.textInside(text), style: pill));
+      spans.add(TextSpan(text: r.textInside(text), style: strong));
       at = r.end;
       if (at < text.length && text[at] == ' ') {
         spans.add(TextSpan(text: ' ', style: room));
@@ -1161,14 +1160,15 @@ class _MentionController extends TextEditingController {
     TextStyle? style,
     required bool withComposing,
   }) {
-    if (pillRanges.isEmpty) {
+    final ranges = pillRanges;
+    if (ranges.isEmpty) {
       return super.buildTextSpan(
         context: context,
         style: style,
         withComposing: withComposing,
       );
     }
-    return spanFor(style, LoafTokens.of(context).textStrong);
+    return _spanFor(ranges, style, LoafTokens.of(context).textStrong);
   }
 }
 
@@ -1183,6 +1183,7 @@ class _PillPainter extends CustomPainter {
   _PillPainter({
     required this.controller,
     required this.field,
+    required this.self,
     required this.scroll,
     required this.color,
     required this.height,
@@ -1192,6 +1193,9 @@ class _PillPainter extends CustomPainter {
 
   /// The field's [TextField], to find its [RenderEditable] under.
   final GlobalKey field;
+
+  /// The [CustomPaint] this paints for, to map the field's coordinates into.
+  final GlobalKey self;
   final ScrollController scroll;
   final Color color;
 
@@ -1199,13 +1203,31 @@ class _PillPainter extends CustomPainter {
   /// as in the timeline.
   final double height;
 
+  Element? _fieldElement;
+  RenderEditable? _render;
+
   @override
   void paint(Canvas canvas, Size size) {
     final ranges = controller.pillRanges;
     if (ranges.isEmpty) return;
     final render = _editable();
+    final box = self.currentContext?.findRenderObject();
     // Not laid out yet: the next frame has it.
-    if (render == null || !render.hasSize) return;
+    if (render == null || !render.hasSize || box is! RenderBox) return;
+    // The editable's own coordinates carry its scroll offset, and whatever
+    // padding, prefix or mirroring sits between it and this canvas.
+    final transform = render.getTransformTo(box);
+    Rect mapped(Rect r) => MatrixUtils.transformRect(transform, r);
+    // Scrolled out of the field, a pill is gone, not drawn over what is
+    // around it. Sideways it may reach past by its own padding.
+    canvas.clipRect(
+      Rect.fromLTRB(
+        -mentionPillPadX,
+        0,
+        size.width + mentionPillPadX,
+        size.height,
+      ),
+    );
     final paint = Paint()..color = color;
     for (final r in ranges) {
       final boxes = render.getBoxesForSelection(
@@ -1213,17 +1235,21 @@ class _PillPainter extends CustomPainter {
       );
       if (boxes.isEmpty) continue;
       // Upstream, so a name ending a wrapped line ends on that line.
-      final start = render.getLocalRectForCaret(TextPosition(offset: r.start));
-      final end = render.getLocalRectForCaret(
-        TextPosition(offset: r.end, affinity: TextAffinity.upstream),
+      final start = mapped(
+        render.getLocalRectForCaret(TextPosition(offset: r.start)),
+      );
+      final end = mapped(
+        render.getLocalRectForCaret(
+          TextPosition(offset: r.end, affinity: TextAffinity.upstream),
+        ),
       );
       for (var i = 0; i < boxes.length; i++) {
-        final box = boxes[i];
-        final left = i == 0 ? start.left : box.left;
-        final right = i == boxes.length - 1 ? end.left : box.right;
+        final line = mapped(boxes[i].toRect());
+        final left = i == 0 ? start.left : line.left;
+        final right = i == boxes.length - 1 ? end.left : line.right;
         // Centred on the line, out past the glyphs by the room the spaces
         // either side were widened by.
-        final middle = box.toRect().center.dy;
+        final middle = line.center.dy;
         canvas.drawRRect(
           RRect.fromRectAndRadius(
             Rect.fromLTRB(
@@ -1240,7 +1266,15 @@ class _PillPainter extends CustomPainter {
     }
   }
 
+  /// The field's [RenderEditable], found once and kept until the field's
+  /// element changes, rather than walked for on every scroll frame.
   RenderEditable? _editable() {
+    final element = field.currentContext as Element?;
+    if (element != null &&
+        identical(element, _fieldElement) &&
+        (_render?.attached ?? false)) {
+      return _render;
+    }
     RenderEditable? found;
     void visit(Element e) {
       if (found != null) return;
@@ -1252,8 +1286,9 @@ class _PillPainter extends CustomPainter {
       e.visitChildren(visit);
     }
 
-    field.currentContext?.visitChildElements(visit);
-    return found;
+    element?.visitChildElements(visit);
+    _fieldElement = element;
+    return _render = found;
   }
 
   @override
@@ -1261,5 +1296,6 @@ class _PillPainter extends CustomPainter {
       old.color != color ||
       old.height != height ||
       old.field != field ||
+      old.self != self ||
       old.scroll != scroll;
 }

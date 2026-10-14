@@ -170,6 +170,20 @@ void main() {
     expect(html, contains('</p>\n<p>bye'));
   });
 
+  test('code in a message with a mention is sent as written', () {
+    final c = TimelineController([_msg('1', _them)], you: _you);
+    addTearDown(c.dispose);
+    const sam = Mention(kind: MentionKind.person, id: '@them', label: '@them');
+
+    c.send('@them\n```\nint x;\nint y;\n```', mentions: [sam]);
+
+    // As the SDK does: a line break in the text, the code untouched.
+    expect(
+      c.messages.last.formatted,
+      contains('<code>int x;\nint y;\n</code>'),
+    );
+  });
+
   group('jumping', () {
     TimelineController timeline() => TimelineController([
       _msg('1', _them),

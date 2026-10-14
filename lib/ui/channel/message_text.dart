@@ -2,8 +2,10 @@
 /// and code, with links that open in the browser, mention pills, and
 /// spoilers that stay hidden until asked.
 ///
-/// Everything is text spans and plain boxes, so a [SelectionArea] around it
-/// selects across all of it on a computer, links included.
+/// Everything is text spans and plain boxes, save a mention's pill: a box set
+/// in the line, whose name is its own text. A [SelectionArea] around it still
+/// selects across all of it on a computer, links and pills included, and
+/// copies the names in reading order.
 library;
 
 import 'package:flutter/gestures.dart';

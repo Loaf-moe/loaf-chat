@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/channel/message_group_tile.dart';
 import 'package:loaf_native/ui/channel/message_markup.dart';
@@ -233,6 +234,78 @@ void main() {
     expect(fill('you'), tokens.accentSoft);
     expect(fill('Ada'), tokens.borderStrong);
   });
+
+  testWidgets('a pill names someone; it is not a link to follow', (
+    tester,
+  ) async {
+    final opened = _captureLinks();
+    await _pump(
+      tester,
+      formatted: 'hi <a href="https://matrix.to/#/@ada:loaf.moe">Ada</a>',
+      body: 'hi Ada',
+    );
+    final pill = tester.widget<RichText>(
+      find.descendant(
+        of: find.widgetWithText(DecoratedBox, 'Ada'),
+        matching: find.byType(RichText),
+      ),
+    );
+    expect((pill.text as TextSpan).recognizer, isNull);
+    await tester.tap(find.text('Ada'));
+    await tester.pump();
+    expect(opened, isEmpty);
+  });
+
+  testWidgets(
+    'copying across a pill keeps the name, in place',
+    variant: _desktop,
+    (tester) async {
+      await _pump(
+        tester,
+        formatted:
+            '<a href="https://matrix.to/#/@you:loaf.moe">you</a> and '
+            '<a href="https://matrix.to/#/@ada:loaf.moe">Ada</a> met',
+        body: 'you and Ada met',
+      );
+      final copied = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          if (call.method == 'Clipboard.setData') {
+            copied.add((call.arguments as Map)['text'] as String);
+          }
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      // Drag from before the first pill to past the last word.
+      final from = tester.getTopLeft(find.text('you')) - const Offset(2, -4);
+      final to =
+          tester.getBottomRight(find.textContaining('met')) +
+          const Offset(4, -4);
+      final drag = await tester.startGesture(
+        from,
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      await drag.moveTo(to);
+      await tester.pump();
+      await drag.up();
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+      await tester.pump();
+      expect(copied, isNotEmpty);
+      // The pills' names, not U+FFFC placeholders, and in reading order.
+      expect(copied.last, 'you and Ada met');
+    },
+  );
 
   test('a quote of a message reads as one line of its text', () {
     expect(

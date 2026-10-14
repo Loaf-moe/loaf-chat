@@ -174,23 +174,40 @@ List<Mention> mentionsIn(String text, Iterable<Mention> picked) {
 /// [text] with each of [mentions] made a markdown link to its permalink, for
 /// the formatted body. The label's `@` and `#` are escaped, or the SDK's own
 /// `@name` and pill syntaxes would eat the link text and leave the markdown
-/// showing. Code is left as written, as are labels that run on into more of
-/// a word (`@Ada` inside `@Adam`). Where two mentions share a label, the one
-/// picked last wins.
+/// showing.
 String linkMentions(String text, List<Mention> mentions) {
-  if (mentions.isEmpty) return text;
+  final found = mentionRanges(text, mentions);
+  if (found.isEmpty) return text;
+  final out = StringBuffer();
+  var at = 0;
+  for (final f in found) {
+    out
+      ..write(text.substring(at, f.start))
+      ..write('[${_escapeLinkText(f.mention.label)}](${f.mention.link})');
+    at = f.end;
+  }
+  out.write(text.substring(at));
+  return out.toString();
+}
+
+/// Where in [text] each of [mentions] will be sent as a link, in order: the
+/// one answer to which text is a mention, for [linkMentions] and for the
+/// composer's pills alike. Code is left as written, as are labels that run
+/// on into more of a word (`@Ada` inside `@Adam`). Where two mentions share
+/// a label, the one picked last wins.
+List<({int start, int end, Mention mention})> mentionRanges(
+  String text,
+  List<Mention> mentions,
+) {
+  if (mentions.isEmpty) return const [];
   final byLabel = {for (final m in mentions) m.label: m};
   // Longest first, so `@Ada Lovelace` is not cut short by `@Ada`.
   final labels = byLabel.keys.toList()
     ..sort((a, b) => b.length.compareTo(a.length));
-  final out = StringBuffer();
-  var at = 0;
-  for (final segment in _segments(text)) {
-    if (segment.code) {
-      out.write(text.substring(segment.start, segment.end));
-      continue;
-    }
-    at = segment.start;
+  final found = <({int start, int end, Mention mention})>[];
+  for (final segment in codeSegments(text)) {
+    if (segment.code) continue;
+    var at = segment.start;
     while (at < segment.end) {
       final label = labels.firstWhereOrNull(
         (l) =>
@@ -200,16 +217,14 @@ String linkMentions(String text, List<Mention> mentions) {
             _boundaryAfter(text, at + l.length),
       );
       if (label == null) {
-        out.write(text[at]);
         at++;
         continue;
       }
-      final m = byLabel[label]!;
-      out.write('[${_escapeLinkText(label)}](${m.link})');
+      found.add((start: at, end: at + label.length, mention: byLabel[label]!));
       at += label.length;
     }
   }
-  return out.toString();
+  return found;
 }
 
 /// The Matrix `m.mentions` user ids for [mentions]: people only, since a
@@ -220,7 +235,7 @@ List<String> mentionedUserIds(List<Mention> mentions) => [
 ];
 
 Iterable<int> _occurrences(String text, String label) sync* {
-  for (final s in _segments(text)) {
+  for (final s in codeSegments(text)) {
     if (s.code) continue;
     var from = s.start;
     while (true) {
@@ -246,8 +261,9 @@ String _escapeLinkText(String label) =>
     label.replaceAllMapped(RegExp(r'[\[\]\\@#]'), (m) => '\\${m[0]}');
 
 /// [text] cut into code (fenced, closed or running to the end, and inline)
-/// and everything else, in order.
-List<({int start, int end, bool code})> _segments(String text) {
+/// and everything else, in order. Code is sent as written: no mention is
+/// found in it, and nothing else rewrites it.
+List<({int start, int end, bool code})> codeSegments(String text) {
   final out = <({int start, int end, bool code})>[];
   var at = 0;
   for (final m in _code.allMatches(text)) {
