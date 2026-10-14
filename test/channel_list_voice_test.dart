@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/call/call_tile.dart';
+import 'package:loaf_native/ui/members/person_card.dart';
 import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
@@ -342,6 +343,18 @@ void main() {
           expect(find.text('deafen for everyone'), findsOneWidget);
         },
       );
+
+      testWidgets('leads with their card', variant: _computer, (tester) async {
+        await open(tester, const {});
+        expect(find.byType(PersonCard), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(PersonCard),
+            matching: find.text(_ada.id),
+          ),
+          findsOneWidget,
+        );
+      });
 
       testWidgets(
         'offers unmuting, and deafening, someone muted',

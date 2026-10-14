@@ -126,6 +126,9 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
+  Future<void> kickFromSpace(String spaceId, String userId) async {}
+
+  @override
   Future<void> invite(String roomId, List<String> userIds) async {
     invited[roomId] = userIds;
   }

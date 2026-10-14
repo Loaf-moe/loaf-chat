@@ -168,6 +168,8 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   Future<void> leaveSpace(String spaceId) => _unwired();
   @override
+  Future<void> kickFromSpace(String spaceId, String userId) => _unwired();
+  @override
   Future<String> createSpace(String name, {required Member me}) => _unwired();
   @override
   Future<Channel> createDirect(List<Member> members) => _unwired();

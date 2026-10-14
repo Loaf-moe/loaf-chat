@@ -37,9 +37,14 @@ class MessageGroupTile extends StatelessWidget {
     required this.group,
     this.controller,
     this.focus,
+    this.onPerson,
   });
 
   final MessageGroup group;
+
+  /// Opens the author's menu: from the avatar, or the name's right-click
+  /// or long press. At the pointer on a computer. Null leaves both plain.
+  final void Function(Member member, Offset? position)? onPerson;
 
   /// When set, each message offers its actions: long press on a phone,
   /// hover and right-click on a computer. Left null, the tile is
@@ -53,10 +58,24 @@ class MessageGroupTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
     final author = group.author;
+    final onPerson = this.onPerson;
+    final avatar = _Avatar(
+      key: const ValueKey('author-avatar'),
+      member: author,
+    );
+    final name = PersonName(author, size: 15, weight: 600);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _Avatar(member: author),
+        if (onPerson == null)
+          avatar
+        else
+          _PersonGesture(
+            member: author,
+            onPerson: onPerson,
+            primary: true,
+            child: avatar,
+          ),
         const SizedBox(width: LoafSpace.x3),
         Expanded(
           child: Column(
@@ -66,7 +85,15 @@ class MessageGroupTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.baseline,
                 textBaseline: TextBaseline.alphabetic,
                 children: [
-                  PersonName(author, size: 15, weight: 600),
+                  if (onPerson == null)
+                    name
+                  else
+                    _PersonGesture(
+                      member: author,
+                      onPerson: onPerson,
+                      primary: false,
+                      child: name,
+                    ),
                   const SizedBox(width: LoafSpace.x2),
                   Text(
                     _formatTime(group.sentAt),
@@ -125,8 +152,43 @@ class MessageGroupTile extends StatelessWidget {
   }
 }
 
+/// Opens [member]'s menu. [primary] takes the tap or click too; otherwise
+/// only a right-click or a long press, the tap being someone else's.
+class _PersonGesture extends StatelessWidget {
+  const _PersonGesture({
+    required this.member,
+    required this.onPerson,
+    required this.primary,
+    required this.child,
+  });
+
+  final Member member;
+  final void Function(Member member, Offset? position) onPerson;
+  final bool primary;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => isDesktop
+      ? MouseRegion(
+          cursor: primary ? SystemMouseCursors.click : MouseCursor.defer,
+          child: GestureDetector(
+            onTapUp: primary ? (d) => onPerson(member, d.globalPosition) : null,
+            onSecondaryTapUp: (d) => onPerson(member, d.globalPosition),
+            child: child,
+          ),
+        )
+      : GestureDetector(
+          onTap: primary ? () => onPerson(member, null) : null,
+          onLongPress: () {
+            HapticFeedback.mediumImpact();
+            onPerson(member, null);
+          },
+          child: child,
+        );
+}
+
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.member});
+  const _Avatar({super.key, required this.member});
 
   final Member member;
 

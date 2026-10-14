@@ -62,9 +62,13 @@ class ChannelView extends StatelessWidget {
     this.onVerify,
     this.people = const [],
     this.channels = const [],
+    this.onPerson,
   });
 
   final Channel channel;
+
+  /// Opens a message author's menu. See `MessageGroupTile.onPerson`.
+  final void Function(Member member, Offset? position)? onPerson;
 
   /// Someone else's message arrived while you were looking: you have read
   /// it. Only heard while the app is in front.
@@ -153,6 +157,7 @@ class ChannelView extends StatelessWidget {
                         key: ValueKey((timeline, timeline!.stretch)),
                         controller: timeline!,
                         onRead: onRead,
+                        onPerson: onPerson,
                       ),
                     ),
                   ],
@@ -362,10 +367,16 @@ class _HeaderIconButton extends StatelessWidget {
 }
 
 class _Timeline extends StatefulWidget {
-  const _Timeline({super.key, required this.controller, this.onRead});
+  const _Timeline({
+    super.key,
+    required this.controller,
+    this.onRead,
+    this.onPerson,
+  });
 
   final Timeline controller;
   final VoidCallback? onRead;
+  final void Function(Member member, Offset? position)? onPerson;
 
   @override
   State<_Timeline> createState() => _TimelineState();
@@ -700,6 +711,7 @@ class _TimelineState extends State<_Timeline> {
             focus: split != null && entry.messages.any((m) => m.id == split)
                 ? (id: split, key: _focusKey, lit: _lit)
                 : null,
+            onPerson: widget.onPerson,
           ),
         ),
       },

@@ -84,6 +84,10 @@ class _Api extends FakeMatrixApi {
   /// While set, a kick is refused.
   var refuseKicks = false;
 
+  /// Room ids (decoded) whose kicks are refused, even while [refuseKicks]
+  /// is false.
+  final refuseKickIds = <String>{};
+
   /// Set by [_client], since [FakeMatrixApi.client] is a setter only:
   /// [mockIntercept] needs the client itself to push a fake sync.
   Client? ownerClient;
@@ -110,7 +114,10 @@ class _Api extends FakeMatrixApi {
       );
     }
     if (request.method == 'POST' && path.endsWith('/kick')) {
-      if (refuseKicks) {
+      final roomId = Uri.decodeComponent(
+        path.split('/rooms/')[1].split('/kick')[0],
+      );
+      if (refuseKicks || refuseKickIds.contains(roomId)) {
         return http.Response(
           jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
           403,
@@ -2500,6 +2507,105 @@ void main() {
         // The space's own wish still hides it, so with the space gone from
         // the rail, oven's real (still joined) state shows through in Home.
         expect(rooms.homeRooms.map((c) => c.id), contains('!oven:example.com'));
+      },
+    );
+
+    /// Mod joins [roomIds], sent as a sync of each room's member state.
+    Future<void> modJoins(Client client, List<String> roomIds) =>
+        _sync(client, {
+          'join': {
+            for (final id in roomIds)
+              id: {
+                'state': {
+                  'events': [
+                    _state(
+                      'm.room.member',
+                      {'membership': 'join', 'displayname': 'Moddy'},
+                      key: '@mod:example.com',
+                      sender: '@mod:example.com',
+                    ),
+                  ],
+                },
+              },
+          },
+        });
+
+    test(
+      'kicking from a space kicks from the rooms they are in, then the space',
+      () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _bakery(client);
+        await modJoins(client, [
+          '!general:example.com',
+          '!crumb:example.com',
+          '!recipes:example.com',
+        ]);
+        await _settle();
+
+        await rooms.kickFromSpace('!bakery:example.com', '@mod:example.com');
+        await _settle();
+
+        final kicked = [for (final k in api.kicks) k.$1];
+        expect(api.kicks.map((k) => k.$2).toSet(), {'@mod:example.com'});
+        expect(kicked.last, '!bakery:example.com');
+        expect(
+          kicked.indexOf('!crumb:example.com'),
+          lessThan(kicked.indexOf('!recipes:example.com')),
+        );
+        expect(kicked, contains('!general:example.com'));
+        // Never a member there: nothing to kick from.
+        expect(kicked, isNot(contains('!oven:example.com')));
+        expect(kicked, isNot(contains('!sourdough:example.com')));
+      },
+    );
+
+    test('kicking from a space spares rooms another space lists', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _sync(client, {
+        'join': {
+          '!twin:example.com': _room(
+            'twin',
+            type: 'm.space',
+            extra: [_child('!crumb:example.com')],
+          ),
+        },
+      });
+      await modJoins(client, ['!crumb:example.com', '!general:example.com']);
+      await _settle();
+
+      await rooms.kickFromSpace('!bakery:example.com', '@mod:example.com');
+      await _settle();
+
+      final kicked = [for (final k in api.kicks) k.$1];
+      expect(kicked, isNot(contains('!crumb:example.com')));
+      expect(kicked, contains('!general:example.com'));
+      expect(kicked, contains('!bakery:example.com'));
+    });
+
+    test(
+      'a partly refused kick throws PartlyDone naming what stayed',
+      () async {
+        final api = _Api()..refuseKickIds.add('!general:example.com');
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _bakery(client);
+        await modJoins(client, ['!general:example.com', '!crumb:example.com']);
+        await _settle();
+
+        await expectLater(
+          rooms.kickFromSpace('!bakery:example.com', '@mod:example.com'),
+          throwsA(
+            isA<PartlyDone>().having((e) => e.missing, 'missing', ['general']),
+          ),
+        );
+        final kicked = [for (final k in api.kicks) k.$1];
+        expect(kicked, contains('!crumb:example.com'));
+        expect(kicked, contains('!bakery:example.com'));
       },
     );
 

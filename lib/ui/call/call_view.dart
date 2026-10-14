@@ -6,6 +6,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../members/person_card.dart';
 import '../members/role_colors.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
@@ -158,6 +159,7 @@ Future<void> showTileActions(
       context,
       position: position,
       leading: [
+        PersonCardEntry<_TileAction>(member: info.member, isYou: info.you),
         if (voice != null)
           VolumeMenuEntry<_TileAction>(voice: voice, id: info.id),
       ],
@@ -166,9 +168,13 @@ Future<void> showTileActions(
   } else {
     action = await showActionSheet(
       context,
-      header: voice == null
-          ? null
-          : (context) => VolumeSlider(voice: voice, id: info.id),
+      header: (context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PersonCard(member: info.member, isYou: info.you),
+          if (voice != null) VolumeSlider(voice: voice, id: info.id),
+        ],
+      ),
       items: items,
     );
   }

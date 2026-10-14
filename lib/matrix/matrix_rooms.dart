@@ -1251,41 +1251,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   Future<void> leaveSpace(String spaceId) async {
     final space = client.getRoomById(spaceId);
     if (space == null) return;
-
-    final joinedSpaces = [
-      for (final room in client.rooms)
-        if (room.isSpace && room.membership == Membership.join) room,
-    ];
-    final childIds = {
-      for (final s in joinedSpaces)
-        for (final c in s.spaceChildren) ?c.roomId,
-    };
-    final otherTops = [
-      for (final s in joinedSpaces)
-        if (s.id != spaceId && !childIds.contains(s.id)) s,
-    ];
-    final protected = <String>{};
-    for (final top in otherTops) {
-      protected.addAll(_listedRoomIds(top, {}));
-    }
-
-    final descendants = <String>{};
-    void collect(Room room, Set<String> seen) {
-      if (!seen.add(room.id) || !room.isSpace) return;
-      for (final child in room.spaceChildren) {
-        final id = child.roomId;
-        if (id == null) continue;
-        final childRoom = client.getRoomById(id);
-        if (childRoom == null || childRoom.membership != Membership.join) {
-          continue;
-        }
-        if (childRoom.isSpace) collect(childRoom, seen);
-        if (!protected.contains(id)) descendants.add(id);
-      }
-    }
-
-    collect(space, {});
-    final order = [...descendants, spaceId];
+    final order = _spaceOrder(space);
 
     for (final id in order) {
       _wishes.putIfAbsent(id, _Wish.new).joined = false;
@@ -1310,6 +1276,70 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _invalidateHierarchies();
     if (!_disposed) _rebuild();
     if (missing.isNotEmpty) throw PartlyDone(missing: missing);
+  }
+
+  @override
+  Future<void> kickFromSpace(String spaceId, String userId) async {
+    final space = client.getRoomById(spaceId);
+    if (space == null) return;
+    final missing = <String>[];
+    for (final id in _spaceOrder(space)) {
+      final room = client.getRoomById(id);
+      if (room == null) continue;
+      try {
+        // Member state is not in memory until asked for.
+        final members = await room.requestParticipants(
+          const [Membership.join],
+          true,
+          true,
+        );
+        if (!members.any((u) => u.id == userId)) continue;
+        await room.kick(userId);
+      } on Object {
+        missing.add(room.getLocalizedDisplayname());
+      }
+    }
+    if (missing.isNotEmpty) throw PartlyDone(missing: missing);
+  }
+
+  /// Every joined room under [space], deepest first, then the space: the
+  /// order to leave or kick in. Rooms another joined top-level space also
+  /// lists, at any depth, are left out.
+  List<String> _spaceOrder(Room space) {
+    final joinedSpaces = [
+      for (final room in client.rooms)
+        if (room.isSpace && room.membership == Membership.join) room,
+    ];
+    final childIds = {
+      for (final s in joinedSpaces)
+        for (final c in s.spaceChildren) ?c.roomId,
+    };
+    final otherTops = [
+      for (final s in joinedSpaces)
+        if (s.id != space.id && !childIds.contains(s.id)) s,
+    ];
+    final protected = <String>{};
+    for (final top in otherTops) {
+      protected.addAll(_listedRoomIds(top, {}));
+    }
+
+    final descendants = <String>{};
+    void collect(Room room, Set<String> seen) {
+      if (!seen.add(room.id) || !room.isSpace) return;
+      for (final child in room.spaceChildren) {
+        final id = child.roomId;
+        if (id == null) continue;
+        final childRoom = client.getRoomById(id);
+        if (childRoom == null || childRoom.membership != Membership.join) {
+          continue;
+        }
+        if (childRoom.isSpace) collect(childRoom, seen);
+        if (!protected.contains(id)) descendants.add(id);
+      }
+    }
+
+    collect(space, {});
+    return [...descendants, space.id];
   }
 
   /// Every room [space] lists, at any depth, through joined rooms only —

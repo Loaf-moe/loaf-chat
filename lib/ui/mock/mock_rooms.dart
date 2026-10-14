@@ -336,6 +336,10 @@ class MockRooms extends ChangeNotifier implements Rooms {
   @override
   Future<void> kick(String roomId, String userId) => SynchronousFuture(null);
 
+  @override
+  Future<void> kickFromSpace(String spaceId, String userId) =>
+      SynchronousFuture(null);
+
   /// No mock channel says you may, so nothing asks.
   @override
   Future<void> silence(String roomId, String userId, CallSilence? to) =>

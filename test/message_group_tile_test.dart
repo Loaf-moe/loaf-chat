@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/channel/link_preview_card.dart';
@@ -169,6 +170,95 @@ void main() {
   testWidgets('anyone else\'s name carries none', (tester) async {
     await pumpAuthor(tester, const Member('@x', 'Pat', Color(0xFF00FF00)));
     expect(find.bySemanticsLabel('from Discord'), findsNothing);
+  });
+
+  group('opening the author', () {
+    const pat = Member('@x', 'Pat', Color(0xFF00FF00));
+
+    Future<List<(Member, Offset?)>> pump(WidgetTester tester) async {
+      final opened = <(Member, Offset?)>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: Scaffold(
+            body: MessageGroupTile(
+              group: MessageGroup([
+                Message(
+                  id: '1',
+                  author: pat,
+                  sentAt: DateTime(2026, 9, 24, 10),
+                  body: 'hello',
+                ),
+              ]),
+              onPerson: (m, at) => opened.add((m, at)),
+            ),
+          ),
+        ),
+      );
+      return opened;
+    }
+
+    final avatar = find.byKey(const ValueKey('author-avatar'));
+
+    testWidgets(
+      'on a computer, clicking the avatar opens at the pointer',
+      variant: TargetPlatformVariant.desktop(),
+      (tester) async {
+        final opened = await pump(tester);
+        final at = tester.getCenter(avatar);
+        await tester.tapAt(at);
+        expect(opened.single, (pat, at));
+      },
+    );
+
+    testWidgets(
+      'on a computer, right-clicking the name opens at the pointer',
+      variant: TargetPlatformVariant.desktop(),
+      (tester) async {
+        final opened = await pump(tester);
+        final at = tester.getCenter(find.text('Pat'));
+        await tester.tapAt(at, buttons: kSecondaryButton);
+        expect(opened.single, (pat, at));
+      },
+    );
+
+    testWidgets(
+      'on a computer, clicking the name does nothing yet',
+      variant: TargetPlatformVariant.desktop(),
+      (tester) async {
+        final opened = await pump(tester);
+        await tester.tap(find.text('Pat'));
+        expect(opened, isEmpty);
+      },
+    );
+
+    testWidgets(
+      'on a phone, tapping the avatar opens with nowhere to anchor',
+      variant: TargetPlatformVariant.mobile(),
+      (tester) async {
+        final opened = await pump(tester);
+        await tester.tap(avatar);
+        expect(opened.single, (pat, null));
+      },
+    );
+
+    testWidgets(
+      'on a phone, holding the name opens too',
+      variant: TargetPlatformVariant.mobile(),
+      (tester) async {
+        final opened = await pump(tester);
+        await tester.longPress(find.text('Pat'));
+        expect(opened.single, (pat, null));
+      },
+    );
+
+    testWidgets('with nobody listening, the avatar is plain', (tester) async {
+      await pumpAuthor(tester, pat);
+      expect(
+        find.ancestor(of: avatar, matching: find.byType(GestureDetector)),
+        findsNothing,
+      );
+    });
   });
 
   for (final (label, author) in [

@@ -10,6 +10,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../call/call_tile.dart';
 import '../call/volume_slider.dart';
+import '../members/person_card.dart';
 import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
@@ -800,18 +801,12 @@ class _Occupant extends StatelessWidget {
         ),
     ];
     final _OccupantAction? action;
-    final name = Text(
-      member.name,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: loafBody(13, 600).copyWith(color: tokens.textMuted),
-    );
     if (position != null) {
       action = await showActionMenu(
         context,
         position: position,
         leading: [
-          _MenuHeading(child: name),
+          PersonCardEntry(member: member, isYou: you),
           if (voice != null) VolumeMenuEntry(voice: voice, id: member.id),
         ],
         items: items,
@@ -820,9 +815,9 @@ class _Occupant extends StatelessWidget {
       action = await showActionSheet(
         context,
         header: (context) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            name,
+            PersonCard(member: member, isYou: you),
             if (voice != null) VolumeSlider(voice: voice, id: member.id),
           ],
         ),
@@ -946,34 +941,6 @@ class _Occupant extends StatelessWidget {
 enum _OccupantAction { mute, deafen, lift, kick }
 
 /// A line of plain text heading a menu.
-class _MenuHeading<T> extends PopupMenuEntry<T> {
-  const _MenuHeading({required this.child});
-
-  final Widget child;
-
-  @override
-  double get height => 28;
-
-  @override
-  bool represents(T? value) => false;
-
-  @override
-  State<_MenuHeading<T>> createState() => _MenuHeadingState<T>();
-}
-
-class _MenuHeadingState<T> extends State<_MenuHeading<T>> {
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(
-      LoafSpace.x3,
-      LoafSpace.x2,
-      LoafSpace.x3,
-      0,
-    ),
-    child: widget.child,
-  );
-}
-
 /// Marks a channel you can join with one tap. Not a separate button: the
 /// whole row joins, and this says so.
 /// A standalone room's face: a rounded square with its initial, since it is

@@ -178,6 +178,11 @@ abstract interface class Rooms implements Listenable {
   /// let them. Throws when the server says no.
   Future<void> kick(String roomId, String userId);
 
+  /// Removes [userId] from every joined room under [spaceId] they are in,
+  /// then the space itself. Every kick is attempted; throws [PartlyDone]
+  /// naming the rooms that refused.
+  Future<void> kickFromSpace(String spaceId, String userId);
+
   /// Puts [to] on [userId] in the room's call for everyone, or with null
   /// lifts it. Their own client is what obeys. Throws when the server
   /// says no.
