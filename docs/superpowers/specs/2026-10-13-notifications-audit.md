@@ -227,9 +227,13 @@ Settings never shows the "blocking" line on a machine where the call
 itself fails. The AUMID is registered only from `prepare()`, which runs
 when the shell opens with notifications on, or when the toggle is turned
 on. An installed build has no console (`windows/runner/main.cpp` attaches
-one only to a parent console or a debugger) and there is no file log, so
-every failure is invisible to a user. `tool/release/windows-smoke.sh`
-checks four files of the install and not `loaf_notify_win.dll`.
+one only to a parent console or a debugger), so on Windows the SDK's log,
+warnings and worse, is kept in `loaf.log` in the app's support folder,
+`%APPDATA%\moe.loaf\Loaf Chat`, next to `notifications.json`
+(`lib/log_file.dart`); the Rust side's own
+lines (`[loaf notify]`) go to stderr and are not in it.
+`tool/release/windows-smoke.sh` checks four files of the install and not
+`loaf_notify_win.dll`.
 
 ## Windows: a checklist for a user
 
@@ -237,10 +241,9 @@ In this order; each step says what to send back.
 
 1. Open the install folder (where `loaf-chat.exe` is). Is
    `loaf_notify_win.dll` there? Send yes or no.
-2. Quit Loaf Chat. Open Command Prompt, type the full path of
-   `loaf-chat.exe` and press Enter. The log now shows in that window.
-   Have someone message you with the window not in front. Copy every
-   line that starts with `[loaf]` or `[loaf notify]`.
+2. Have someone message you with the window not in front. Then open
+   `%APPDATA%\moe.loaf\Loaf Chat` in Explorer (paste it into the address
+   bar) and send `loaf.log` from there.
 3. In Loaf Chat, Settings, Notifications: is "notifications" on? Turn it
    off and on again. Does a line say windows is blocking notifications?
 4. Windows Settings, System, Notifications: is Loaf Chat in the list, and

@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:matrix/matrix.dart' show Logs;
+
+import 'log_file.dart';
 
 import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
@@ -89,6 +92,11 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (!kIsWeb && (Platform.isLinux || Platform.isMacOS)) {
     _quitOnSignals(beforeQuit);
+  }
+  // An installed Windows build has no console, and the SDK's log is where
+  // every notification failure goes: a file is the one way to see it.
+  if (!kIsWeb && Platform.isWindows) {
+    Logs().onLog = (await LogFile.inSupportDirectory()).write;
   }
   // Restored before the first frame, like the session, so the app never
   // flashes the wrong palette. The mock keeps nothing between runs.
