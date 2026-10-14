@@ -75,6 +75,9 @@ class _Api extends FakeMatrixApi {
   /// Each kick asked for: the room and who.
   final kicks = <(String, String)>[];
 
+  /// Each media download asked for, by path.
+  final downloads = <String>[];
+
   /// Each moderation entry written: the room, its state key, its content.
   final silences = <(String, String, Map<String, Object?>)>[];
 
@@ -111,6 +114,14 @@ class _Api extends FakeMatrixApi {
       return http.Response(
         jsonEncode({'event_id': '\$m${silences.length}'}),
         200,
+      );
+    }
+    if (request.method == 'GET' && path.contains('/download/')) {
+      downloads.add(path);
+      return http.Response.bytes(
+        utf8.encode('pixels'),
+        200,
+        headers: {'content-type': 'image/png'},
       );
     }
     if (request.method == 'POST' && path.endsWith('/kick')) {
@@ -306,8 +317,16 @@ Future<Client> _client({_Api? api, bool firstSync = true}) async {
   return client;
 }
 
-Future<MatrixRooms> _rooms(Client client, {DateTime Function()? now}) async {
-  final rooms = MatrixRooms(client, now: now);
+Future<MatrixRooms> _rooms(
+  Client client, {
+  DateTime Function()? now,
+  Duration? warmAvatarsAfter,
+}) async {
+  final rooms = MatrixRooms(
+    client,
+    now: now,
+    warmAvatarsAfter: warmAvatarsAfter,
+  );
   addTearDown(rooms.dispose);
   await _settle();
   return rooms;
@@ -1379,6 +1398,32 @@ void main() {
     expect(members['@mod:example.com']!.role, Role.moderator);
     expect(members['@mod:example.com']!.name, 'Moddy');
     expect(members['@mod:example.com']!.presence, loaf.Presence.unknown);
+  });
+
+  test('a member\'s original avatar is fetched ahead', () async {
+    final api = _Api();
+    final client = await _client(api: api);
+    final rooms = await _rooms(client, warmAvatarsAfter: Duration.zero);
+    await _sync(client, {
+      'join': {
+        '!pics:example.com': _room(
+          'pics',
+          extra: [
+            _state(
+              'm.room.member',
+              {'membership': 'join', 'avatar_url': 'mxc://example.com/ada'},
+              key: '@ada:example.com',
+              sender: '@ada:example.com',
+            ),
+          ],
+        ),
+      },
+    });
+    await _settle();
+    rooms.loadMembers('!pics:example.com');
+    await _settle();
+    await _settle();
+    expect(api.downloads.where((p) => p.contains('ada')), hasLength(1));
   });
 
   test('a Discord puppet carries its bridge, and nobody else does', () async {

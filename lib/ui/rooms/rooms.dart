@@ -97,7 +97,7 @@ abstract interface class Rooms implements Listenable {
   Member get me;
 
   /// Turns the avatar refs on this account's people, rooms and spaces into
-  /// images.
+  /// images. The originals of people in your rooms are fetched ahead.
   AvatarImages get avatarImages;
 
   /// Turns the media on this account's messages into pictures and files on

@@ -18,6 +18,9 @@ class _Api extends FakeMatrixApi {
   final requests = <Map<String, String>>[];
   final paths = <String>[];
   var status = 200;
+
+  /// While set, a download of a path containing it waits on the completer.
+  (String, Completer<void>)? hold;
   var contentType = 'image/png';
 
   @override
@@ -27,6 +30,9 @@ class _Api extends FakeMatrixApi {
         (path.contains('/thumbnail/') || path.contains('/download/'))) {
       paths.add(path);
       requests.add(request.headers);
+      if (hold case (final part, final gate) when path.contains(part)) {
+        await gate.future;
+      }
       return http.Response.bytes(
         utf8.encode('pixels'),
         status,
@@ -170,6 +176,84 @@ void main() {
     completer.addListener(ImageStreamListener((_, _) => done.complete()));
     await done.future;
     expect(asked.single, isNull);
+  });
+
+  group('warming', () {
+    List<String> downloads(_Api api) =>
+        api.paths.where((p) => p.contains('/download/')).toList();
+
+    test('fetches an original once, however often it is asked', () async {
+      final api = _Api();
+      final client = await _client(api);
+      final images = MatrixAvatarImages(client, warmAfter: Duration.zero);
+      addTearDown(images.dispose);
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(downloads(api), hasLength(1));
+    });
+
+    test('goes on past one that fails', () async {
+      final api = _Api()..status = 500;
+      final client = await _client(api);
+      final images = MatrixAvatarImages(client, warmAfter: Duration.zero);
+      addTearDown(images.dispose);
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      images.warm(const AvatarRef('mxc://fake/def'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(downloads(api), hasLength(2));
+    });
+
+    test('ignores a ref that is not mxc', () async {
+      final api = _Api();
+      final client = await _client(api);
+      final images = MatrixAvatarImages(client, warmAfter: Duration.zero);
+      addTearDown(images.dispose);
+      images.warm(const AvatarRef('https://x/y'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(downloads(api), isEmpty);
+    });
+
+    test('fetches nothing once disposed', () async {
+      final api = _Api();
+      final client = await _client(api);
+      final images = MatrixAvatarImages(client, warmAfter: Duration.zero);
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      images.dispose();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(downloads(api), isEmpty);
+    });
+
+    test('waits its delay before the first fetch', () async {
+      final api = _Api();
+      final client = await _client(api);
+      final images = MatrixAvatarImages(
+        client,
+        warmAfter: const Duration(seconds: 5),
+      );
+      addTearDown(images.dispose);
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(downloads(api), isEmpty);
+    });
+
+    test('gives up on a download that hangs and fetches the next', () async {
+      final gate = Completer<void>();
+      final api = _Api()..hold = ('abc', gate);
+      addTearDown(gate.complete);
+      final client = await _client(api);
+      final images = MatrixAvatarImages(
+        client,
+        warmAfter: Duration.zero,
+        fetchTimeout: const Duration(milliseconds: 100),
+      );
+      addTearDown(images.dispose);
+      images.warm(const AvatarRef('mxc://fake/abc'));
+      images.warm(const AvatarRef('mxc://fake/def'));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(downloads(api), hasLength(2));
+      expect(downloads(api).last, contains('def'));
+    });
   });
 
   test('an mxc ref has an original; another scheme has none', () async {

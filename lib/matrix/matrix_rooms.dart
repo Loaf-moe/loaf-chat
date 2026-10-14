@@ -26,7 +26,6 @@ import '../ui/settings/voice_settings.dart';
 import '../ui/shell/profile.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
-import '../ui/widgets/avatar_images.dart';
 import '../ui/call/calls.dart';
 import 'bridges.dart';
 import 'call_media.dart';
@@ -76,7 +75,11 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     this._voiceApplying,
     this.externalMedia,
     @visibleForTesting this._now,
-  }) {
+    @visibleForTesting Duration? warmAvatarsAfter,
+  }) : avatarImages = MatrixAvatarImages(
+         client,
+         warmAfter: warmAvatarsAfter ?? MatrixAvatarImages.defaultWarmAfter,
+       ) {
     _hierarchy = MatrixHierarchy(
       client,
       onChange: () {
@@ -309,7 +312,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   double? get syncProgress => _progress;
 
   @override
-  late final AvatarImages avatarImages = MatrixAvatarImages(client);
+  final MatrixAvatarImages avatarImages;
 
   @override
   MatrixMediaSource get media =>
@@ -388,7 +391,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final profile = _profile;
     // A profile nobody asked for has nothing to add.
     if (profile == null) return _baseMe;
-    return _baseMe.copyWith(name: profile.loadedName, avatar: profile.avatar);
+    final avatar = profile.avatar;
+    if (avatar != null) avatarImages.warm(avatar);
+    return _baseMe.copyWith(name: profile.loadedName, avatar: avatar);
   }
 
   @override
@@ -852,13 +857,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   Member _member(Room room, String userId) {
     final user = room.unsafeGetUserFromMemoryOrFallback(userId);
+    final avatar = AvatarRef.maybe(user.avatarUrl?.toString());
+    if (avatar != null) avatarImages.warm(avatar);
     return Member(
       userId,
       user.calcDisplayname(),
       spaceColorFor(userId),
       presence: Presence.unknown,
       powerLevel: room.getPowerLevelByUserId(userId).level,
-      avatar: AvatarRef.maybe(user.avatarUrl?.toString()),
+      avatar: avatar,
       bridge: bridgeOf(userId),
     );
   }
@@ -1510,6 +1517,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   @override
   void dispose() {
     _disposed = true;
+    avatarImages.dispose();
     _callExpiry?.cancel();
     _calls?.dispose();
     for (final s in _subscriptions) {

@@ -2,6 +2,8 @@
 /// thumbnails, kept in the SDK's file store so a relaunch draws from disk.
 library;
 
+import 'dart:async';
+import 'dart:collection';
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
@@ -24,9 +26,90 @@ int bucketFor(double physical, {List<int> buckets = avatarBuckets}) =>
     buckets.firstWhere((b) => physical <= b, orElse: () => buckets.last);
 
 class MatrixAvatarImages implements AvatarImages {
-  MatrixAvatarImages(this.client);
+  MatrixAvatarImages(
+    this.client, {
+    this.warmAfter = defaultWarmAfter,
+    this.fetchTimeout = const Duration(seconds: 60),
+  });
+
+  /// Long enough for the first sync to land first.
+  static const defaultWarmAfter = Duration(seconds: 5);
 
   final Client client;
+
+  /// How long the first warm fetch waits.
+  final Duration warmAfter;
+
+  /// A warm fetch slower than this is given up on, so one dead download
+  /// never parks the rest.
+  final Duration fetchTimeout;
+
+  final _warmed = <Uri>{};
+  final _pending = Queue<Uri>();
+  Timer? _timer;
+  Timer? _fetchTimer;
+  var _started = false;
+  var _draining = false;
+  var _disposed = false;
+
+  /// Fetches [ref]'s original into the file store, after the others asked
+  /// for before it, so the card and the call tile have it at once.
+  void warm(AvatarRef ref) {
+    final uri = _mxc(ref);
+    if (uri == null || _disposed || !_warmed.add(uri)) return;
+    _pending.add(uri);
+    if (_started) {
+      if (!_draining) unawaited(_drain());
+    } else {
+      _timer ??= Timer(warmAfter, () {
+        _started = true;
+        unawaited(_drain());
+      });
+    }
+  }
+
+  Future<void> _drain() async {
+    _draining = true;
+    while (_pending.isNotEmpty && !_disposed) {
+      try {
+        await _fetch(_pending.removeFirst());
+      } on Object {
+        // Logged by bytes(), or timed out; the next avatar still gets its turn.
+      }
+    }
+    _draining = false;
+  }
+
+  /// [MxcImage.bytes] bounded by [fetchTimeout]. Its own timer, not
+  /// `Future.timeout`, so [dispose] can cancel it.
+  Future<void> _fetch(Uri uri) {
+    final done = Completer<void>();
+    final timer = _fetchTimer = Timer(fetchTimeout, () {
+      if (!done.isCompleted) {
+        done.completeError(TimeoutException(uri.toString()));
+      }
+    });
+    unawaited(
+      MxcImage(client, uri)
+          .bytes()
+          .then(
+            (_) {
+              if (!done.isCompleted) done.complete();
+            },
+            onError: (Object e) {
+              if (!done.isCompleted) done.completeError(e);
+            },
+          )
+          .whenComplete(timer.cancel),
+    );
+    return done.future;
+  }
+
+  void dispose() {
+    _disposed = true;
+    _timer?.cancel();
+    _fetchTimer?.cancel();
+  }
 
   @override
   ImageProvider? resolve(AvatarRef ref, double physicalSize) {
