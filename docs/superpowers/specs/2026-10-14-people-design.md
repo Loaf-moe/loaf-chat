@@ -255,31 +255,43 @@ Flutter cannot pause a GIF.
 
 ## Mentioning from a name
 
-`Timeline` gains `ValueListenable<Member?> get mentionRequest` and
-`TimelineController.mention(Member)`. The composer listens as it does for
-`target`: on a request it puts the member's label at the cursor through the
-same path as an accepted suggestion (a trailing space, the `Mention` into
-`_picked`), takes the focus, and the controller clears the request. With no
-composer open the request has no listener, and the name's tap is not
-offered.
+`Timeline` carries `MentionRequest? get mentionRequest` and
+`mention(Member)`, both from `ComposerAiming`, so every backend has them.
+A request is a new object each time; the composer tells one from the next
+by identity, as it does reply and edit targets. It notes the request
+standing when it opens, and again when its timeline changes, so a request
+from before it existed is never inserted. A new one goes in at the cursor,
+over any selection, with a trailing space, the `Mention` kept for sending,
+and the field takes focus: the same `_insertMention` an accepted suggestion
+uses.
+
+The timeline name's click or tap asks for one only while the timeline is
+writable. The person menu's "mention" is offered by the shell when the open
+channel is not a voice channel and its timeline is writable, and closes the
+member drawer on a phone so the composer shows.
 
 ## Removing someone from a call
 
-`moe.loaf.call.moderation` gains `hung_up_at`, milliseconds since the epoch,
-beside `muted` and `deafened`. `callSilenceContent` writes the three
-together, so one write never loses another; `callHangups(events)` reads
-them back as a map from user id to time.
+`moe.loaf.call.moderation` gains `hung_up: true` beside `muted` and
+`deafened`. `callHangUpContent(current)` writes the flag with the silence
+they are under, so a hang-up never lifts a mute; `callSilenceContent`
+writes without it, so the next mute or lift ends the hang-up. The time is
+the event's `origin_server_ts` (`callHangUps`), and a membership's
+`created` is the server's time too once echoed: both sides compare one
+clock.
 
-`MatrixCalls`, on every change of that state while in a call, compares its
-own `hung_up_at` with the membership's `created` time. A newer `hung_up_at`
-leaves the call by the hang-up path. An older one is a removal from an
-earlier visit and is ignored, so joining again after being removed works
-with no further write.
+`MatrixCalls`, on every sync while in a call, ends the call as
+`CallPhase.hungUp` when the flag about you is newer than your membership.
+An older flag is a removal from an earlier visit and is ignored, so joining
+again stays, with no further write. The end state reads "someone hung up
+for you" and offers "join again", which is `retry`. The shell toasts the
+same line, since you may be reading elsewhere.
 
 `Rooms.hangUp(roomId, userId)` writes it, gated by `RoomAbility.silence`.
-The voice occupant row's "kick from <channel>" becomes "remove from call",
-not drawn destructive, and calls it. "kick from space" lives in the person
-menu alone.
+The voice occupant row's item is "remove from call", not drawn
+destructive, never on your own row. `Rooms.kick`, `Channel.kickBelow` and
+the row's "kick from <channel>" are gone; kick from space lives in the
+person menu alone.
 
 ## Copy
 
@@ -289,6 +301,8 @@ menu alone.
 | a moderator deafened you | someone deafened you |
 | a moderator unmuted you / undeafened you | you can talk again |
 | — | someone hung up for you |
+| Muted by a moderator / Deafened by a moderator (tile tooltip) | Muted for everyone / Deafened for everyone |
+| muted by a moderator (row, read aloud) | muted for everyone |
 
 Menu labels stay lowercase.
 
@@ -316,14 +330,22 @@ Menu labels stay lowercase.
   seen on the download path.
 - **The call tile**: plays while they speak; rests while quiet, faded or
   reconnecting.
-- **Mentioning**: a tap puts `@Name ` at the cursor and the sent message
-  carries the mention; a tap on your own name does nothing; a request with
-  no composer is not offered.
-- **Removal**: `callHangups` parsing; `MatrixCalls` leaving on a newer
-  `hung_up_at`, staying on an older one, and joining again afterwards;
-  `callSilenceContent` keeping `hung_up_at` through a mute.
-- **The occupant row**: its labels; no kick on it; kick in the person menu
-  with `RoomAbility.kick`.
+- **Mentioning**: a request is new each time and heard; the composer puts
+  it at the cursor, mid-text, in an empty field, twice for the same person,
+  and sends it as a pill; a request from before the composer opened is not
+  taken; a click or tap on the name asks, a right-click still opens the
+  menu; the tile has no `onMention` until the device can write; the menu's
+  item is offered iff given and calls back once the menu is gone; from the
+  member list it fills the composer; never for yourself.
+- **Removal**: `callHangUpContent` keeping the standing silence;
+  `callHangUps` reading the flag with the server's time and nothing without
+  it; `MatrixCalls` ending the call on a newer flag, ignoring an older one,
+  staying after joining again, keeping the mute the flag came with, and
+  `retry` joining again; `hangUp` writing the flag with the silence they
+  are under; the end state's words and button; the shell's toast.
+- **The occupant row**: "remove from call" offered where the app can, not
+  without, not on your own row, under the volume; one tap asks the backend
+  with no question; a refusal toasts; the row reads "muted for everyone".
 
 **By hand on loaf.moe:** a puppet's message and member row; the menu from
 each place in the table; mentioning from a name; removing someone from a
@@ -334,5 +356,5 @@ call and watching them stay in the channel and rejoin.
 1. The bridge and the badge, with `PersonName`. Landed.
 2. The person menu, then the card's look, original avatars, warming, and
    the call tile. Landed.
-3. Mentioning from a name.
-4. Removing someone from a call, and the copy.
+3. Mentioning from a name. Landed.
+4. Removing someone from a call, and the copy. Landed.
