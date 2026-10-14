@@ -3,10 +3,12 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart' show XFile;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderCustomPaint;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/channel/composer.dart';
+import 'package:loaf_native/ui/channel/mention_pill.dart';
 import 'package:loaf_native/ui/channel/timeline_controller.dart';
 import 'package:loaf_native/ui/mock/fixtures.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -540,6 +542,123 @@ void main() {
       await tester.tap(find.byIcon(LucideIcons.send));
       await tester.pumpAndSettle();
       expect(timeline.messages.single.formatted, isNull);
+    });
+
+    /// The texts the field draws as pills: what its own span sets in the
+    /// pill's weight.
+    List<String> pilled(WidgetTester tester) {
+      final span = tester
+          .state<EditableTextState>(find.byType(EditableText))
+          .buildTextSpan();
+      final out = <String>[];
+      span.visitChildren((s) {
+        if (s is TextSpan &&
+            s.style?.fontWeight == FontWeight.w600 &&
+            s.text != null) {
+          out.add(s.text!);
+        }
+        return true;
+      });
+      return out;
+    }
+
+    Future<void> pickAda(WidgetTester tester) async {
+      await type(tester, '@ad');
+      await tester.tap(offered('Ada'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a picked mention is drawn as a pill', (tester) async {
+      await pump(tester);
+      await pickAda(tester);
+      await tester.enterText(find.byType(TextField), '@Ada hello');
+      await tester.pump();
+      expect(pilled(tester), ['@Ada']);
+    });
+
+    testWidgets('a pill only where the mention will be sent', (tester) async {
+      final timeline = await pump(tester);
+      await pickAda(tester);
+      // Not inside a longer name, and not in code: neither is sent as one.
+      await tester.enterText(find.byType(TextField), '@Ada @Adam `@Ada`');
+      await tester.pump();
+      expect(pilled(tester), ['@Ada']);
+
+      await tester.tap(find.byIcon(LucideIcons.send));
+      await tester.pumpAndSettle();
+      expect(
+        'href="https://matrix.to/#/@ada:loaf.moe"'
+            .allMatches(timeline.messages.single.formatted!)
+            .length,
+        1,
+      );
+    });
+
+    testWidgets('a word being composed after a pill leaves it a pill', (
+      tester,
+    ) async {
+      await pump(tester);
+      await pickAda(tester);
+      // An Android keyboard keeps the word being typed under composition.
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: '@Ada h',
+          selection: TextSelection.collapsed(offset: 6),
+          composing: TextRange(start: 5, end: 6),
+        ),
+      );
+      await tester.pump();
+      expect(pilled(tester), ['@Ada']);
+
+      // Over the name itself it is not settled, so it is left plain.
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: '@Ada h',
+          selection: TextSelection.collapsed(offset: 4),
+          composing: TextRange(start: 1, end: 4),
+        ),
+      );
+      await tester.pump();
+      expect(pilled(tester), isEmpty);
+    });
+
+    testWidgets('a pill scrolled out of the field is not drawn past it', (
+      tester,
+    ) async {
+      await pump(tester);
+      await pickAda(tester);
+      await tester.enterText(
+        find.byType(TextField),
+        '@Ada one\ntwo\nthree\nfour\nfive\nsix\nseven',
+      );
+      await tester.pumpAndSettle();
+      final pills = tester.renderObject<RenderCustomPaint>(
+        find.byWidgetPredicate(
+          (w) =>
+              w is CustomPaint &&
+              w.painter.runtimeType.toString() == '_PillPainter',
+        ),
+      );
+      // Scrolled to the end, the first line's pill sits above the field;
+      // the clip, set before any pill is drawn, keeps it inside, with only
+      // the pill's own padding of room either side.
+      final size = pills.size;
+      expect(
+        pills,
+        paints
+          ..clipRect(
+            rect: Rect.fromLTRB(
+              -mentionPillPadX,
+              0,
+              size.width + mentionPillPadX,
+              size.height,
+            ),
+          )
+          ..something(
+            (method, args) =>
+                method == #drawRRect && (args.first as RRect).top < 0,
+          ),
+      );
     });
 
     group('asked from outside', () {

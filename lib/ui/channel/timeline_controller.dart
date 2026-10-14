@@ -231,13 +231,18 @@ class TimelineController extends ChangeNotifier
       (m) => '&lt;${m[1]}&gt;',
     );
     // A lone newline is a line break, as the SDK's convertLinebreaks makes
-    // it; markdown alone would fold it into a space.
-    final linked = linkMentions(
-      escaped,
-      mentions,
-    ).replaceAll(RegExp(r'(?<!\n)\n(?!\n)'), '  \n');
+    // it; markdown alone would fold it into a space. Not in code, which the
+    // SDK leaves as written too.
+    final linked = linkMentions(escaped, mentions);
+    final broken = StringBuffer();
+    for (final s in codeSegments(linked)) {
+      final part = linked.substring(s.start, s.end);
+      broken.write(
+        s.code ? part : part.replaceAll(RegExp(r'(?<!\n)\n(?!\n)'), '  \n'),
+      );
+    }
     return md.markdownToHtml(
-      linked,
+      broken.toString(),
       extensionSet: md.ExtensionSet.gitHubFlavored,
     );
   }
