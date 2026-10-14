@@ -62,6 +62,8 @@ dependencies:
   flutter_webrtc: ^1.6.2
   loaf_media:
     path: packages/loaf_media
+  loaf_chrome:
+    path: packages/loaf_chrome
   loaf_notify:
     path: packages/loaf_notify
 

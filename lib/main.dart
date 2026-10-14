@@ -51,7 +51,7 @@ const backend = String.fromEnvironment('LOAF_BACKEND', defaultValue: 'matrix');
 
 /// The window's own controls, in place of the OS title bar. Lives as long
 /// as the app, like [themeMode].
-final windowChrome = WindowChromeController();
+final windowChrome = WindowChromeController(runner: pickWindowRunner());
 
 /// The app's one account. Lives as long as the app, like [themeMode].
 late final LoafSession session;

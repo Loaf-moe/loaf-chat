@@ -49,13 +49,17 @@ run = "cargo test --locked --manifest-path packages/loaf_media/rust/loaf_streams
 description = "loaf_notify's Rust tests"
 run = "cargo test --locked --manifest-path packages/loaf_notify/rust/Cargo.toml"
 
+[tasks."test:chrome"]
+description = "loaf_chrome's Rust tests"
+run = "cargo test --locked --manifest-path packages/loaf_chrome/rust/Cargo.toml"
+
 [tasks."test:player:linux"]
 description = "The Linux player's Rust tests; needs GStreamer"
 run = "cargo test --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml"
 
 [tasks."test:all"]
 description = "Every test that runs on any platform"
-run = [{ task = "test" }, { task = "test:media" }, { task = "test:streams" }, { task = "test:notify" }]
+run = [{ task = "test" }, { task = "test:media" }, { task = "test:streams" }, { task = "test:notify" }, { task = "test:chrome" }]
 
 [tasks."build:macos"]
 description = "Debug build for macOS; also the encryption tests' library there"
