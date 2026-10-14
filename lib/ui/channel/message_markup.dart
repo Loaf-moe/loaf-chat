@@ -238,7 +238,9 @@ String? mentionOf(Uri link) {
   if (link.scheme == 'https' && link.host == 'matrix.to') {
     final id = Uri.decodeComponent(link.fragment.split('?').first);
     final user = id.startsWith('/') ? id.substring(1) : id;
-    return user.startsWith('@') && user.contains(':') ? user : null;
+    // Any `@` id: a homeserver always adds `:server`, but nothing here
+    // needs it, and requiring it turned the mock's people into plain links.
+    return user.length > 1 && user.startsWith('@') ? user : null;
   }
   return null;
 }
