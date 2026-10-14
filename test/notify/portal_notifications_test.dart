@@ -123,6 +123,15 @@ void main() {
     expect(chime.plays, 1);
   });
 
+  test('an avatar gone by the show still shows the notice, without a '
+      'picture', () async {
+    final p = await serve(_FakePortal(2));
+    await make().show(_notice(avatar: '${dir.path}/gone.png'));
+    expect(p.added.single.$2.containsKey('icon'), isFalse);
+    expect(p.added.single.$2['body'], const DBusString('hi'));
+    expect(chime.plays, 1);
+  });
+
   test('version 1: no sound field, and the app plays the chime', () async {
     final p = await serve(_FakePortal(1));
     await make().show(_notice());
@@ -154,7 +163,9 @@ void main() {
       final n = make();
       final clicks = <MessageRoute>[];
       n.clicks.listen(clicks.add);
-      await pumpEventQueue();
+      // Listening sends the match rule without awaiting it; the bus answers
+      // a ping on the same connection only once it has that rule.
+      await appSide.ping();
       await p.invoke(r'room:!old:x:$z', ['!old:x', r'$z']);
       await pumpEventQueue();
       expect(clicks, [const MessageRoute('!old:x', r'$z')]);
@@ -168,6 +179,15 @@ void main() {
     await n.show(_notice(room: '!b:x'));
     await n.withdraw('!a:x');
     expect(p.removed, [r'room:!a:x:$e']);
+  });
+
+  test('retract removes that one notice', () async {
+    final p = await serve(_FakePortal(2));
+    final n = make();
+    await n.show(_notice(room: '!a:x'));
+    await n.show(_notice(room: '!b:x'));
+    await n.retract(const MessageRoute('!b:x', r'$e'));
+    expect(p.removed, [r'room:!b:x:$e']);
   });
 
   // A bus nobody listens on, as on a desktop with no session bus.
@@ -205,5 +225,18 @@ void main() {
     }, (e, _) => uncaught.add(e));
     expect(uncaught, isEmpty);
     expect(logged, hasLength(1), reason: 'logged once');
+  });
+
+  test('prepare, blocked and open settings ask nothing of the OS', () async {
+    final logged = <Object>[];
+    final n = PortalNotifications(
+      chime: chime,
+      bus: deadBus(),
+      log: logged.add,
+    );
+    await n.prepare();
+    expect(await n.blocked(), isFalse);
+    await n.openSystemSettings();
+    expect(logged, isEmpty);
   });
 }

@@ -94,6 +94,12 @@ class ChannelDesktopNotifications implements DesktopNotifications {
       _call<void>('withdraw', {'roomId': roomId});
 
   @override
+  Future<void> retract(MessageRoute route) => _call<void>('retract', {
+    'roomId': route.roomId,
+    'eventId': route.eventId,
+  });
+
+  @override
   Stream<MessageRoute> get clicks => _clicks.stream;
 
   @override

@@ -182,6 +182,12 @@ void main() {
       expect(mentionsMe(event, userId: _me, displayName: 'Me'), isFalse);
     });
 
+    test('m.mentions of any shape decides alone', () {
+      final room = _room();
+      final event = _event(room, content: _text('Me, look', mentions: 'yes'));
+      expect(mentionsMe(event, userId: _me, displayName: 'Me'), isFalse);
+    });
+
     test('@room counts from a sender with the power to notify the room', () {
       final room = _room(users: {'@ada:example.com': 50});
       final event = _event(

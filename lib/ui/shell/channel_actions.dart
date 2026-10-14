@@ -18,8 +18,9 @@ enum ChannelAction {
   lowPriority,
   notLowPriority,
   olderConversations,
-  mute,
-  unmute,
+  notifyAll,
+  notifyMentions,
+  notifyNone,
   invite,
   leave,
 }
@@ -47,7 +48,10 @@ List<ChannelAction> actionsFor(
           : ChannelAction.lowPriority,
       if (channel.earlier.isNotEmpty) ChannelAction.olderConversations,
     ],
-    channel.muted ? ChannelAction.unmute : ChannelAction.mute,
+    // The two levels the channel is not at, as favourite offers its flip.
+    if (channel.notify != NotifyLevel.all) ChannelAction.notifyAll,
+    if (channel.notify != NotifyLevel.mentions) ChannelAction.notifyMentions,
+    if (channel.notify != NotifyLevel.none) ChannelAction.notifyNone,
     // A 1:1 DM has exactly one person to invite already there: nobody else
     // could be added to it.
     if (!(channel.kind == ChannelKind.direct && channel.members.length == 1))
@@ -97,17 +101,21 @@ ActionItem<ChannelAction> _item(ChannelAction action, String noun) =>
         icon: LucideIcons.history,
         label: 'Older conversations',
       ),
-      // Muting keeps mentions: it maps to a mentions-only push rule, synced to
-      // every device, with no expiry — Matrix has none to offer.
-      ChannelAction.mute => ActionItem(
-        value: ChannelAction.mute,
+      // Push rules, synced to every device, with no expiry: Matrix has none.
+      ChannelAction.notifyAll => const ActionItem(
+        value: ChannelAction.notifyAll,
+        icon: LucideIcons.bell,
+        label: 'All messages',
+      ),
+      ChannelAction.notifyMentions => const ActionItem(
+        value: ChannelAction.notifyMentions,
+        icon: LucideIcons.bellMinus,
+        label: 'Mentions only',
+      ),
+      ChannelAction.notifyNone => ActionItem(
+        value: ChannelAction.notifyNone,
         icon: LucideIcons.bellOff,
         label: 'Mute $noun',
-      ),
-      ChannelAction.unmute => ActionItem(
-        value: ChannelAction.unmute,
-        icon: LucideIcons.bell,
-        label: 'Unmute $noun',
       ),
       ChannelAction.invite => const ActionItem(
         value: ChannelAction.invite,

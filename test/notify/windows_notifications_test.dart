@@ -155,6 +155,11 @@ void main() {
     expect(toasts.withdrawn, ['!r:x']);
   });
 
+  test('retract takes back the room\'s toasts', () async {
+    await make().retract(const MessageRoute('!r:x', r'$e'));
+    expect(toasts.withdrawn, ['!r:x']);
+  });
+
   test('a click becomes a route', () async {
     final routes = <MessageRoute>[];
     final sub = make().clicks.listen(routes.add);

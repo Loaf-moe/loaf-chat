@@ -18,6 +18,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart' show DatabaseException;
 import '../ui/channel/timeline.dart';
 import '../ui/members/presence.dart';
 import '../ui/model/arrival.dart';
+import '../ui/model/message_route.dart';
 import '../ui/model/models.dart';
 import '../ui/rooms/rooms.dart';
 import '../ui/settings/devices.dart';
@@ -42,6 +43,7 @@ import 'matrix_timeline.dart';
 import 'matrix_arrivals.dart';
 import 'matrix_unread.dart';
 import 'media_store.dart';
+import 'unread_rules.dart';
 import 'unread_tally.dart';
 
 /// `m.room.create` types that make a room a voice channel: Element's video
@@ -51,13 +53,13 @@ const _voiceTypes = {'m.call', 'org.matrix.msc3417.call'};
 /// What a row should show while its change is on its way. A field is
 /// cleared when a sync shows it, or when its call fails.
 class _Wish {
-  bool? muted;
+  NotifyLevel? notify;
   bool? favourite;
   double? favouriteOrder;
   bool? lowPriority;
   bool? joined;
   bool get isEmpty =>
-      muted == null &&
+      notify == null &&
       favourite == null &&
       favouriteOrder == null &&
       lowPriority == null &&
@@ -161,6 +163,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   @override
   Stream<Arrival> get arrivals => _arrivals.stream;
+
+  @override
+  Stream<MessageRoute> get retractions => _arrivals.retractions;
 
   /// A space's children the SDK doesn't have state for: unjoined channels,
   /// and the children of an unjoined subspace. The hierarchy cache: the
@@ -283,7 +288,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     RoomAbility.answerInvites,
     RoomAbility.messages,
     RoomAbility.markRead,
-    RoomAbility.mute,
+    RoomAbility.notify,
     RoomAbility.tag,
     RoomAbility.join,
     RoomAbility.leave,
@@ -553,10 +558,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     for (final id in _wishes.keys.toList()) {
       final wish = _wishes[id]!;
       final room = client.getRoomById(id);
-      if (wish.muted != null &&
+      if (wish.notify != null &&
           room != null &&
-          (room.pushRuleState != PushRuleState.notify) == wish.muted) {
-        wish.muted = null;
+          _levelOf(room.pushRuleState) == wish.notify) {
+        wish.notify = null;
       }
       if (wish.favourite != null &&
           room != null &&
@@ -583,18 +588,31 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   /// Brings back an invite's own membership event and its inviter, which a
   /// relaunch leaves on disk: without them a DM invite reads as a room, the
-  /// inviter as nobody, and accepting skips `m.direct`. The SDK's own
-  /// `loadHeroUsers` does exactly this for invites, from the database first.
+  /// inviter as nobody, and accepting skips `m.direct`. Your own event
+  /// comes from memory or the store, never the server: a server asked about
+  /// a room you are not in answers with nothing true, and an answer landing
+  /// after the sync's own event would replace it.
   void _loadInvite(Room room) {
     if (!_invitesLoaded.add(room.id)) return;
     unawaited(
-      room
-          .loadHeroUsers()
+      _inviteMembers(room)
           .then<void>((_) {}, onError: (Object _) {})
           .whenComplete(() {
             if (!_disposed) _rebuild();
           }),
     );
+  }
+
+  Future<void> _inviteMembers(Room room) async {
+    final me = client.userID!;
+    var mine = room.getState(EventTypes.RoomMember, me)?.asUser(room);
+    if (mine == null) {
+      mine = await client.database.getUser(me, room);
+      if (mine != null) room.setState(mine);
+    }
+    final inviter = mine?.senderId;
+    if (inviter == null || inviter == me) return;
+    await room.requestUser(inviter, ignoreErrors: true, requestState: false);
   }
 
   Space _space(Room space, Map<String, Room> joined) {
@@ -746,7 +764,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         JoinRules.knock,
       }.contains(room.joinRules),
       topic: topic.isEmpty ? null : topic,
-      muted: room.pushRuleState != PushRuleState.notify,
+      notify: _levelOf(room.pushRuleState),
       members: switch (kind) {
         ChannelKind.direct => _others(room),
         ChannelKind.room => _members(room),
@@ -756,6 +774,13 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       favouriteOrder: favourite?.order,
       lowPriority: room.isLowPriority,
       lastActivity: room.latestEventReceivedTime,
+      read: switch (ownReceipt(room)) {
+        final own? => ReadMark(
+          eventId: own.eventId,
+          at: DateTime.fromMillisecondsSinceEpoch(own.ts),
+        ),
+        null => null,
+      },
       occupants: kind == ChannelKind.voice
           ? [for (final occupant in _occupants(room)) occupant.member]
           : const [],
@@ -771,7 +796,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final wish = _wishes[room.id];
     if (wish == null) return channel;
     return channel.copyWith(
-      muted: wish.muted,
+      notify: wish.notify,
       favourite: wish.favourite,
       favouriteOrder: wish.favouriteOrder,
       lowPriority: wish.lowPriority,
@@ -949,6 +974,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final last = room?.lastEvent;
     // Your own message still on its way has no event id to mark.
     if (room == null || last == null || !last.status.isSent) return;
+    _unread.readToLast(roomId);
     if (_unread.of(roomId).isEmpty && room.fullyRead == last.eventId) return;
     if (!_reading.add(roomId)) {
       _readAgain.add(roomId);
@@ -1012,17 +1038,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
-  Future<void> setMuted(String roomId, bool muted) {
+  Future<void> setNotify(String roomId, NotifyLevel level) {
     final room = client.getRoomById(roomId);
     if (room == null) return Future.value();
     return _wished(
       roomId,
-      'muted',
-      (wish) => wish.muted = muted,
-      (wish) => wish.muted = null,
-      () => room.setPushRuleState(
-        muted ? PushRuleState.dontNotify : PushRuleState.notify,
-      ),
+      'notify',
+      (wish) => wish.notify = level,
+      (wish) => wish.notify = null,
+      () => room.setPushRuleState(_stateOf(level)),
     );
   }
 
@@ -1472,3 +1496,15 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     super.dispose();
   }
 }
+
+NotifyLevel _levelOf(PushRuleState state) => switch (state) {
+  PushRuleState.notify => NotifyLevel.all,
+  PushRuleState.mentionsOnly => NotifyLevel.mentions,
+  PushRuleState.dontNotify => NotifyLevel.none,
+};
+
+PushRuleState _stateOf(NotifyLevel level) => switch (level) {
+  NotifyLevel.all => PushRuleState.notify,
+  NotifyLevel.mentions => PushRuleState.mentionsOnly,
+  NotifyLevel.none => PushRuleState.dontNotify,
+};

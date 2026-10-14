@@ -101,6 +101,13 @@ void main() {
     expect(calls[1].arguments, {'roomId': '!r:x'});
   });
 
+  test('retract sends room and event', () async {
+    await ChannelDesktopNotifications(chime: chime)
+        .retract(const MessageRoute('!r:x', r'$e'));
+    expect(calls.single.method, 'retract');
+    expect(calls.single.arguments, {'roomId': '!r:x', 'eventId': r'$e'});
+  });
+
   test('no plugin (a platform without one): blocked is false', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);

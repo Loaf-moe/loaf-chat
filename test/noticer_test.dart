@@ -5,24 +5,25 @@ import 'package:loaf_native/ui/mock/mock_rooms.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
 import 'package:loaf_native/ui/model/chime.dart';
 import 'package:loaf_native/ui/model/desktop_notifications.dart';
+import 'package:loaf_native/ui/model/message_route.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/model/notice.dart';
 import 'package:loaf_native/ui/settings/notification_settings.dart';
 import 'package:loaf_native/ui/shell/noticer.dart';
 
-/// Mock rooms whose unread counts the test sets, and an avatar file for
+/// Mock rooms whose read receipts the test sets, and an avatar file for
 /// anyone.
 class _Rooms extends MockRooms {
-  final unread = <String, int>{};
+  final marks = <String, ReadMark>{};
 
   @override
   List<Channel> get homeRooms => [
     for (final c in super.homeRooms)
-      unread.containsKey(c.id) ? c.copyWith(unread: unread[c.id]) : c,
+      marks.containsKey(c.id) ? c.copyWith(read: marks[c.id]) : c,
   ];
 
-  void setUnread(String id, int n) {
-    unread[id] = n;
+  void setRead(String id, ReadMark mark) {
+    marks[id] = mark;
     notifyListeners();
   }
 
@@ -77,14 +78,22 @@ void main() {
     rooms.dispose();
   });
 
-  Arrival arrival(String room, {AvatarRef? avatar}) => Arrival(
-    roomId: room,
-    eventId: r'$e',
-    senderId: '@ada:x',
-    senderName: 'Ada',
-    senderAvatar: avatar,
-    text: 'hi',
-  );
+  final sent = DateTime.utc(2026, 10, 14, 12);
+
+  Arrival arrival(String room, {AvatarRef? avatar, String id = r'$e'}) =>
+      Arrival(
+        roomId: room,
+        eventId: id,
+        senderId: '@ada:x',
+        senderName: 'Ada',
+        senderAvatar: avatar,
+        text: 'hi',
+        sentAt: sent,
+      );
+
+  /// Your receipt [seconds] after [sent], on no event in particular.
+  ReadMark readAt(int seconds) =>
+      ReadMark(at: sent.add(Duration(seconds: seconds)));
 
   test(
     'shows a notice with the avatar file and the sound it was given',
@@ -112,24 +121,67 @@ void main() {
     expect(desktop.shown.single.body, 'new message');
   });
 
-  test('a read room has its notices withdrawn', () async {
-    rooms.setUnread(dm, 1);
+  test('a notice is withdrawn once your receipt covers its message', () async {
     await noticer.show(arrival(dm), sound: false);
-    rooms.setUnread(dm, 0);
+    rooms.setRead(dm, readAt(1));
     expect(desktop.withdrawn, [dm]);
-    rooms.setUnread(dm, 0);
+    rooms.setRead(dm, readAt(2));
     expect(desktop.withdrawn, [dm], reason: 'once');
   });
 
-  test('a notice is not withdrawn before its room was seen unread', () async {
-    rooms.setUnread(dm, 0);
+  test('a receipt on the message itself covers it', () async {
     await noticer.show(arrival(dm), sound: false);
-    rooms.setUnread(dm, 0); // the count has not caught up yet
-    expect(desktop.withdrawn, isEmpty);
-    rooms.setUnread(dm, 1);
-    rooms.setUnread(dm, 0);
+    rooms.setRead(
+      dm,
+      ReadMark(eventId: r'$e', at: sent.subtract(const Duration(days: 1))),
+    );
     expect(desktop.withdrawn, [dm]);
   });
+
+  test('a receipt short of the message keeps the notice', () async {
+    await noticer.show(arrival(dm), sound: false);
+    rooms.setRead(dm, readAt(-1));
+    expect(desktop.withdrawn, isEmpty);
+  });
+
+  test('a message already read when it arrives leaves no notice', () async {
+    rooms.setRead(dm, readAt(1));
+    await noticer.show(arrival(dm), sound: false);
+    expect(desktop.shown, isEmpty);
+    expect(desktop.withdrawn, isEmpty);
+  });
+
+  test('two messages, a receipt short of the newest: both stay', () async {
+    await noticer.show(arrival(dm, id: r'$a'), sound: false);
+    await noticer.show(
+      Arrival(
+        roomId: dm,
+        eventId: r'$b',
+        senderId: '@ada:x',
+        senderName: 'Ada',
+        text: 'hi',
+        sentAt: sent.add(const Duration(minutes: 5)),
+      ),
+      sound: false,
+    );
+    rooms.setRead(dm, readAt(60));
+    expect(desktop.withdrawn, isEmpty);
+    rooms.setRead(dm, readAt(600));
+    expect(desktop.withdrawn, [dm]);
+  });
+
+  test(
+    'a retracted message\'s notice is taken back, the room\'s others stay',
+    () async {
+      await noticer.show(arrival(dm, id: r'$a'), sound: false);
+      await noticer.show(arrival(dm, id: r'$b'), sound: false);
+      noticer.retract(MessageRoute(dm, r'$a'));
+      expect(desktop.retracted, [MessageRoute(dm, r'$a')]);
+      expect(desktop.withdrawn, isEmpty);
+      rooms.setRead(dm, readAt(1));
+      expect(desktop.withdrawn, [dm], reason: r'$b was still up');
+    },
+  );
 
   test('a room that is gone has its notices withdrawn', () async {
     await noticer.show(arrival('!gone:x'), sound: false);
@@ -137,35 +189,16 @@ void main() {
     expect(desktop.withdrawn, ['!gone:x']);
   });
 
-  test(
-    'a room read while the avatar loads still has its notice withdrawn',
-    () async {
-      rooms.setUnread(dm, 1);
-      rooms.avatarGate = Completer();
-      final shown = noticer.show(
-        arrival(dm, avatar: const AvatarRef('ada')),
-        sound: false,
-      );
-      await pumpEventQueue();
-      rooms.setUnread(dm, 0); // read on another device, notice not up yet
-      rooms.avatarGate!.complete();
-      await shown;
-      expect(desktop.log.last, 'withdraw', reason: 'after the notice went up');
-      expect(desktop.shown, hasLength(1));
-    },
-  );
-
-  test('a lagging count while the avatar loads does not withdraw', () async {
-    rooms.setUnread(dm, 0);
+  test('a room read while the avatar loads shows no notice', () async {
     rooms.avatarGate = Completer();
     final shown = noticer.show(
       arrival(dm, avatar: const AvatarRef('ada')),
       sound: false,
     );
     await pumpEventQueue();
-    rooms.setUnread(dm, 0);
+    rooms.setRead(dm, readAt(1)); // read on another device, notice not up yet
     rooms.avatarGate!.complete();
     await shown;
-    expect(desktop.withdrawn, isEmpty);
+    expect(desktop.shown, isEmpty);
   });
 }

@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 
 import '../call/calls.dart';
 import '../channel/timeline_controller.dart';
+import '../model/message_route.dart';
 import '../model/arrival.dart';
 import '../model/link_previews.dart';
 import '../model/media_source.dart';
@@ -32,8 +33,8 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   // This session's changes, layered over the fixtures by Space.withSession.
   final _membership = <String, bool>{};
-  final _muted = <String, bool>{};
-  final _read = <String>{};
+  final _notify = <String, NotifyLevel>{};
+  final _readAt = <String, DateTime>{};
 
   // Home's room tags, as this session has them. Favourites are a list so
   // their order is the list's; m.favourite's `order` is its position.
@@ -110,6 +111,9 @@ class MockRooms extends ChangeNotifier implements Rooms {
   @override
   Stream<Arrival> get arrivals => const Stream.empty();
 
+  @override
+  Stream<MessageRoute> get retractions => const Stream.empty();
+
   /// With this session's reading applied, so badges recount. A left
   /// invite-only channel is dropped: only channels you could join in one
   /// tap are ever listed.
@@ -120,10 +124,14 @@ class MockRooms extends ChangeNotifier implements Rooms {
   List<Space> get spaces => [
     for (final space in [...mockSpaces, ..._acceptedSpaces])
       if (_membership[space.id] != false)
-        space.withSession(membership: _membership, muted: _muted, read: _read),
+        space.withSession(
+          membership: _membership,
+          notify: _notify,
+          read: _readAt,
+        ),
   ];
 
-  /// Home's rooms with this session's tags, mutes and reading applied.
+  /// Home's rooms with this session's tags, levels and reading applied.
   /// Rooms you have left are gone: Home has no "join" pills, only what you
   /// are in.
   @override
@@ -137,11 +145,15 @@ class MockRooms extends ChangeNotifier implements Rooms {
               : null,
           lowPriority: _lowPriority[room.id],
           lastActivity: _activity[room.id],
-          muted: _muted[room.id],
+          notify: _notify[room.id],
           // Read state is applied per room here, before duplicates fold
           // together, so an older room's unreads still count on the row.
-          unread: _read.contains(room.id) ? 0 : room.unread,
-          mentions: _read.contains(room.id) ? 0 : room.mentions,
+          unread: _readAt.containsKey(room.id) ? 0 : room.unread,
+          mentions: _readAt.containsKey(room.id) ? 0 : room.mentions,
+          read: switch (_readAt[room.id]) {
+            final at? => ReadMark(at: at),
+            null => null,
+          },
         ),
   ];
 
@@ -162,13 +174,13 @@ class MockRooms extends ChangeNotifier implements Rooms {
 
   @override
   void markRead(String roomId) {
-    if (_read.contains(roomId)) return;
-    _change(() => _read.add(roomId));
+    if (_readAt.containsKey(roomId)) return;
+    _change(() => _readAt[roomId] = DateTime.now());
   }
 
   @override
-  Future<void> setMuted(String roomId, bool muted) {
-    _change(() => _muted[roomId] = muted);
+  Future<void> setNotify(String roomId, NotifyLevel level) {
+    _change(() => _notify[roomId] = level);
     return SynchronousFuture(null);
   }
 

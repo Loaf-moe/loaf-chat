@@ -115,9 +115,15 @@ class FdoNotifications implements DesktopNotifications {
       _listen();
       final caps = await _capabilities();
       final serverSounds = caps.contains('sound');
+      // The same message again (read late, now with its text) replaces
+      // its notification: the server answers with the id it was given.
+      final replaces = _routes.entries
+          .where((e) => e.value == notice.route)
+          .map((e) => e.key)
+          .firstOrNull;
       final reply = await _server.callMethod(_name, 'Notify', [
         const DBusString('Loaf Chat'),
-        const DBusUint32(0),
+        DBusUint32(replaces ?? 0),
         const DBusString('moe.loaf.chat'),
         DBusString(notice.title),
         DBusString(
@@ -145,11 +151,18 @@ class FdoNotifications implements DesktopNotifications {
   }
 
   @override
-  Future<void> withdraw(String roomId) async {
-    final ids = [
-      for (final MapEntry(key: id, value: route) in _routes.entries)
-        if (route.roomId == roomId) id,
-    ];
+  Future<void> withdraw(String roomId) => _close([
+    for (final MapEntry(key: id, value: route) in _routes.entries)
+      if (route.roomId == roomId) id,
+  ]);
+
+  @override
+  Future<void> retract(MessageRoute route) => _close([
+    for (final MapEntry(key: id, value: shown) in _routes.entries)
+      if (shown == route) id,
+  ]);
+
+  Future<void> _close(List<int> ids) async {
     for (final id in ids) {
       _routes.remove(id);
       try {

@@ -31,7 +31,11 @@ class _FakeServer extends DBusObject {
         return DBusMethodSuccessResponse([DBusArray.string(caps)]);
       case 'Notify':
         notified.add(call.values);
-        return DBusMethodSuccessResponse([DBusUint32(_next++)]);
+        // A notification replaced keeps its id, as a server does it.
+        final replaces = call.values[1].asUint32();
+        return DBusMethodSuccessResponse([
+          DBusUint32(replaces != 0 ? replaces : _next++),
+        ]);
       case 'CloseNotification':
         closed.add(call.values.single.asUint32());
         return DBusMethodSuccessResponse();
@@ -45,11 +49,12 @@ class _FakeServer extends DBusObject {
 
 Notice _notice({
   String room = '!r:x',
+  String event = r'$e',
   String body = 'hi',
   bool sound = true,
   String? avatar,
 }) => Notice(
-  route: MessageRoute(room, r'$e'),
+  route: MessageRoute(room, event),
   sender: 'Ada',
   senderId: '@ada:x',
   place: '#general · Loaf',
@@ -166,11 +171,31 @@ void main() {
     final n = make();
     await n.show(_notice(room: '!a:x'));
     await n.show(_notice(room: '!b:x'));
-    await n.show(_notice(room: '!a:x'));
+    await n.show(_notice(room: '!a:x', event: r'$f'));
     await n.withdraw('!a:x');
     expect(s.closed, unorderedEquals([1, 3]));
     await n.withdraw('!a:x');
     expect(s.closed, hasLength(2), reason: 'nothing left to close');
+  });
+
+  test('a notice shown again replaces the first', () async {
+    final s = await serve(['actions', 'body']);
+    final n = make();
+    await n.show(_notice(body: 'encrypted message'));
+    await n.show(_notice(body: 'hi'));
+    expect(s.notified[0][1].asUint32(), 0);
+    expect(s.notified[1][1].asUint32(), 1, reason: 'replaces the first');
+    await n.withdraw('!r:x');
+    expect(s.closed, [1], reason: 'one notification, not two');
+  });
+
+  test('retract closes that one notification', () async {
+    final s = await serve(['actions', 'body']);
+    final n = make();
+    await n.show(_notice(room: '!a:x'));
+    await n.show(_notice(room: '!b:x'));
+    await n.retract(const MessageRoute('!a:x', r'$e'));
+    expect(s.closed, [1]);
   });
 
   test('no server at all: nothing throws, and the chime still plays', () async {
@@ -233,5 +258,19 @@ void main() {
     }, (e, _) => uncaught.add(e));
     expect(uncaught, isEmpty);
     expect(logged, hasLength(1), reason: 'logged once');
+  });
+
+  test('prepare, blocked and open settings ask nothing of the OS', () async {
+    final logged = <Object>[];
+    final n = FdoNotifications(
+      chime: chime,
+      soundFile: '/app/chime.wav',
+      bus: deadBus(),
+      log: logged.add,
+    );
+    await n.prepare();
+    expect(await n.blocked(), isFalse);
+    await n.openSystemSettings();
+    expect(logged, isEmpty);
   });
 }

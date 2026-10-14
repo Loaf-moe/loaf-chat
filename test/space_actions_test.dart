@@ -23,6 +23,7 @@ import 'package:loaf_native/ui/verify/verifier.dart';
 import 'package:loaf_native/ui/settings/devices.dart';
 import 'package:loaf_native/ui/shell/profile.dart';
 import 'package:loaf_native/ui/model/arrival.dart';
+import 'package:loaf_native/ui/model/message_route.dart';
 import 'package:loaf_native/ui/model/link_previews.dart';
 import 'package:loaf_native/ui/model/media_source.dart';
 import 'package:loaf_native/ui/widgets/avatar_images.dart';
@@ -69,6 +70,8 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
 
   @override
   Stream<Arrival> get arrivals => const Stream.empty();
+  @override
+  Stream<MessageRoute> get retractions => const Stream.empty();
   @override
   Calls? get calls => null;
   @override
@@ -137,7 +140,7 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   void markRead(String roomId) => _unwired();
   @override
-  Future<void> setMuted(String roomId, bool muted) => _unwired();
+  Future<void> setNotify(String roomId, NotifyLevel level) => _unwired();
   @override
   Future<void> setJoined(String roomId, bool joined) => _unwired();
   @override

@@ -44,6 +44,22 @@ class MockProfile extends ChangeNotifier implements Profile {
   bool get uploadingAvatar => false;
 
   @override
+  ChannelDefault get channelDefault => _channelDefault;
+  var _channelDefault = ChannelDefault.all;
+
+  @override
+  bool get settingChannelDefault => false;
+
+  @override
+  Future<void> setChannelDefault(ChannelDefault level) {
+    if (level != _channelDefault) {
+      _channelDefault = level;
+      notifyListeners();
+    }
+    return SynchronousFuture(null);
+  }
+
+  @override
   Member get me => currentUser.copyWith(
     name: _name,
     presence: _choice.shown,

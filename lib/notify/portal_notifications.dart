@@ -9,6 +9,7 @@ library;
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dbus/dbus.dart';
 import 'package:matrix/matrix.dart' show Logs;
@@ -115,8 +116,15 @@ class PortalNotifications implements DesktopNotifications {
     try {
       _listen();
       final version = await _portalVersion();
-      final avatar = notice.avatarPath;
-      final icon = avatar == null ? null : await File(avatar).readAsBytes();
+      Uint8List? icon;
+      if (notice.avatarPath case final avatar?) {
+        try {
+          icon = await File(avatar).readAsBytes();
+        } on FileSystemException {
+          // A picture gone by now is no reason to lose the words.
+          icon = null;
+        }
+      }
       final id = _id(notice.route);
       await _portal.callMethod(_iface, 'AddNotification', [
         DBusString(id),
@@ -146,11 +154,15 @@ class PortalNotifications implements DesktopNotifications {
   }
 
   @override
-  Future<void> withdraw(String roomId) async {
-    final ids = [
-      for (final MapEntry(key: id, value: route) in _shown.entries)
-        if (route.roomId == roomId) id,
-    ];
+  Future<void> withdraw(String roomId) => _remove([
+    for (final MapEntry(key: id, value: route) in _shown.entries)
+      if (route.roomId == roomId) id,
+  ]);
+
+  @override
+  Future<void> retract(MessageRoute route) => _remove([_id(route)]);
+
+  Future<void> _remove(List<String> ids) async {
     for (final id in ids) {
       _shown.remove(id);
       try {

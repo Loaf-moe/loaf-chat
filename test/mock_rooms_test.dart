@@ -36,6 +36,12 @@ void main() {
     expect(heard, 1);
   });
 
+  test('marking read sets a read mark', () {
+    expect(_home(rooms, 'fermentation').read, isNull);
+    rooms.markRead('fermentation');
+    expect(_home(rooms, 'fermentation').read, isNotNull);
+  });
+
   test('marking a space channel read recounts the space', () {
     final space = rooms.spaces.first;
     final unread = space.allChannels.firstWhere((c) => c.unread > 0);
@@ -64,12 +70,19 @@ void main() {
     expect(_home(rooms, 'admins').favouriteOrder, 0);
   });
 
-  test('muting and low priority reach Home rooms', () {
+  test('a notification level and low priority reach Home rooms', () {
     rooms
-      ..setMuted('admins', true)
+      ..setNotify('admins', NotifyLevel.none)
       ..setLowPriority('admins', true);
-    expect(_home(rooms, 'admins').muted, isTrue);
+    expect(_home(rooms, 'admins').notify, NotifyLevel.none);
     expect(_home(rooms, 'admins').lowPriority, isTrue);
+  });
+
+  test('a notification level reaches a space channel', () {
+    rooms.setNotify('kitchen', NotifyLevel.mentions);
+    expect(_channel(rooms, 'kitchen').notify, NotifyLevel.mentions);
+    rooms.setNotify('kitchen', NotifyLevel.all);
+    expect(_channel(rooms, 'kitchen').notify, NotifyLevel.all);
   });
 
   test('accepting a DM invite brings it into Home at once', () {

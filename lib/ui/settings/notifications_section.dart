@@ -1,5 +1,6 @@
 /// Notifications: the chime, and on a desktop the notifications themselves
-/// and how much they say.
+/// and how much they say; then what channels send you, which is the
+/// account's and follows you to every device.
 library;
 
 import 'dart:async';
@@ -9,15 +10,24 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../platform.dart';
+import '../shell/profile.dart';
+import '../shell/profile_controller.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
 import 'notification_settings.dart';
 import 'settings_controls.dart';
 
 class NotificationsSection extends StatefulWidget {
-  const NotificationsSection({super.key, required this.controller});
+  const NotificationsSection({
+    super.key,
+    required this.controller,
+    this.profile,
+  });
 
   final NotificationController controller;
+
+  /// The account's side; left out, only this device's settings show.
+  final ProfileController? profile;
 
   @override
   State<NotificationsSection> createState() => _NotificationsSectionState();
@@ -58,9 +68,10 @@ class _NotificationsSectionState extends State<NotificationsSection>
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
+    final profile = widget.profile;
     final desktop = isDesktop ? controller.desktop : null;
     return ListenableBuilder(
-      listenable: controller,
+      listenable: Listenable.merge([controller, ?profile]),
       builder: (context, _) => ListView(
         padding: const EdgeInsets.all(LoafSpace.x6),
         children: [
@@ -99,10 +110,51 @@ class _NotificationsSectionState extends State<NotificationsSection>
               enabled: controller.notifications,
               onChanged: controller.setShowText,
             ),
+          if (profile != null) ...[
+            const SizedBox(height: LoafSpace.x6),
+            const SettingsLabel(label: "everywhere you're signed in"),
+            _AccountLine(
+              "channels, unless a channel's own menu says otherwise:",
+            ),
+            for (final level in ChannelDefault.values)
+              Padding(
+                padding: const EdgeInsets.only(bottom: LoafSpace.x2),
+                child: SettingsChoice(
+                  title: switch (level) {
+                    ChannelDefault.all => 'all messages',
+                    ChannelDefault.mentions => 'mentions only',
+                  },
+                  selected: profile.channelDefault == level,
+                  busy:
+                      profile.channelDefault == level &&
+                      profile.settingChannelDefault,
+                  onTap: () => profile.setChannelDefault(level),
+                ),
+              ),
+            _AccountLine('direct messages always notify.'),
+          ],
         ],
       ),
     );
   }
+}
+
+class _AccountLine extends StatelessWidget {
+  const _AccountLine(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: LoafSpace.x3),
+    child: Text(
+      text,
+      style: loafBody(
+        13,
+        400,
+      ).copyWith(color: LoafTokens.of(context).textMuted),
+    ),
+  );
 }
 
 class _BlockedLine extends StatelessWidget {

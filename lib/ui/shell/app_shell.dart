@@ -171,6 +171,8 @@ class _AppShellState extends State<AppShell> {
             ? null
             : (arrival, {required sound}) =>
                   unawaited(noticer.show(arrival, sound: sound)),
+        retractions: _rooms.retractions,
+        retract: noticer?.retract,
       );
       // The first time the shell opens after sign-in is when macOS asks
       // permission; asking again later does nothing.
@@ -273,6 +275,8 @@ class _AppShellState extends State<AppShell> {
               ProfileCall.presence =>
                 "couldn't change your presence. try again?",
               ProfileCall.status => "couldn't save your status. try again?",
+              ProfileCall.notifications =>
+                "couldn't change your notifications. try again?",
             },
     );
   }
@@ -380,7 +384,11 @@ class _AppShellState extends State<AppShell> {
       ChannelAction.notLowPriority,
     ],
     ChannelAction.olderConversations,
-    if (_can(RoomAbility.mute)) ...[ChannelAction.mute, ChannelAction.unmute],
+    if (_can(RoomAbility.notify)) ...[
+      ChannelAction.notifyAll,
+      ChannelAction.notifyMentions,
+      ChannelAction.notifyNone,
+    ],
     if (_can(RoomAbility.invite)) ChannelAction.invite,
     if (_can(RoomAbility.leave)) ChannelAction.leave,
   };
@@ -544,10 +552,14 @@ class _AppShellState extends State<AppShell> {
         break; // Handled before any state changes: it asks first.
       case ChannelAction.invite:
         break; // Handled before any state changes: it opens the panel first.
-      case ChannelAction.mute:
-        unawaited(_rooms.setMuted(id, true).catchError(_refused));
-      case ChannelAction.unmute:
-        unawaited(_rooms.setMuted(id, false).catchError(_refused));
+      case ChannelAction.notifyAll:
+        unawaited(_rooms.setNotify(id, NotifyLevel.all).catchError(_refused));
+      case ChannelAction.notifyMentions:
+        unawaited(
+          _rooms.setNotify(id, NotifyLevel.mentions).catchError(_refused),
+        );
+      case ChannelAction.notifyNone:
+        unawaited(_rooms.setNotify(id, NotifyLevel.none).catchError(_refused));
       case ChannelAction.leave:
         // Leaving the channel you are reading falls through to the space's
         // first joined text channel: see _channel.

@@ -27,8 +27,10 @@ bool mentionsMe(Event event, {required String userId, String? displayName}) {
     return false;
   }
   final content = event.content;
-  final mentions = content['m.mentions'];
-  if (mentions is Map) {
+  if (content.containsKey('m.mentions')) {
+    // Present, whatever its shape, it decides alone, as Synapse reads it.
+    final mentions = content['m.mentions'];
+    if (mentions is! Map) return false;
     final ids = mentions['user_ids'];
     if (ids is List && ids.contains(userId)) return true;
     return mentions['room'] == true && _mayNotifyRoom(event);

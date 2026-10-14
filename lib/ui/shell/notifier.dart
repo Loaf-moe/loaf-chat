@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 
 import '../model/arrival.dart';
 import '../model/chime.dart';
+import '../model/message_route.dart';
 import '../platform.dart';
 
 enum NoticeAction { none, chime, desktopNotice, push }
@@ -32,6 +33,8 @@ class Notifier {
     required this.soundOn,
     required this.openRoom,
     this.notice,
+    Stream<MessageRoute>? retractions,
+    this.retract,
     bool Function()? focused,
     bool? desktop,
     Duration Function()? elapsed,
@@ -39,7 +42,12 @@ class Notifier {
        _desktop = desktop ?? isDesktop,
        _elapsed = elapsed ?? _clock {
     _sub = arrivals.listen(_on);
+    _retracting = retractions?.listen((route) => retract?.call(route));
   }
+
+  /// Takes back the notice for a message noticed while sealed whose text
+  /// turned out not to notify; null where there are no notices.
+  final void Function(MessageRoute route)? retract;
 
   final Chime chime;
   final bool Function() soundOn;
@@ -54,6 +62,7 @@ class Notifier {
   final bool _desktop;
   final Duration Function() _elapsed;
   late final StreamSubscription<Arrival> _sub;
+  StreamSubscription<MessageRoute>? _retracting;
 
   /// A monotonic clock for the throttle: the wall clock can step backwards,
   /// which would hold the chime back until it caught up.
@@ -64,6 +73,11 @@ class Notifier {
   /// within a second of it are the same moment, and get one chime.
   Duration? _lastChime;
 
+  /// The last arrivals heard, in order. A sealed message read late comes
+  /// again with its text: its notice is replaced, and it sounded already.
+  final _heard = <Arrival>{};
+  static const _remembered = 200;
+
   /// The same test the channel view uses before it marks anything read.
   static bool _resumed() {
     final state = WidgetsBinding.instance.lifecycleState;
@@ -71,15 +85,17 @@ class Notifier {
   }
 
   void _on(Arrival arrival) {
+    final again = !_heard.add(arrival);
+    if (_heard.length > _remembered) _heard.remove(_heard.first);
     switch (decide(
       focused: _focused(),
       open: arrival.roomId == openRoom(),
       desktop: _desktop,
     )) {
       case NoticeAction.chime:
-        _chime();
+        if (!again) _chime();
       case NoticeAction.desktopNotice:
-        notice?.call(arrival, sound: _sounds());
+        notice?.call(arrival, sound: !again && _sounds());
       case NoticeAction.push:
         // Step E: the push gateway brings it.
         break;
@@ -103,5 +119,8 @@ class Notifier {
     return true;
   }
 
-  void dispose() => unawaited(_sub.cancel());
+  void dispose() {
+    unawaited(_sub.cancel());
+    unawaited(_retracting?.cancel());
+  }
 }

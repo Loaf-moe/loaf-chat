@@ -130,6 +130,11 @@ class WindowsDesktopNotifications implements DesktopNotifications {
     _status('withdraw', () => _toasts.withdraw(roomId));
   }
 
+  /// The toast API can take one toast by tag and group, which the native
+  /// side does not expose; the room's toasts go instead.
+  @override
+  Future<void> retract(MessageRoute route) => withdraw(route.roomId);
+
   @override
   Stream<MessageRoute> get clicks {
     try {

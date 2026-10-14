@@ -590,7 +590,7 @@ class _ChannelEntry extends StatelessWidget {
     final joined = channel.joined;
     final direct = channel.kind == ChannelKind.direct;
     final room = channel.kind == ChannelKind.room;
-    // Mute quiets notifications and sound, not what's unread.
+    // A level quiets notifications and sound, not what's unread.
     final unread = joined && channel.unread > 0;
     final iconData = channel.icon;
     final fg = selected
@@ -657,10 +657,12 @@ class _ChannelEntry extends StatelessWidget {
                                   .copyWith(color: fg),
                         ),
                       ),
-                      if (channel.muted) ...[
+                      if (channel.notify != NotifyLevel.all) ...[
                         const SizedBox(width: 6),
                         Icon(
-                          LucideIcons.bellOff,
+                          channel.notify == NotifyLevel.none
+                              ? LucideIcons.bellOff
+                              : LucideIcons.bellMinus,
                           size: 14,
                           color: tokens.textMuted,
                         ),

@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import '../call/calls.dart';
 import '../channel/timeline.dart';
 import '../model/arrival.dart';
+import '../model/message_route.dart';
 import '../model/models.dart';
 import '../settings/devices.dart';
 import '../shell/profile.dart';
@@ -22,7 +23,9 @@ import '../widgets/avatar_images.dart';
 enum RoomAbility {
   /// Mark as read, and reading by opening.
   markRead,
-  mute,
+
+  /// Choosing a channel's [NotifyLevel].
+  notify,
   leave,
 
   /// Joining an unjoined channel from its row.
@@ -123,6 +126,10 @@ abstract interface class Rooms implements Listenable {
   /// arrive. Never the backlog a launch catches up on.
   Stream<Arrival> get arrivals;
 
+  /// Messages noticed while sealed whose text, once read, does not
+  /// notify: their notice is to be taken back.
+  Stream<MessageRoute> get retractions;
+
   /// Everything that lives in Home, before `homeSections` sorts it.
   List<Channel> get homeRooms;
 
@@ -138,7 +145,7 @@ abstract interface class Rooms implements Listenable {
   Timeline? timeline(String roomId);
 
   void markRead(String roomId);
-  Future<void> setMuted(String roomId, bool muted);
+  Future<void> setNotify(String roomId, NotifyLevel level);
   Future<void> setJoined(String roomId, bool joined);
   Future<void> setFavourite(String roomId, bool favourite);
 
