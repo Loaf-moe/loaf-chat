@@ -160,7 +160,7 @@ macOS and iOS.
 |---|---|---|
 | Gates 1–5 and 7, arrival contents, members loaded or refused | `test/matrix/matrix_arrivals_test.dart` | 19 |
 | Gate 6 against the full default ruleset: account level × room level × room kind × 8 mention shapes; the same through encryption; events the defaults silence | `test/matrix/matrix_arrivals_rules_test.dart` | 245 |
-| The decision and the device settings, from sync to chime or notice, through the real shell: in front × open channel × platform × sound × notifications × text; bursts; preparing the desktop | `test/app_shell_arrivals_test.dart` | 69 |
+| The decision and the device settings, from sync to chime or notice, through the real shell: each decision cell with the settings that change its outcome; bursts; preparing the desktop | `test/app_shell_arrivals_test.dart` | 17 |
 | A click opening the channel at the message; withdrawal on reading here, on another device's receipt, on leaving | `test/app_shell_notices_test.dart` | 7 |
 | Levels: reading each rule shape, the six transitions and the calls they send, the account default's writes and rollback, the menu and the row icon | `test/matrix/matrix_rooms_test.dart`, `test/matrix/matrix_profile_test.dart`, `test/mock_rooms_test.dart`, `test/app_shell_test.dart`, `test/notifications_section_test.dart` | 30 |
 | Each adapter against a fake bus, channel or toast API | `test/notify/*_test.dart` | 41 |
@@ -168,7 +168,7 @@ macOS and iOS.
 
 The two shell suites run a real client, real rooms and the real shell
 per case, with fakes only at the chime and the desktop. They add about
-two and a half minutes to the Flutter lane. `test/shell_harness.dart`
+a minute to the Flutter lane. `test/shell_harness.dart`
 holds their rig, and documents what a widget test over the SDK needs:
 client work under `runAsync`, bounded pumps in place of `pumpAndSettle`,
 no closing of the in-memory database.

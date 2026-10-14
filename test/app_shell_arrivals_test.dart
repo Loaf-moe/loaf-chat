@@ -1,8 +1,9 @@
 /// The shell's reaction to a message arriving, from the sync down: a real
 /// client over the fake server, real rooms, the real shell, and fakes only
 /// where the chime plays and the desktop shows a notification. Every
-/// device setting and every state the decision reads: which channel is
-/// open, whether the app is in front, and which platform.
+/// device setting and state the decision reads, where it changes the
+/// outcome: which channel is open, whether the app is in front, which
+/// platform, and the three toggles.
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -12,60 +13,191 @@ import 'shell_harness.dart';
 
 void main() {
   group('an arrival', () {
-    for (final focused in [true, false]) {
-      for (final open in [true, false]) {
-        for (final phone in [false, true]) {
-          for (final sound in [true, false]) {
-            for (final notifications in [true, false]) {
-              for (final showText in [true, false]) {
-                final roomId = open ? kitchen : pantry;
-                final chimes = focused && !open && sound ? 1 : 0;
-                final notices = !focused && !phone && notifications ? 1 : 0;
-                testWidgets(
-                  '${focused ? 'in front' : 'in the background'}, '
-                  '${open ? 'the open channel' : 'another channel'}, '
-                  '${phone ? 'phone' : 'desktop'}, '
-                  'sound ${sound ? 'on' : 'off'}, '
-                  'notifications ${notifications ? 'on' : 'off'}, '
-                  'text ${showText ? 'on' : 'off'}',
-                  (tester) => run(
-                    tester,
-                    phone: phone,
-                    focused: focused,
-                    sound: sound,
-                    notifications: notifications,
-                    showText: showText,
-                    body: (shell) async {
-                      await openChannel(tester, kitchen, phone: phone);
-                      await arrive(
-                        tester,
-                        shell,
-                        roomId,
-                        [msg(r'$m')],
-                        done: () =>
-                            shell.chime.plays >= chimes &&
-                            shell.desktop.shown.length >= notices,
-                      );
-                      expect(shell.chime.plays, chimes);
-                      expect(shell.desktop.shown.length, notices);
-                      if (notices == 1) {
-                        final notice = shell.desktop.shown.single;
-                        expect(notice.sound, sound);
-                        expect(notice.body, showText ? 'hi' : 'new message');
-                        expect(
-                          notice.title,
-                          'Ada in #${open ? 'kitchen' : 'pantry'} · Bakery',
-                        );
-                        expect(notice.route, MessageRoute(roomId, r'$m'));
-                      }
-                    },
-                  ),
-                );
-              }
+    // The decision table's four cells, each with the settings that change
+    // its outcome; the table itself, every cell, is pinned in
+    // notifier_test. What a case expects: chimes, notices, and for a
+    // notice its sound and body.
+    for (final (
+          name,
+          focused,
+          open,
+          phone,
+          sound,
+          notifications,
+          showText,
+          chimes,
+          notices,
+        )
+        in <(String, bool, bool, bool, bool, bool, bool, int, int)>[
+          (
+            'in front, the open channel: nothing',
+            true,
+            true,
+            false,
+            true,
+            true,
+            true,
+            0,
+            0,
+          ),
+          (
+            'in front, the open channel, on a phone: nothing',
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            0,
+            0,
+          ),
+          (
+            'in front, another channel: the chime',
+            true,
+            false,
+            false,
+            true,
+            true,
+            true,
+            1,
+            0,
+          ),
+          (
+            'in front, another channel, on a phone: the chime',
+            true,
+            false,
+            true,
+            true,
+            true,
+            true,
+            1,
+            0,
+          ),
+          (
+            'in front, another channel, sound off: nothing',
+            true,
+            false,
+            false,
+            false,
+            true,
+            true,
+            0,
+            0,
+          ),
+          (
+            'in the background on a desktop: a notice',
+            false,
+            false,
+            false,
+            true,
+            true,
+            true,
+            0,
+            1,
+          ),
+          (
+            'in the background on a desktop, the open channel: a notice too',
+            false,
+            true,
+            false,
+            true,
+            true,
+            true,
+            0,
+            1,
+          ),
+          (
+            'in the background on a desktop, sound off: a silent notice',
+            false,
+            false,
+            false,
+            false,
+            true,
+            true,
+            0,
+            1,
+          ),
+          (
+            'in the background on a desktop, text off: a notice saying only that',
+            false,
+            false,
+            false,
+            true,
+            true,
+            false,
+            0,
+            1,
+          ),
+          (
+            'in the background on a desktop, notifications off: nothing',
+            false,
+            false,
+            false,
+            true,
+            false,
+            true,
+            0,
+            0,
+          ),
+          (
+            'in the background on a phone: nothing',
+            false,
+            false,
+            true,
+            true,
+            true,
+            true,
+            0,
+            0,
+          ),
+          (
+            'in the background on a phone, the open channel: nothing',
+            false,
+            true,
+            true,
+            true,
+            true,
+            true,
+            0,
+            0,
+          ),
+        ]) {
+      final roomId = open ? kitchen : pantry;
+      testWidgets(
+        name,
+        (tester) => run(
+          tester,
+          phone: phone,
+          focused: focused,
+          sound: sound,
+          notifications: notifications,
+          showText: showText,
+          body: (shell) async {
+            await openChannel(tester, kitchen, phone: phone);
+            await arrive(
+              tester,
+              shell,
+              roomId,
+              [msg(r'$m')],
+              done: () =>
+                  shell.chime.plays >= chimes &&
+                  shell.desktop.shown.length >= notices,
+            );
+            expect(shell.chime.plays, chimes);
+            expect(shell.desktop.shown.length, notices);
+            if (notices == 1) {
+              final notice = shell.desktop.shown.single;
+              expect(notice.sound, sound);
+              expect(notice.body, showText ? 'hi' : 'new message');
+              expect(
+                notice.title,
+                'Ada in #${open ? 'kitchen' : 'pantry'} · Bakery',
+              );
+              expect(notice.route, MessageRoute(roomId, r'$m'));
             }
-          }
-        }
-      }
+          },
+        ),
+      );
     }
   });
 

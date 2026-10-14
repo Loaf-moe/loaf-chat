@@ -165,7 +165,7 @@ Future<void> _until(bool Function() done) async {
   while (!done() && DateTime.now().isBefore(give)) {
     await Future<void>.delayed(const Duration(milliseconds: 5));
   }
-  await Future<void>.delayed(const Duration(milliseconds: 100));
+  await Future<void>.delayed(const Duration(milliseconds: 300));
 }
 
 /// A few frames: the shell over real rooms never settles (something on it
