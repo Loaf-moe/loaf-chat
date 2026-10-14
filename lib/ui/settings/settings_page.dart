@@ -21,7 +21,6 @@ import '../shell/profile_controller.dart';
 import '../theme/appearance.dart';
 import '../theme/loaf_theme.dart';
 import '../model/media_source.dart';
-import '../widgets/avatar_images.dart';
 import '../widgets/loaf_button.dart';
 import '../model/updater.dart';
 import 'about_section.dart';
@@ -69,20 +68,17 @@ Future<void> showSettings(
 }) => showDialog<void>(
   context: context,
   barrierColor: const Color(0x99000016),
-  // The dialog is a root-navigator route, above the shell's avatar scope.
-  builder: (_) => AvatarImagesScope.carry(
+  // The dialog is a root-navigator route, above the shell's media scope.
+  builder: (_) => MediaSourceScope.carry(
     context,
-    child: MediaSourceScope.carry(
-      context,
-      child: SettingsModal(
-        initial: initial,
-        devices: devices,
-        updater: updater,
-        profile: profile,
-        me: me,
-        editable: editable,
-        onSignOut: onSignOut,
-      ),
+    child: SettingsModal(
+      initial: initial,
+      devices: devices,
+      updater: updater,
+      profile: profile,
+      me: me,
+      editable: editable,
+      onSignOut: onSignOut,
     ),
   ),
 );

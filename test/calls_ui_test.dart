@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:loaf_native/ui/call/call_controller.dart';
+import 'package:loaf_native/ui/members/person_card.dart';
 import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
@@ -298,6 +299,7 @@ void main() {
         expect(find.text('Pin'), findsOneWidget);
         expect(find.text('View profile'), findsNothing);
         expect(find.byType(Slider), findsOneWidget);
+        expect(find.byType(PersonCard), findsOneWidget);
       },
     );
   });

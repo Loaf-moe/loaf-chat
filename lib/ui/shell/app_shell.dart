@@ -32,7 +32,7 @@ import '../spaces/add_space.dart';
 import '../home/invite_preview.dart';
 import '../members/invite_panel.dart';
 import '../members/member_list.dart';
-import '../members/person_card.dart';
+import '../members/person_menu.dart';
 import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
 import '../mock/fixtures.dart';
@@ -242,25 +242,38 @@ class _AppShellState extends State<AppShell> {
       _follow(held);
     }
     _saySilenced();
+    _sayHungUp();
     setState(() {});
   }
 
-  /// What a moderator had put on you when the calls last changed.
+  /// What someone had put on you when the calls last changed.
   CallSilence? _silenced;
 
-  /// Says when a moderator mutes, deafens or frees you during a call.
-  /// Nothing else would, short of trying a locked button.
+  /// Says when someone mutes, deafens or frees you during a call. Nothing
+  /// else would, short of trying a locked button.
   void _saySilenced() {
     final before = _silenced;
     final now = _silenced = _calls.silenced;
     // Leaving a call drops it without anyone having lifted it.
     if (now == before || !_calls.inCall || !mounted) return;
-    showToast(context, switch ((before, now)) {
-      (_, CallSilence.deafened) => 'a moderator deafened you',
-      (_, CallSilence.muted) => 'a moderator muted you',
-      (CallSilence.deafened, null) => 'a moderator undeafened you',
-      (_, null) => 'a moderator unmuted you',
+    showToast(context, switch (now) {
+      CallSilence.deafened => 'someone deafened you',
+      CallSilence.muted => 'someone muted you for everyone',
+      null => 'you can talk again',
     });
+  }
+
+  /// The call's phase when the calls last changed.
+  CallPhase? _phase;
+
+  /// Says when someone hangs up for you; the call page says it too, but
+  /// you may be reading elsewhere.
+  void _sayHungUp() {
+    final before = _phase;
+    final now = _phase = _calls.session?.phase;
+    if (now == CallPhase.hungUp && before != CallPhase.hungUp && mounted) {
+      showToast(context, 'someone hung up for you');
+    }
   }
 
   /// A presence or status write the server refused: the profile has already
@@ -571,28 +584,6 @@ class _AppShellState extends State<AppShell> {
 
   /// A quick toggle's refusal: the change snaps back once the listener
   /// hears the backend's own state again, and a toast says to try again.
-  /// The kicks the server has yet to answer: the room and who.
-  final _kicking = <(String, String)>{};
-
-  /// Kicks [member] from [channel], once you have said you mean it.
-  Future<void> _kick(Channel channel, Member member) async {
-    final kick = (channel.id, member.id);
-    // They stay listed until a sync says otherwise; asking again meanwhile
-    // would only be refused.
-    if (_kicking.contains(kick)) return;
-    final confirmed = await confirmKick(context, member, channel);
-    if (!confirmed || !mounted || !_kicking.add(kick)) return;
-    try {
-      await _rooms.kick(channel.id, member.id);
-    } on Exception {
-      // The server said no, or could not be reached; either way they are
-      // still there.
-      if (mounted) showToast(context, "couldn't kick ${member.name}");
-    } finally {
-      _kicking.remove(kick);
-    }
-  }
-
   void _refused(Object error) {
     if (mounted) showToast(context, "couldn't do that. try again?");
   }
@@ -1073,19 +1064,22 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  void _openDevices() {
+  void _openDevices() =>
+      unawaited(_openSettings(initial: SettingsSection.devices));
+
+  Future<void> _openSettings({
+    SettingsSection initial = SettingsSection.account,
+  }) async {
     if (!mounted) return;
-    unawaited(
-      showSettings(
-        context,
-        initial: SettingsSection.devices,
-        devices: _rooms.devices,
-        profile: _profile,
-        me: _me,
-        editable: _can(RoomAbility.editProfile),
-        onSignOut: _session.signOut,
-        updater: _updater,
-      ),
+    await showSettings(
+      context,
+      initial: initial,
+      profile: _profile,
+      me: _me,
+      editable: _can(RoomAbility.editProfile),
+      onSignOut: _session.signOut,
+      devices: _can(RoomAbility.devices) ? _rooms.devices : null,
+      updater: _updater,
     );
   }
 
@@ -1269,6 +1263,7 @@ class _AppShellState extends State<AppShell> {
     return ChannelView(
       channel: channel,
       timeline: _rooms.timeline(channel.id),
+      onPerson: _openPerson,
       onRead: _can(RoomAbility.markRead)
           ? () => _rooms.markRead(channel.id)
           : null,
@@ -1513,17 +1508,75 @@ class _AppShellState extends State<AppShell> {
     return MemberList(members: members, onOpen: _openPerson);
   }
 
-  /// Someone's card, and verifying them if that is what it was opened for.
-  Future<void> _openPerson(Member member) async {
-    final verifier = _session.verifier;
-    final verify = await showPersonCard(
+  /// Someone's menu, with what this shell can do about them.
+  Future<void> _openPerson(Member member, Offset? position) async {
+    final isYou = member.id == _me.id;
+    final real = member.bridge == null;
+    final space = _home ? null : _space;
+    final channel = _channel;
+    final timeline = channel == null || channel.kind == ChannelKind.voice
+        ? null
+        : _rooms.timeline(channel.id);
+    await showPersonMenu(
       context,
       member: member,
-      trust: verifier.personTrust(member.id),
-      isYou: member.id == _me.id,
+      isYou: isYou,
+      // A puppet has no identity to vouch for; a trust line would mislead.
+      trust: real ? _session.verifier.personTrust(member.id) : null,
       canVerify: _session.trust == DeviceTrust.verified,
+      position: position,
+      onMention: !isYou && timeline != null && timeline.writable
+          ? () {
+              timeline.mention(member);
+              _scaffoldKey.currentState?.closeEndDrawer();
+            }
+          : null,
+      onMessage: !isYou && real && _can(RoomAbility.startDirect)
+          ? () => unawaited(_messagePerson(member))
+          : null,
+      onVerify: !isYou && real ? () => unawaited(_verifyPerson(member)) : null,
+      onEditProfile: isYou && _can(RoomAbility.editProfile)
+          ? () => unawaited(_openSettings())
+          : null,
+      kick: !isYou && space != null && _can(RoomAbility.kick)
+          ? (
+              from: space.name,
+              run: () => unawaited(_kickFromSpace(member, space)),
+            )
+          : null,
     );
-    if (verify != true || !mounted) return;
+  }
+
+  Future<void> _messagePerson(Member member) async {
+    final dm = await _rooms.createDirect([member]);
+    if (!mounted) return;
+    setState(() => _open(mockHome.id, dm.id));
+    _scaffoldKey.currentState?.closeDrawer();
+    _scaffoldKey.currentState?.closeEndDrawer();
+  }
+
+  Future<void> _kickFromSpace(Member member, Space space) async {
+    if (!mounted) return;
+    final error = await confirmKickFromSpace(
+      context,
+      member,
+      space,
+      kick: () => _rooms.kickFromSpace(space.id, member.id),
+    );
+    if (error == null || !mounted) return;
+    if (error is PartlyDone) {
+      showToast(
+        context,
+        "couldn't kick ${member.name} from everything in ${space.name}",
+      );
+    } else {
+      _refused(error);
+    }
+  }
+
+  Future<void> _verifyPerson(Member member) async {
+    if (!mounted) return;
+    final verifier = _session.verifier;
     final v = VerificationController(
       purpose: VerifyPurpose.person,
       verifier: verifier,
@@ -1583,7 +1636,13 @@ class _AppShellState extends State<AppShell> {
                 space: _space,
                 call: _heardCall,
                 myId: _me.id,
-                onKick: _can(RoomAbility.kick) ? _kick : null,
+                onHangUp: _can(RoomAbility.silence)
+                    ? (channel, member) => unawaited(
+                        _rooms
+                            .hangUp(channel.id, member.id)
+                            .catchError(_refused),
+                      )
+                    : null,
                 onSilence: _can(RoomAbility.silence)
                     ? (channel, member, silence) => unawaited(
                         _rooms
@@ -1620,15 +1679,7 @@ class _AppShellState extends State<AppShell> {
             onToggleMute: _calls.toggleMute,
             onToggleDeafen: _calls.toggleDeafen,
             callControls: _can(RoomAbility.calls),
-            onSettings: () => showSettings(
-              context,
-              profile: _profile,
-              me: _me,
-              editable: _can(RoomAbility.editProfile),
-              onSignOut: _session.signOut,
-              devices: _can(RoomAbility.devices) ? _rooms.devices : null,
-              updater: _updater,
-            ),
+            onSettings: () => unawaited(_openSettings()),
             me: _me,
             onAvatarTap: _can(RoomAbility.editProfile)
                 ? (anchor) =>

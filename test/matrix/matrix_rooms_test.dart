@@ -75,6 +75,9 @@ class _Api extends FakeMatrixApi {
   /// Each kick asked for: the room and who.
   final kicks = <(String, String)>[];
 
+  /// Each media download asked for, by path.
+  final downloads = <String>[];
+
   /// Each moderation entry written: the room, its state key, its content.
   final silences = <(String, String, Map<String, Object?>)>[];
 
@@ -83,6 +86,10 @@ class _Api extends FakeMatrixApi {
 
   /// While set, a kick is refused.
   var refuseKicks = false;
+
+  /// Room ids (decoded) whose kicks are refused, even while [refuseKicks]
+  /// is false.
+  final refuseKickIds = <String>{};
 
   /// Set by [_client], since [FakeMatrixApi.client] is a setter only:
   /// [mockIntercept] needs the client itself to push a fake sync.
@@ -109,8 +116,19 @@ class _Api extends FakeMatrixApi {
         200,
       );
     }
+    if (request.method == 'GET' && path.contains('/download/')) {
+      downloads.add(path);
+      return http.Response.bytes(
+        utf8.encode('pixels'),
+        200,
+        headers: {'content-type': 'image/png'},
+      );
+    }
     if (request.method == 'POST' && path.endsWith('/kick')) {
-      if (refuseKicks) {
+      final roomId = Uri.decodeComponent(
+        path.split('/rooms/')[1].split('/kick')[0],
+      );
+      if (refuseKicks || refuseKickIds.contains(roomId)) {
         return http.Response(
           jsonEncode({'errcode': 'M_FORBIDDEN', 'error': 'not allowed'}),
           403,
@@ -299,8 +317,16 @@ Future<Client> _client({_Api? api, bool firstSync = true}) async {
   return client;
 }
 
-Future<MatrixRooms> _rooms(Client client, {DateTime Function()? now}) async {
-  final rooms = MatrixRooms(client, now: now);
+Future<MatrixRooms> _rooms(
+  Client client, {
+  DateTime Function()? now,
+  Duration? warmAvatarsAfter,
+}) async {
+  final rooms = MatrixRooms(
+    client,
+    now: now,
+    warmAvatarsAfter: warmAvatarsAfter,
+  );
   addTearDown(rooms.dispose);
   await _settle();
   return rooms;
@@ -491,6 +517,12 @@ Future<void> _bakery(Client client) => _sync(client, {
           {'membership': 'join', 'displayname': 'Moddy'},
           key: '@mod:example.com',
           sender: '@mod:example.com',
+        ),
+        _state(
+          'm.room.member',
+          {'membership': 'join', 'displayname': 'lou'},
+          key: '@_ooye_lou:example.com',
+          sender: '@_ooye_lou:example.com',
         ),
       ],
     ),
@@ -1366,6 +1398,45 @@ void main() {
     expect(members['@mod:example.com']!.role, Role.moderator);
     expect(members['@mod:example.com']!.name, 'Moddy');
     expect(members['@mod:example.com']!.presence, loaf.Presence.unknown);
+  });
+
+  test('a member\'s original avatar is fetched ahead', () async {
+    final api = _Api();
+    final client = await _client(api: api);
+    final rooms = await _rooms(client, warmAvatarsAfter: Duration.zero);
+    await _sync(client, {
+      'join': {
+        '!pics:example.com': _room(
+          'pics',
+          extra: [
+            _state(
+              'm.room.member',
+              {'membership': 'join', 'avatar_url': 'mxc://example.com/ada'},
+              key: '@ada:example.com',
+              sender: '@ada:example.com',
+            ),
+          ],
+        ),
+      },
+    });
+    await _settle();
+    rooms.loadMembers('!pics:example.com');
+    await _settle();
+    await _settle();
+    expect(api.downloads.where((p) => p.contains('ada')), hasLength(1));
+  });
+
+  test('a Discord puppet carries its bridge, and nobody else does', () async {
+    final client = await _client();
+    final rooms = await _rooms(client);
+    await _bakery(client);
+    await _settle();
+    rooms.loadMembers('!bakery:example.com');
+    await _settle();
+    final members = {for (final m in rooms.spaces.last.members) m.id: m};
+    expect(members['@_ooye_lou:example.com']!.bridge, Bridge.discord);
+    expect(members['@mod:example.com']!.bridge, isNull);
+    expect(members[_me]!.bridge, isNull);
   });
 
   test('a member list is asked for once, however often it is wanted', () async {
@@ -2484,6 +2555,105 @@ void main() {
       },
     );
 
+    /// Mod joins [roomIds], sent as a sync of each room's member state.
+    Future<void> modJoins(Client client, List<String> roomIds) =>
+        _sync(client, {
+          'join': {
+            for (final id in roomIds)
+              id: {
+                'state': {
+                  'events': [
+                    _state(
+                      'm.room.member',
+                      {'membership': 'join', 'displayname': 'Moddy'},
+                      key: '@mod:example.com',
+                      sender: '@mod:example.com',
+                    ),
+                  ],
+                },
+              },
+          },
+        });
+
+    test(
+      'kicking from a space kicks from the rooms they are in, then the space',
+      () async {
+        final api = _Api();
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _bakery(client);
+        await modJoins(client, [
+          '!general:example.com',
+          '!crumb:example.com',
+          '!recipes:example.com',
+        ]);
+        await _settle();
+
+        await rooms.kickFromSpace('!bakery:example.com', '@mod:example.com');
+        await _settle();
+
+        final kicked = [for (final k in api.kicks) k.$1];
+        expect(api.kicks.map((k) => k.$2).toSet(), {'@mod:example.com'});
+        expect(kicked.last, '!bakery:example.com');
+        expect(
+          kicked.indexOf('!crumb:example.com'),
+          lessThan(kicked.indexOf('!recipes:example.com')),
+        );
+        expect(kicked, contains('!general:example.com'));
+        // Never a member there: nothing to kick from.
+        expect(kicked, isNot(contains('!oven:example.com')));
+        expect(kicked, isNot(contains('!sourdough:example.com')));
+      },
+    );
+
+    test('kicking from a space spares rooms another space lists', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await _sync(client, {
+        'join': {
+          '!twin:example.com': _room(
+            'twin',
+            type: 'm.space',
+            extra: [_child('!crumb:example.com')],
+          ),
+        },
+      });
+      await modJoins(client, ['!crumb:example.com', '!general:example.com']);
+      await _settle();
+
+      await rooms.kickFromSpace('!bakery:example.com', '@mod:example.com');
+      await _settle();
+
+      final kicked = [for (final k in api.kicks) k.$1];
+      expect(kicked, isNot(contains('!crumb:example.com')));
+      expect(kicked, contains('!general:example.com'));
+      expect(kicked, contains('!bakery:example.com'));
+    });
+
+    test(
+      'a partly refused kick throws PartlyDone naming what stayed',
+      () async {
+        final api = _Api()..refuseKickIds.add('!general:example.com');
+        final client = await _client(api: api);
+        final rooms = await _rooms(client);
+        await _bakery(client);
+        await modJoins(client, ['!general:example.com', '!crumb:example.com']);
+        await _settle();
+
+        await expectLater(
+          rooms.kickFromSpace('!bakery:example.com', '@mod:example.com'),
+          throwsA(
+            isA<PartlyDone>().having((e) => e.missing, 'missing', ['general']),
+          ),
+        );
+        final kicked = [for (final k in api.kicks) k.$1];
+        expect(kicked, contains('!crumb:example.com'));
+        expect(kicked, contains('!bakery:example.com'));
+      },
+    );
+
     test('disposing mid-leave notifies nothing', () async {
       final api = _Api()..hold = Completer();
       final client = await _client(api: api);
@@ -2587,87 +2757,6 @@ void main() {
     expect(late.media.store, isNull);
     const media = Media(kind: MediaKind.image, name: 'a.png', ref: 'x');
     expect(late.media.preview(media, 300), isNull);
-  });
-
-  group('kicking from a voice channel', () {
-    const oven = '!oven:example.com';
-    const ada = '@ada:example.com';
-
-    Channel channel(MatrixRooms rooms) => rooms.spaces
-        .expand((s) => s.categories)
-        .expand((c) => c.channels)
-        .firstWhere((c) => c.id == oven);
-
-    /// The oven's power levels: yours, and what a kick takes.
-    Future<void> levels(Client client, {required int mine, int? kick}) =>
-        _sync(client, {
-          'join': {
-            oven: {
-              'state': {
-                'events': [
-                  _state('m.room.power_levels', {
-                    'users': {_me: mine},
-                    'kick': ?kick,
-                  }),
-                ],
-              },
-            },
-          },
-        });
-
-    test('you may kick anyone below your level when it reaches what a kick '
-        'takes', () async {
-      final client = await _client();
-      final rooms = await _rooms(client);
-      await _bakery(client);
-
-      await levels(client, mine: 75, kick: 60);
-      await _until(() => channel(rooms).kickBelow != null);
-
-      expect(channel(rooms).kickBelow, 75);
-    });
-
-    test('you may kick nobody when your level falls short', () async {
-      final client = await _client();
-      final rooms = await _rooms(client);
-      await _bakery(client);
-
-      await levels(client, mine: 40, kick: 60);
-      await _settle();
-
-      expect(channel(rooms).kickBelow, isNull);
-    });
-
-    test('a kick takes 50 where the room does not say', () async {
-      final client = await _client();
-      final rooms = await _rooms(client);
-      await _bakery(client);
-
-      await levels(client, mine: 50);
-      await _until(() => channel(rooms).kickBelow != null);
-
-      expect(channel(rooms).kickBelow, 50);
-    });
-
-    test('a kick is asked of the server for that room and person', () async {
-      final api = _Api();
-      final client = await _client(api: api);
-      final rooms = await _rooms(client);
-      await _bakery(client);
-
-      await rooms.kick(oven, ada);
-
-      expect(api.kicks, [(oven, ada)]);
-    });
-
-    test('a refused kick throws', () async {
-      final api = _Api()..refuseKicks = true;
-      final client = await _client(api: api);
-      final rooms = await _rooms(client);
-      await _bakery(client);
-
-      await expectLater(rooms.kick(oven, ada), throwsA(isA<MatrixException>()));
-    });
   });
 
   group('muting and deafening for everyone, in a voice channel', () {
@@ -2792,6 +2881,32 @@ void main() {
         expect(sent, content);
       });
     }
+
+    test('hanging up for them keeps the silence they are under', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+      await state(client, [entry(callSilenceContent(CallSilence.deafened))]);
+      await _settle();
+
+      await rooms.hangUp(oven, ada);
+
+      final (room, key, sent) = api.silences.single;
+      expect((room, key), (oven, '_$ada'));
+      expect(sent, {'muted': true, 'deafened': true, 'hung_up': true});
+    });
+
+    test('hanging up for someone unsilenced writes the flag alone', () async {
+      final api = _Api();
+      final client = await _client(api: api);
+      final rooms = await _rooms(client);
+      await _bakery(client);
+
+      await rooms.hangUp(oven, ada);
+
+      expect(api.silences.single.$3, {'hung_up': true});
+    });
 
     test('a refusal throws', () async {
       final api = _Api()..refuseSilences = true;

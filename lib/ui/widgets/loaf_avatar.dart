@@ -19,6 +19,7 @@ class LoafAvatar extends StatelessWidget {
     this.boxShadow,
     this.border,
     this.image,
+    this.original = false,
   });
 
   /// Already-computed initials, drawn as given.
@@ -37,13 +38,18 @@ class LoafAvatar extends StatelessWidget {
   /// Null, or a ref the scope cannot resolve, leaves the initials.
   final AvatarRef? image;
 
+  /// Also fetch the upload itself and draw it over the thumbnail: a GIF
+  /// plays, where a thumbnail is always still.
+  final bool original;
+
   @override
   Widget build(BuildContext context) {
     final ref = image;
+    final images = AvatarImagesScope.of(context);
     final provider = ref == null
         ? null
-        : AvatarImagesScope.of(context)
-              .resolve(ref, size * MediaQuery.devicePixelRatioOf(context));
+        : images.resolve(ref, size * MediaQuery.devicePixelRatioOf(context));
+    final whole = ref == null || !original ? null : images.original(ref);
     final initials = Container(
       alignment: Alignment.center,
       decoration: BoxDecoration(
@@ -58,38 +64,45 @@ class LoafAvatar extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size,
-      child: provider == null
+      child: provider == null && whole == null
           ? initials
           : Stack(
               fit: StackFit.expand,
               children: [
                 initials,
                 // Inside the ring, so a picture never paints over it.
-                Padding(
-                  padding: border?.dimensions ?? EdgeInsets.zero,
-                  child: _clip(
-                    Image(
-                      image: provider,
-                      fit: BoxFit.cover,
-                      width: size,
-                      height: size,
-                      // Fades in over the initials once decoded, so a slow
-                      // avatar never flashes; a failed one leaves them.
-                      frameBuilder: (_, child, frame, sync) => sync
-                          ? child
-                          : AnimatedOpacity(
-                              opacity: frame == null ? 0 : 1,
-                              duration: const Duration(milliseconds: 150),
-                              child: child,
-                            ),
-                      errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                    ),
+                if (provider != null)
+                  Padding(
+                    padding: border?.dimensions ?? EdgeInsets.zero,
+                    child: _clip(_picture(provider)),
                   ),
-                ),
+                if (whole != null)
+                  Padding(
+                    padding: border?.dimensions ?? EdgeInsets.zero,
+                    child: _clip(_picture(whole, gapless: true)),
+                  ),
               ],
             ),
     );
   }
+
+  /// Fades in once decoded, so a slow picture never flashes; a failed one
+  /// leaves what is under it.
+  Widget _picture(ImageProvider provider, {bool gapless = false}) => Image(
+    image: provider,
+    fit: BoxFit.cover,
+    width: size,
+    height: size,
+    gaplessPlayback: gapless,
+    frameBuilder: (_, child, frame, sync) => sync
+        ? child
+        : AnimatedOpacity(
+            opacity: frame == null ? 0 : 1,
+            duration: const Duration(milliseconds: 150),
+            child: child,
+          ),
+    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+  );
 
   Widget _clip(Widget child) => radius == null
       ? ClipOval(child: child)

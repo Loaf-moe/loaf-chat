@@ -5,12 +5,13 @@ library;
 import 'package:flutter/material.dart';
 
 import '../mock/fixtures.dart';
+import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
 import '../window/window_chrome.dart';
+import 'person_name.dart';
 import 'presence.dart';
 import 'presence_dot.dart';
-import 'role_colors.dart';
 
 /// Splits [members] into the two sections the list shows. Moderators stay
 /// with members: their name colour already sets them apart, and a third
@@ -47,9 +48,10 @@ class MemberList extends StatelessWidget {
 
   final List<Member> members;
 
-  /// Opens someone's card. Null leaves the rows plain: a row that ripples
-  /// and does nothing promises what it cannot keep.
-  final ValueChanged<Member>? onOpen;
+  /// Opens someone's menu, at the pointer on a computer. Null leaves the
+  /// rows plain: a row that ripples and does nothing promises what it
+  /// cannot keep.
+  final void Function(Member member, Offset? position)? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +111,7 @@ class _Section extends StatelessWidget {
   final String title;
   final List<Member> members;
   final LoafTokens tokens;
-  final ValueChanged<Member>? onOpen;
+  final void Function(Member member, Offset? position)? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -141,7 +143,7 @@ class _MemberRow extends StatelessWidget {
 
   final Member member;
   final LoafTokens tokens;
-  final ValueChanged<Member>? onOpen;
+  final void Function(Member member, Offset? position)? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -156,14 +158,12 @@ class _MemberRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  member.name,
+                PersonName(
+                  member,
+                  size: 15,
+                  weight: 500,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: loafBody(
-                    15,
-                    500,
-                  ).copyWith(color: tokens.nameColor(member.role)),
                 ),
                 if (status != null)
                   Text(
@@ -188,7 +188,13 @@ class _MemberRow extends StatelessWidget {
           ? row
           : Material(
               type: MaterialType.transparency,
-              child: InkWell(onTap: () => open(member), child: row),
+              child: isDesktop
+                  ? InkWell(
+                      onTapUp: (d) => open(member, d.globalPosition),
+                      onSecondaryTapUp: (d) => open(member, d.globalPosition),
+                      child: row,
+                    )
+                  : InkWell(onTap: () => open(member, null), child: row),
             ),
     );
   }

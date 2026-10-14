@@ -229,13 +229,14 @@ Map<String, Object?> _state(
   Map<String, Object?> content, {
   String key = '',
   String sender = _me,
+  int? ts,
 }) => {
   'type': type,
   'state_key': key,
   'sender': sender,
   'content': content,
   'event_id': '\$e${_events++}',
-  'origin_server_ts': _noon.millisecondsSinceEpoch - _hour,
+  'origin_server_ts': ts ?? _noon.millisecondsSinceEpoch - _hour,
 };
 
 /// [user]'s membership of a call on [device], or their leaving it.
@@ -293,6 +294,9 @@ Future<void> _until(bool Function() done) async {
 /// Everything a test holds: this device's calls, and the world around it.
 class _World {
   final log = <String>[];
+
+  /// What the calls take the time to be; moved by tests that join again.
+  var now = _noon;
   late final api = _Api(log);
   final server = InMemoryCallServer(_mediaUrl);
   final network = ValueNotifier(CallLink.connected);
@@ -361,7 +365,7 @@ class _World {
       callMedia: _media,
       voice: voice,
       voiceApplying: voiceApplying,
-      now: () => _noon,
+      now: () => now,
     );
     addTearDown(rooms.dispose);
     calls = rooms.calls!;
@@ -1008,15 +1012,83 @@ void main() {
     });
   });
 
-  group('a moderator', () {
-    /// A moderator's entry about [user] in [room]: [silence], or lifted.
-    Map<String, Object?> entry(CallSilence? silence, {String user = _me}) =>
-        _state(
-          callSilenceType,
-          callSilenceContent(silence),
-          key: callSilenceKey(user),
-          sender: _ada,
-        );
+  group('someone, for everyone,', () {
+    /// Someone's entry about [user] in the oven: [silence], or lifted, and
+    /// hung up when [hungUp], at [ts].
+    Map<String, Object?> entry(
+      CallSilence? silence, {
+      String user = _me,
+      bool hungUp = false,
+      int? ts,
+    }) => _state(
+      callSilenceType,
+      hungUp ? callHangUpContent(silence) : callSilenceContent(silence),
+      key: callSilenceKey(user),
+      sender: _ada,
+      ts: ts,
+    );
+
+    final later = _noon.millisecondsSinceEpoch + _hour;
+
+    test('hanging up for you after you joined ends the call', () async {
+      final world = await _open();
+      await world.join();
+
+      await _sync(world.client, _oven, [entry(null, hungUp: true, ts: later)]);
+      await _until(() => !world.calls.inCall);
+
+      expect(world.calls.session?.phase, CallPhase.hungUp);
+      expect(world.calls.inCall, isFalse);
+    });
+
+    test('a hang-up from before you joined is ignored', () async {
+      final world = await _open(already: [entry(null, hungUp: true)]);
+      await world.join();
+      await _settle();
+
+      expect(world.calls.session?.phase, CallPhase.live);
+    });
+
+    test('joining again after a hang-up stays', () async {
+      final world = await _open();
+      await world.join();
+      await _sync(world.client, _oven, [entry(null, hungUp: true, ts: later)]);
+      await _until(() => !world.calls.inCall);
+
+      world.now = DateTime.fromMillisecondsSinceEpoch(later + _hour);
+      await world.join();
+      await _settle();
+
+      expect(world.calls.session?.phase, CallPhase.live);
+    });
+
+    test('join again after a hang-up is live again', () async {
+      final world = await _open();
+      await world.join();
+      await _sync(world.client, _oven, [entry(null, hungUp: true, ts: later)]);
+      await _until(() => !world.calls.inCall);
+
+      world.now = DateTime.fromMillisecondsSinceEpoch(later + _hour);
+      world.calls.retry();
+      await _until(() => world.calls.session?.phase == CallPhase.live);
+
+      expect(world.calls.inCall, isTrue);
+    });
+
+    test('a hang-up keeps the mute it came with', () async {
+      final world = await _open();
+      await world.join();
+      await _sync(world.client, _oven, [
+        entry(CallSilence.muted, hungUp: true, ts: later),
+      ]);
+      await _until(() => !world.calls.inCall);
+
+      world.now = DateTime.fromMillisecondsSinceEpoch(later + _hour);
+      await world.join();
+      await _until(() => world.calls.silenced != null);
+
+      expect(world.calls.silenced, CallSilence.muted);
+    });
 
     test('muting you stops your microphone being sent', () async {
       final world = await _open();
@@ -1030,7 +1102,7 @@ void main() {
       expect(watcher.peers[_mine]?.muted, isTrue);
     });
 
-    test('muting you shows as muted, by a moderator', () async {
+    test('muting you shows as muted, for everyone', () async {
       final world = await _open();
       await world.join();
 

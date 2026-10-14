@@ -255,36 +255,87 @@ Future<String?> showOlderConversations(BuildContext context, Channel channel) {
   );
 }
 
-/// Confirms kicking [member] from [channel] before anything is sent.
-Future<bool> confirmKick(
+/// Asks before kicking [member] out of [space] and everything in it, then
+/// runs [kick] with a spinner up until it is done. Completes with what
+/// [kick] threw, or null when it went through or was cancelled.
+Future<Object?> confirmKickFromSpace(
   BuildContext context,
   Member member,
-  Channel channel,
-) async {
-  final tokens = LoafTokens.of(context);
-  final confirmed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      backgroundColor: tokens.card,
-      title: Text(
-        'kick ${member.name} from ${channel.name}?',
-        style: loafBody(17, 600).copyWith(color: tokens.textStrong),
-      ),
-      content: Text(
-        'they are removed from the channel and its call.',
-        style: loafBody(14, 400).copyWith(color: tokens.textBody),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: Text('cancel', style: TextStyle(color: tokens.textMuted)),
+  Space space, {
+  required Future<void> Function() kick,
+}) => showDialog<Object?>(
+  context: context,
+  builder: (context) =>
+      _KickFromSpaceDialog(member: member, space: space, kick: kick),
+);
+
+class _KickFromSpaceDialog extends StatefulWidget {
+  const _KickFromSpaceDialog({
+    required this.member,
+    required this.space,
+    required this.kick,
+  });
+
+  final Member member;
+  final Space space;
+  final Future<void> Function() kick;
+
+  @override
+  State<_KickFromSpaceDialog> createState() => _KickFromSpaceDialogState();
+}
+
+class _KickFromSpaceDialogState extends State<_KickFromSpaceDialog> {
+  var _kicking = false;
+
+  Future<void> _kick() async {
+    setState(() => _kicking = true);
+    Object? error;
+    try {
+      await widget.kick();
+    } on Object catch (e) {
+      error = e;
+    }
+    if (mounted) Navigator.pop(context, error);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return PopScope(
+      // Dismissing mid-kick would lose the outcome: no cancel while busy.
+      canPop: !_kicking,
+      child: AlertDialog(
+        backgroundColor: tokens.card,
+        title: Text(
+          'kick ${widget.member.name} from ${widget.space.name}?',
+          style: loafBody(17, 600).copyWith(color: tokens.textStrong),
         ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text('kick', style: TextStyle(color: tokens.accent)),
+        content: Text(
+          'they leave the space and every channel in it, and need a new '
+          'invite to come back.',
+          style: loafBody(14, 400).copyWith(color: tokens.textBody),
         ),
-      ],
-    ),
-  );
-  return confirmed ?? false;
+        actions: [
+          TextButton(
+            onPressed: _kicking ? null : () => Navigator.pop(context),
+            child: Text('cancel', style: TextStyle(color: tokens.textMuted)),
+          ),
+          if (_kicking)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: LoafSpace.x4),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+              ),
+            )
+          else
+            TextButton(
+              onPressed: _kick,
+              child: Text('kick', style: TextStyle(color: tokens.accent)),
+            ),
+        ],
+      ),
+    );
+  }
 }

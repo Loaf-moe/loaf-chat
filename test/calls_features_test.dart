@@ -9,6 +9,7 @@ import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/ui/widgets/loaf_avatar.dart';
 import 'package:loaf_native/ui/widgets/speaking_ring.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
@@ -169,8 +170,8 @@ void main() {
     });
 
     for (final (silence, words) in [
-      (CallSilence.muted, 'Muted by a moderator'),
-      (CallSilence.deafened, 'Deafened by a moderator'),
+      (CallSilence.muted, 'Muted for everyone'),
+      (CallSilence.deafened, 'Deafened for everyone'),
     ]) {
       testWidgets('on a tile says "$words"', (tester) async {
         await _pump(
@@ -193,6 +194,43 @@ void main() {
       });
     }
 
+    for (final (label, info, dimmed, playing) in [
+      (
+        'plays while they speak',
+        const TileInfo(_ada, speaking: true),
+        false,
+        true,
+      ),
+      ('rests while they are quiet', const TileInfo(_ada), false, false),
+      (
+        'rests on a faded tile, speaking or not',
+        const TileInfo(_ada, speaking: true, ring: RingState.declined),
+        false,
+        false,
+      ),
+      (
+        'rests while the call reconnects, speaking or not',
+        const TileInfo(_ada, speaking: true),
+        true,
+        false,
+      ),
+    ]) {
+      testWidgets('the avatar $label', (tester) async {
+        await _pump(
+          tester,
+          SizedBox(
+            width: 300,
+            height: 200,
+            child: CallTile(info: info, dimmed: dimmed),
+          ),
+        );
+        expect(
+          tester.widget<LoafAvatar>(find.byType(LoafAvatar)).original,
+          playing,
+        );
+      });
+    }
+
     testWidgets('a tile muted by its own person says nothing of '
         'moderators', (tester) async {
       await _pump(
@@ -204,7 +242,7 @@ void main() {
         ),
       );
 
-      expect(find.byTooltip('Muted by a moderator'), findsNothing);
+      expect(find.byTooltip('Muted for everyone'), findsNothing);
     });
 
     testWidgets(
@@ -405,6 +443,23 @@ void main() {
       expect(find.text("couldn't connect"), findsOneWidget);
       expect(find.text('retry'), findsOneWidget);
       expect(find.text('join voice'), findsNothing);
+    },
+    variant: _desktop,
+  );
+
+  testWidgets(
+    'a voice channel someone hung up for you says so, and offers to join again',
+    (tester) async {
+      final calls = VoiceOnlyCalls()
+        ..session = const CallSession(
+          target: _oven,
+          phase: CallPhase.hungUp,
+          participants: [],
+        );
+      await _pump(tester, _lobby(calls));
+
+      expect(find.text('someone hung up for you'), findsOneWidget);
+      expect(find.text('join again'), findsOneWidget);
     },
     variant: _desktop,
   );

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../members/person_name.dart';
 import '../members/role_colors.dart';
 import '../mock/fixtures.dart';
 import '../model/media_source.dart';
@@ -36,9 +37,19 @@ class MessageGroupTile extends StatelessWidget {
     required this.group,
     this.controller,
     this.focus,
+    this.onPerson,
+    this.onMention,
   });
 
   final MessageGroup group;
+
+  /// Opens the author's menu: from the avatar, or the name's right-click
+  /// or long press. At the pointer on a computer. Null leaves both plain.
+  final void Function(Member member, Offset? position)? onPerson;
+
+  /// A click or tap on the name. Null where there is no composer to put
+  /// them in.
+  final ValueChanged<Member>? onMention;
 
   /// When set, each message offers its actions: long press on a phone,
   /// hover and right-click on a computer. Left null, the tile is
@@ -52,10 +63,24 @@ class MessageGroupTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = LoafTokens.of(context);
     final author = group.author;
+    final onPerson = this.onPerson;
+    final avatar = _Avatar(
+      key: const ValueKey('author-avatar'),
+      member: author,
+    );
+    final name = PersonName(author, size: 15, weight: 600);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _Avatar(member: author),
+        if (onPerson == null)
+          avatar
+        else
+          _PersonGesture(
+            member: author,
+            onPerson: onPerson,
+            primary: true,
+            child: avatar,
+          ),
         const SizedBox(width: LoafSpace.x3),
         Expanded(
           child: Column(
@@ -65,13 +90,18 @@ class MessageGroupTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.baseline,
                 textBaseline: TextBaseline.alphabetic,
                 children: [
-                  Text(
-                    author.name,
-                    style: loafBody(
-                      15,
-                      600,
-                    ).copyWith(color: tokens.nameColor(author.role)),
-                  ),
+                  if (onPerson == null)
+                    name
+                  else
+                    _PersonGesture(
+                      member: author,
+                      onPerson: onPerson,
+                      primary: false,
+                      onTap: onMention == null
+                          ? null
+                          : () => onMention!(author),
+                      child: name,
+                    ),
                   const SizedBox(width: LoafSpace.x2),
                   Text(
                     _formatTime(group.sentAt),
@@ -130,8 +160,52 @@ class MessageGroupTile extends StatelessWidget {
   }
 }
 
+/// Opens [member]'s menu on a right-click or a long press. A tap or click
+/// opens it too when [primary]; otherwise it runs [onTap], if any.
+class _PersonGesture extends StatelessWidget {
+  const _PersonGesture({
+    required this.member,
+    required this.onPerson,
+    required this.primary,
+    this.onTap,
+    required this.child,
+  });
+
+  final Member member;
+  final void Function(Member member, Offset? position) onPerson;
+  final bool primary;
+  final VoidCallback? onTap;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final clickable = primary || onTap != null;
+    return isDesktop
+        ? MouseRegion(
+            cursor: clickable ? SystemMouseCursors.click : MouseCursor.defer,
+            child: GestureDetector(
+              onTapUp: primary
+                  ? (d) => onPerson(member, d.globalPosition)
+                  : onTap == null
+                  ? null
+                  : (_) => onTap!(),
+              onSecondaryTapUp: (d) => onPerson(member, d.globalPosition),
+              child: child,
+            ),
+          )
+        : GestureDetector(
+            onTap: primary ? () => onPerson(member, null) : onTap,
+            onLongPress: () {
+              HapticFeedback.mediumImpact();
+              onPerson(member, null);
+            },
+            child: child,
+          );
+  }
+}
+
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.member});
+  const _Avatar({super.key, required this.member});
 
   final Member member;
 

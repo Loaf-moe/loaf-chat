@@ -26,8 +26,8 @@ import '../ui/settings/voice_settings.dart';
 import '../ui/shell/profile.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 import '../ui/spaces/space_directory.dart';
-import '../ui/widgets/avatar_images.dart';
 import '../ui/call/calls.dart';
+import 'bridges.dart';
 import 'call_media.dart';
 import 'call_members.dart';
 import 'call_silence.dart';
@@ -75,7 +75,11 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     this._voiceApplying,
     this.externalMedia,
     @visibleForTesting this._now,
-  }) {
+    @visibleForTesting Duration? warmAvatarsAfter,
+  }) : avatarImages = MatrixAvatarImages(
+         client,
+         warmAfter: warmAvatarsAfter ?? MatrixAvatarImages.defaultWarmAfter,
+       ) {
     _hierarchy = MatrixHierarchy(
       client,
       onChange: () {
@@ -117,10 +121,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final mxc = Uri.tryParse(ref.value);
     if (mxc == null || !mxc.isScheme('mxc')) return null;
     try {
-      final bytes = await MxcThumbnail(
+      final bytes = await MxcImage(
         client,
         mxc,
-        avatarBuckets[1],
+        size: avatarBuckets[1],
       ).bytes().timeout(const Duration(seconds: 2));
       final dir = Directory(
         '${(await getTemporaryDirectory()).path}'
@@ -308,7 +312,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   double? get syncProgress => _progress;
 
   @override
-  late final AvatarImages avatarImages = MatrixAvatarImages(client);
+  final MatrixAvatarImages avatarImages;
 
   @override
   MatrixMediaSource get media =>
@@ -387,7 +391,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final profile = _profile;
     // A profile nobody asked for has nothing to add.
     if (profile == null) return _baseMe;
-    return _baseMe.copyWith(name: profile.loadedName, avatar: profile.avatar);
+    final avatar = profile.avatar;
+    if (avatar != null) avatarImages.warm(avatar);
+    return _baseMe.copyWith(name: profile.loadedName, avatar: avatar);
   }
 
   @override
@@ -784,12 +790,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       occupants: kind == ChannelKind.voice
           ? [for (final occupant in _occupants(room)) occupant.member]
           : const [],
-      kickBelow: room.canKick ? room.ownPowerLevel.level : null,
       silenced: kind == ChannelKind.voice
-          ? callSilences(
-              (room.states[callSilenceType]?.values ?? const [])
-                  .whereType<Event>(),
-            )
+          ? callSilences(callModeration(room))
           : const {},
       canSilence: room.canChangeStateEvent(callSilenceType),
     );
@@ -851,13 +853,16 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
 
   Member _member(Room room, String userId) {
     final user = room.unsafeGetUserFromMemoryOrFallback(userId);
+    final avatar = AvatarRef.maybe(user.avatarUrl?.toString());
+    if (avatar != null) avatarImages.warm(avatar);
     return Member(
       userId,
       user.calcDisplayname(),
       spaceColorFor(userId),
       presence: Presence.unknown,
       powerLevel: room.getPowerLevelByUserId(userId).level,
-      avatar: AvatarRef.maybe(user.avatarUrl?.toString()),
+      avatar: avatar,
+      bridge: bridgeOf(userId),
     );
   }
 
@@ -1249,41 +1254,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   Future<void> leaveSpace(String spaceId) async {
     final space = client.getRoomById(spaceId);
     if (space == null) return;
-
-    final joinedSpaces = [
-      for (final room in client.rooms)
-        if (room.isSpace && room.membership == Membership.join) room,
-    ];
-    final childIds = {
-      for (final s in joinedSpaces)
-        for (final c in s.spaceChildren) ?c.roomId,
-    };
-    final otherTops = [
-      for (final s in joinedSpaces)
-        if (s.id != spaceId && !childIds.contains(s.id)) s,
-    ];
-    final protected = <String>{};
-    for (final top in otherTops) {
-      protected.addAll(_listedRoomIds(top, {}));
-    }
-
-    final descendants = <String>{};
-    void collect(Room room, Set<String> seen) {
-      if (!seen.add(room.id) || !room.isSpace) return;
-      for (final child in room.spaceChildren) {
-        final id = child.roomId;
-        if (id == null) continue;
-        final childRoom = client.getRoomById(id);
-        if (childRoom == null || childRoom.membership != Membership.join) {
-          continue;
-        }
-        if (childRoom.isSpace) collect(childRoom, seen);
-        if (!protected.contains(id)) descendants.add(id);
-      }
-    }
-
-    collect(space, {});
-    final order = [...descendants, spaceId];
+    final order = _spaceOrder(space);
 
     for (final id in order) {
       _wishes.putIfAbsent(id, _Wish.new).joined = false;
@@ -1308,6 +1279,70 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     _invalidateHierarchies();
     if (!_disposed) _rebuild();
     if (missing.isNotEmpty) throw PartlyDone(missing: missing);
+  }
+
+  @override
+  Future<void> kickFromSpace(String spaceId, String userId) async {
+    final space = client.getRoomById(spaceId);
+    if (space == null) return;
+    final missing = <String>[];
+    for (final id in _spaceOrder(space)) {
+      final room = client.getRoomById(id);
+      if (room == null) continue;
+      try {
+        // Member state is not in memory until asked for.
+        final members = await room.requestParticipants(
+          const [Membership.join],
+          true,
+          true,
+        );
+        if (!members.any((u) => u.id == userId)) continue;
+        await room.kick(userId);
+      } on Object {
+        missing.add(room.getLocalizedDisplayname());
+      }
+    }
+    if (missing.isNotEmpty) throw PartlyDone(missing: missing);
+  }
+
+  /// Every joined room under [space], deepest first, then the space: the
+  /// order to leave or kick in. Rooms another joined top-level space also
+  /// lists, at any depth, are left out.
+  List<String> _spaceOrder(Room space) {
+    final joinedSpaces = [
+      for (final room in client.rooms)
+        if (room.isSpace && room.membership == Membership.join) room,
+    ];
+    final childIds = {
+      for (final s in joinedSpaces)
+        for (final c in s.spaceChildren) ?c.roomId,
+    };
+    final otherTops = [
+      for (final s in joinedSpaces)
+        if (s.id != space.id && !childIds.contains(s.id)) s,
+    ];
+    final protected = <String>{};
+    for (final top in otherTops) {
+      protected.addAll(_listedRoomIds(top, {}));
+    }
+
+    final descendants = <String>{};
+    void collect(Room room, Set<String> seen) {
+      if (!seen.add(room.id) || !room.isSpace) return;
+      for (final child in room.spaceChildren) {
+        final id = child.roomId;
+        if (id == null) continue;
+        final childRoom = client.getRoomById(id);
+        if (childRoom == null || childRoom.membership != Membership.join) {
+          continue;
+        }
+        if (childRoom.isSpace) collect(childRoom, seen);
+        if (!protected.contains(id)) descendants.add(id);
+      }
+    }
+
+    collect(space, {});
+    return [...descendants, space.id];
   }
 
   /// Every room [space] lists, at any depth, through joined rooms only —
@@ -1441,8 +1476,18 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
-  Future<void> kick(String roomId, String userId) =>
-      client.kick(roomId, userId);
+  Future<void> hangUp(String roomId, String userId) {
+    final room = client.getRoomById(roomId);
+    final current = room == null
+        ? null
+        : callSilences(callModeration(room))[userId];
+    return client.setRoomStateWithKey(
+      roomId,
+      callSilenceType,
+      callSilenceKey(userId),
+      callHangUpContent(current),
+    );
+  }
 
   @override
   Future<void> silence(String roomId, String userId, CallSilence? to) =>
@@ -1478,6 +1523,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   @override
   void dispose() {
     _disposed = true;
+    avatarImages.dispose();
     _callExpiry?.cancel();
     _calls?.dispose();
     for (final s in _subscriptions) {

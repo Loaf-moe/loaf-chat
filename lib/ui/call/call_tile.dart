@@ -124,8 +124,8 @@ class _CallTileState extends State<CallTile> {
               color: tokens.sunken,
               child: Center(
                 child: ring == RingState.ringing
-                    ? Pulse(child: _avatar(info.member))
-                    : _avatar(info.member),
+                    ? Pulse(child: _avatar(info.member, playing: false))
+                    : _avatar(info.member, playing: info.speaking && !faded),
               ),
             ),
           Positioned(
@@ -199,7 +199,8 @@ class _CallTileState extends State<CallTile> {
     );
   }
 
-  Widget _avatar(Member member) => LayoutBuilder(
+  /// [playing] draws the upload itself, so a GIF moves with their voice.
+  Widget _avatar(Member member, {required bool playing}) => LayoutBuilder(
     builder: (context, constraints) {
       final size = (constraints.biggest.shortestSide * 0.42).clamp(28.0, 96.0);
       return LoafAvatar(
@@ -207,6 +208,7 @@ class _CallTileState extends State<CallTile> {
         color: member.color,
         size: size,
         image: member.avatar,
+        original: playing,
         textStyle: loafBody(size * 0.36, 600),
       );
     },
@@ -266,7 +268,7 @@ class _NameChip extends StatelessWidget {
           ],
           if (info.deafened || info.muted) ...[
             const SizedBox(width: 4),
-            _byModerator(
+            _forEveryone(
               info,
               Icon(
                 info.deafened ? LucideIcons.headphoneOff : LucideIcons.micOff,
@@ -281,12 +283,12 @@ class _NameChip extends StatelessWidget {
   }
 }
 
-/// [icon] saying on hover that a moderator did it, where one did.
-Widget _byModerator(TileInfo info, Widget icon) => switch (info.silenced) {
+/// [icon] saying on hover that someone did it for everyone, where one did.
+Widget _forEveryone(TileInfo info, Widget icon) => switch (info.silenced) {
   null => icon,
-  CallSilence.muted => Tooltip(message: 'Muted by a moderator', child: icon),
+  CallSilence.muted => Tooltip(message: 'Muted for everyone', child: icon),
   CallSilence.deafened => Tooltip(
-    message: 'Deafened by a moderator',
+    message: 'Deafened for everyone',
     child: icon,
   ),
 };

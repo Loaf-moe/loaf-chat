@@ -10,6 +10,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../call/call_tile.dart';
 import '../call/volume_slider.dart';
+import '../members/person_card.dart';
 import '../members/presence_dot.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
@@ -40,15 +41,15 @@ class ChannelList extends StatefulWidget {
     this.allowedActions,
     this.call,
     required this.myId,
-    this.onKick,
+    this.onHangUp,
     this.onSilence,
   });
 
   final Space space;
 
-  /// Asked to kick [member] from [channel]. Left null, nobody's menu
-  /// offers it.
-  final void Function(Channel channel, Member member)? onKick;
+  /// Asked to take [member] out of [channel]'s call. Left null, nobody's
+  /// menu offers it.
+  final void Function(Channel channel, Member member)? onHangUp;
 
   /// Asked to put [silence] on [member] in [channel]'s call for everyone,
   /// or with null to lift it. Left null, nobody's menu offers it.
@@ -161,7 +162,7 @@ class _ChannelListState extends State<ChannelList> {
                       ringingId: widget.ringingId,
                       call: widget.call,
                       myId: widget.myId,
-                      onKick: widget.onKick,
+                      onHangUp: widget.onHangUp,
                       onSilence: widget.onSilence,
                       home: widget.home,
                       onReorder: widget.home && category.name == 'favourites'
@@ -324,7 +325,7 @@ class _CategorySection extends StatelessWidget {
     this.ringingId,
     this.call,
     required this.myId,
-    this.onKick,
+    this.onHangUp,
     this.onSilence,
     this.home = false,
     this.onReorder,
@@ -339,7 +340,7 @@ class _CategorySection extends StatelessWidget {
   final String? ringingId;
   final ({String channelId, List<TileInfo> people})? call;
   final String myId;
-  final void Function(Channel channel, Member member)? onKick;
+  final void Function(Channel channel, Member member)? onHangUp;
   final void Function(Channel channel, Member member, CallSilence? silence)?
   onSilence;
   final bool collapsed;
@@ -364,7 +365,7 @@ class _CategorySection extends StatelessWidget {
         ringing: channel.id == ringingId,
         people: channel.id == call?.channelId ? call!.people : const [],
         myId: myId,
-        onKick: onKick,
+        onHangUp: onHangUp,
         onSilence: onSilence,
         tokens: tokens,
         home: home,
@@ -522,7 +523,7 @@ class _ChannelEntry extends StatelessWidget {
     this.ringing = false,
     this.people = const [],
     required this.myId,
-    this.onKick,
+    this.onHangUp,
     this.onSilence,
     this.home = false,
     this.longPressActions = true,
@@ -537,7 +538,7 @@ class _ChannelEntry extends StatelessWidget {
   /// you are in. Empty otherwise.
   final List<TileInfo> people;
   final String myId;
-  final void Function(Channel channel, Member member)? onKick;
+  final void Function(Channel channel, Member member)? onHangUp;
   final void Function(Channel channel, Member member, CallSilence? silence)?
   onSilence;
 
@@ -552,14 +553,12 @@ class _ChannelEntry extends StatelessWidget {
     return (silence) => onSilence(channel, member, silence);
   }
 
-  /// Kicks [member] from this channel, or null where you may not: the app
-  /// does no kicking, your level here does not reach, or it is you.
-  VoidCallback? _kick(Member member) {
-    final onKick = this.onKick;
-    final below = channel.kickBelow;
-    if (onKick == null || below == null) return null;
-    if (member.id == myId || member.powerLevel >= below) return null;
-    return () => onKick(channel, member);
+  /// Takes [member] out of this channel's call, or null where you may not:
+  /// the app does none of it, or it is you.
+  VoidCallback? _hangUp(Member member) {
+    final onHangUp = this.onHangUp;
+    if (onHangUp == null || member.id == myId) return null;
+    return () => onHangUp(channel, member);
   }
 
   /// A Home row: its actions include favourite and low priority.
@@ -709,8 +708,7 @@ class _ChannelEntry extends StatelessWidget {
                           .where((person) => person.id == member.id)
                           .firstOrNull,
                       you: member.id == myId,
-                      channelName: channel.name,
-                      onKick: _kick(member),
+                      onHangUp: _hangUp(member),
                       silenced: channel.silenced[member.id],
                       onSilence: _silence(member),
                       tokens: tokens,
@@ -732,8 +730,7 @@ class _Occupant extends StatelessWidget {
     required this.member,
     required this.heard,
     required this.you,
-    required this.channelName,
-    required this.onKick,
+    required this.onHangUp,
     required this.silenced,
     required this.onSilence,
     required this.tokens,
@@ -742,27 +739,25 @@ class _Occupant extends StatelessWidget {
   final Member member;
   final TileInfo? heard;
   final bool you;
-  final String channelName;
 
-  /// Null where you may not kick them.
-  final VoidCallback? onKick;
+  /// Null where you may not take them out of the call.
+  final VoidCallback? onHangUp;
 
-  /// What a moderator has put on them, if anything.
+  /// What someone has put on them for everyone, if anything.
   final CallSilence? silenced;
 
   /// Null where you may not mute or deafen them for everyone.
   final ValueChanged<CallSilence?>? onSilence;
   final LoafTokens tokens;
 
-  /// Their volume, where [voice] keeps one, and what a moderator may do,
-  /// where you are one: a menu at [position] on a computer, a sheet on a
-  /// phone.
+  /// Their volume, where [voice] keeps one, and what you may do to them for
+  /// everyone: a menu at [position] on a computer, a sheet on a phone.
   Future<void> _openMenu(
     BuildContext context,
     VoiceController? voice, {
     Offset? position,
   }) async {
-    final onKick = this.onKick;
+    final onHangUp = this.onHangUp;
     final onSilence = this.onSilence;
     final items = [
       if (onSilence != null) ...[
@@ -791,27 +786,20 @@ class _Occupant extends StatelessWidget {
             label: 'deafen for everyone',
           ),
       ],
-      if (onKick != null)
-        ActionItem(
-          value: _OccupantAction.kick,
-          icon: LucideIcons.userX,
-          label: 'kick from $channelName',
-          destructive: true,
+      if (onHangUp != null)
+        const ActionItem(
+          value: _OccupantAction.hangUp,
+          icon: LucideIcons.phoneOff,
+          label: 'remove from call',
         ),
     ];
     final _OccupantAction? action;
-    final name = Text(
-      member.name,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: loafBody(13, 600).copyWith(color: tokens.textMuted),
-    );
     if (position != null) {
       action = await showActionMenu(
         context,
         position: position,
         leading: [
-          _MenuHeading(child: name),
+          PersonCardEntry(member: member, isYou: you),
           if (voice != null) VolumeMenuEntry(voice: voice, id: member.id),
         ],
         items: items,
@@ -820,9 +808,9 @@ class _Occupant extends StatelessWidget {
       action = await showActionSheet(
         context,
         header: (context) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            name,
+            PersonCard(member: member, isYou: you),
             if (voice != null) VolumeSlider(voice: voice, id: member.id),
           ],
         ),
@@ -836,8 +824,8 @@ class _Occupant extends StatelessWidget {
         onSilence?.call(CallSilence.deafened);
       case _OccupantAction.lift:
         onSilence?.call(null);
-      case _OccupantAction.kick:
-        onKick?.call();
+      case _OccupantAction.hangUp:
+        onHangUp?.call();
       case null:
     }
   }
@@ -852,14 +840,14 @@ class _Occupant extends StatelessWidget {
     // Found, not watched: whether the app keeps voice settings never
     // changes while it runs.
     final voice = you ? null : VoiceScope.find(context);
-    final hasMenu = voice != null || onKick != null || onSilence != null;
+    final hasMenu = voice != null || onHangUp != null || onSilence != null;
     return Semantics(
       label: [
         member.name,
         if (speaking) 'speaking',
         // Deafened is muted too; the one word says both.
         if (silenced != null)
-          '${deafened ? 'deafened' : 'muted'} by a moderator'
+          '${deafened ? 'deafened' : 'muted'} for everyone'
         else if (deafened)
           'deafened'
         else if (muted)
@@ -943,37 +931,9 @@ class _Occupant extends StatelessWidget {
 }
 
 /// What the menu on someone in a voice channel can do.
-enum _OccupantAction { mute, deafen, lift, kick }
+enum _OccupantAction { mute, deafen, lift, hangUp }
 
 /// A line of plain text heading a menu.
-class _MenuHeading<T> extends PopupMenuEntry<T> {
-  const _MenuHeading({required this.child});
-
-  final Widget child;
-
-  @override
-  double get height => 28;
-
-  @override
-  bool represents(T? value) => false;
-
-  @override
-  State<_MenuHeading<T>> createState() => _MenuHeadingState<T>();
-}
-
-class _MenuHeadingState<T> extends State<_MenuHeading<T>> {
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(
-      LoafSpace.x3,
-      LoafSpace.x2,
-      LoafSpace.x3,
-      0,
-    ),
-    child: widget.child,
-  );
-}
-
 /// Marks a channel you can join with one tap. Not a separate button: the
 /// whole row joins, and this says so.
 /// A standalone room's face: a rounded square with its initial, since it is

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/call/call_tile.dart';
+import 'package:loaf_native/ui/members/person_card.dart';
 import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
@@ -28,7 +29,6 @@ const _moderated = Space(
         name: 'oven',
         kind: ChannelKind.voice,
         occupants: [_you, _ada, _mo],
-        kickBelow: 50,
       ),
     ]),
   ],
@@ -68,7 +68,7 @@ Future<void> _pump(
   List<TileInfo>? people,
   VoiceController? voice,
   Space space = _space,
-  void Function(Channel channel, Member member)? onKick,
+  void Function(Channel channel, Member member)? onHangUp,
   void Function(Channel channel, Member member, CallSilence? silence)?
   onSilence,
 }) async {
@@ -83,7 +83,7 @@ Future<void> _pump(
         selectedChannelId: '',
         onSelect: (_) {},
         myId: _you.id,
-        onKick: onKick,
+        onHangUp: onHangUp,
         onSilence: onSilence,
         call: people == null ? null : (channelId: '!oven', people: people),
       ),
@@ -294,7 +294,7 @@ void main() {
       expect(theirs, isNot(own));
     });
 
-    testWidgets('is said aloud as a moderator\'s', (tester) async {
+    testWidgets('is said aloud as for everyone', (tester) async {
       final semantics = tester.ensureSemantics();
       await _pump(
         tester,
@@ -306,8 +306,8 @@ void main() {
 
       String said(Member member) =>
           tester.getSemantics(_row('!oven', member)).label;
-      expect(said(_ada), 'ada, muted by a moderator');
-      expect(said(_bo), 'bo, deafened by a moderator');
+      expect(said(_ada), 'ada, muted for everyone');
+      expect(said(_bo), 'bo, deafened for everyone');
       semantics.dispose();
     });
 
@@ -342,6 +342,18 @@ void main() {
           expect(find.text('deafen for everyone'), findsOneWidget);
         },
       );
+
+      testWidgets('leads with their card', variant: _computer, (tester) async {
+        await open(tester, const {});
+        expect(find.byType(PersonCard), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byType(PersonCard),
+            matching: find.text(_ada.id),
+          ),
+          findsOneWidget,
+        );
+      });
 
       testWidgets(
         'offers unmuting, and deafening, someone muted',
@@ -418,68 +430,35 @@ void main() {
     });
   });
 
-  group('kicking, from the menu on someone listed,', () {
-    testWidgets('is offered for someone below your level', variant: _computer, (
+  group('removing from the call, from the menu on someone listed,', () {
+    testWidgets('is offered where the app can', variant: _computer, (
       tester,
     ) async {
-      await _pump(tester, space: _moderated, onKick: (_, _) {});
+      await _pump(tester, space: _moderated, onHangUp: (_, _) {});
 
       await _rightClick(tester, _row('!oven', _ada));
 
-      expect(find.text('kick from oven'), findsOneWidget);
+      expect(find.text('remove from call'), findsOneWidget);
     });
 
-    testWidgets(
-      'is not offered for someone at your level',
-      variant: _computer,
-      (tester) async {
-        await _pump(
-          tester,
-          space: _moderated,
-          voice: _voice(),
-          onKick: (_, _) {},
-        );
+    testWidgets('is not offered where the app cannot', variant: _computer, (
+      tester,
+    ) async {
+      await _pump(tester, space: _moderated, voice: _voice());
 
-        await _rightClick(tester, _row('!oven', _mo));
+      await _rightClick(tester, _row('!oven', _ada));
 
-        expect(find.byType(Slider), findsOneWidget);
-        expect(find.text('kick from oven'), findsNothing);
-      },
-    );
-
-    testWidgets(
-      'is not offered where the channel gives you no kick',
-      variant: _computer,
-      (tester) async {
-        await _pump(tester, voice: _voice(), onKick: (_, _) {});
-
-        await _rightClick(tester, _row('!oven', _ada));
-
-        expect(find.byType(Slider), findsOneWidget);
-        expect(find.text('kick from oven'), findsNothing);
-      },
-    );
-
-    testWidgets(
-      'is not offered where the app does no kicking',
-      variant: _computer,
-      (tester) async {
-        await _pump(tester, space: _moderated, voice: _voice());
-
-        await _rightClick(tester, _row('!oven', _ada));
-
-        expect(find.text('kick from oven'), findsNothing);
-      },
-    );
+      expect(find.text('remove from call'), findsNothing);
+    });
 
     testWidgets('is not offered on your own row', variant: _computer, (
       tester,
     ) async {
-      await _pump(tester, space: _moderated, onKick: (_, _) {});
+      await _pump(tester, space: _moderated, onHangUp: (_, _) {});
 
       await _rightClick(tester, _row('!oven', _you));
 
-      expect(find.text('kick from oven'), findsNothing);
+      expect(find.text('remove from call'), findsNothing);
     });
 
     testWidgets(
@@ -490,59 +469,59 @@ void main() {
           tester,
           space: _moderated,
           voice: _voice(),
-          onKick: (_, _) {},
+          onHangUp: (_, _) {},
         );
 
         await _rightClick(tester, _row('!oven', _ada));
 
         expect(find.byType(Slider), findsOneWidget);
-        expect(find.text('kick from oven'), findsOneWidget);
+        expect(find.text('remove from call'), findsOneWidget);
       },
     );
 
     testWidgets('when chosen, says which channel and who', variant: _computer, (
       tester,
     ) async {
-      final kicked = <(String, String)>[];
+      final removed = <(String, String)>[];
       await _pump(
         tester,
         space: _moderated,
-        onKick: (channel, member) => kicked.add((channel.id, member.id)),
+        onHangUp: (channel, member) => removed.add((channel.id, member.id)),
       );
       await _rightClick(tester, _row('!oven', _ada));
 
-      await tester.tap(find.text('kick from oven'));
+      await tester.tap(find.text('remove from call'));
       await tester.pumpAndSettle();
 
-      expect(kicked, [('!oven', _ada.id)]);
+      expect(removed, [('!oven', _ada.id)]);
     });
 
     testWidgets('is not done by closing the menu', variant: _computer, (
       tester,
     ) async {
-      final kicked = <(String, String)>[];
+      final removed = <(String, String)>[];
       await _pump(
         tester,
         space: _moderated,
-        onKick: (channel, member) => kicked.add((channel.id, member.id)),
+        onHangUp: (channel, member) => removed.add((channel.id, member.id)),
       );
       await _rightClick(tester, _row('!oven', _ada));
 
       await tester.tapAt(const Offset(390, 890));
       await tester.pumpAndSettle();
 
-      expect(kicked, isEmpty);
+      expect(removed, isEmpty);
     });
 
     testWidgets('is offered on a long press on a phone', variant: _phone, (
       tester,
     ) async {
-      await _pump(tester, space: _moderated, onKick: (_, _) {});
+      await _pump(tester, space: _moderated, onHangUp: (_, _) {});
 
       await tester.longPress(_row('!oven', _ada));
       await tester.pumpAndSettle();
 
-      expect(find.text('kick from oven'), findsOneWidget);
+      expect(find.text('remove from call'), findsOneWidget);
     });
   });
 

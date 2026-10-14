@@ -6,6 +6,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../members/person_card.dart';
 import '../members/role_colors.dart';
 import '../mock/fixtures.dart';
 import '../platform.dart';
@@ -158,6 +159,7 @@ Future<void> showTileActions(
       context,
       position: position,
       leading: [
+        PersonCardEntry<_TileAction>(member: info.member, isYou: info.you),
         if (voice != null)
           VolumeMenuEntry<_TileAction>(voice: voice, id: info.id),
       ],
@@ -166,9 +168,13 @@ Future<void> showTileActions(
   } else {
     action = await showActionSheet(
       context,
-      header: voice == null
-          ? null
-          : (context) => VolumeSlider(voice: voice, id: info.id),
+      header: (context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PersonCard(member: info.member, isYou: info.you),
+          if (voice != null) VolumeSlider(voice: voice, id: info.id),
+        ],
+      ),
       items: items,
     );
   }
@@ -384,8 +390,8 @@ class _ShareStrip extends StatelessWidget {
   }
 }
 
-/// A call that has ended without you hanging up: failed, declined, or
-/// nobody answered.
+/// A call that has ended without you hanging up: failed, declined, nobody
+/// answered, or someone hung up for you.
 class _EndState extends StatelessWidget {
   const _EndState({required this.calls, required this.session});
 
@@ -412,6 +418,12 @@ class _EndState extends StatelessWidget {
         session.target.members.length > 1 ? 'no one answered' : 'no answer',
         'call again',
         calls.callAgain,
+      ),
+      CallPhase.hungUp => (
+        LucideIcons.phoneOff,
+        'someone hung up for you',
+        'join again',
+        calls.retry,
       ),
       _ => (LucideIcons.wifiOff, "couldn't connect", 'retry', calls.retry),
     };

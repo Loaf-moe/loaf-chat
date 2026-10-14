@@ -39,6 +39,13 @@ const _ada = Member(
   Color(0xFF8B5CF6),
   presence: Presence.offline,
 );
+// Here over the Discord bridge.
+const _lou = Member(
+  '@_ooye_lou',
+  'lou',
+  Color(0xFF5865F2),
+  bridge: Bridge.discord,
+);
 
 // Only in member lists, never in the timeline — enough people that the
 // offline half of a list has something to show.
@@ -56,7 +63,7 @@ const _pim = Member(
   presence: Presence.offline,
 );
 
-const mockMembers = [_you, _mika, _sam, _jun, _ada];
+const mockMembers = [_you, _mika, _sam, _jun, _ada, _lou];
 const currentUser = _you;
 
 final mockSpaces = <Space>[
@@ -64,7 +71,7 @@ final mockSpaces = <Space>[
     id: 'starter',
     name: 'The Starter Pack',
     color: const Color(0xFFD97B2A),
-    members: const [_you, _mika, _sam, _jun, _ada, _rosa, _theo, _pim],
+    members: const [_you, _mika, _sam, _jun, _ada, _lou, _rosa, _theo, _pim],
     categories: [
       ChannelCategory('general', [
         const Channel(
@@ -572,6 +579,12 @@ List<Message> mockTimeline() {
       sentAt: at(0, 10, 18),
       body: 'ok that crumb is unreasonable',
       edited: true,
+    ),
+    Message(
+      id: 'm10',
+      author: _lou,
+      sentAt: at(0, 10, 25),
+      body: 'save me a slice, i land at six',
     ),
   ];
 }

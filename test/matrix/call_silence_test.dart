@@ -61,6 +61,61 @@ void main() {
     );
   });
 
+  group('hanging up', () {
+    test('keeps the standing silence beside the flag', () {
+      expect(callHangUpContent(CallSilence.muted), {
+        'muted': true,
+        'deafened': false,
+        'hung_up': true,
+      });
+      expect(callHangUpContent(CallSilence.deafened), {
+        'muted': true,
+        'deafened': true,
+        'hung_up': true,
+      });
+      expect(callHangUpContent(null), {'hung_up': true});
+    });
+
+    test('is read back with the server\'s time', () {
+      expect(
+        callHangUps([
+          _entry({'muted': true, 'hung_up': true}),
+        ]),
+        {_ada: DateTime.utc(2026, 10, 11)},
+      );
+    });
+
+    test('is nobody without the flag', () {
+      expect(
+        callHangUps([
+          _entry({'muted': true}),
+        ]),
+        isEmpty,
+      );
+      expect(
+        callHangUps([
+          _entry({'hung_up': 'yes'}),
+        ]),
+        isEmpty,
+      );
+      expect(
+        callHangUps([
+          _entry({'hung_up': true}, key: _ada),
+        ]),
+        isEmpty,
+      );
+    });
+
+    test('is still a silence', () {
+      expect(
+        callSilences([
+          _entry({'muted': true, 'deafened': false, 'hung_up': true}),
+        ]),
+        {_ada: CallSilence.muted},
+      );
+    });
+  });
+
   group('is nobody when', () {
     final shapes = <String, MatrixEvent>{
       'the switch is no yes or no': _entry({'muted': 'yes'}),

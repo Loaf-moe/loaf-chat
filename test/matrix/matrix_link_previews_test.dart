@@ -115,7 +115,7 @@ void main() {
         expect(preview.description, 'Flour, water, salt and time.');
         expect(
           preview.image,
-          MxcThumbnail(client, Uri.parse('mxc://loaf.moe/oven'), 320),
+          MxcImage(client, Uri.parse('mxc://loaf.moe/oven'), size: 320),
         );
       },
     );

@@ -126,12 +126,15 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   }
 
   @override
+  Future<void> kickFromSpace(String spaceId, String userId) async {}
+
+  @override
   Future<void> invite(String roomId, List<String> userIds) async {
     invited[roomId] = userIds;
   }
 
   @override
-  Future<void> kick(String roomId, String userId) => _unwired();
+  Future<void> hangUp(String roomId, String userId) => _unwired();
   @override
   Future<void> silence(String roomId, String userId, CallSilence? to) =>
       _unwired();

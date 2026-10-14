@@ -38,6 +38,9 @@ class AvatarRef {
   int get hashCode => value.hashCode;
 }
 
+/// Where a puppet's messages come from; null means a real Matrix account.
+enum Bridge { discord }
+
 class Member {
   const Member(
     this.id,
@@ -47,10 +50,14 @@ class Member {
     this.statusMessage,
     this.powerLevel = 0,
     this.avatar,
+    this.bridge,
   });
 
   final String id;
   final String name;
+
+  /// Set by the backend from the user id; the UI reads this alone.
+  final Bridge? bridge;
 
   /// Null draws the initials.
   final AvatarRef? avatar;
@@ -102,6 +109,7 @@ class Member {
         ? this.statusMessage
         : (statusMessage.isEmpty ? null : statusMessage),
     powerLevel: powerLevel,
+    bridge: bridge,
   );
 }
 
@@ -296,7 +304,6 @@ class Channel {
     this.earlier = const [],
     this.waitingFor = const [],
     this.avatar,
-    this.kickBelow,
     this.silenced = const {},
     this.canSilence = false,
   });
@@ -347,12 +354,8 @@ class Channel {
   /// Invited to a DM you started, and not in it yet.
   final List<Member> waitingFor;
 
-  /// Your power level here, when it lets you kick: anyone whose own is
-  /// below it can be kicked by you. Null: you can kick nobody.
-  final int? kickBelow;
-
-  /// Whom a moderator has muted or deafened in this channel's call, by
-  /// user id.
+  /// Whom someone has muted or deafened for everyone in this channel's
+  /// call, by user id.
   final Map<String, CallSilence> silenced;
 
   /// Whether you may mute or deafen people in this channel's call for
@@ -389,7 +392,6 @@ class Channel {
     private: private,
     topic: topic,
     occupants: occupants ?? this.occupants,
-    kickBelow: kickBelow,
     silenced: silenced,
     canSilence: canSilence,
     joined: joined ?? this.joined,

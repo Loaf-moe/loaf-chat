@@ -258,6 +258,21 @@ void main() {
       expect(c.messages.single.previewLink, isNull);
     });
 
+    test('a mention request is new each time, and heard', () {
+      final t = timeline();
+      addTearDown(t.dispose);
+      var heard = 0;
+      t.addListener(() => heard++);
+      expect(t.mentionRequest, isNull);
+      t.mention(_them);
+      final first = t.mentionRequest;
+      expect(first?.member, _them);
+      expect(heard, 1);
+      t.mention(_them);
+      expect(t.mentionRequest, isNot(same(first)));
+      expect(heard, 2);
+    });
+
     test('the mock is always at the live end', () {
       final t = timeline();
       addTearDown(t.dispose);

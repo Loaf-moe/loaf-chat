@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/auth/loaf_session.dart';
 import 'package:loaf_native/ui/channel/channel_view.dart';
 import 'package:loaf_native/ui/channel/composer.dart';
+import 'package:loaf_native/ui/channel/message_group_tile.dart';
 import 'package:loaf_native/ui/channel/timeline.dart';
 import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -118,6 +119,19 @@ Future<_Timeline> _pump(
 }
 
 void main() {
+  testWidgets('names mention nobody until this device can write', (
+    tester,
+  ) async {
+    final timeline = await _pump(tester);
+    MessageGroupTile tile() =>
+        tester.widget<MessageGroupTile>(find.byType(MessageGroupTile));
+    expect(tile().onMention, isNull);
+
+    timeline.verified();
+    await tester.pumpAndSettle();
+    expect(tile().onMention, isNotNull);
+  });
+
   testWidgets('an unverified device is shown the way to send here', (
     tester,
   ) async {

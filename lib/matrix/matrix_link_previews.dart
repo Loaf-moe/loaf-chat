@@ -101,7 +101,7 @@ class MatrixLinkPreviews implements LinkPreviews {
       title: title is String ? title : null,
       description: description is String ? description : null,
       image: image != null && image.isScheme('mxc')
-          ? MxcThumbnail(client, image, timelineBuckets.first)
+          ? MxcImage(client, image, size: timelineBuckets.first)
           : null,
     );
   }

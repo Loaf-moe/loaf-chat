@@ -181,7 +181,11 @@ class CallController extends ChangeNotifier implements Calls {
   @override
   void retry() {
     final session = _session;
-    if (session == null || session.phase != CallPhase.failed) return;
+    if (session == null ||
+        (session.phase != CallPhase.failed &&
+            session.phase != CallPhase.hungUp)) {
+      return;
+    }
     _session = session.copyWith(phase: CallPhase.connecting);
     _connect();
     notifyListeners();
