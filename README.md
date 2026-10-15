@@ -60,10 +60,12 @@ Setup installs for the current user only and never asks for admin.
 
 ## Releasing
 
-Push a tag like `v0.1.0` that sits on `main`. `.github/workflows/release.yml`
-does the rest: it builds, signs and notarizes (on Windows, only the feed
-entry is signed), publishes a GitHub Release, and rewrites get.loaf.moe,
-including the download page in `tool/release/site/`.
+`mise run release` tags the tip of `main` with the next patch version and
+pushes it, after asking; `mise run release v0.2.0` picks the version. The
+tag is the whole release: `.github/workflows/release.yml` does the rest. It
+builds, signs and notarizes (on Windows, only the feed entry is signed),
+publishes a GitHub Release, and rewrites get.loaf.moe, including the
+download page in `tool/release/site/`.
 The same tag sends iOS to TestFlight, where the Testing group picks it up.
 Every step it takes is a `release:*` task in `mise.toml`, runnable by hand.
 Preview that page with `mise run release:site <latest.json> <out dir>`.

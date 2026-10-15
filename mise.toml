@@ -213,6 +213,11 @@ run = "tool/icons/render.sh"
 # runs by hand. <version> is the tag without its v, <build> the commit
 # count `release:version` prints.
 
+[tasks.release]
+description = "Release origin/main: tag it and push, which runs release.yml"
+usage = 'arg "[tag]" help="Like v1.2.3; the last release plus one patch when left out"'
+run = 'tool/release/tag.sh {{usage.tag}}'
+
 [tasks."release:version"]
 description = "Check a release tag; print its version name and build number"
 usage = 'arg "<tag>" help="Like v1.2.3, on main"'
