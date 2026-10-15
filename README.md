@@ -24,12 +24,15 @@ CocoaPods is not needed. `mise run run:macos` runs the app on the Mac and
 ## Building on Linux
 
 Video plays through GStreamer, and the player is a Rust crate that CMake
-builds with cargo. Install the development packages, then Rust:
+builds with cargo. On Debian or Ubuntu, install the toolchains and the
+development packages:
 
 ```nu
-sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 mise install
+mise run setup:linux:build
 ```
+
+`mise run setup:linux` installs just what the tests need.
 
 `mise install` brings Rust (pinned in `mise.toml`) along with Flutter. Run the
 build as `mise run build:linux` so cargo is on the path.
@@ -64,8 +67,9 @@ does the rest: it builds, signs and notarizes (on Windows, only the feed
 entry is signed), publishes a GitHub Release, and rewrites get.loaf.moe,
 including the download page in `tool/release/site/`.
 The same tag sends iOS to TestFlight, where the Testing group picks it up.
-Preview that page with `tool/release/site.sh <latest.json> <out dir>`.
-The signing keys were made once by `tool/release/keygen.sh`.
+Every step it takes is a `release:*` task in `mise.toml`, runnable by hand.
+Preview that page with `mise run release:site <latest.json> <out dir>`.
+The signing keys were made once by `mise run release:keygen`.
 
 ## Licence
 
