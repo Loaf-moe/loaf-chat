@@ -5,48 +5,32 @@ import Sparkle
 /// Sparkle, with no windows of its own. Sparkle asks its user driver what
 /// to show at each step; this one shows nothing and answers for itself,
 /// reporting to Dart instead, where the rail's notice is the only UI.
-/// The other end is `lib/update/sparkle_updater.dart`.
-final class UpdaterBridge: NSObject, SPUUpdaterDelegate, SPUUserDriver {
-  private let channel: FlutterMethodChannel
+/// Both directions are typed by Pigeon (`pigeons/sparkle.dart` →
+/// `Sparkle.g.swift`); the other end is `lib/update/macos/sparkle_updater.dart`.
+final class UpdaterBridge: NSObject, SparkleHost, SPUUpdaterDelegate, SPUUserDriver {
+  private let events: SparkleEvents
   private var updater: SPUUpdater?
 
   /// Set once an update is staged: either Sparkle's quiet install-on-quit
   /// path, or its ready-to-relaunch prompt. Calling it installs and relaunches.
   private var install: (() -> Void)?
 
-  /// Checks asked for by hand, answered together by whatever ends the
-  /// session: "found", "upToDate" or "failed".
-  private var checks: [FlutterResult] = []
+  /// Checks asked for by hand, answered together by whatever ends the session.
+  private var checks: [CheckedContinuation<SparkleCheck, Never>] = []
+
+  /// The last event on its way to Dart. Each waits for the one before, so
+  /// Dart hears preparing before ready, as it happened.
+  private var sending: Task<Void, Never>?
 
   init(messenger: FlutterBinaryMessenger) {
-    channel = FlutterMethodChannel(
-      name: "moe.loaf.chat/updater", binaryMessenger: messenger)
+    events = SparkleEvents(binaryMessenger: messenger)
     super.init()
-    channel.setMethodCallHandler { [weak self] call, result in
-      switch call.method {
-      case "start":
-        self?.start()
-        result(nil)
-      case "check":
-        guard let self else {
-          result("failed")
-          return
-        }
-        self.check(result)
-      case "restart":
-        guard let install = self?.install else {
-          result(FlutterError(code: "not-ready", message: nil, details: nil))
-          return
-        }
-        install()
-        result(nil)
-      default:
-        result(FlutterMethodNotImplemented)
-      }
-    }
+    SparkleHostSetup.setUp(binaryMessenger: messenger, api: self)
   }
 
-  private func start() {
+  // MARK: SparkleHost
+
+  func start() {
     guard updater == nil else { return }
     let sparkle = SPUUpdater(
       hostBundle: .main, applicationBundle: .main, userDriver: self, delegate: self)
@@ -61,32 +45,45 @@ final class UpdaterBridge: NSObject, SPUUpdaterDelegate, SPUUserDriver {
 
   /// A session already under way, a background check included, answers
   /// this one too: starting a second is not allowed while it runs.
-  private func check(_ result: @escaping FlutterResult) {
-    guard let updater else {
-      result("failed")
-      return
+  @MainActor func check() async -> SparkleCheck {
+    guard let updater else { return .failed }
+    if install != nil { return .found }
+    return await withCheckedContinuation { done in
+      checks.append(done)
+      if !updater.sessionInProgress { updater.checkForUpdates() }
     }
-    if install != nil {
-      result("found")
-      return
-    }
-    checks.append(result)
-    if !updater.sessionInProgress { updater.checkForUpdates() }
   }
 
-  private func answer(_ outcome: String) {
+  func restart() throws {
+    guard let install else {
+      throw PigeonError(code: "not-ready", message: "nothing is staged", details: nil)
+    }
+    install()
+  }
+
+  private func answer(_ outcome: SparkleCheck) {
     let waiting = checks
     checks = []
-    waiting.forEach { $0(outcome) }
+    waiting.forEach { $0.resume(returning: outcome) }
   }
 
-  private func send(_ state: String, version: String? = nil) {
-    channel.invokeMethod("state", arguments: ["state": state, "version": version])
+  private func send(_ event: @escaping @MainActor (SparkleEvents) async throws -> Void) {
+    let previous = sending
+    let events = self.events
+    sending = Task { @MainActor in
+      await previous?.value
+      do {
+        try await event(events)
+      } catch {
+        NSLog("[loaf update] Dart did not hear an update event: \(error)")
+      }
+    }
   }
 
   private func staged(_ item: SUAppcastItem?, install: @escaping () -> Void) {
     self.install = install
-    send("ready", version: item?.displayVersionString)
+    let version = item?.displayVersionString
+    send { try await $0.ready(version: version) }
   }
 
   private var found: SUAppcastItem?
@@ -95,33 +92,33 @@ final class UpdaterBridge: NSObject, SPUUpdaterDelegate, SPUUserDriver {
 
   func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
     found = item
-    if install == nil { send("preparing") }
-    answer("found")
+    if install == nil { send { try await $0.preparing() } }
+    answer(.found)
   }
 
   func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
-    if install == nil { send("idle") }
-    answer("upToDate")
+    if install == nil { send { try await $0.idle() } }
+    answer(.upToDate)
   }
 
   func updater(
     _ updater: SPUUpdater, failedToDownloadUpdate item: SUAppcastItem, error: Error
   ) {
     NSLog("[loaf update] download failed: \(error)")
-    if install == nil { send("idle") }
+    if install == nil { send { try await $0.idle() } }
   }
 
   /// Also follows not-found, which has answered already by then.
   func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
-    if install == nil { send("idle") }
-    answer("failed")
+    if install == nil { send { try await $0.idle() } }
+    answer(.failed)
   }
 
   /// The backstop: a session that ended without saying how still answers.
   func updater(
     _ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: Error?
   ) {
-    answer(install != nil ? "found" : "failed")
+    answer(install != nil ? .found : .failed)
   }
 
   /// The quiet path: downloaded and verified, waiting for the app to quit.
