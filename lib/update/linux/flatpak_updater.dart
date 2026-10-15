@@ -3,26 +3,28 @@
 library;
 
 import 'dart:async';
-import 'dart:io';
 
-import '../ui/model/updater.dart';
+import '../updater.dart';
 import 'flatpak_portal.dart';
-import 'state_updater.dart';
-import 'update_log.dart';
+import '../restarter.dart';
+import '../state_updater.dart';
+import '../update_log.dart';
 
 class FlatpakUpdater extends StateUpdater {
   FlatpakUpdater({
     required this.portal,
     required this.version,
-    void Function()? quit,
-  }) : _quit = quit ?? (() => exit(0));
+    this.restarter = const Restarter(),
+  });
 
   final FlatpakPortal portal;
 
   /// The newest release's version name, from the feed: the portal speaks in
   /// commits. Null, or a throw, means the notice goes without one.
   final Future<String?> Function() version;
-  final void Function() _quit;
+
+  /// Only its quit: the portal starts the new build itself.
+  final Restarter restarter;
 
   StreamSubscription<UpdateCommits>? _watching;
 
@@ -52,17 +54,17 @@ class FlatpakUpdater extends StateUpdater {
   @override
   Future<UpdateCheck> check() async {
     if (state is! UpdateIdle) return settled();
-    move(const UpdatePreparing());
+    transition(const UpdatePreparing());
     try {
       if (!await portal.update()) {
-        move(const UpdateIdle());
+        transition(const UpdateIdle());
         return UpdateCheck.upToDate;
       }
-      move(UpdateReady(await _version()));
+      transition(UpdateReady(await _version()));
       return UpdateCheck.ready;
     } catch (e, s) {
       updateLog('the Flatpak was not updated', e, s);
-      move(const UpdateIdle());
+      transition(const UpdateIdle());
       return UpdateCheck.failed;
     }
   }
@@ -72,19 +74,19 @@ class FlatpakUpdater extends StateUpdater {
     if (state is! UpdateIdle) return;
     if (commits.local != commits.running) {
       // The system got there first.
-      move(const UpdatePreparing());
-      move(UpdateReady(await _version()));
+      transition(const UpdatePreparing());
+      transition(UpdateReady(await _version()));
     } else if (commits.remote != commits.local) {
-      move(const UpdatePreparing());
+      transition(const UpdatePreparing());
       try {
-        move(
+        transition(
           await portal.update()
               ? UpdateReady(await _version())
               : const UpdateIdle(),
         );
       } catch (e, s) {
         updateLog('the Flatpak was not updated', e, s);
-        move(const UpdateIdle());
+        transition(const UpdateIdle());
       }
     }
   }
@@ -98,18 +100,9 @@ class FlatpakUpdater extends StateUpdater {
   }
 
   @override
-  Future<void> restart() async {
-    final ready = state;
-    if (ready is! UpdateReady) return;
-    move(UpdateApplying(ready.version));
-    try {
-      await portal.spawnLatest();
-    } catch (e, s) {
-      updateLog('the new Flatpak did not start', e, s);
-      move(ready);
-      return;
-    }
-    _quit();
+  Future<void> relaunch() async {
+    await portal.spawnLatest();
+    restarter.quit();
   }
 
   @override

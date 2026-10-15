@@ -35,13 +35,14 @@ import '../members/member_list.dart';
 import '../members/person_menu.dart';
 import '../members/presence_dot.dart';
 import '../mock/call_fixtures.dart';
+import '../mock/fake_updater.dart';
 import '../mock/fixtures.dart';
 import '../mock/mock_rooms.dart';
 import 'noticer.dart';
 import 'notifier.dart';
 import '../channel/timeline.dart' show messageUnavailable;
 import '../model/message_route.dart';
-import '../model/updater.dart';
+import '../../update/updater.dart';
 import '../platform.dart';
 import '../rooms/rooms.dart';
 import '../theme/loaf_theme.dart';
@@ -332,11 +333,11 @@ class _AppShellState extends State<AppShell> {
   String? _laterUpdate;
 
   AppNotice? get _updateNotice => switch (_updater.state) {
-    UpdateReady(:final version) when _laterUpdate != (version ?? '') =>
+    final UpdateReady ready when _laterUpdate != (ready.version ?? '') =>
       AppNotice.update(
-        version: version,
-        onAction: () => unawaited(_updater.restart()),
-        onDismiss: () => setState(() => _laterUpdate = version ?? ''),
+        version: ready.version,
+        onAction: () => unawaited(_updater.restart(ready)),
+        onDismiss: () => setState(() => _laterUpdate = ready.version ?? ''),
       ),
     UpdateApplying(:final version) => AppNotice.update(
       version: version,

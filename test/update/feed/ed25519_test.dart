@@ -1,9 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/update/ed25519.dart';
+import 'package:loaf_native/update/feed/ed25519.dart';
 
-import '../matrix/crypto_harness.dart';
+import '../../matrix/crypto_harness.dart';
 
 String _b64(String hex) => base64.encode([
   for (var i = 0; i < hex.length; i += 2)

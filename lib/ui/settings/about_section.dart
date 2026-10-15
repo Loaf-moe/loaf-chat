@@ -13,7 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../model/app_version.dart';
-import '../model/updater.dart';
+import '../../update/updater.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
 
@@ -115,7 +115,10 @@ class _AboutSectionState extends State<AboutSection> {
         _button(
           state is UpdateApplying ? 'restarting…' : 'restart to update',
           LucideIcons.rotateCw,
-          state is UpdateApplying ? null : () => unawaited(updater.restart()),
+          switch (state) {
+            final UpdateReady ready => () => unawaited(updater.restart(ready)),
+            _ => null,
+          },
         ),
       ],
       _ => [

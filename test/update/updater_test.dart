@@ -1,11 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/model/updater.dart';
+import 'package:loaf_native/ui/mock/fake_updater.dart';
+import 'package:loaf_native/update/updater.dart';
 
 void main() {
   test('no updater is idle, and restarting it does nothing', () async {
     const updater = NoUpdater();
     updater.addListener(() => fail('it never changes'));
-    await updater.restart();
+    await updater.restart(const UpdateReady('0.4.0'));
     expect(updater.state, isA<UpdateIdle>());
   });
 
@@ -22,8 +23,15 @@ void main() {
   test('restarting a fake is counted, and leaves it idle', () async {
     final updater = FakeUpdater(const UpdateReady('0.4.0'));
     addTearDown(updater.dispose);
-    await updater.restart();
+    await updater.restart(updater.state as UpdateReady);
     expect(updater.restarts, 1);
     expect(updater.state, isA<UpdateIdle>());
+  });
+
+  test('only a build on disk is staged', () {
+    expect(const UpdateIdle().staged, isFalse);
+    expect(const UpdatePreparing().staged, isFalse);
+    expect(const UpdateReady(null).staged, isTrue);
+    expect(const UpdateApplying('0.4.0').staged, isTrue);
   });
 }

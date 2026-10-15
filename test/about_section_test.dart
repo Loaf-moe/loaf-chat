@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/model/updater.dart';
+import 'package:loaf_native/ui/mock/fake_updater.dart';
+import 'package:loaf_native/update/updater.dart';
 import 'package:loaf_native/ui/settings/about_section.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 

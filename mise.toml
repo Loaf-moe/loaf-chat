@@ -24,6 +24,14 @@ run = [
 description = "Format the Dart"
 run = "dart format lib test tool packages"
 
+[tasks."gen:pigeon"]
+description = "Generate the typed Dart and Swift ends of the platform channels"
+run = [
+  "dart run pigeon --input pigeons/sparkle.dart",
+  # Pigeon writes Dart that dart format would change, and check fails on it.
+  "dart format lib/update/macos/sparkle.g.dart",
+]
+
 [tasks.vodozemac]
 description = "Build the encryption tests' native library (Linux, Windows)"
 run = "sh tool/build-vodozemac"
