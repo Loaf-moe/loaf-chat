@@ -11,59 +11,42 @@ library;
 import 'dart:async';
 import 'dart:io';
 
-import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 
-import '../updater.dart';
-import '../feed/asset_download.dart';
-import 'bundle_swap.dart';
-import '../feed/ed25519.dart';
 import '../feed/release_feed.dart';
-import '../state_updater.dart';
+import '../feed/verified_asset.dart';
+import '../self_updater.dart';
 import '../update_log.dart';
+import 'bundle_swap.dart';
 
 typedef Unpack = Future<void> Function(File zip, Directory into);
 
-class WindowsUpdater extends StateUpdater {
+class WindowsUpdater extends SelfUpdater {
   WindowsUpdater({
-    required this.install,
-    required this.build,
-    required this.feed,
-    required this.verify,
-    this.idleTimeout = const Duration(minutes: 2),
-    http.Client? httpClient,
-    Unpack? unpack,
-    Future<void> Function(String path)? launch,
-    void Function()? quit,
-  }) : _http = httpClient ?? http.Client(),
-       _swap = BundleSwap(install),
-       _unpack = unpack ?? _tarUnpack,
-       _launch = launch ?? _launchDetached,
-       _quit = quit ?? _exit;
+    required this.installation,
+    required super.build,
+    required super.feed,
+    required super.verify,
+    super.idleTimeout,
+    super.restarter,
+    super.httpClient,
+    this._unpack = _tarUnpack,
+  }) : _swap = BundleSwap(installation.path);
 
   /// The folder Setup installed into.
-  final Directory install;
-
-  /// This copy's build number.
-  final int build;
-  final Uri feed;
-  final SignatureCheck verify;
-
-  /// How long a download may go without a byte before it is given up on.
-  final Duration idleTimeout;
-  final http.Client _http;
+  final Directory installation;
   final BundleSwap _swap;
   final Unpack _unpack;
-  final Future<void> Function(String path) _launch;
-  final void Function() _quit;
 
-  final _timers = <Timer>[];
+  @override
+  AssetKind get kind => AssetKind.windows;
 
-  /// The check under way, which a second caller waits on rather than racing.
-  Future<UpdateCheck>? _checking;
+  @override
+  String get relaunchPath =>
+      p.join(installation.path, BundleSwap.executable.posix);
 
-  /// Clears what the last update left, then checks shortly after launch and
-  /// hourly after: the AppImage's pace, so a release reaches every desktop
-  /// together.
+  /// Clears what the last update left first.
+  @override
   Future<void> start({
     Duration checkAfter = const Duration(seconds: 30),
   }) async {
@@ -74,80 +57,31 @@ class WindowsUpdater extends StateUpdater {
     } catch (e, s) {
       updateLog('could not clear the last update', e, s);
     }
-    _timers
-      ..add(Timer(checkAfter, check))
-      ..add(Timer.periodic(const Duration(hours: 1), (_) => check()));
+    await super.start(checkAfter: checkAfter);
   }
 
   @override
-  bool get canCheck => true;
-
-  @override
-  Future<UpdateCheck> check() {
-    if (state is UpdateReady || state is UpdateApplying) {
-      return Future.value(UpdateCheck.ready);
-    }
-    return _checking ??= _check().whenComplete(() => _checking = null);
-  }
-
-  Future<UpdateCheck> _check() async {
+  Future<void> install(VerifiedAsset asset) async {
+    // Inside the install, so every rename of the swap stays on one volume.
     final work = _swap.work;
     try {
-      final release = await fetchRelease(_http, feed);
-      final asset = release.windows;
-      if (asset == null || release.build <= build) return UpdateCheck.upToDate;
-      if (!verify(release.signedTextFor(AssetKind.windows), asset.signature)) {
-        throw StateError('the feed is not signed by the release key');
-      }
-      if (asset.size > largestAsset) throw StateError('${asset.size} bytes');
-      move(const UpdatePreparing());
-
-      // Inside the install, so every rename of the swap stays on one volume.
       if (work.existsSync()) work.deleteSync(recursive: true);
       work.createSync(recursive: true);
-      final zip = File('${work.path}${Platform.pathSeparator}build.zip');
-      await downloadAsset(_http, asset, zip, idleTimeout: idleTimeout);
-      final staged = Directory('${work.path}${Platform.pathSeparator}staged')
-        ..createSync();
+      final zip = await asset.fetch(
+        client,
+        work.childFile('build.zip'),
+        idleTimeout: idleTimeout,
+      );
+      final staged = work.childDirectory('staged')..createSync();
       await _unpack(zip, staged);
       await _swap.apply(staged);
-      move(UpdateReady(release.version));
-      return UpdateCheck.ready;
-    } catch (e, s) {
-      updateLog('Windows was not updated', e, s);
-      move(const UpdateIdle());
-      return UpdateCheck.failed;
     } finally {
       try {
         if (work.existsSync()) work.deleteSync(recursive: true);
-      } catch (_) {}
+      } on FileSystemException {
+        // Held; the next launch's clean-up gets it.
+      }
     }
-  }
-
-  @override
-  Future<void> restart() async {
-    final ready = state;
-    if (ready is! UpdateReady) return;
-    move(UpdateApplying(ready.version));
-    final exe =
-        '${install.path}${Platform.pathSeparator}${BundleSwap.executable}';
-    try {
-      await _launch(exe);
-    } catch (e, s) {
-      updateLog('the new build did not start', e, s);
-      move(ready);
-      return;
-    }
-    _quit();
-  }
-
-  @override
-  void dispose() {
-    for (final timer in _timers) {
-      timer.cancel();
-    }
-    _http.close();
-    super.dispose();
   }
 }
 
@@ -170,8 +104,3 @@ Future<void> _tarUnpack(File zip, Directory into) async {
     );
   }
 }
-
-Future<void> _launchDetached(String path) =>
-    Process.start(path, const [], mode: ProcessStartMode.detached);
-
-void _exit() => exit(0);

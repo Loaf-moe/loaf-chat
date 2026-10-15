@@ -10,64 +10,65 @@
 library;
 
 import 'dart:async';
-import 'dart:io';
 
-typedef FileRename = Future<void> Function(String from, String to);
+import 'package:file/file.dart';
+import 'package:file/local.dart';
+import 'package:path/path.dart' as p;
+
+import '../../util/retry.dart';
 
 class BundleSwap {
   BundleSwap(
-    this.install, {
-    FileRename? rename,
-    this.retryFor = const Duration(seconds: 2),
-    this.retryEvery = const Duration(milliseconds: 100),
-  }) : _rename = rename ?? _renameFile;
+    String install, {
+    this.fs = const LocalFileSystem(),
+    this.attempts = 20,
+    this.attemptDelay = const Duration(milliseconds: 100),
+  }) : install = fs.directory(install);
+
+  final FileSystem fs;
 
   /// The folder Setup installed into, holding the running build.
   final Directory install;
 
-  /// How long a file someone else holds (Defender scanning a new DLL, say)
-  /// is waited for before the swap gives up.
-  final Duration retryFor;
-  final Duration retryEvery;
-  final FileRename _rename;
+  /// How many times a rename is tried, [attemptDelay] apart, before the
+  /// swap gives up: a file someone else holds (Defender scanning a new DLL,
+  /// say) is usually let go within a second or two.
+  final int attempts;
+  final Duration attemptDelay;
 
-  /// What every build has, and what goes in last and comes out last, so the
-  /// shortcut points at nothing for as short a time as possible.
-  static const executable = 'loaf-chat.exe';
+  /// Swapped last so the Start-menu shortcut is broken for the shortest
+  /// time.
+  static const executable = BuildFile('loaf-chat.exe');
 
   /// The updater's own folder inside the install: the download, the staged
   /// build, the journal. Never swapped.
   static const workName = 'update';
 
-  /// Setup's uninstaller and its log belong to Setup, not to any build.
-  static const _setupFiles = {'unins000.exe', 'unins000.dat'};
-
-  static const _old = '.old';
-
-  Directory get work => Directory(_join(install.path, workName));
-  File get _journal => File(_join(work.path, 'journal'));
+  Directory get work => install.childDirectory(workName);
+  File get _journal => work.childFile('journal');
 
   /// Puts [staged], an unpacked build, in place of the running one. Throws,
   /// with the old build put back, if any of it could not be done.
   Future<void> apply(Directory staged) async {
     final incoming = _files(staged);
     if (!incoming.contains(executable)) {
-      throw StateError('the new build has no $executable');
+      throw StateError('the new build has no ${executable.posix}');
     }
-    final outgoing = _files(install).where(_swappable).toList();
+    final outgoing = _files(install).where((f) => f.swappable);
 
     work.createSync(recursive: true);
     _journal.writeAsStringSync('');
     try {
-      for (final rel in _executableLast(outgoing)) {
-        _record('old', rel);
-        await _retrying(_at(install, rel), '${_at(install, rel)}$_old');
+      for (final file in _executableLast(outgoing)) {
+        final at = file.under(install);
+        _record(SetAside(file));
+        await _rename(at, '$at${BuildFile.aside}');
       }
-      for (final rel in _executableLast(incoming)) {
-        _record('new', rel);
-        final to = _at(install, rel);
-        File(to).parent.createSync(recursive: true);
-        await _retrying(_at(staged, rel), to);
+      for (final file in _executableLast(incoming)) {
+        final to = fs.file(file.under(install));
+        _record(PutInPlace(file));
+        to.parent.createSync(recursive: true);
+        await _rename(file.under(staged), to.path);
       }
     } catch (_) {
       _rollBack();
@@ -83,8 +84,8 @@ class BundleSwap {
   Future<bool> cleanUp() async {
     final interrupted = _journal.existsSync();
     if (interrupted) _rollBack();
-    for (final rel in _files(install)) {
-      if (rel.endsWith(_old)) _tryDelete(File(_at(install, rel)));
+    for (final file in _files(install)) {
+      if (file.isSetAside) _tryDelete(fs.file(file.under(install)));
     }
     if (work.existsSync()) {
       try {
@@ -100,74 +101,52 @@ class BundleSwap {
   /// under its own name. A line written for a rename that never happened
   /// finds nothing to undo.
   void _rollBack() {
-    final lines = _journal.readAsLinesSync().reversed;
-    for (final line in lines) {
-      final tab = line.indexOf('\t');
-      if (tab < 0) continue; // torn by the crash
-      final rel = line.substring(tab + 1);
-      final at = _at(install, rel);
-      switch (line.substring(0, tab)) {
-        case 'new':
-          _tryDelete(File(at));
-        case 'old':
-          final aside = File('$at$_old');
+    final entries = _journal.readAsLinesSync().map(JournalEntry.parse);
+    for (final entry in entries.toList().reversed) {
+      switch (entry) {
+        case PutInPlace(:final file):
+          _tryDelete(fs.file(file.under(install)));
+        case SetAside(:final file):
+          final at = fs.file(file.under(install));
+          final aside = fs.file('${at.path}${BuildFile.aside}');
           if (aside.existsSync()) {
-            if (File(at).existsSync()) File(at).deleteSync();
-            aside.renameSync(at);
+            if (at.existsSync()) at.deleteSync();
+            aside.renameSync(at.path);
           }
+        case null: // torn by the crash
       }
     }
     _journal.deleteSync();
-  }
-
-  Future<void> _retrying(String from, String to) async {
-    final until = DateTime.now().add(retryFor);
-    while (true) {
-      try {
-        return await _rename(from, to);
-      } on FileSystemException {
-        if (!DateTime.now().isBefore(until)) rethrow;
-        await Future<void>.delayed(retryEvery);
-      }
-    }
   }
 
   /// Written and flushed before the rename it names, so the journal never
   /// misses a rename that happened. Closed again straight after: Windows
   /// will not delete a file anyone holds open, and a swap that stalls must
   /// still leave a journal [cleanUp] can play back and delete.
-  void _record(String kind, String rel) => _journal.writeAsStringSync(
-    '$kind\t$rel\n',
+  void _record(JournalEntry entry) => _journal.writeAsStringSync(
+    '${entry.line}\n',
     mode: FileMode.append,
     flush: true,
   );
 
-  bool _swappable(String rel) {
-    final top = rel.split('/').first.toLowerCase();
-    return top != workName &&
-        !_setupFiles.contains(top) &&
-        !rel.toLowerCase().endsWith(_old);
-  }
+  /// Through [fs], where a test holds a file.
+  Future<void> _rename(String from, String to) =>
+      retry<File, FileSystemException>(
+        () => fs.file(from).rename(to),
+        attempts: attempts,
+        delay: attemptDelay,
+      );
 
-  static List<String> _executableLast(Iterable<String> rels) => [
-    ...rels.where((r) => r != executable),
-    if (rels.contains(executable)) executable,
+  /// Every file under [dir], sorted.
+  static List<BuildFile> _files(Directory dir) => [
+    for (final entity in dir.listSync(recursive: true, followLinks: false))
+      if (entity is File) BuildFile.of(entity, dir),
+  ]..sort((a, b) => a.posix.compareTo(b.posix));
+
+  static List<BuildFile> _executableLast(Iterable<BuildFile> files) => [
+    ...files.where((f) => f != executable),
+    if (files.contains(executable)) executable,
   ];
-
-  /// Every file under [dir], relative, with `/` between folders.
-  static List<String> _files(Directory dir) {
-    final sep = Platform.pathSeparator;
-    return [
-      for (final entity in dir.listSync(recursive: true, followLinks: false))
-        if (entity is File)
-          entity.path.substring(dir.path.length + 1).replaceAll(sep, '/'),
-    ]..sort();
-  }
-
-  static String _at(Directory dir, String rel) =>
-      _join(dir.path, rel.replaceAll('/', Platform.pathSeparator));
-
-  static String _join(String a, String b) => '$a${Platform.pathSeparator}$b';
 
   static void _tryDelete(File file) {
     try {
@@ -178,4 +157,70 @@ class BundleSwap {
   }
 }
 
-Future<void> _renameFile(String from, String to) => File(from).rename(to);
+/// A file's place inside a build, written the same on every platform:
+/// relative, with `/` between folders. The journal holds these.
+extension type const BuildFile(String posix) {
+  BuildFile.of(File file, Directory root)
+    : this(
+        p.posix.joinAll(
+          file.fileSystem.path.split(
+            file.fileSystem.path.relative(file.path, from: root.path),
+          ),
+        ),
+      );
+
+  /// Added to a file's name when the swap sets it aside.
+  static const aside = '.old';
+
+  /// Setup's uninstaller and its log belong to Setup, not to any build.
+  static const _setupFiles = {'unins000.exe', 'unins000.dat'};
+
+  /// What the last swap set aside, for the next launch to delete.
+  bool get isSetAside => posix.toLowerCase().endsWith(aside);
+
+  /// Part of the running build: not Setup's, not the updater's own folder,
+  /// not set aside by the last swap.
+  bool get swappable {
+    final top = p.posix.split(posix).first.toLowerCase();
+    return top != BundleSwap.workName &&
+        !_setupFiles.contains(top) &&
+        !isSetAside;
+  }
+
+  /// Its path in [root]'s copy of the build.
+  String under(Directory root) =>
+      root.fileSystem.path.joinAll([root.path, ...p.posix.split(posix)]);
+}
+
+/// One line of the journal: a rename about to happen.
+sealed class JournalEntry {
+  const JournalEntry(this.file);
+
+  final BuildFile file;
+
+  String get line;
+
+  /// Null for a line a crash tore. Windows allows no tab in a file name, so
+  /// the first one always ends the kind.
+  static JournalEntry? parse(String line) => switch (line.split('\t')) {
+    ['old', final path] when path.isNotEmpty => SetAside(BuildFile(path)),
+    ['new', final path] when path.isNotEmpty => PutInPlace(BuildFile(path)),
+    _ => null,
+  };
+}
+
+/// The running build's [file] steps aside as `<file>.old`.
+final class SetAside extends JournalEntry {
+  const SetAside(super.file);
+
+  @override
+  String get line => 'old\t${file.posix}';
+}
+
+/// The new build's [file] takes its place in the install.
+final class PutInPlace extends JournalEntry {
+  const PutInPlace(super.file);
+
+  @override
+  String get line => 'new\t${file.posix}';
+}

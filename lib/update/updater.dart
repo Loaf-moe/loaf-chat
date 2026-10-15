@@ -9,6 +9,13 @@ import 'package:flutter/foundation.dart';
 
 sealed class UpdateState {
   const UpdateState();
+
+  /// Whether a newer build is on disk, ready or already being restarted
+  /// into. A check then has nothing left to find.
+  bool get staged => switch (this) {
+    UpdateReady() || UpdateApplying() => true,
+    UpdateIdle() || UpdatePreparing() => false,
+  };
 }
 
 /// Nothing newer is known.
@@ -50,8 +57,10 @@ abstract class Updater implements Listenable {
   /// [state] is [UpdateReady].
   Future<UpdateCheck> check();
 
-  /// Restarts into the staged build. Only means anything in [UpdateReady].
-  Future<void> restart();
+  /// Restarts into the build [ready] names, which is the [state] read a
+  /// moment ago: taking it means nothing can ask for a restart with nothing
+  /// staged. If [state] has moved on since, this does nothing.
+  Future<void> restart(UpdateReady ready);
 
   void dispose();
 }
@@ -71,7 +80,7 @@ class NoUpdater implements Updater {
   Future<UpdateCheck> check() async => UpdateCheck.upToDate;
 
   @override
-  Future<void> restart() async {}
+  Future<void> restart(UpdateReady ready) async {}
 
   @override
   void addListener(VoidCallback listener) {}

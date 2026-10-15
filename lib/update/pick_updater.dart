@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 
 import 'updater.dart';
 import 'linux/appimage_updater.dart';
@@ -52,8 +53,7 @@ Updater pickUpdater() {
     // Setup's uninstall log sits beside the executable it installed.
     installedBySetup:
         defaultTargetPlatform == TargetPlatform.windows &&
-        File('${install.path}${Platform.pathSeparator}unins000.dat')
-            .existsSync(),
+        File(p.join(install.path, 'unins000.dat')).existsSync(),
   )) {
     case UpdaterKind.none:
       return const NoUpdater();
@@ -74,15 +74,17 @@ Updater pickUpdater() {
       unawaited(updater.start());
       return updater;
     case UpdaterKind.appImage:
-      return AppImageUpdater(
+      final updater = AppImageUpdater(
         appImage: File(environment['APPIMAGE']!),
         build: buildNumber,
         feed: latestFeed,
         verify: ed25519Check(releasePublicKey),
-      )..start();
+      );
+      unawaited(updater.start());
+      return updater;
     case UpdaterKind.windows:
       final updater = WindowsUpdater(
-        install: install,
+        installation: install,
         build: buildNumber,
         feed: latestFeed,
         verify: ed25519Check(releasePublicKey),
