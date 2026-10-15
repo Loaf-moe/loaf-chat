@@ -6,12 +6,12 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:path_provider/path_provider.dart';
+
+import '../../util/json_store.dart';
 
 /// A microphone or a speaker, as the system names it.
 @immutable
@@ -60,7 +60,7 @@ List<DeviceChoice> deviceChoices(
 ];
 
 @immutable
-class VoiceSettings {
+class VoiceSettings implements Jsonable {
   const VoiceSettings({
     this.microphone,
     this.speaker,
@@ -140,6 +140,7 @@ class VoiceSettings {
     volumes: volumes ?? this.volumes,
   );
 
+  @override
   Map<String, Object> toJson() => {
     'microphone': ?microphone?.toJson(),
     'speaker': ?speaker?.toJson(),
@@ -176,56 +177,6 @@ class VoiceSettings {
   );
 }
 
-abstract interface class VoiceStore {
-  /// Null when nothing has been saved, or what was saved can't be read.
-  Future<VoiceSettings?> load();
-
-  Future<void> save(VoiceSettings settings);
-}
-
-/// Forgets on exit: for tests and the mock backend.
-class MemoryVoiceStore implements VoiceStore {
-  MemoryVoiceStore([this.saved]);
-
-  VoiceSettings? saved;
-
-  @override
-  Future<VoiceSettings?> load() async => saved;
-
-  @override
-  Future<void> save(VoiceSettings settings) async => saved = settings;
-}
-
-class FileVoiceStore implements VoiceStore {
-  FileVoiceStore(this.file);
-
-  static Future<FileVoiceStore> inSupportDirectory() async => FileVoiceStore(
-    File(
-      '${(await getApplicationSupportDirectory()).path}'
-      '${Platform.pathSeparator}voice.json',
-    ),
-  );
-
-  final File file;
-
-  @override
-  Future<VoiceSettings?> load() async {
-    try {
-      return VoiceSettings.fromJson(jsonDecode(await file.readAsString()));
-    } on FileSystemException {
-      return null;
-    } on FormatException {
-      return null;
-    }
-  }
-
-  @override
-  Future<void> save(VoiceSettings settings) async {
-    await file.parent.create(recursive: true);
-    await file.writeAsString(jsonEncode(settings.toJson()));
-  }
-}
-
 /// The machine's microphones and speakers.
 abstract interface class AudioDevices {
   Future<List<AudioDevice>> microphones();
@@ -244,7 +195,7 @@ class VoiceController extends ChangeNotifier {
   }) : settings = ValueNotifier(settings);
 
   static Future<VoiceController> load(
-    VoiceStore store, {
+    Store<VoiceSettings> store, {
     required AudioDevices devices,
   }) async => VoiceController(
     store: store,
@@ -252,7 +203,7 @@ class VoiceController extends ChangeNotifier {
     settings: await store.load() ?? const VoiceSettings(),
   );
 
-  final VoiceStore _store;
+  final Store<VoiceSettings> _store;
   final AudioDevices _devices;
 
   /// Null until the first [refresh]: asking the machine about its devices

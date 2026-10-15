@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/settings/appearance_section.dart';
 import 'package:loaf_native/ui/theme/appearance.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 /// Returns the controller so each test can unmount, then dispose it: the
 /// controller's midnight Timer must be gone before testWidgets checks.
@@ -12,7 +13,7 @@ Future<AppearanceController> _pump(
   AppearanceSettings settings = const AppearanceSettings(),
 }) async {
   final c = AppearanceController(
-    store: MemoryAppearanceStore(),
+    store: MemoryStore<AppearanceSettings>(),
     settings: settings,
     clock: () => now,
   );

@@ -13,6 +13,7 @@ import 'package:flutter/foundation.dart';
 // UI draws.
 import 'package:matrix/matrix.dart' hide Presence, Profile, Timeline;
 import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart' show DatabaseException;
 
 import '../ui/channel/timeline.dart';
@@ -45,6 +46,8 @@ import 'matrix_unread.dart';
 import 'media_store.dart';
 import 'unread_rules.dart';
 import 'unread_tally.dart';
+import '../notify/toast_image.dart';
+import '../util/files.dart';
 
 /// `m.room.create` types that make a room a voice channel: Element's video
 /// rooms, stable and unstable.
@@ -126,43 +129,23 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         mxc,
         size: avatarBuckets[1],
       ).bytes().timeout(const Duration(seconds: 2));
-      final dir = Directory(
-        '${(await getTemporaryDirectory()).path}'
-        '${Platform.pathSeparator}loaf-notice-avatars',
-      );
-      await dir.create(recursive: true);
-      final name = sha256.convert(utf8.encode(ref.value)).toString();
       // A picture Windows can't name by extension is no picture.
-      final ext = imageExtension(bytes);
+      final ext = toastImageExtension(bytes);
       if (ext == null) return null;
-      final file = File('${dir.path}${Platform.pathSeparator}$name.$ext');
-      if (!await file.exists()) {
-        // Written beside, then renamed in: a reader (the OS, reading the
-        // toast's picture) never sees half a file.
-        final part = File('${file.path}.${bytes.hashCode}.part');
-        await part.writeAsBytes(bytes, flush: true);
-        await part.rename(file.path);
-      }
+      final name = sha256.convert(utf8.encode(ref.value)).toString();
+      final file = File(
+        p.join(
+          (await getTemporaryDirectory()).path,
+          'loaf-notice-avatars',
+          '$name.$ext',
+        ),
+      );
+      // Atomic: the OS, reading the toast's picture, never sees half a file.
+      if (!await file.exists()) await writeAtomically(file, bytes);
       return file.path;
     } on Object {
       return null;
     }
-  }
-
-  /// Windows reads a toast's picture by its extension, so this names the
-  /// format by its magic bytes; null when it is none of the four.
-  @visibleForTesting
-  static String? imageExtension(Uint8List b) {
-    bool at(int i, List<int> m) =>
-        b.length >= i + m.length &&
-        [for (var k = 0; k < m.length; k++) b[i + k] == m[k]].every((x) => x);
-    if (at(0, [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) return 'png';
-    if (at(0, [0xFF, 0xD8, 0xFF])) return 'jpg';
-    if (at(0, [0x47, 0x49, 0x46, 0x38])) return 'gif';
-    if (at(0, [0x52, 0x49, 0x46, 0x46]) && at(8, [0x57, 0x45, 0x42, 0x50])) {
-      return 'webp';
-    }
-    return null;
   }
 
   @override
@@ -184,9 +167,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     // In the media root's parent, not in it: `MediaStore.evict` walks the
     // root and must never see this file.
     file: switch (_mediaRoot ?? _storageRoot()) {
-      final root? => File(
-        '${root.parent.path}${Platform.pathSeparator}unread.json',
-      ),
+      final root? => File(p.join(root.parent.path, 'unread.json')),
       null => null,
     },
     onChange: () {
@@ -351,9 +332,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final location = database is MatrixSdkDatabase
         ? database.fileStorageLocation
         : null;
-    return location == null
-        ? null
-        : Directory('${location.toFilePath()}${Platform.pathSeparator}files');
+    return switch (location) {
+      final location? => Directory(p.join(location.toFilePath(), 'files')),
+      null => null,
+    };
   }
 
   @override

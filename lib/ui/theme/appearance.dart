@@ -7,11 +7,10 @@
 library;
 
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/widgets.dart';
-import 'package:path_provider/path_provider.dart';
+
+import '../../util/json_store.dart';
 
 enum LoafThemeId {
   loafDark('Loaf Dark'),
@@ -30,7 +29,7 @@ bool inNihonSeason(DateTime local) {
 }
 
 @immutable
-class AppearanceSettings {
+class AppearanceSettings implements Jsonable {
   const AppearanceSettings({
     this.theme = LoafThemeId.loafDark,
     this.easterEggs = true,
@@ -72,62 +71,12 @@ class AppearanceSettings {
     externalMedia: externalMedia ?? this.externalMedia,
   );
 
+  @override
   Map<String, Object> toJson() => {
     'theme': theme.name,
     'easterEggs': easterEggs,
     'externalMedia': externalMedia,
   };
-}
-
-abstract interface class AppearanceStore {
-  /// Null when nothing has been saved, or what was saved can't be read.
-  Future<AppearanceSettings?> load();
-
-  Future<void> save(AppearanceSettings settings);
-}
-
-/// Forgets on exit: for tests and the mock backend.
-class MemoryAppearanceStore implements AppearanceStore {
-  MemoryAppearanceStore([this.saved]);
-
-  AppearanceSettings? saved;
-
-  @override
-  Future<AppearanceSettings?> load() async => saved;
-
-  @override
-  Future<void> save(AppearanceSettings settings) async => saved = settings;
-}
-
-class FileAppearanceStore implements AppearanceStore {
-  FileAppearanceStore(this.file);
-
-  static Future<FileAppearanceStore> inSupportDirectory() async =>
-      FileAppearanceStore(
-        File(
-          '${(await getApplicationSupportDirectory()).path}'
-          '${Platform.pathSeparator}appearance.json',
-        ),
-      );
-
-  final File file;
-
-  @override
-  Future<AppearanceSettings?> load() async {
-    try {
-      return AppearanceSettings.fromJson(jsonDecode(await file.readAsString()));
-    } on FileSystemException {
-      return null;
-    } on FormatException {
-      return null;
-    }
-  }
-
-  @override
-  Future<void> save(AppearanceSettings settings) async {
-    await file.parent.create(recursive: true);
-    await file.writeAsString(jsonEncode(settings.toJson()));
-  }
 }
 
 class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
@@ -143,7 +92,7 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   static Future<AppearanceController> load(
-    AppearanceStore store, {
+    Store<AppearanceSettings> store, {
     DateTime Function() clock = DateTime.now,
   }) async => AppearanceController(
     store: store,
@@ -151,7 +100,7 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
     clock: clock,
   );
 
-  final AppearanceStore _store;
+  final Store<AppearanceSettings> _store;
   final DateTime Function() _clock;
   AppearanceSettings _settings;
   Timer? _midnight;

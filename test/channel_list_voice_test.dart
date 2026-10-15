@@ -11,6 +11,7 @@ import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/widgets/speaking_ring.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 const _you = Member('@you:loaf.test', 'you', Color(0xFF888888));
 const _ada = Member('@ada:loaf.test', 'ada', Color(0xFF884422));
@@ -97,7 +98,7 @@ Future<void> _pump(
 
 VoiceController _voice({VoiceSettings saved = const VoiceSettings()}) {
   final voice = VoiceController(
-    store: MemoryVoiceStore(),
+    store: MemoryStore<VoiceSettings>(),
     devices: MemoryAudioDevices(),
     settings: saved,
   );

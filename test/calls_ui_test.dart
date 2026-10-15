@@ -12,6 +12,7 @@ import 'package:loaf_native/ui/shell/channel_list.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/widgets/speaking_ring.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 final _mobile = TargetPlatformVariant.only(TargetPlatform.iOS);
 final _android = TargetPlatformVariant.only(TargetPlatform.android);
@@ -285,7 +286,7 @@ void main() {
       variant: _desktop,
       (tester) async {
         final voice = VoiceController(
-          store: MemoryVoiceStore(),
+          store: MemoryStore<VoiceSettings>(),
           devices: MemoryAudioDevices(),
         );
         addTearDown(voice.dispose);

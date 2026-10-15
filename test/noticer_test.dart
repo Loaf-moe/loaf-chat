@@ -10,6 +10,7 @@ import 'package:loaf_native/ui/model/models.dart';
 import 'package:loaf_native/ui/model/notice.dart';
 import 'package:loaf_native/ui/settings/notification_settings.dart';
 import 'package:loaf_native/ui/shell/noticer.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 /// Mock rooms whose read receipts the test sets, and an avatar file for
 /// anyone.
@@ -65,7 +66,7 @@ void main() {
     rooms = _Rooms();
     desktop = _Desktop();
     settings = await NotificationController.load(
-      MemoryNotificationStore(),
+      MemoryStore<NotificationSettings>(),
       chime: FakeChime(),
       desktop: desktop,
     );

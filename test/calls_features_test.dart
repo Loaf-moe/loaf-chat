@@ -15,6 +15,8 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import 'voice_only_calls.dart';
 
+import 'package:loaf_native/util/json_store.dart';
+
 const _desktop = TargetPlatformVariant({TargetPlatform.linux});
 const _mobile = TargetPlatformVariant({TargetPlatform.iOS});
 
@@ -41,7 +43,7 @@ Future<void> _pump(
 
 VoiceController _voice({VoiceSettings saved = const VoiceSettings()}) {
   final voice = VoiceController(
-    store: MemoryVoiceStore(),
+    store: MemoryStore<VoiceSettings>(),
     devices: MemoryAudioDevices(),
     settings: saved,
   );
