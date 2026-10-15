@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc show Helper;
 import 'package:livekit_client/livekit_client.dart';
+import 'package:matrix/matrix.dart' show Logs;
 
 import '../matrix/call_media.dart';
 import '../ui/settings/voice_settings.dart';
@@ -102,7 +103,7 @@ class LiveKitMedia implements CallMedia {
         ),
       );
     }
-    return _LiveKitConnection(room, selectSpeaker);
+    return LiveKitConnection(room, selectSpeaker);
   }
 }
 
@@ -120,10 +121,31 @@ class _AlwaysOnline extends ConnectivityPlatform {
       const Stream.empty();
 }
 
-class _LiveKitConnection extends ChangeNotifier implements CallConnection {
-  _LiveKitConnection(this._room, this._selectSpeaker) {
+class LiveKitConnection extends ChangeNotifier implements CallConnection {
+  LiveKitConnection(this._room, this._selectSpeaker) {
     _room.addListener(notifyListeners);
     _events = _room.createListener()
+      ..on<RoomAttemptReconnectEvent>((event) {
+        Logs().w(
+          "[loaf] the call's media dropped: reconnect attempt "
+          '${event.attempt} of ${event.maxAttemptsRetry} '
+          'in ${event.nextRetryDelaysInMs} ms',
+        );
+        _setLink(CallLink.reconnecting);
+      })
+      ..on<RoomReconnectingEvent>((_) => _setLink(CallLink.reconnecting))
+      ..on<RoomResumingEvent>((_) => _setLink(CallLink.reconnecting))
+      ..on<RoomReconnectedEvent>((_) => _setLink(CallLink.connected))
+      ..on<RoomDisconnectedEvent>((event) {
+        Logs().w("[loaf] the call's media is gone: ${event.reason}");
+        _setLink(switch (event.reason) {
+          DisconnectReason.participantRemoved ||
+          DisconnectReason.duplicateIdentity ||
+          DisconnectReason.roomDeleted ||
+          DisconnectReason.roomClosed => CallLink.ended,
+          _ => CallLink.lost,
+        });
+      })
       ..on<TrackSubscribedEvent>((event) async {
         final track = event.track;
         if (track is! RemoteAudioTrack) return;
@@ -171,13 +193,18 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
   LocalAudioTrack? get _track =>
       _room.localParticipant?.audioTrackPublications.firstOrNull?.track;
 
+  // LiveKit's socket state reads disconnected before its own reconnect
+  // starts; only its events say whether it has given up.
+  var _link = CallLink.connected;
+
   @override
-  CallLink get link => switch (_room.connectionState) {
-    ConnectionState.connected => CallLink.connected,
-    ConnectionState.connecting ||
-    ConnectionState.reconnecting => CallLink.reconnecting,
-    ConnectionState.disconnected => CallLink.lost,
-  };
+  CallLink get link => _link;
+
+  void _setLink(CallLink link) {
+    if (link == _link) return;
+    _link = link;
+    notifyListeners();
+  }
 
   @override
   bool get speaking => _room.localParticipant?.isSpeaking ?? false;
@@ -340,7 +367,16 @@ class _LiveKitConnection extends ChangeNotifier implements CallConnection {
   Future<void> disconnect() async {
     _room.removeListener(notifyListeners);
     await _events.dispose();
-    await _room.disconnect();
-    await _room.dispose();
+    // Once LiveKit has said the media is gone there is nothing to leave,
+    // and its own leave can wait ten seconds for an event already sent.
+    if (_link == CallLink.lost || _link == CallLink.ended) {
+      await _room.dispose();
+      return;
+    }
+    try {
+      await _room.disconnect();
+    } finally {
+      await _room.dispose();
+    }
   }
 }
