@@ -1,7 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/model/updater.dart';
-import 'package:loaf_native/update/sparkle_updater.dart';
+import 'package:loaf_native/update/updater.dart';
+import 'package:loaf_native/update/macos/sparkle_updater.dart';
 
 const _channel = MethodChannel('moe.loaf.chat/updater');
 

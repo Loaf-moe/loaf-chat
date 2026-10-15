@@ -13,7 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../model/app_version.dart';
-import '../model/updater.dart';
+import '../../update/updater.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_button.dart';
 

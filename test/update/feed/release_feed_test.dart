@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:loaf_native/update/release_feed.dart';
+import 'package:loaf_native/update/feed/release_feed.dart';
 
 const _feed = '''
 {"version":"0.1.1","build":412,"appimage":{

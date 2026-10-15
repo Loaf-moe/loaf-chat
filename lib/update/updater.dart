@@ -1,7 +1,8 @@
 /// How this copy of the app replaces itself with a newer one. The shell
 /// reads this and nothing else: which platform mechanism stands behind it
-/// (Sparkle, the Flatpak portal, our own for an AppImage) is `lib/update/`'s
-/// business. Phones have none; the stores own their updates.
+/// (Sparkle, the Flatpak portal, our own for an AppImage) is the business
+/// of the platform folders beside this file. Phones have none; the stores
+/// own their updates.
 library;
 
 import 'package:flutter/foundation.dart';
@@ -80,50 +81,4 @@ class NoUpdater implements Updater {
 
   @override
   void dispose() {}
-}
-
-/// Says whatever it is told to, for tests and the mock.
-class FakeUpdater extends ChangeNotifier implements Updater {
-  FakeUpdater([this._state = const UpdateIdle()]);
-
-  UpdateState _state;
-  int restarts = 0;
-  int checks = 0;
-
-  /// What the next [check] answers. Ready moves [state] to [UpdateReady].
-  UpdateCheck nextCheck = UpdateCheck.upToDate;
-  String? nextVersion = '0.3.0';
-
-  /// How long a check takes. The mock waits, so "checking…" is seen.
-  Duration checkTakes = Duration.zero;
-
-  @override
-  bool get canCheck => true;
-
-  @override
-  Future<UpdateCheck> check() async {
-    checks++;
-    if (checkTakes > Duration.zero) {
-      state = const UpdatePreparing();
-      await Future<void>.delayed(checkTakes);
-      if (nextCheck != UpdateCheck.ready) state = const UpdateIdle();
-    }
-    if (nextCheck == UpdateCheck.ready) state = UpdateReady(nextVersion);
-    return nextCheck;
-  }
-
-  @override
-  UpdateState get state => _state;
-
-  set state(UpdateState value) {
-    _state = value;
-    notifyListeners();
-  }
-
-  /// As if the app had restarted: the notice has nothing left to say.
-  @override
-  Future<void> restart() async {
-    restarts++;
-    state = const UpdateIdle();
-  }
 }

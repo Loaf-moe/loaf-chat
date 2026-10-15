@@ -5,7 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../ui/model/updater.dart';
+import 'updater.dart';
 
 abstract class StateUpdater extends ChangeNotifier implements Updater {
   UpdateState _state = const UpdateIdle();

@@ -8,9 +8,9 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
-import '../ui/model/updater.dart';
-import 'state_updater.dart';
-import 'update_log.dart';
+import '../updater.dart';
+import '../state_updater.dart';
+import '../update_log.dart';
 
 class SparkleUpdater extends StateUpdater {
   SparkleUpdater({

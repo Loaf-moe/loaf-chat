@@ -8,15 +8,15 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-import '../ui/model/updater.dart';
-import 'appimage_updater.dart';
-import 'build_info.dart';
-import 'dbus_flatpak_portal.dart';
-import 'ed25519.dart';
-import 'flatpak_updater.dart';
-import 'release_feed.dart';
-import 'sparkle_updater.dart';
-import 'windows_updater.dart';
+import 'updater.dart';
+import 'linux/appimage_updater.dart';
+import 'feed/build_info.dart';
+import 'linux/dbus_flatpak_portal.dart';
+import 'feed/ed25519.dart';
+import 'linux/flatpak_updater.dart';
+import 'feed/release_feed.dart';
+import 'macos/sparkle_updater.dart';
+import 'windows/windows_updater.dart';
 
 enum UpdaterKind { none, sparkle, flatpak, appImage, windows }
 

@@ -9,7 +9,7 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 import 'release_feed.dart';
-import 'update_log.dart';
+import '../update_log.dart';
 
 /// Nothing sane is this big; refuse before filling the disk.
 const largestAsset = 500 * 1024 * 1024;

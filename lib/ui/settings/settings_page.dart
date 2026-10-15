@@ -22,7 +22,7 @@ import '../theme/appearance.dart';
 import '../theme/loaf_theme.dart';
 import '../model/media_source.dart';
 import '../widgets/loaf_button.dart';
-import '../model/updater.dart';
+import '../../update/updater.dart';
 import 'about_section.dart';
 import 'account_section.dart';
 import 'appearance_section.dart';

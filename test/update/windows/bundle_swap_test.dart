@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/update/bundle_swap.dart';
+import 'package:loaf_native/update/windows/bundle_swap.dart';
 
 final _sep = Platform.pathSeparator;
 
