@@ -8,9 +8,72 @@ rust = "1.96.1"
 # build stops at "Failed to copy plugin". tool/bin puts Apple's first.
 _.path = ["tool/bin"]
 
-[tasks.deps]
-description = "Fetch the Dart packages"
-run = "flutter pub get"
+# `mise install` fetches every dependency once the toolchains are in. It runs
+# even when nothing new was installed, so `mise install` is also how to
+# catch up after a pull.
+[hooks]
+postinstall = { task = "dependencies" }
+
+[tasks.dependencies]
+description = "Fetch every Dart package and Rust crate"
+run = [{ task = "dependencies:dart" }, { task = "dependencies:rust" }]
+
+# loaf_media's tests run in its own folder, against its own lockfile.
+[tasks."dependencies:dart"]
+description = "Fetch the Dart packages, the app's and loaf_media's"
+run = ["flutter pub get", "flutter pub get --directory packages/loaf_media"]
+
+# Every target's crates, so a Windows-only crate is there on a Mac too.
+[tasks."dependencies:rust"]
+description = "Fetch the Rust crates of every crate in the repo"
+run = [
+  "cargo fetch --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml",
+  "cargo fetch --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml",
+  "cargo fetch --locked --manifest-path packages/loaf_media/windows/rust/Cargo.toml",
+  "cargo fetch --locked --manifest-path packages/loaf_notify/rust/Cargo.toml",
+  "cargo fetch --locked --manifest-path packages/loaf_chrome/rust/Cargo.toml",
+  "cargo fetch --locked --manifest-path tool/chime/Cargo.toml",
+]
+
+[tasks.clean]
+description = "Remove Flutter's build output and the vodozemac library"
+run = "flutter clean"
+
+# ── CI ───────────────────────────────────────────────────────────────────
+# What the GitHub runners need that a developer's machine does not.
+
+# The runner image's LLVM brings libunwind-14-dev, which conflicts with the
+# libunwind-dev GStreamer needs; nothing here uses LLVM's libunwind (Flutter
+# links libstdc++), so it goes first.
+[tasks."ci:setup:linux"]
+description = "CI: install what the tests need on the Ubuntu runner (GStreamer)"
+run = [
+  "sudo apt-get update",
+  "sudo apt-get remove -y libunwind-14-dev",
+  """sudo apt-get install -y libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good \
+    gstreamer1.0-libav""",
+]
+
+# libwebkit2gtk and libsoup: desktop_webview_window (via flutter_web_auth_2)
+# requires them at CMake time. The GStreamer dev packages are loaf_media's:
+# its Linux plugin finds them through pkg-config.
+[tasks."ci:setup:linux:release"]
+description = "CI: install what the release's Linux build needs on its Ubuntu runner"
+run = [
+  "sudo apt-get update",
+  "sudo apt-get remove -y libunwind-14-dev",
+  """sudo apt-get install -y clang cmake ninja-build pkg-config \
+    libgtk-3-dev liblzma-dev libstdc++-12-dev jq \
+    libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev""",
+]
+
+# flutter test runs on half the cores by default; a CI runner has nothing
+# else to do with the other half.
+[tasks."ci:test"]
+description = "CI: the app's tests on every core of the Linux runner"
+run = 'flutter test -j "$(nproc)"'
 
 [tasks.check]
 description = "Analyze, and fail on unformatted Dart"
@@ -57,9 +120,33 @@ run = "cargo test --locked --manifest-path packages/loaf_chrome/rust/Cargo.toml"
 description = "The Linux player's Rust tests; needs GStreamer"
 run = "cargo test --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml"
 
+[tasks."test:player:windows"]
+description = "The Windows player's Rust tests; needs Media Foundation"
+run = "cargo test --locked --manifest-path packages/loaf_media/windows/rust/Cargo.toml"
+
+[tasks."test:chime"]
+description = "The chime generator's Rust tests"
+run = "cargo test --locked --manifest-path tool/chime/Cargo.toml"
+
 [tasks."test:all"]
 description = "Every test that runs on any platform"
-run = [{ task = "test" }, { task = "test:media" }, { task = "test:streams" }, { task = "test:notify" }, { task = "test:chrome" }]
+run = [
+  { task = "test" },
+  { task = "test:media" },
+  { task = "test:streams" },
+  { task = "test:notify" },
+  { task = "test:chrome" },
+  { task = "test:chime" },
+]
+
+# build and run pick this machine's own task: macos, linux or windows.
+[tasks.build]
+description = "Debug build for this machine's OS; arguments go to flutter build"
+run = "mise run build:{{os()}}"
+
+[tasks.run]
+description = "Run on this machine's OS; arguments go to flutter run"
+run = "mise run run:{{os()}}"
 
 [tasks."build:macos"]
 description = "Debug build for macOS; also the encryption tests' library there"
@@ -72,6 +159,10 @@ run = "flutter build linux --debug"
 [tasks."build:ios:sim"]
 description = "Debug build for the iOS simulator"
 run = "flutter build ios --debug --simulator"
+
+[tasks."build:windows"]
+description = "Debug build for Windows"
+run = "flutter build windows --debug"
 
 [tasks."run:macos"]
 description = "Run on this Mac; arguments go to flutter run"
@@ -93,3 +184,128 @@ run = [
   "open -a DeviceHub",
   'flutter run -d "{{usage.simulator}}"',
 ]
+
+[tasks."run:linux"]
+description = "Run on this Linux machine; arguments go to flutter run"
+run = "flutter run -d linux"
+
+[tasks."run:windows"]
+description = "Run on this Windows machine; arguments go to flutter run"
+run = "flutter run -d windows"
+
+# ── Generated files ─────────────────────────────────────────────────────
+# Their outputs are checked in; run these only to change them.
+
+[tasks."gen:emoji"]
+description = "Regenerate the emoji table from tool/emoji-test.txt"
+run = "dart run tool/gen_emoji.dart"
+
+[tasks."gen:chime"]
+description = "Regenerate the chime sound for every platform"
+run = "cargo run --locked --manifest-path tool/chime/Cargo.toml"
+
+[tasks."gen:icons"]
+description = "Render the app icons for every platform; needs Inkscape"
+run = "tool/icons/render.sh"
+
+# ── Releasing ───────────────────────────────────────────────────────────
+# Pushing a tag like v1.2.3 on main runs these in release.yml; each also
+# runs by hand. <version> is the tag without its v, <build> the commit
+# count `release:version` prints.
+
+[tasks.release]
+description = "Release origin/main: tag it and push, which runs release.yml"
+usage = 'arg "[tag]" help="Like v1.2.3; the last release plus one patch when left out"'
+run = 'tool/release/tag.sh {{usage.tag}}'
+
+[tasks."release:version"]
+description = "Check a release tag; print its version name and build number"
+usage = 'arg "<tag>" help="Like v1.2.3, on main"'
+run = 'tool/release/version.sh "{{usage.tag}}"'
+
+[tasks."release:macos"]
+description = "Build, sign and notarize the macOS release into dist/"
+usage = '''
+arg "<version>"
+arg "<build>"
+'''
+run = 'tool/release/macos.sh "{{usage.version}}" "{{usage.build}}" dist'
+
+[tasks."release:ios"]
+description = "Build, sign and upload the iOS release to TestFlight"
+usage = '''
+arg "<version>"
+arg "<build>"
+'''
+run = 'tool/release/ios.sh "{{usage.version}}" "{{usage.build}}"'
+
+[tasks."release:linux"]
+description = "Build the AppImage and its feed entry into dist/"
+usage = '''
+arg "<version>"
+arg "<build>"
+'''
+run = [
+  """flutter build linux --release \
+    --build-name="{{usage.version}}" --build-number="{{usage.build}}" \
+    --dart-define=LOAF_BUILD="{{usage.build}}" \
+    --dart-define=LOAF_VERSION="{{usage.version}}\"""",
+  'tool/release/appimage.sh "{{usage.version}}" "{{usage.build}}" dist',
+  # Tarred: artifacts drop the executable bit, and the Flatpak packs it.
+  "tar -cf dist/bundle.tar -C build/linux/x64/release bundle",
+]
+
+# Bash, not cmd: windows.sh is a shell script. Run from Git Bash, whose
+# bash comes first on the path.
+[tasks."release:windows"]
+description = "Build the Windows zip, its feed entry and Setup into dist/"
+usage = '''
+arg "<version>"
+arg "<build>"
+'''
+shell = "bash -c"
+run = [
+  """flutter build windows --release \
+    --build-name="{{usage.version}}" --build-number="{{usage.build}}" \
+    --dart-define=LOAF_BUILD="{{usage.build}}\"""",
+  'tool/release/windows.sh "{{usage.version}}" "{{usage.build}}" dist',
+]
+
+[tasks."release:windows:smoke"]
+description = "Install Setup, run the app, swap its files, uninstall (Windows)"
+usage = 'arg "<setup>" help="The Setup.exe to try"'
+shell = "bash -c"
+run = 'tool/release/windows-smoke.sh "{{usage.setup}}"'
+
+[tasks."release:flatpak"]
+description = "Commit the Linux bundle to the signed Flatpak repo, as repo.tar"
+usage = '''
+arg "<version>"
+arg "<bundle>" help="bundle.tar from release:linux"
+'''
+run = [
+  'tool/release/flatpak-repo.sh "{{usage.bundle}}" repo',
+  'tool/release/flatpak.sh "{{usage.version}}" repo',
+  "tar -cf repo.tar repo",
+]
+
+[tasks."release:publish"]
+description = "Publish the GitHub Release and point get.loaf.moe at it"
+usage = '''
+arg "<tag>"
+arg "<artifacts>" help="One folder per job: macos, linux, windows, flatpak"
+'''
+run = 'tool/release/publish.sh "{{usage.tag}}" "{{usage.artifacts}}"'
+
+[tasks."release:site"]
+description = "Lay out get.loaf.moe's download page, to preview it"
+usage = '''
+arg "<feed>" help="A latest.json"
+arg "<out>"
+'''
+run = 'tool/release/site.sh "{{usage.feed}}" "{{usage.out}}"'
+
+[tasks."release:keygen"]
+description = "Make the three release signing keys, once"
+usage = 'arg "<folder>" help="Where the private keys go: outside the repo"'
+run = 'tool/release/keygen.sh "{{usage.folder}}"'
