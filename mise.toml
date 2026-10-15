@@ -49,7 +49,7 @@ run = "flutter clean"
 description = "CI: install what the tests need on the Ubuntu runner (GStreamer)"
 run = [
   "sudo apt-get update",
-  "sudo apt-get remove -y libunwind-14-dev || true",
+  "sudo apt-get remove -y libunwind-14-dev",
   """sudo apt-get install -y libgstreamer1.0-dev \
     libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-good \
     gstreamer1.0-libav""",
@@ -62,7 +62,7 @@ run = [
 description = "CI: install what the release's Linux build needs on its Ubuntu runner"
 run = [
   "sudo apt-get update",
-  "sudo apt-get remove -y libunwind-14-dev || true",
+  "sudo apt-get remove -y libunwind-14-dev",
   """sudo apt-get install -y clang cmake ninja-build pkg-config \
     libgtk-3-dev liblzma-dev libstdc++-12-dev jq \
     libwebkit2gtk-4.1-dev libsoup-3.0-dev \

@@ -122,7 +122,8 @@ jobs:
         with:
           flutter-version: ${{ steps.flutter.outputs.version }}
           channel: stable
-          # Restored from what ci.yml saves on main.
+          # A cache made under a tag stays with that tag, so only a re-run of
+          # this release finds it.
           cache: true
       # The AppImage's key signs Windows' feed entry too; each signs its own
       # text (lib/update/release_feed.dart), so neither passes for the other.
