@@ -138,7 +138,13 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
       ..on<RoomReconnectedEvent>((_) => _setLink(CallLink.connected))
       ..on<RoomDisconnectedEvent>((event) {
         Logs().w("[loaf] the call's media is gone: ${event.reason}");
-        _setLink(CallLink.lost);
+        _setLink(switch (event.reason) {
+          DisconnectReason.participantRemoved ||
+          DisconnectReason.duplicateIdentity ||
+          DisconnectReason.roomDeleted ||
+          DisconnectReason.roomClosed => CallLink.ended,
+          _ => CallLink.lost,
+        });
       })
       ..on<TrackSubscribedEvent>((event) async {
         final track = event.track;
@@ -361,7 +367,16 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
   Future<void> disconnect() async {
     _room.removeListener(notifyListeners);
     await _events.dispose();
-    await _room.disconnect();
-    await _room.dispose();
+    // Once LiveKit has said the media is gone there is nothing to leave,
+    // and its own leave can wait ten seconds for an event already sent.
+    if (_link == CallLink.lost || _link == CallLink.ended) {
+      await _room.dispose();
+      return;
+    }
+    try {
+      await _room.disconnect();
+    } finally {
+      await _room.dispose();
+    }
   }
 }

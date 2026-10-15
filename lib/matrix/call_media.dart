@@ -15,8 +15,13 @@ enum CallLink {
   /// Dropped, and trying to come back by itself.
   reconnecting,
 
-  /// Gone for good. Only a new connection brings the call back.
+  /// Gone, and no longer trying. A new connection may bring the call back.
   lost,
+
+  /// Ended by the server for this device: removed, replaced by another
+  /// connection of this device's, or the call's room closed. Another
+  /// connection would end the same way.
+  ended,
 }
 
 /// Someone else's device in the call.
@@ -161,5 +166,6 @@ abstract interface class CallConnection implements Listenable {
   /// before.
   Future<void> setSpeakerDevice(String? id);
 
+  /// Leaves the call. Media already gone has nothing to undo.
   Future<void> disconnect();
 }

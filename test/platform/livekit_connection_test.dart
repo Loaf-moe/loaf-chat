@@ -83,6 +83,43 @@ void main() {
     expect(connection.link, CallLink.lost);
   });
 
+  test('is lost when LiveKit gives no reason', () async {
+    final (:room, :connection) = _open();
+
+    await _tell(room, RoomDisconnectedEvent());
+
+    expect(connection.link, CallLink.lost);
+  });
+
+  for (final (why, reason) in [
+    ('the server removed this device', DisconnectReason.participantRemoved),
+    (
+      'another connection of this device took its place',
+      DisconnectReason.duplicateIdentity,
+    ),
+    ('the room closed', DisconnectReason.roomClosed),
+  ]) {
+    test('is ended when $why', () async {
+      final (:room, :connection) = _open();
+
+      await _tell(room, RoomDisconnectedEvent(reason: reason));
+
+      expect(connection.link, CallLink.ended);
+    });
+  }
+
+  test('disconnecting once LiveKit has given up returns at once', () async {
+    final room = Room();
+    final connection = LiveKitConnection(room, null);
+    addTearDown(connection.dispose);
+    await _tell(
+      room,
+      RoomDisconnectedEvent(reason: DisconnectReason.reconnectAttemptsExceeded),
+    );
+
+    await connection.disconnect().timeout(const Duration(seconds: 2));
+  });
+
   test('a listener told of the change sees the new link', () async {
     final (:room, :connection) = _open();
     final seen = <CallLink>[];
