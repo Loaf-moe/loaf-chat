@@ -116,6 +116,15 @@ run = [
   { task = "test:chime" },
 ]
 
+# build and run pick this machine's own task: macos, linux or windows.
+[tasks.build]
+description = "Debug build for this machine's OS; arguments go to flutter build"
+run = "mise run build:{{os()}}"
+
+[tasks.run]
+description = "Run on this machine's OS; arguments go to flutter run"
+run = "mise run run:{{os()}}"
+
 [tasks."build:macos"]
 description = "Debug build for macOS; also the encryption tests' library there"
 run = "flutter build macos --debug"
