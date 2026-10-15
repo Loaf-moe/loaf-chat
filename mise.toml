@@ -16,13 +16,14 @@ run = "flutter pub get"
 description = "Remove Flutter's build output and the vodozemac library"
 run = "flutter clean"
 
-# ── Setup ────────────────────────────────────────────────────────────────
+# ── CI ───────────────────────────────────────────────────────────────────
+# What the GitHub runners need that a developer's machine does not.
 
-# The image's LLVM brings libunwind-14-dev, which conflicts with the
+# The runner image's LLVM brings libunwind-14-dev, which conflicts with the
 # libunwind-dev GStreamer needs; nothing here uses LLVM's libunwind (Flutter
 # links libstdc++), so it goes first.
-[tasks."setup:linux"]
-description = "Install what the tests need on Debian or Ubuntu (GStreamer)"
+[tasks."ci:setup:linux"]
+description = "CI: install what the tests need on the Ubuntu runner (GStreamer)"
 run = [
   "sudo apt-get update",
   "sudo apt-get remove -y libunwind-14-dev || true",
@@ -34,8 +35,8 @@ run = [
 # libwebkit2gtk and libsoup: desktop_webview_window (via flutter_web_auth_2)
 # requires them at CMake time. The GStreamer dev packages are loaf_media's:
 # its Linux plugin finds them through pkg-config.
-[tasks."setup:linux:build"]
-description = "Install what building the Linux app needs on Debian or Ubuntu"
+[tasks."ci:setup:linux:release"]
+description = "CI: install what the release's Linux build needs on its Ubuntu runner"
 run = [
   "sudo apt-get update",
   "sudo apt-get remove -y libunwind-14-dev || true",
@@ -44,6 +45,12 @@ run = [
     libwebkit2gtk-4.1-dev libsoup-3.0-dev \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev""",
 ]
+
+# flutter test runs on half the cores by default; a CI runner has nothing
+# else to do with the other half.
+[tasks."ci:test"]
+description = "CI: the app's tests on every core of the Linux runner"
+run = 'flutter test -j "$(nproc)"'
 
 [tasks.check]
 description = "Analyze, and fail on unformatted Dart"
@@ -108,12 +115,6 @@ run = [
   { task = "test:chrome" },
   { task = "test:chime" },
 ]
-
-# flutter test runs on half the cores by default; a CI runner has nothing
-# else to do with the other half.
-[tasks."test:ci"]
-description = "The app's tests on every core, as CI runs them (Linux)"
-run = 'flutter test -j "$(nproc)"'
 
 [tasks."build:macos"]
 description = "Debug build for macOS; also the encryption tests' library there"

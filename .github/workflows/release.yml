@@ -83,7 +83,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
-      - run: mise run setup:linux:build
+      - run: mise run ci:setup:linux:release
       - run: >
           mise run release:linux
           "${{ needs.version.outputs.name }}" "${{ needs.version.outputs.build }}"

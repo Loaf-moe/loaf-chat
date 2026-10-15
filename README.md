@@ -24,15 +24,12 @@ CocoaPods is not needed. `mise run run:macos` runs the app on the Mac and
 ## Building on Linux
 
 Video plays through GStreamer, and the player is a Rust crate that CMake
-builds with cargo. On Debian or Ubuntu, install the toolchains and the
-development packages:
+builds with cargo. Install the development packages, then Rust:
 
 ```nu
+sudo apt-get install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 mise install
-mise run setup:linux:build
 ```
-
-`mise run setup:linux` installs just what the tests need.
 
 `mise install` brings Rust (pinned in `mise.toml`) along with Flutter. Run the
 build as `mise run build:linux` so cargo is on the path.

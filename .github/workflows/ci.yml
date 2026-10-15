@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
-      - run: mise run setup:linux
+      - run: mise run ci:setup:linux
       # mise-action keeps Flutter, not the packages it fetches.
       - uses: actions/cache@v4
         with:
@@ -46,7 +46,7 @@ jobs:
       - if: steps.vodozemac.outputs.cache-hit != 'true'
         run: mise run vodozemac
       - if: ${{ !cancelled() }}
-        run: mise run test:ci
+        run: mise run ci:test
       - if: ${{ !cancelled() }}
         run: mise run test:media
       - uses: Swatinem/rust-cache@v2
