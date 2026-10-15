@@ -54,7 +54,7 @@ class SparkleUpdater extends StateUpdater {
         return UpdateCheck.upToDate;
       case 'found':
         // Sparkle says preparing too, but don't hang on which lands first.
-        if (state is UpdateIdle) move(const UpdatePreparing());
+        if (state is UpdateIdle) transition(const UpdatePreparing());
         return settled();
       default:
         return UpdateCheck.failed;
@@ -65,25 +65,16 @@ class SparkleUpdater extends StateUpdater {
     if (call.method != 'state') return;
     final args = call.arguments;
     if (args is! Map) return;
-    move(switch (args['state']) {
+    transition(switch (args['state']) {
       'preparing' => const UpdatePreparing(),
       'ready' => UpdateReady(args['version'] as String?),
       _ => const UpdateIdle(),
     });
   }
 
+  /// Sparkle installs and relaunches; this process is quit by it.
   @override
-  Future<void> restart() async {
-    final ready = state;
-    if (ready is! UpdateReady) return;
-    move(UpdateApplying(ready.version));
-    try {
-      await _channel.invokeMethod<void>('restart');
-    } catch (e, s) {
-      updateLog('Sparkle did not restart the app', e, s);
-      move(ready);
-    }
-  }
+  Future<void> relaunch() => _channel.invokeMethod<void>('restart');
 
   @override
   void dispose() {

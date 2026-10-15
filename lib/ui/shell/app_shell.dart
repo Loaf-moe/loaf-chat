@@ -333,11 +333,11 @@ class _AppShellState extends State<AppShell> {
   String? _laterUpdate;
 
   AppNotice? get _updateNotice => switch (_updater.state) {
-    UpdateReady(:final version) when _laterUpdate != (version ?? '') =>
+    final UpdateReady ready when _laterUpdate != (ready.version ?? '') =>
       AppNotice.update(
-        version: version,
-        onAction: () => unawaited(_updater.restart()),
-        onDismiss: () => setState(() => _laterUpdate = version ?? ''),
+        version: ready.version,
+        onAction: () => unawaited(_updater.restart(ready)),
+        onDismiss: () => setState(() => _laterUpdate = ready.version ?? ''),
       ),
     UpdateApplying(:final version) => AppNotice.update(
       version: version,

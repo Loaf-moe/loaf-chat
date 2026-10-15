@@ -115,7 +115,10 @@ class _AboutSectionState extends State<AboutSection> {
         _button(
           state is UpdateApplying ? 'restarting…' : 'restart to update',
           LucideIcons.rotateCw,
-          state is UpdateApplying ? null : () => unawaited(updater.restart()),
+          switch (state) {
+            final UpdateReady ready => () => unawaited(updater.restart(ready)),
+            _ => null,
+          },
         ),
       ],
       _ => [

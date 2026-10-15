@@ -62,10 +62,10 @@ void main() {
 
   test('restart is passed on only when ready', () async {
     final u = updater();
-    await u.restart();
+    await u.restart(const UpdateReady('0.1.2'));
     expect(calls, isNot(contains('restart')));
     await native('ready', '0.1.2');
-    await u.restart();
+    await u.restart(u.state as UpdateReady);
     expect(calls, contains('restart'));
     expect((u.state as UpdateApplying).version, '0.1.2');
   });
@@ -77,7 +77,7 @@ void main() {
       _channel,
       (_) async => throw PlatformException(code: 'no'),
     );
-    await u.restart();
+    await u.restart(u.state as UpdateReady);
     expect(u.state, isA<UpdateReady>());
   });
 

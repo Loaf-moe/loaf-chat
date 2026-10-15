@@ -44,7 +44,7 @@ class FakeUpdater extends ChangeNotifier implements Updater {
 
   /// As if the app had restarted: the notice has nothing left to say.
   @override
-  Future<void> restart() async {
+  Future<void> restart(UpdateReady ready) async {
     restarts++;
     state = const UpdateIdle();
   }
