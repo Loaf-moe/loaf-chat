@@ -4,14 +4,15 @@ A Matrix client for loaf.moe, shaped like a place you hang out.
 
 ## Running the tests
 
-Tools, environment and tasks all come from `mise.toml`: `mise install` once,
-then `mise tasks` lists what there is to run.
+Tools, environment and tasks all come from `mise.toml`. `mise install` brings
+the toolchains and then every Dart package and Rust crate; run it again after
+a pull to catch up. `mise tasks` lists what there is to run.
 
 Encryption tests load vodozemac's native library, and fail saying so without
 it. On macOS, build the app once with `mise run build:macos`. On Linux, build
-just the library once with `mise run vodozemac` (it needs `mise run deps`
-first). Then run `mise run test:all`, and `mise run check` for the analyzer
-and the formatter.
+just the library once with `mise run vodozemac` (after `mise install`). Then
+run `mise run test:all`, and `mise run check` for the analyzer and the
+formatter.
 
 ## Building on macOS
 

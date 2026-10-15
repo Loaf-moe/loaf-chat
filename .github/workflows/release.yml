@@ -11,6 +11,11 @@ permissions:
 
 concurrency: release
 
+# mise install's postinstall hook fetches every dependency; the builds
+# fetch what each needs themselves.
+env:
+  MISE_NO_HOOKS: 1
+
 jobs:
   version:
     runs-on: ubuntu-latest

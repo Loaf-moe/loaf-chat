@@ -8,9 +8,32 @@ rust = "1.96.1"
 # build stops at "Failed to copy plugin". tool/bin puts Apple's first.
 _.path = ["tool/bin"]
 
-[tasks.deps]
-description = "Fetch the Dart packages"
-run = "flutter pub get"
+# `mise install` fetches every dependency once the toolchains are in. It runs
+# even when nothing new was installed, so `mise install` is also how to
+# catch up after a pull.
+[hooks]
+postinstall = { task = "dependencies" }
+
+[tasks.dependencies]
+description = "Fetch every Dart package and Rust crate"
+run = [{ task = "dependencies:dart" }, { task = "dependencies:rust" }]
+
+# loaf_media's tests run in its own folder, against its own lockfile.
+[tasks."dependencies:dart"]
+description = "Fetch the Dart packages, the app's and loaf_media's"
+run = ["flutter pub get", "flutter pub get --directory packages/loaf_media"]
+
+# Every target's crates, so a Windows-only crate is there on a Mac too.
+[tasks."dependencies:rust"]
+description = "Fetch the Rust crates of every crate in the repo"
+run = [
+  "cargo fetch --locked --manifest-path packages/loaf_media/rust/loaf_streams/Cargo.toml",
+  "cargo fetch --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml",
+  "cargo fetch --locked --manifest-path packages/loaf_media/windows/rust/Cargo.toml",
+  "cargo fetch --locked --manifest-path packages/loaf_notify/rust/Cargo.toml",
+  "cargo fetch --locked --manifest-path packages/loaf_chrome/rust/Cargo.toml",
+  "cargo fetch --locked --manifest-path tool/chime/Cargo.toml",
+]
 
 [tasks.clean]
 description = "Remove Flutter's build output and the vodozemac library"

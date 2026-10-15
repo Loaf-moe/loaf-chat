@@ -20,6 +20,11 @@ concurrency:
   # on main gets its own answer.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# mise install's postinstall hook fetches every dependency up front; here
+# each is fetched where its cache is restored instead.
+env:
+  MISE_NO_HOOKS: 1
+
 jobs:
   linux:
     # The release's runner, for the release's GStreamer.
@@ -35,7 +40,7 @@ jobs:
           path: ~/.pub-cache
           key: pub-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: pub-${{ runner.os }}-
-      - run: mise run deps
+      - run: mise run dependencies:dart
       # The encryption tests' native library. It changes only with
       # vodozemac (in pubspec.lock) or Rust (in mise.toml).
       - id: vodozemac
