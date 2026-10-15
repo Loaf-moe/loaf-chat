@@ -8,15 +8,13 @@ import 'dart:io';
 
 import 'package:matrix/matrix.dart' show Level, LogEvent;
 import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 
 class LogFile {
   LogFile(this.file, {this.cap = 1 << 20, this.least = Level.warning});
 
   static Future<LogFile> inSupportDirectory() async => LogFile(
-    File(
-      '${(await getApplicationSupportDirectory()).path}'
-      '${Platform.pathSeparator}loaf.log',
-    ),
+    File(p.join((await getApplicationSupportDirectory()).path, 'loaf.log')),
   );
 
   final File file;

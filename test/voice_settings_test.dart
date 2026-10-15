@@ -4,16 +4,17 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 const _rode = AudioDevice('rode', 'RODE NT-USB');
 const _sony = AudioDevice('sony', 'WH-1000XM3');
 
 Future<VoiceController> _controller({
-  VoiceStore? store,
+  Store<VoiceSettings>? store,
   AudioDevices? devices,
 }) async {
   final controller = await VoiceController.load(
-    store ?? MemoryVoiceStore(),
+    store ?? MemoryStore<VoiceSettings>(),
     devices: devices ?? MemoryAudioDevices(),
   );
   addTearDown(controller.dispose);
@@ -21,7 +22,7 @@ Future<VoiceController> _controller({
 }
 
 /// A store whose first write takes longest, as a file's may.
-class _SlowFirst implements VoiceStore {
+class _SlowFirst implements Store<VoiceSettings> {
   VoiceSettings? saved;
 
   /// How many writes were begun.
@@ -37,7 +38,7 @@ class _SlowFirst implements VoiceStore {
   }
 }
 
-class _FullDisk implements VoiceStore {
+class _FullDisk implements Store<VoiceSettings> {
   @override
   Future<VoiceSettings?> load() async => null;
 
@@ -65,7 +66,7 @@ class _Slow implements AudioDevices {
 
 void main() {
   test('nothing saved means the system default for both', () async {
-    final controller = await _controller(store: MemoryVoiceStore());
+    final controller = await _controller(store: MemoryStore<VoiceSettings>());
 
     expect(controller.microphone, isNull);
     expect(controller.speaker, isNull);
@@ -76,9 +77,11 @@ void main() {
     addTearDown(() => dir.delete(recursive: true));
     final file = File('${dir.path}/v/voice.json');
 
-    await FileVoiceStore(file)
-        .save(const VoiceSettings(microphone: _rode, speaker: _sony));
-    final back = await FileVoiceStore(file).load();
+    await JsonFileStore(
+      file,
+      VoiceSettings.fromJson,
+    ).save(const VoiceSettings(microphone: _rode, speaker: _sony));
+    final back = await JsonFileStore(file, VoiceSettings.fromJson).load();
 
     expect(back, const VoiceSettings(microphone: _rode, speaker: _sony));
     expect(back?.microphone?.label, 'RODE NT-USB');
@@ -89,7 +92,7 @@ void main() {
     addTearDown(() => dir.delete(recursive: true));
     final file = File('${dir.path}/voice.json')..writeAsStringSync('{nope');
 
-    expect(await FileVoiceStore(file).load(), isNull);
+    expect(await JsonFileStore(file, VoiceSettings.fromJson).load(), isNull);
   });
 
   group('a saved device falls back to the default alone when it', () {
@@ -116,7 +119,7 @@ void main() {
   });
 
   test('a choice goes to the store', () async {
-    final store = MemoryVoiceStore();
+    final store = MemoryStore<VoiceSettings>();
     final controller = await _controller(store: store);
 
     controller.chooseMicrophone(_rode);
@@ -128,7 +131,7 @@ void main() {
 
   test('a choice leaves the other device as it was', () async {
     final controller = await _controller(
-      store: MemoryVoiceStore(const VoiceSettings(speaker: _sony)),
+      store: MemoryStore<VoiceSettings>(const VoiceSettings(speaker: _sony)),
     );
 
     controller.chooseMicrophone(_rode);
@@ -138,7 +141,7 @@ void main() {
 
   test('choosing nothing goes back to the system default', () async {
     final controller = await _controller(
-      store: MemoryVoiceStore(const VoiceSettings(microphone: _rode)),
+      store: MemoryStore<VoiceSettings>(const VoiceSettings(microphone: _rode)),
     );
 
     controller.chooseMicrophone(null);
@@ -160,7 +163,7 @@ void main() {
 
   test('choosing the same again tells no one', () async {
     final controller = await _controller(
-      store: MemoryVoiceStore(const VoiceSettings(speaker: _sony)),
+      store: MemoryStore<VoiceSettings>(const VoiceSettings(speaker: _sony)),
     );
     var told = 0;
     controller.addListener(() => told++);
@@ -172,7 +175,7 @@ void main() {
 
   test('nothing saved means every kind of processing is on but the '
       'high-pass filter', () async {
-    final controller = await _controller(store: MemoryVoiceStore());
+    final controller = await _controller(store: MemoryStore<VoiceSettings>());
 
     expect(controller.settings.value.echoCancellation, isTrue);
     expect(controller.settings.value.noiseSuppression, isTrue);
@@ -193,9 +196,12 @@ void main() {
         addTearDown(() => dir.delete(recursive: true));
         final file = File('${dir.path}/voice.json');
 
-        await FileVoiceStore(file).save(settings);
+        await JsonFileStore(file, VoiceSettings.fromJson).save(settings);
 
-        expect(await FileVoiceStore(file).load(), settings);
+        expect(
+          await JsonFileStore(file, VoiceSettings.fromJson).load(),
+          settings,
+        );
       });
     }
   });
@@ -250,7 +256,7 @@ void main() {
     };
     for (final MapEntry(key: name, value: (flip, after)) in switches.entries) {
       test('$name is saved, the rest left as it was', () async {
-        final store = MemoryVoiceStore(
+        final store = MemoryStore<VoiceSettings>(
           const VoiceSettings(microphone: _rode, speaker: _sony),
         );
         final controller = await _controller(store: store);
@@ -302,13 +308,16 @@ void main() {
       final file = File('${dir.path}/voice.json');
       const settings = VoiceSettings(volumes: {ada: 0.4});
 
-      await FileVoiceStore(file).save(settings);
+      await JsonFileStore(file, VoiceSettings.fromJson).save(settings);
 
-      expect(await FileVoiceStore(file).load(), settings);
+      expect(
+        await JsonFileStore(file, VoiceSettings.fromJson).load(),
+        settings,
+      );
     });
 
     test('goes to the store when set', () async {
-      final store = MemoryVoiceStore();
+      final store = MemoryStore<VoiceSettings>();
       final controller = await _controller(store: store);
 
       controller.setVolume(ada, 0.4);
@@ -319,7 +328,9 @@ void main() {
     });
 
     test('is forgotten when set back to 1', () async {
-      final store = MemoryVoiceStore(const VoiceSettings(volumes: {ada: 0.4}));
+      final store = MemoryStore<VoiceSettings>(
+        const VoiceSettings(volumes: {ada: 0.4}),
+      );
       final controller = await _controller(store: store);
 
       controller.setVolume(ada, 1);
@@ -330,7 +341,7 @@ void main() {
     });
 
     test("leaves another person's, and the devices, as they were", () async {
-      final store = MemoryVoiceStore(
+      final store = MemoryStore<VoiceSettings>(
         const VoiceSettings(microphone: _rode, volumes: {bo: 1.5}),
       );
       final controller = await _controller(store: store);

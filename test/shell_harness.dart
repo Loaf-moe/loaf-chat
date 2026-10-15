@@ -17,6 +17,7 @@ import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:matrix/matrix.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 const _me = '@test:fakeServer.notExisting';
 const _ada = '@_ada:example.com';
@@ -237,7 +238,7 @@ Future<Shell> _mount(
   final chime = FakeChime();
   final desktop = FakeDesktopNotifications();
   final controller = NotificationController(
-    store: MemoryNotificationStore(),
+    store: MemoryStore<NotificationSettings>(),
     chime: chime,
     desktop: desktop,
     settings: NotificationSettings(

@@ -28,6 +28,7 @@ import 'ui/theme/appearance.dart';
 import 'ui/theme/loaf_theme.dart';
 import 'ui/window/window_chrome.dart';
 import 'update/pick_updater.dart';
+import 'util/json_store.dart';
 
 /// Dark is the default. The brand defines no dark palette, but a community
 /// chat client is read in the evening, so the derived navy palette leads and
@@ -102,8 +103,11 @@ Future<void> main() async {
   // flashes the wrong palette. The mock keeps nothing between runs.
   appearance = await AppearanceController.load(
     backend == 'mock'
-        ? MemoryAppearanceStore()
-        : await FileAppearanceStore.inSupportDirectory(),
+        ? MemoryStore<AppearanceSettings>()
+        : await JsonFileStore.inSupportDirectory(
+            'appearance.json',
+            AppearanceSettings.fromJson,
+          ),
   );
   final chime = NativeChime();
   final desktop = backend == 'mock'
@@ -111,8 +115,11 @@ Future<void> main() async {
       : pickDesktopNotifications(chime: chime);
   notifications = await NotificationController.load(
     backend == 'mock'
-        ? MemoryNotificationStore()
-        : await FileNotificationStore.inSupportDirectory(),
+        ? MemoryStore<NotificationSettings>()
+        : await JsonFileStore.inSupportDirectory(
+            'notifications.json',
+            NotificationSettings.fromJson,
+          ),
     chime: chime,
     desktop: desktop,
   );
@@ -123,7 +130,7 @@ Future<void> main() async {
   if (backend == 'mock') {
     session = MockSession();
     voice = await VoiceController.load(
-      MemoryVoiceStore(),
+      MemoryStore<VoiceSettings>(),
       devices: MemoryAudioDevices(),
     );
   } else {
@@ -135,7 +142,10 @@ Future<void> main() async {
         : null;
     if (calls) {
       voice = await VoiceController.load(
-        await FileVoiceStore.inSupportDirectory(),
+        await JsonFileStore.inSupportDirectory(
+          'voice.json',
+          VoiceSettings.fromJson,
+        ),
         devices: system ?? const LiveKitAudioDevices(),
       );
     }
