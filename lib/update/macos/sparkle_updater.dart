@@ -1,32 +1,30 @@
 /// Updates the macOS app through Sparkle, which checks, downloads, verifies
 /// and installs. Sparkle shows no windows of its own here: it reports over
-/// a method channel, and the rail's notice is the only thing you see.
-/// The other end is `macos/Runner/UpdaterBridge.swift`.
+/// the typed API in `sparkle.g.dart` (from `pigeons/sparkle.dart`), and the
+/// rail's notice is the only thing you see. The other end is
+/// `macos/Runner/UpdaterBridge.swift`.
 library;
 
 import 'dart:async';
 
-import 'package:flutter/services.dart';
-
-import '../updater.dart';
 import '../state_updater.dart';
 import '../update_log.dart';
+import '../updater.dart';
+import 'sparkle.g.dart';
 
 class SparkleUpdater extends StateUpdater {
-  SparkleUpdater({
-    this._channel = const MethodChannel('moe.loaf.chat/updater'),
-  }) {
-    _channel.setMethodCallHandler(_onCall);
-    // Only now: a state sent before anyone listens would be lost.
+  SparkleUpdater({SparkleHost? host}) : _host = host ?? SparkleHost() {
+    SparkleEvents.setUp(_Events(this));
+    // Only now: an event sent before anyone listens would be lost.
     unawaited(_start());
   }
 
-  final MethodChannel _channel;
+  final SparkleHost _host;
   var _started = false;
 
   Future<void> _start() async {
     try {
-      await _channel.invokeMethod<void>('start');
+      await _host.start();
       _started = true;
       notifyListeners();
     } catch (e) {
@@ -42,43 +40,51 @@ class SparkleUpdater extends StateUpdater {
   @override
   Future<UpdateCheck> check() async {
     if (state is! UpdateIdle) return settled();
-    final String? answer;
+    final SparkleCheck answer;
     try {
-      answer = await _channel.invokeMethod<String>('check');
+      answer = await _host.check();
     } catch (e, s) {
       updateLog('Sparkle did not check', e, s);
       return UpdateCheck.failed;
     }
     switch (answer) {
-      case 'upToDate':
+      case SparkleCheck.upToDate:
         return UpdateCheck.upToDate;
-      case 'found':
+      case SparkleCheck.found:
         // Sparkle says preparing too, but don't hang on which lands first.
         if (state is UpdateIdle) transition(const UpdatePreparing());
         return settled();
-      default:
+      case SparkleCheck.failed:
         return UpdateCheck.failed;
     }
   }
 
-  Future<void> _onCall(MethodCall call) async {
-    if (call.method != 'state') return;
-    final args = call.arguments;
-    if (args is! Map) return;
-    transition(switch (args['state']) {
-      'preparing' => const UpdatePreparing(),
-      'ready' => UpdateReady(args['version'] as String?),
-      _ => const UpdateIdle(),
-    });
-  }
+  /// For [_Events], which is not a [StateUpdater] and may not call it.
+  void _become(UpdateState next) => transition(next);
 
-  /// Sparkle installs and relaunches; this process is quit by it.
+  /// Sparkle installs, relaunches, and quits this process itself.
   @override
-  Future<void> relaunch() => _channel.invokeMethod<void>('restart');
+  Future<void> relaunch() => _host.restart();
 
   @override
   void dispose() {
-    _channel.setMethodCallHandler(null);
+    SparkleEvents.setUp(null);
     super.dispose();
   }
+}
+
+/// Sparkle's events, each a state.
+class _Events implements SparkleEvents {
+  _Events(this._updater);
+
+  final SparkleUpdater _updater;
+
+  @override
+  void idle() => _updater._become(const UpdateIdle());
+
+  @override
+  void preparing() => _updater._become(const UpdatePreparing());
+
+  @override
+  void ready(String? version) => _updater._become(UpdateReady(version));
 }

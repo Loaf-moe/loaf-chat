@@ -22,6 +22,7 @@
 
 /* Begin PBXBuildFile section */
 		A1B2C3D4E5F60718293A4B01 /* UpdaterBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B02 /* UpdaterBridge.swift */; };
+		A1B2C3D4E5F60718293A5E01 /* Sparkle.g.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A5E02 /* Sparkle.g.swift */; };
 		A1B2C3D4E5F60718293A4D01 /* NotifyBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4D02 /* NotifyBridge.swift */; };
 		A1B2C3D4E5F60718293A4E01 /* chime.wav in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4E02 /* chime.wav */; };
 		A1B2C3D4E5F60718293A4C01 /* WindowChromeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4C02 /* WindowChromeBridge.swift */; };
@@ -68,6 +69,7 @@
 
 /* Begin PBXFileReference section */
 		A1B2C3D4E5F60718293A4B02 /* UpdaterBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterBridge.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A5E02 /* Sparkle.g.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sparkle.g.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4D02 /* NotifyBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotifyBridge.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60718293A4E02 /* chime.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; name = chime.wav; path = ../assets/sounds/chime.wav; sourceTree = SOURCE_ROOT; };
 		A1B2C3D4E5F60718293A4C02 /* WindowChromeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowChromeBridge.swift; sourceTree = "<group>"; };
@@ -181,6 +183,7 @@
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				A1B2C3D4E5F60718293A4B02 /* UpdaterBridge.swift */,
+				A1B2C3D4E5F60718293A5E02 /* Sparkle.g.swift */,
 				A1B2C3D4E5F60718293A4D02 /* NotifyBridge.swift */,
 				A1B2C3D4E5F60718293A4E02 /* chime.wav */,
 				A1B2C3D4E5F60718293A4C02 /* WindowChromeBridge.swift */,
@@ -376,6 +379,7 @@
 			files = (
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				A1B2C3D4E5F60718293A4B01 /* UpdaterBridge.swift in Sources */,
+				A1B2C3D4E5F60718293A5E01 /* Sparkle.g.swift in Sources */,
 				A1B2C3D4E5F60718293A4D01 /* NotifyBridge.swift in Sources */,
 				A1B2C3D4E5F60718293A4C01 /* WindowChromeBridge.swift in Sources */,
 				A1B2C3D4E5F60718293A4C03 /* AudioDevicesBridge.swift in Sources */,
