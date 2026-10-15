@@ -5,10 +5,10 @@ library;
 import 'dart:async';
 import 'dart:io';
 
-import '../ui/model/updater.dart';
+import '../updater.dart';
 import 'flatpak_portal.dart';
-import 'state_updater.dart';
-import 'update_log.dart';
+import '../state_updater.dart';
+import '../update_log.dart';
 
 class FlatpakUpdater extends StateUpdater {
   FlatpakUpdater({

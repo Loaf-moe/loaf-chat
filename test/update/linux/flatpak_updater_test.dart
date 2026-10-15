@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/model/updater.dart';
-import 'package:loaf_native/update/flatpak_portal.dart';
-import 'package:loaf_native/update/flatpak_updater.dart';
+import 'package:loaf_native/update/updater.dart';
+import 'package:loaf_native/update/linux/flatpak_portal.dart';
+import 'package:loaf_native/update/linux/flatpak_updater.dart';
 
 class _Portal implements FlatpakPortal {
   int portalVersion = 2;

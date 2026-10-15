@@ -3,8 +3,8 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/model/updater.dart';
-import 'package:loaf_native/update/windows_updater.dart';
+import 'package:loaf_native/update/updater.dart';
+import 'package:loaf_native/update/windows/windows_updater.dart';
 
 final _sep = Platform.pathSeparator;
 

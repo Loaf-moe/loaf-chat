@@ -9,12 +9,12 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
-import '../ui/model/updater.dart';
-import 'asset_download.dart';
-import 'ed25519.dart';
-import 'release_feed.dart';
-import 'state_updater.dart';
-import 'update_log.dart';
+import '../updater.dart';
+import '../feed/asset_download.dart';
+import '../feed/ed25519.dart';
+import '../feed/release_feed.dart';
+import '../state_updater.dart';
+import '../update_log.dart';
 
 class AppImageUpdater extends StateUpdater {
   AppImageUpdater({

@@ -13,13 +13,13 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
-import '../ui/model/updater.dart';
-import 'asset_download.dart';
+import '../updater.dart';
+import '../feed/asset_download.dart';
 import 'bundle_swap.dart';
-import 'ed25519.dart';
-import 'release_feed.dart';
-import 'state_updater.dart';
-import 'update_log.dart';
+import '../feed/ed25519.dart';
+import '../feed/release_feed.dart';
+import '../state_updater.dart';
+import '../update_log.dart';
 
 typedef Unpack = Future<void> Function(File zip, Directory into);
 

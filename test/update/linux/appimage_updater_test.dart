@@ -7,8 +7,8 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/model/updater.dart';
-import 'package:loaf_native/update/appimage_updater.dart';
+import 'package:loaf_native/update/updater.dart';
+import 'package:loaf_native/update/linux/appimage_updater.dart';
 
 const _old = 'the old build';
 const _new = 'the new build, which is longer';

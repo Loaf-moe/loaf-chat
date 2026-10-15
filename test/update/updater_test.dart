@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/model/updater.dart';
+import 'package:loaf_native/ui/mock/fake_updater.dart';
+import 'package:loaf_native/update/updater.dart';
 
 void main() {
   test('no updater is idle, and restarting it does nothing', () async {

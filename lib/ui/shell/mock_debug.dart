@@ -6,7 +6,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../model/updater.dart';
+import '../../update/updater.dart';
 import '../platform.dart';
 import '../widgets/action_menu.dart';
 
