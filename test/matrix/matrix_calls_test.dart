@@ -1967,6 +1967,37 @@ void main() {
     expect(world.log.skip(3), ['wrote membership']);
   });
 
+  test('your membership emptied from elsewhere, written again through a '
+      'dropped connection, keeps the call', () async {
+    final world = await _open();
+    await world.join();
+    await _sync(world.client, _oven, [_inCall(_me, _device)]);
+    world.api.dropMemberships = 1;
+
+    await _sync(world.client, _oven, [_inCall(_me, _device, left: true)]);
+    await _until(
+      () => world.log.where((e) => e == 'wrote membership').length == 2,
+    );
+    await _settle();
+
+    expect(world.calls.session?.phase, CallPhase.live);
+    expect(world.calls.inCall, isTrue);
+    expect(world.log, isNot(contains('emptied membership')));
+  });
+
+  test('your membership emptied from elsewhere and refused again ends the '
+      'call', () async {
+    final world = await _open();
+    await world.join();
+    await _sync(world.client, _oven, [_inCall(_me, _device)]);
+    world.api.refuseMembership = true;
+
+    await _sync(world.client, _oven, [_inCall(_me, _device, left: true)]);
+    await _until(() => world.calls.session?.phase == CallPhase.failed);
+
+    expect(world.calls.inCall, isFalse);
+  });
+
   test('an old emptied membership of yours is not taken for leaving', () async {
     final world = await _open();
     await _sync(world.client, _oven, [_inCall(_me, _device, left: true)]);

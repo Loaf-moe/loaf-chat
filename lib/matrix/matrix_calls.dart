@@ -342,13 +342,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     } else if (live.echoed) {
       // Emptied from elsewhere: say again that this device is here.
       live.echoed = false;
-      final attempt = _attempt;
-      unawaited(
-        live.membership.join().onError<Exception>((e, s) {
-          Logs().w("[loaf] couldn't say again that this device is here", e, s);
-          return _lost(attempt);
-        }),
-      );
+      unawaited(live.membership.refresh());
     }
     final silenced = _silences(live.room)[_client.userID];
     if (silenced != live.silenced) {

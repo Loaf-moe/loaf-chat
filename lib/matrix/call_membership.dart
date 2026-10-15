@@ -118,10 +118,13 @@ class OwnCallMembership {
 
   void _schedule(Duration after) {
     _timer?.cancel();
-    _timer = Timer(after, () => unawaited(_refresh()));
+    _timer = Timer(after, () => unawaited(refresh()));
   }
 
-  Future<void> _refresh() async {
+  /// Writes the membership again now, as if its refresh were due: after a
+  /// sync shows it gone. A failed write is tried again as any refresh is; a
+  /// refused one reports the membership lost.
+  Future<void> refresh() async {
     final joined = _joined;
     if (joined == null) return;
     try {
