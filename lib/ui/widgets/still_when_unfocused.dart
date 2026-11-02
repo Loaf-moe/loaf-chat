@@ -10,6 +10,10 @@ class StillWhenUnfocused extends StatefulWidget {
 
   final Widget child;
 
+  /// Whether the app has focus; with no [StillWhenUnfocused] above, it does.
+  static bool focusedOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_Focus>()?.focused ?? true;
+
   @override
   State<StillWhenUnfocused> createState() => _StillWhenUnfocusedState();
 }
@@ -41,10 +45,22 @@ class _StillWhenUnfocusedState extends State<StillWhenUnfocused>
   }
 
   @override
-  Widget build(BuildContext context) => MediaQuery(
-    data: MediaQuery.of(context).copyWith(
-      disableAnimations: MediaQuery.disableAnimationsOf(context) || !_focused,
+  Widget build(BuildContext context) => _Focus(
+    focused: _focused,
+    child: MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        disableAnimations: MediaQuery.disableAnimationsOf(context) || !_focused,
+      ),
+      child: widget.child,
     ),
-    child: widget.child,
   );
+}
+
+class _Focus extends InheritedWidget {
+  const _Focus({required this.focused, required super.child});
+
+  final bool focused;
+
+  @override
+  bool updateShouldNotify(_Focus old) => old.focused != focused;
 }

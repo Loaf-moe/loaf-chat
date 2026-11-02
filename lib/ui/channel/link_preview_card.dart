@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import '../model/link_previews.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/plays_on_hover.dart';
 import 'message_text.dart';
 
 const _maxWidth = 400.0;
@@ -123,62 +124,64 @@ class _LinkPreviewCardState extends State<LinkPreviewCard> {
             ? math.min(constraints.maxWidth, _maxWidth)
             : constraints.maxWidth,
         height: _height,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Container(
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(
-                  color: tokens.card,
-                  borderRadius: radius,
-                ),
-                // Over the picture, not around it: a border in the
-                // decoration would inset it.
-                foregroundDecoration: BoxDecoration(
-                  border: Border.all(color: tokens.border),
-                  borderRadius: radius,
-                ),
-                child: Row(
-                  children: [
-                    if (image != null)
-                      Image(
-                        image: image,
-                        width: _height,
-                        height: _height,
-                        fit: BoxFit.cover,
-                        // The words take the room a picture would have had.
-                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                      ),
-                    Expanded(child: _words(tokens, preview)),
-                  ],
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: Material(
-                type: MaterialType.transparency,
-                child: InkWell(
-                  onTap: () {
-                    if (isDesktop) _focus.requestFocus();
-                    _open();
-                  },
-                  canRequestFocus: false,
-                  borderRadius: radius,
-                ),
-              ),
-            ),
-            if (_focused)
+        child: PlaysOnHover(
+          child: Stack(
+            children: [
               Positioned.fill(
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: tokens.accent, width: 2),
-                      borderRadius: radius,
-                    ),
+                child: Container(
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: tokens.card,
+                    borderRadius: radius,
+                  ),
+                  // Over the picture, not around it: a border in the
+                  // decoration would inset it.
+                  foregroundDecoration: BoxDecoration(
+                    border: Border.all(color: tokens.border),
+                    borderRadius: radius,
+                  ),
+                  child: Row(
+                    children: [
+                      if (image != null)
+                        Image(
+                          image: image,
+                          width: _height,
+                          height: _height,
+                          fit: BoxFit.cover,
+                          // The words take the room a picture would have had.
+                          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                        ),
+                      Expanded(child: _words(tokens, preview)),
+                    ],
                   ),
                 ),
               ),
-          ],
+              Positioned.fill(
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: InkWell(
+                    onTap: () {
+                      if (isDesktop) _focus.requestFocus();
+                      _open();
+                    },
+                    canRequestFocus: false,
+                    borderRadius: radius,
+                  ),
+                ),
+              ),
+              if (_focused)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: tokens.accent, width: 2),
+                        borderRadius: radius,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
