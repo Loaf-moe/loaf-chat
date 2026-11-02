@@ -1,5 +1,5 @@
-/// Appearance — which theme loaf chat wears, and whether the seasons may
-/// dress it up anyway.
+/// Appearance — which theme loaf chat wears, whether the seasons may dress
+/// it up anyway, and how much it moves.
 ///
 /// While a season is overriding the pick, the section says so: otherwise
 /// tapping a theme and seeing nothing change would look broken.
@@ -49,6 +49,16 @@ class AppearanceSection extends StatelessWidget {
             detail: 'the occasional surprise.',
             value: controller.easterEggs,
             onChanged: controller.setEasterEggs,
+          ),
+          const SizedBox(height: LoafSpace.x4),
+          SettingsLabel(label: 'motion'),
+          SettingsCheck(
+            title: 'reduce motion',
+            detail:
+                'animations and GIFs hold still; point at a GIF to play '
+                'it. on by default under X11, where every frame costs more.',
+            value: controller.reduceMotion,
+            onChanged: controller.setReduceMotion,
           ),
           const SizedBox(height: LoafSpace.x4),
           SettingsLabel(label: 'media'),

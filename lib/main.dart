@@ -11,6 +11,7 @@ import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
 import 'platform/livekit_media.dart';
 import 'platform/system_audio_devices.dart';
+import 'platform/x11.dart';
 import 'ui/auth/loaf_session.dart';
 import 'ui/auth/session_root.dart';
 import 'ui/model/updater.dart';
@@ -105,6 +106,7 @@ Future<void> main() async {
     backend == 'mock'
         ? MemoryAppearanceStore()
         : await FileAppearanceStore.inSupportDirectory(),
+    reduceMotionByDefault: await drawsThroughX11(),
   );
   final chime = NativeChime();
   final desktop = backend == 'mock'
@@ -174,8 +176,17 @@ class LoafApp extends StatelessWidget {
           theme: nihon ? loafNihonTheme() : loafLightTheme(),
           darkTheme: nihon ? loafNihonTheme() : loafDarkTheme(),
           themeMode: mode,
-          builder: (context, child) => StillWhenUnfocused(
-            child: WindowChrome(controller: windowChrome, child: child!),
+          // The setting joins the system's ask above StillWhenUnfocused, so
+          // what it reads as preference includes it.
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              disableAnimations:
+                  MediaQuery.disableAnimationsOf(context) ||
+                  appearance.reduceMotion,
+            ),
+            child: StillWhenUnfocused(
+              child: WindowChrome(controller: windowChrome, child: child!),
+            ),
           ),
           home: CallbackShortcuts(
             bindings: {
