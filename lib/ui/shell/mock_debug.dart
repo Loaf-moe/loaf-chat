@@ -1,6 +1,7 @@
 /// Mock-only levers for states the fake data never reaches on its own: an
-/// incoming ring, a dropped connection, a denied permission, a server that
-/// shares no presence, a session signed out or expired.
+/// incoming ring, a call held connecting, a dropped connection, a denied
+/// permission, a server that shares no presence, a session signed out or
+/// expired.
 library;
 
 import 'package:flutter/material.dart';
@@ -14,6 +15,7 @@ enum MockDebug {
   ringFromMika,
   ringFromCrew,
   reconnecting,
+  hold,
   failNext,
   encryption,
   micBlocked,
@@ -29,12 +31,13 @@ enum MockDebug {
   nextUpdateCheck,
 }
 
-/// [presenceShared] words the presence lever for the state it would change;
-/// [nextCheck] says what the next update check will find.
+/// [presenceShared] and [holding] word their levers for the state they would
+/// change; [nextCheck] says what the next update check will find.
 Future<MockDebug?> showMockDebug(
   BuildContext context,
   Rect anchor, {
   required bool presenceShared,
+  required bool holding,
   required UpdateCheck nextCheck,
 }) {
   ActionItem<MockDebug> item(MockDebug d, IconData icon, String label) =>
@@ -43,6 +46,11 @@ Future<MockDebug?> showMockDebug(
     item(MockDebug.ringFromMika, LucideIcons.phoneIncoming, 'call from Mika'),
     item(MockDebug.ringFromCrew, LucideIcons.users, 'call from weekend crew'),
     item(MockDebug.reconnecting, LucideIcons.wifiOff, 'toggle reconnecting'),
+    item(
+      MockDebug.hold,
+      LucideIcons.loader,
+      holding ? 'let calls connect' : 'hold calls connecting',
+    ),
     item(MockDebug.failNext, LucideIcons.circleX, 'fail the next connection'),
     item(MockDebug.encryption, LucideIcons.lock, 'toggle encryption'),
     item(MockDebug.micBlocked, LucideIcons.micOff, 'block the microphone'),

@@ -329,4 +329,94 @@ void main() {
       calls.dispose();
     });
   });
+
+  group('holding connections', () {
+    testWidgets('a held call stays connecting', (tester) async {
+      final (:calls, records: _, advance: _) = _controller();
+
+      calls.toggleHold();
+      calls.joinVoice(_lounge, spaceName: 's');
+      await tester.pump(CallController.connectDelay * 2);
+
+      expect(calls.session!.phase, CallPhase.connecting);
+      calls.dispose();
+    });
+
+    testWidgets('letting go of a held call brings it live', (tester) async {
+      final (:calls, records: _, advance: _) = _controller();
+      calls.toggleHold();
+      calls.joinVoice(_lounge, spaceName: 's');
+      await tester.pump(CallController.connectDelay);
+
+      calls.toggleHold();
+
+      expect(calls.session!.phase, CallPhase.live);
+      calls.dispose();
+    });
+
+    testWidgets('letting go early still connects on time', (tester) async {
+      final (:calls, records: _, advance: _) = _controller();
+      calls.toggleHold();
+      calls.joinVoice(_lounge, spaceName: 's');
+
+      calls.toggleHold();
+      expect(calls.session!.phase, CallPhase.connecting);
+      await tester.pump(CallController.connectDelay);
+
+      expect(calls.session!.phase, CallPhase.live);
+      calls.dispose();
+    });
+
+    testWidgets('a held call set to fail fails when let go', (tester) async {
+      final (:calls, records: _, advance: _) = _controller();
+      calls.toggleHold();
+      calls.failNextConnection();
+      calls.joinVoice(_lounge, spaceName: 's');
+      await tester.pump(CallController.connectDelay);
+
+      calls.toggleHold();
+
+      expect(calls.session!.phase, CallPhase.failed);
+      calls.dispose();
+    });
+
+    testWidgets('holding lasts across calls', (tester) async {
+      final (:calls, records: _, advance: _) = _controller();
+      calls.toggleHold();
+      calls.joinVoice(_lounge, spaceName: 's');
+      await tester.pump(CallController.connectDelay);
+      await calls.leave();
+
+      calls.joinVoice(_den, spaceName: 's');
+      await tester.pump(CallController.connectDelay);
+
+      expect(calls.session!.phase, CallPhase.connecting);
+      calls.dispose();
+    });
+
+    testWidgets('letting go after leaving starts nothing', (tester) async {
+      final (:calls, records: _, advance: _) = _controller();
+      calls.toggleHold();
+      calls.joinVoice(_lounge, spaceName: 's');
+      await tester.pump(CallController.connectDelay);
+      await calls.leave();
+
+      calls.toggleHold();
+
+      expect(calls.session, isNull);
+      calls.dispose();
+    });
+
+    testWidgets('an accepted ring is held too', (tester) async {
+      final (:calls, records: _, advance: _) = _controller();
+      calls.toggleHold();
+      calls.receive(_dmAna, from: _ana);
+
+      calls.accept();
+      await tester.pump(CallController.connectDelay);
+
+      expect(calls.session!.phase, CallPhase.connecting);
+      calls.dispose();
+    });
+  });
 }

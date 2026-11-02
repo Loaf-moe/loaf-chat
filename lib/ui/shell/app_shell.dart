@@ -936,6 +936,7 @@ class _AppShellState extends State<AppShell> {
       context,
       anchor,
       presenceShared: _profile.presenceShared,
+      holding: _mockCalls?.holdingConnections ?? false,
       nextCheck: switch (_updater) {
         final FakeUpdater fake => fake.nextCheck,
         _ => UpdateCheck.upToDate,
@@ -949,6 +950,8 @@ class _AppShellState extends State<AppShell> {
         _ring('dm-crew', '@jun');
       case MockDebug.reconnecting:
         _mockCalls?.toggleReconnecting();
+      case MockDebug.hold:
+        _mockCalls?.toggleHold();
       case MockDebug.failNext:
         // One "make the next thing fail" lever: the next call, sign-in or
         // verification, whichever comes first for each.
