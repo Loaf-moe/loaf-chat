@@ -8,6 +8,9 @@ import 'package:flutter/widgets.dart';
 
 import 'still_when_unfocused.dart';
 
+/// Wrap it outside any tap layer stacked over the picture: a [Stack]
+/// hit-tests only its topmost child, so a region beneath never hears the
+/// pointer.
 class PlaysOnHover extends StatefulWidget {
   const PlaysOnHover({super.key, required this.child});
 

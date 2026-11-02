@@ -5,6 +5,8 @@ library;
 
 import 'package:flutter/widgets.dart';
 
+/// Sits in `MaterialApp.builder`, below the MediaQuery that carries the
+/// reduce motion setting, so [preferStillOf] sees that setting.
 class StillWhenUnfocused extends StatefulWidget {
   const StillWhenUnfocused({super.key, required this.child});
 

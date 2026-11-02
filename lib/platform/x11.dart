@@ -5,6 +5,7 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+/// Asks the Linux runner over `loaf/window`; false on any other platform.
 Future<bool> drawsThroughX11({
   MethodChannel channel = const MethodChannel('loaf/window'),
 }) async {
