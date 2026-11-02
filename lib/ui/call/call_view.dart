@@ -14,6 +14,7 @@ import '../settings/voice_settings.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
 import '../widgets/loaf_button.dart';
+import '../widgets/loaf_progress.dart';
 import '../widgets/toast.dart';
 import '../window/window_chrome.dart';
 import 'calls.dart';
@@ -252,7 +253,7 @@ class CallTopBar extends StatelessWidget {
                       SizedBox(
                         width: 12,
                         height: 12,
-                        child: CircularProgressIndicator(
+                        child: LoafSpinner(
                           strokeWidth: 2,
                           color: tokens.textMuted,
                         ),

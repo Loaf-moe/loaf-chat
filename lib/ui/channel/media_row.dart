@@ -11,6 +11,7 @@ import '../mock/fixtures.dart';
 import '../model/media_source.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_progress.dart';
 import '../widgets/plays_on_hover.dart';
 import 'media_open.dart';
 import 'sizes.dart';
@@ -483,7 +484,7 @@ class _Fetching extends StatelessWidget {
         listenable: file,
         builder: (context, _) {
           final total = file.total;
-          return CircularProgressIndicator(
+          return LoafSpinner(
             value: total == null || total == 0
                 ? null
                 : (file.received / total).clamp(0.0, 1.0),
