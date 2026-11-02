@@ -26,6 +26,7 @@ import 'ui/settings/notification_settings.dart';
 import 'ui/settings/voice_settings.dart';
 import 'ui/theme/appearance.dart';
 import 'ui/theme/loaf_theme.dart';
+import 'ui/widgets/still_when_unfocused.dart';
 import 'ui/window/window_chrome.dart';
 import 'update/pick_updater.dart';
 
@@ -173,8 +174,9 @@ class LoafApp extends StatelessWidget {
           theme: nihon ? loafNihonTheme() : loafLightTheme(),
           darkTheme: nihon ? loafNihonTheme() : loafDarkTheme(),
           themeMode: mode,
-          builder: (context, child) =>
-              WindowChrome(controller: windowChrome, child: child!),
+          builder: (context, child) => StillWhenUnfocused(
+            child: WindowChrome(controller: windowChrome, child: child!),
+          ),
           home: CallbackShortcuts(
             bindings: {
               // Ctrl+T flips the palette. This exists so both themes get looked

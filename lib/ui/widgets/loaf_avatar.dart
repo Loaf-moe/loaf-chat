@@ -132,10 +132,27 @@ class _AvatarPictureState extends State<AvatarPicture> {
   bool _sync = false;
   bool _resolving = false;
 
+  /// Reduced motion: an animated picture holds the frame it has.
+  bool _paused = false;
+
+  /// Keeps the stream's frames while not listening, so play can go on.
+  ImageStreamCompleterHandle? _held;
+
+  /// Whether the current stream has given a frame. A gapless picture still
+  /// shows the last stream's, and resting before the first would never show
+  /// the new one.
+  bool _hasFrame = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _paused = MediaQuery.disableAnimationsOf(context);
     _resolve();
+    if (_paused && _hasFrame) {
+      _rest();
+    } else if (!_paused && _held != null) {
+      _listen();
+    }
   }
 
   @override
@@ -149,19 +166,41 @@ class _AvatarPictureState extends State<AvatarPicture> {
       createLocalImageConfiguration(context),
     );
     if (_stream != null && stream.key == _stream!.key) return;
-    _stream?.removeListener(_listener);
+    _stop();
     if (!widget.gapless) {
       _replace(null);
       _sync = false;
     }
     _stream = stream;
+    _hasFrame = false;
+    _listen();
+  }
+
+  void _listen() {
+    // Let go of the hold only once listening: with neither, the stream ends.
+    final held = _held;
+    _held = null;
     // A cached picture calls back inside addListener, before the first build.
     _resolving = true;
-    stream.addListener(_listener);
+    _stream!.addListener(_listener);
     _resolving = false;
+    held?.dispose();
+  }
+
+  void _rest() {
+    if (_held != null) return;
+    _held = _stream!.completer!.keepAlive();
+    _stream!.removeListener(_listener);
+  }
+
+  void _stop() {
+    _stream?.removeListener(_listener);
+    _held?.dispose();
+    _held = null;
   }
 
   void _onImage(ImageInfo info, bool synchronousCall) {
+    _hasFrame = true;
     if (_resolving) {
       _sync = _info == null && synchronousCall;
       _replace(info);
@@ -169,6 +208,7 @@ class _AvatarPictureState extends State<AvatarPicture> {
       // Every frame of an animated avatar arrives here too.
       setState(() => _replace(info));
     }
+    if (_paused) _rest();
   }
 
   void _replace(ImageInfo? info) {
@@ -178,7 +218,7 @@ class _AvatarPictureState extends State<AvatarPicture> {
 
   @override
   void dispose() {
-    _stream?.removeListener(_listener);
+    _stop();
     _replace(null);
     super.dispose();
   }

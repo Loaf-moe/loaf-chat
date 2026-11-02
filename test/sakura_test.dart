@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/theme/sakura.dart';
+import 'package:loaf_native/ui/widgets/still_when_unfocused.dart';
 
 Future<void> _pump(
   WidgetTester tester,
@@ -159,5 +160,33 @@ void main() {
         reason: '$type',
       );
     }
+  });
+
+  testWidgets('unfocused, nothing ticks; focused again, the train runs', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: loafNihonTheme(),
+        builder: (context, child) => StillWhenUnfocused(child: child!),
+        home: const Scaffold(
+          body: Column(
+            children: [
+              Expanded(
+                child: Stack(fit: StackFit.expand, children: [SakuraPetals()]),
+              ),
+              ShinkansenRail(),
+            ],
+          ),
+        ),
+      ),
+    );
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(tester.binding.transientCallbackCount, 0);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(tester.binding.transientCallbackCount, greaterThan(0));
   });
 }
