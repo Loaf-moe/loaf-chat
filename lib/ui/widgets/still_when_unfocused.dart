@@ -12,7 +12,13 @@ class StillWhenUnfocused extends StatefulWidget {
 
   /// Whether the app has focus; with no [StillWhenUnfocused] above, it does.
   static bool focusedOf(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<_Focus>()?.focused ?? true;
+      context.dependOnInheritedWidgetOfExactType<_Motion>()?.focused ?? true;
+
+  /// Whether less motion is asked for by preference, focus left out. A
+  /// preference counts only if it is in the MediaQuery above this widget.
+  static bool preferStillOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_Motion>()?.preferStill ??
+      MediaQuery.disableAnimationsOf(context);
 
   @override
   State<StillWhenUnfocused> createState() => _StillWhenUnfocusedState();
@@ -45,22 +51,31 @@ class _StillWhenUnfocusedState extends State<StillWhenUnfocused>
   }
 
   @override
-  Widget build(BuildContext context) => _Focus(
-    focused: _focused,
-    child: MediaQuery(
-      data: MediaQuery.of(context).copyWith(
-        disableAnimations: MediaQuery.disableAnimationsOf(context) || !_focused,
+  Widget build(BuildContext context) {
+    final preferStill = MediaQuery.disableAnimationsOf(context);
+    return _Motion(
+      focused: _focused,
+      preferStill: preferStill,
+      child: MediaQuery(
+        data: MediaQuery.of(context)
+            .copyWith(disableAnimations: preferStill || !_focused),
+        child: widget.child,
       ),
-      child: widget.child,
-    ),
-  );
+    );
+  }
 }
 
-class _Focus extends InheritedWidget {
-  const _Focus({required this.focused, required super.child});
+class _Motion extends InheritedWidget {
+  const _Motion({
+    required this.focused,
+    required this.preferStill,
+    required super.child,
+  });
 
   final bool focused;
+  final bool preferStill;
 
   @override
-  bool updateShouldNotify(_Focus old) => old.focused != focused;
+  bool updateShouldNotify(_Motion old) =>
+      old.focused != focused || old.preferStill != preferStill;
 }

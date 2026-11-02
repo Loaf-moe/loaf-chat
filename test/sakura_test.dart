@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/ui/theme/sakura.dart';
@@ -162,31 +163,109 @@ void main() {
     }
   });
 
-  testWidgets('unfocused, nothing ticks; focused again, the train runs', (
-    tester,
-  ) async {
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: loafNihonTheme(),
-        builder: (context, child) => StillWhenUnfocused(child: child!),
-        home: const Scaffold(
-          body: Column(
-            children: [
-              Expanded(
-                child: Stack(fit: StackFit.expand, children: [SakuraPetals()]),
-              ),
-              ShinkansenRail(),
-            ],
+  group('under the app\'s focus', () {
+    Future<void> pumpApp(WidgetTester tester, {bool reduceMotion = false}) {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      return tester.pumpWidget(
+        MaterialApp(
+          theme: loafNihonTheme(),
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(disableAnimations: reduceMotion),
+            child: StillWhenUnfocused(child: child!),
+          ),
+          home: const Scaffold(
+            body: Column(
+              children: [
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [SakuraPetals()],
+                  ),
+                ),
+                ShinkansenRail(),
+              ],
+            ),
           ),
         ),
-      ),
-    );
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-    await tester.pump();
-    expect(tester.binding.transientCallbackCount, 0);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pump();
-    expect(tester.binding.transientCallbackCount, greaterThan(0));
+      );
+    }
+
+    Future<void> become(WidgetTester tester, AppLifecycleState state) async {
+      tester.binding.handleAppLifecycleStateChanged(state);
+      await tester.pump();
+    }
+
+    /// What each decor shows right now, as pixels.
+    Future<List<List<int>>> picture(WidgetTester tester) async {
+      final out = <List<int>>[];
+      for (final type in [SakuraPetals, ShinkansenRail]) {
+        final boundary = tester.renderObject(
+          find
+              .descendant(
+                of: find.byType(type),
+                matching: find.byType(RepaintBoundary),
+              )
+              .first,
+        ) as RenderRepaintBoundary;
+        final bytes = await tester.runAsync(() async {
+          final image = await boundary.toImage();
+          final data = await image.toByteData();
+          image.dispose();
+          return data!.buffer.asUint8List().toList();
+        });
+        out.add(bytes!);
+      }
+      return out;
+    }
+
+    testWidgets('unfocused: petals and train stay, nothing ticks', (
+      tester,
+    ) async {
+      await pumpApp(tester);
+      await become(tester, AppLifecycleState.inactive);
+      expect(_paintIn(SakuraPetals), findsOneWidget);
+      expect(_paintIn(ShinkansenRail), findsOneWidget);
+      expect(tester.binding.transientCallbackCount, 0);
+    });
+
+    testWidgets('unfocused mid-crossing: the scene holds where it was', (
+      tester,
+    ) async {
+      await pumpApp(tester);
+      await tester.pump(const Duration(seconds: 3));
+      final before = await picture(tester);
+      await become(tester, AppLifecycleState.inactive);
+      await tester.pump(const Duration(seconds: 5));
+      expect(await picture(tester), before);
+    });
+
+    testWidgets('focused again: it goes on from where it held', (tester) async {
+      await pumpApp(tester);
+      await tester.pump(const Duration(seconds: 3));
+      await become(tester, AppLifecycleState.inactive);
+      final held = await picture(tester);
+      await become(tester, AppLifecycleState.resumed);
+      await tester.pump();
+      expect(await picture(tester), held);
+      await tester.pump(const Duration(seconds: 1));
+      expect(await picture(tester), isNot(held));
+    });
+
+    for (final state in [
+      AppLifecycleState.resumed,
+      AppLifecycleState.inactive,
+    ]) {
+      testWidgets(
+        'motion turned off, ${state.name}: no petals, a still train',
+        (tester) async {
+          await pumpApp(tester, reduceMotion: true);
+          await become(tester, state);
+          expect(_paintIn(SakuraPetals), findsNothing);
+          expect(_paintIn(ShinkansenRail), findsOneWidget);
+          expect(tester.binding.transientCallbackCount, 0);
+        },
+      );
+    }
   });
 }

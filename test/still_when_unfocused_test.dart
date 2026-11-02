@@ -75,4 +75,46 @@ void main() {
     final reduced = await _pump(tester, systemReduceMotion: true);
     expect(reduced(), isTrue);
   });
+
+  group('preferStillOf', () {
+    Future<bool Function()> pumpPreference(
+      WidgetTester tester, {
+      required bool systemReduceMotion,
+    }) async {
+      late bool prefer;
+      await tester.pumpWidget(
+        MediaQuery(
+          data: MediaQueryData(disableAnimations: systemReduceMotion),
+          child: StillWhenUnfocused(
+            child: Builder(
+              builder: (context) {
+                prefer = StillWhenUnfocused.preferStillOf(context);
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      );
+      return () => prefer;
+    }
+
+    testWidgets('unfocused with no preference: false', (tester) async {
+      final prefer = await pumpPreference(tester, systemReduceMotion: false);
+      await _become(tester, AppLifecycleState.inactive);
+      expect(prefer(), isFalse);
+    });
+
+    for (final state in [
+      AppLifecycleState.resumed,
+      AppLifecycleState.inactive,
+    ]) {
+      testWidgets('system asks for less motion, ${state.name}: true', (
+        tester,
+      ) async {
+        final prefer = await pumpPreference(tester, systemReduceMotion: true);
+        await _become(tester, state);
+        expect(prefer(), isTrue);
+      });
+    }
+  });
 }
