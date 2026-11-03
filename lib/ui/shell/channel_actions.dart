@@ -10,6 +10,7 @@ import '../mock/fixtures.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
+import '../widgets/loaf_progress.dart';
 
 enum ChannelAction {
   markRead,
@@ -326,7 +327,7 @@ class _KickFromSpaceDialogState extends State<_KickFromSpaceDialog> {
               child: SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+                child: LoafSpinner(adaptive: true, strokeWidth: 2),
               ),
             )
           else

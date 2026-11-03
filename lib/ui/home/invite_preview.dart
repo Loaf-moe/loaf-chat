@@ -13,6 +13,7 @@ import '../shell/channel_list.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
+import '../widgets/loaf_progress.dart';
 import '../window/window_chrome.dart';
 
 /// An answer on its way to the server.
@@ -213,6 +214,6 @@ class _Spinner extends StatelessWidget {
   Widget build(BuildContext context) => const SizedBox(
     width: 15,
     height: 15,
-    child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+    child: LoafSpinner(adaptive: true, strokeWidth: 2),
   );
 }

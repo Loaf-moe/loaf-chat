@@ -14,6 +14,7 @@ import '../widgets/adaptive_panel.dart';
 import '../widgets/error_note.dart';
 import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
+import '../widgets/loaf_progress.dart';
 import 'space_address.dart';
 import 'space_directory.dart';
 
@@ -337,9 +338,7 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
         const SizedBox(height: LoafSpace.x4),
         if (snapshot != null)
           switch (snapshot.connectionState) {
-            ConnectionState.waiting => const Center(
-              child: CircularProgressIndicator(),
-            ),
+            ConnectionState.waiting => const Center(child: LoafSpinner()),
             _ when snapshot.hasError =>
               snapshot.error is SpaceNotFound
                   ? Text(
@@ -422,9 +421,7 @@ class _AddSpacePanelState extends State<AddSpacePanel> {
         const SizedBox(height: LoafSpace.x3),
         Expanded(
           child: switch (snapshot.connectionState) {
-            ConnectionState.waiting => const Center(
-              child: CircularProgressIndicator(),
-            ),
+            ConnectionState.waiting => const Center(child: LoafSpinner()),
             _ when snapshot.hasError => Center(
               child: GestureDetector(
                 onTap: () => _retryExplore(_server),

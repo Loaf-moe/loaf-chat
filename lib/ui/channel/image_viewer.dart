@@ -8,6 +8,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../mock/fixtures.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/plays_on_hover.dart';
 import '../window/window_chrome.dart';
 import 'media_open.dart';
 
@@ -47,17 +48,19 @@ class _ImageViewerState extends State<ImageViewer> {
               // InteractiveViewer's own handling already turns the wheel
               // into zoom about the pointer, and a trackpad's pinch too.
               Positioned.fill(
-                child: InteractiveViewer(
-                  transformationController: _transform,
-                  minScale: 1,
-                  maxScale: 8,
-                  child: Center(
-                    child: Image(
-                      image: widget.provider,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => Text(
-                        "couldn't show this picture",
-                        style: style.copyWith(color: Colors.white70),
+                child: PlaysOnHover(
+                  child: InteractiveViewer(
+                    transformationController: _transform,
+                    minScale: 1,
+                    maxScale: 8,
+                    child: Center(
+                      child: Image(
+                        image: widget.provider,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => Text(
+                          "couldn't show this picture",
+                          style: style.copyWith(color: Colors.white70),
+                        ),
                       ),
                     ),
                   ),

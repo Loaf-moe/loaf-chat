@@ -97,6 +97,8 @@ class CallController extends ChangeNotifier implements Calls {
   @override
   bool cameraBlocked = false;
   bool _failNext = false;
+  bool _hold = false;
+  bool _heldBack = false;
 
   @override
   bool get inCall => _session != null && !_session!.over;
@@ -310,6 +312,19 @@ class CallController extends ChangeNotifier implements Calls {
 
   void failNextConnection() => _failNext = true;
 
+  bool get holdingConnections => _hold;
+
+  /// Keeps connections connecting until toggled off, which lets a held one
+  /// through.
+  void toggleHold() {
+    _hold = !_hold;
+    if (!_hold && _heldBack) {
+      _heldBack = false;
+      _finishConnecting();
+    }
+    notifyListeners();
+  }
+
   void toggleReconnecting() {
     final session = _session;
     if (session == null) return;
@@ -367,16 +382,23 @@ class CallController extends ChangeNotifier implements Calls {
 
   void _connect() {
     _after(connectDelay, () {
-      final session = _session;
-      if (session == null) return;
-      if (_failNext) {
-        _failNext = false;
-        _session = session.copyWith(phase: CallPhase.failed);
-      } else {
-        _goLive();
+      if (_session == null) return;
+      if (_hold) {
+        _heldBack = true;
+        return;
       }
+      _finishConnecting();
       notifyListeners();
     });
+  }
+
+  void _finishConnecting() {
+    if (_failNext) {
+      _failNext = false;
+      _session = _session!.copyWith(phase: CallPhase.failed);
+    } else {
+      _goLive();
+    }
   }
 
   void _goLive() {
@@ -501,6 +523,7 @@ class CallController extends ChangeNotifier implements Calls {
 
   void _reset() {
     _cancelTimers();
+    _heldBack = false;
     _session = null;
     _pinned = null;
     _shareOrder.clear();
