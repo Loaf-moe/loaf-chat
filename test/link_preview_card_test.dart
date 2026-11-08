@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,12 +71,15 @@ Future<void> _pump(
   double column = 600,
   Uri? link,
   double textScale = 1,
+  bool reduceMotion = false,
 }) => tester.pumpWidget(
   MaterialApp(
     theme: loafDarkTheme(),
     builder: (context, child) => MediaQuery(
-      data: MediaQuery.of(context)
-          .copyWith(textScaler: TextScaler.linear(textScale)),
+      data: MediaQuery.of(context).copyWith(
+        textScaler: TextScaler.linear(textScale),
+        disableAnimations: reduceMotion,
+      ),
       child: child!,
     ),
     home: LinkPreviewsScope(
@@ -218,6 +222,24 @@ void main() {
       tester.getTopLeft(find.text('Bake day')).dx,
       greaterThan(tester.getTopRight(picture).dx),
     );
+  });
+
+  testWidgets('reduced motion: hovering the picture lets it move', (
+    tester,
+  ) async {
+    final previews = _Scripted();
+    await _pump(tester, previews, reduceMotion: true);
+    previews.ready(image: _Pending());
+    await tester.pump();
+    final picture = find.descendant(of: card, matching: find.byType(Image));
+    bool reduced() => MediaQuery.disableAnimationsOf(tester.element(picture));
+    expect(reduced(), isTrue);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: const Offset(590, 590));
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(picture));
+    await tester.pump();
+    expect(reduced(), isFalse);
   });
 
   testWidgets('without a picture the words start at the card\'s edge', (

@@ -9,6 +9,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../theme/loaf_theme.dart';
 import '../widgets/error_note.dart';
 import '../widgets/loaf_button.dart';
+import '../widgets/loaf_progress.dart';
 import 'emoji_compare.dart';
 import 'recovery_key.dart';
 import 'verify_state.dart';
@@ -78,10 +79,7 @@ class WorkingLine extends StatelessWidget {
         SizedBox(
           width: 15,
           height: 15,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: tokens.accent,
-          ),
+          child: LoafSpinner(strokeWidth: 2, color: tokens.accent),
         ),
         const SizedBox(width: LoafSpace.x3),
         Flexible(
@@ -401,7 +399,7 @@ class RestoringStep extends StatelessWidget {
         const SizedBox(height: LoafSpace.x3),
         ClipRRect(
           borderRadius: BorderRadius.circular(LoafRadius.full),
-          child: LinearProgressIndicator(
+          child: LoafProgressBar(
             value: total == 0 ? null : restored / total,
             minHeight: 6,
             color: tokens.accent,

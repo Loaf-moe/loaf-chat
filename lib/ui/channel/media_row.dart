@@ -11,6 +11,8 @@ import '../mock/fixtures.dart';
 import '../model/media_source.dart';
 import '../platform.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_progress.dart';
+import '../widgets/plays_on_hover.dart';
 import 'media_open.dart';
 import 'sizes.dart';
 
@@ -349,7 +351,9 @@ class _MediaRowState extends State<MediaRow> {
         ],
       ),
     );
-    return _tappable(picture, LoafRadius.lg);
+    // Around the tap layer too: it lies over the picture and would take the
+    // hover.
+    return PlaysOnHover(child: _tappable(picture, LoafRadius.lg));
   }
 
   /// The platform's player over the poster. Until the first bytes come the
@@ -480,7 +484,7 @@ class _Fetching extends StatelessWidget {
         listenable: file,
         builder: (context, _) {
           final total = file.total;
-          return CircularProgressIndicator(
+          return LoafSpinner(
             value: total == null || total == 0
                 ? null
                 : (file.received / total).clamp(0.0, 1.0),

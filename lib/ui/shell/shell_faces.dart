@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../call/call_view.dart';
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_progress.dart';
 import '../window/window_chrome.dart';
 
 /// The first sync, still coming. A spinner while the server has not
@@ -29,7 +30,7 @@ class SyncingFace extends StatelessWidget {
     return _Face(
       onOpenNavigation: onOpenNavigation,
       child: progress == null
-          ? const CircularProgressIndicator.adaptive()
+          ? const LoafSpinner(adaptive: true)
           : SizedBox(
               width: 200,
               child: ClipRRect(

@@ -34,7 +34,7 @@ class _FakeSelector extends FileSelectorPlatform {
 
 void main() {
   /// A page with a button that opens the viewer, as `openMedia` does.
-  Future<void> pump(WidgetTester tester) async {
+  Future<void> pump(WidgetTester tester, {bool reduceMotion = false}) async {
     tester.view.physicalSize = const Size(800, 600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -44,6 +44,11 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: loafDarkTheme(),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(disableAnimations: reduceMotion),
+          child: child!,
+        ),
         home: MediaSourceScope(
           source: source,
           child: Scaffold(
@@ -75,6 +80,21 @@ void main() {
       .widget<InteractiveViewer>(find.byType(InteractiveViewer))
       .transformationController!
       .value;
+
+  testWidgets('reduced motion: hovering the picture lets it move', (
+    tester,
+  ) async {
+    await pump(tester, reduceMotion: true);
+    bool reduced() =>
+        MediaQuery.disableAnimationsOf(tester.element(find.byType(Image)));
+    expect(reduced(), isTrue);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: const Offset(400, 590));
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(find.byType(InteractiveViewer)));
+    await tester.pump();
+    expect(reduced(), isFalse);
+  });
 
   testWidgets('escape closes the viewer', (tester) async {
     await pump(tester);
