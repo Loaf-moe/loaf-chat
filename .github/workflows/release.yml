@@ -1,4 +1,5 @@
-# Pushing a tag like v0.1.0, on main, is the whole release.
+# Pushing a tag like v0.1.0, on main, is the whole release. Each step is a
+# `release:*` mise task; `mise tasks` describes them.
 name: release
 
 on:
@@ -10,34 +11,29 @@ permissions:
 
 concurrency: release
 
+# mise install's postinstall hook fetches every dependency; the builds
+# fetch what each needs themselves.
+env:
+  MISE_NO_HOOKS: 1
+
 jobs:
   version:
     runs-on: ubuntu-latest
     outputs:
       name: ${{ steps.version.outputs.name }}
       build: ${{ steps.version.outputs.build }}
+    # Only scripts run here: mise without its toolchains.
+    env:
+      MISE_TASK_RUN_AUTO_INSTALL: false
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Public keys are committed
-        # Better to stop here than after three builds and a notarization.
-        run: |
-          for key in appimage.pub sparkle.pub flatpak.asc; do
-            test -s "tool/release/keys/$key" \
-              || { echo "::error::tool/release/keys/$key is missing or empty"; exit 1; }
-          done
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
       - id: version
-        run: |
-          git fetch origin main
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
-            || { echo "::error::the tag is not on main"; exit 1; }
-          name="${GITHUB_REF_NAME#v}"
-          [[ "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-            || { echo "::error::tags look like v1.2.3"; exit 1; }
-          echo "name=$name" >> "$GITHUB_OUTPUT"
-          # Every updater compares this, so it only ever goes up.
-          echo "build=$(git rev-list --count "$GITHUB_SHA")" >> "$GITHUB_OUTPUT"
+        run: mise run release:version "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
 
   macos:
     needs: version
@@ -49,8 +45,8 @@ jobs:
       # Builds, signs through Apple's cloud with the same key as iOS, and
       # notarizes: no provisioning profile secret.
       - run: >
-          tool/release/macos.sh "${{ needs.version.outputs.name }}"
-          "${{ needs.version.outputs.build }}" dist
+          mise run release:macos
+          "${{ needs.version.outputs.name }}" "${{ needs.version.outputs.build }}"
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -74,8 +70,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
       - run: >
-          tool/release/ios.sh "${{ needs.version.outputs.name }}"
-          "${{ needs.version.outputs.build }}"
+          mise run release:ios
+          "${{ needs.version.outputs.name }}" "${{ needs.version.outputs.build }}"
         env:
           # One App Store Connect API key notarizes macOS and, through cloud
           # signing, signs and uploads iOS. The names predate iOS.
@@ -91,35 +87,13 @@ jobs:
     environment: release
     steps:
       - uses: actions/checkout@v4
-      # libwebkit2gtk and libsoup: desktop_webview_window (via
-      # flutter_web_auth_2) requires them at CMake time. The GStreamer dev
-      # packages are loaf_media's: its Linux plugin finds them through
-      # pkg-config and links them into the video player. Its Rust crate is
-      # built by cargo from CMake, and cargo comes from mise.toml below.
-      # The runner image's LLVM brings libunwind-14-dev, which conflicts
-      # with the libunwind-dev that libgstreamer1.0-dev needs; nothing here
-      # uses LLVM's libunwind (Flutter links libstdc++), so it goes first.
-      - run: |
-          sudo apt-get update
-          sudo apt-get remove -y libunwind-14-dev
-          sudo apt-get install -y clang cmake ninja-build pkg-config \
-            libgtk-3-dev liblzma-dev libstdc++-12-dev jq \
-            libwebkit2gtk-4.1-dev libsoup-3.0-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       - uses: jdx/mise-action@v2
+      - run: mise run ci:setup:linux:release
       - run: >
-          mise exec -- flutter build linux --release
-          --build-name=${{ needs.version.outputs.name }}
-          --build-number=${{ needs.version.outputs.build }}
-          --dart-define=LOAF_BUILD=${{ needs.version.outputs.build }}
-          --dart-define=LOAF_VERSION=${{ needs.version.outputs.name }}
-      - run: >
-          tool/release/appimage.sh "${{ needs.version.outputs.name }}"
-          "${{ needs.version.outputs.build }}" dist
+          mise run release:linux
+          "${{ needs.version.outputs.name }}" "${{ needs.version.outputs.build }}"
         env:
           APPIMAGE_PRIVATE_KEY: ${{ secrets.APPIMAGE_PRIVATE_KEY }}
-      # Tarred: artifacts drop the executable bit.
-      - run: tar -cf dist/bundle.tar -C build/linux/x64/release bundle
       - uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -129,36 +103,33 @@ jobs:
     needs: version
     runs-on: windows-latest
     environment: release
+    # mise's Flutter does not install on Windows: mise brings Rust, and
+    # flutter-action the Flutter that mise.toml pins. Tasks then run with
+    # what is there rather than trying for Flutter again.
+    env:
+      MISE_TASK_RUN_AUTO_INSTALL: false
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      # mise pins both; its Flutter backend does not install on Windows, so
-      # the versions are read from mise.toml and installed directly.
-      - id: pins
-        run: |
-          echo "flutter=$(sed -n 's/^flutter = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
-          echo "rust=$(sed -n 's/^rust = "\(.*\)"/\1/p' mise.toml)" >> "$GITHUB_OUTPUT"
+      - uses: jdx/mise-action@v2
+        with:
+          install_args: rust
+      - id: flutter
+        run: echo "version=$(mise current flutter)" >> "$GITHUB_OUTPUT"
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ steps.pins.outputs.flutter }}
+          flutter-version: ${{ steps.flutter.outputs.version }}
           channel: stable
-          # Restored from what ci.yml saves on main.
+          # A cache made under a tag stays with that tag, so only a re-run of
+          # this release finds it.
           cache: true
-      - run: |
-          rustup toolchain install ${{ steps.pins.outputs.rust }} --profile minimal
-          rustup default ${{ steps.pins.outputs.rust }}
-      - run: >
-          flutter build windows --release
-          --build-name=${{ needs.version.outputs.name }}
-          --build-number=${{ needs.version.outputs.build }}
-          --dart-define=LOAF_BUILD=${{ needs.version.outputs.build }}
       # The AppImage's key signs Windows' feed entry too; each signs its own
       # text (lib/update/release_feed.dart), so neither passes for the other.
       - run: >
-          tool/release/windows.sh "${{ needs.version.outputs.name }}"
-          "${{ needs.version.outputs.build }}" dist
+          mise run release:windows
+          "${{ needs.version.outputs.name }}" "${{ needs.version.outputs.build }}"
         env:
           APPIMAGE_PRIVATE_KEY: ${{ secrets.APPIMAGE_PRIVATE_KEY }}
       - uses: actions/upload-artifact@v4
@@ -174,41 +145,20 @@ jobs:
       # GNOME, matching the manifest's runtime.
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
       options: --privileged
+    env:
+      MISE_TASK_RUN_AUTO_INSTALL: false
     steps:
       - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
       - uses: actions/download-artifact@v4
         with:
           name: linux
           path: dist
-      - run: |
-          # The image is Fedora-based; make sure the tools are there.
-          command -v git gpg tar >/dev/null || dnf install -y git gnupg2 tar
-          mkdir -p build/linux/x64/release
-          tar -xf dist/bundle.tar -C build/linux/x64/release
-          # The repo so far, so this build lands on top of the last ones.
-          # No branch yet (exit 2) is a first release; any other failure
-          # must not quietly drop the older builds.
-          url="https://github.com/${GITHUB_REPOSITORY}.git"
-          code=0
-          git ls-remote --exit-code --heads "$url" gh-pages >/dev/null || code=$?
-          case "$code" in
-            0)
-              git clone --depth 1 --branch gh-pages "$url" pages-before
-              test -d pages-before/repo \
-                || { echo "::error::gh-pages has no repo/"; exit 1; }
-              mv pages-before/repo repo
-              # Git does not keep empty directories, and ostree will not
-              # open a repo without them.
-              mkdir -p repo/tmp repo/refs/remotes repo/refs/mirrors \
-                repo/state repo/extensions
-              ;;
-            2) echo "no gh-pages yet: first release" ;;
-            *) echo "::error::could not list gh-pages (exit $code)"; exit 1 ;;
-          esac
-      - run: tool/release/flatpak.sh "${{ needs.version.outputs.name }}" repo
+      - run: mise run release:flatpak "${{ needs.version.outputs.name }}" dist/bundle.tar
         env:
           FLATPAK_GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
-      - run: tar -cf repo.tar repo
       - uses: actions/upload-artifact@v4
         with:
           name: flatpak
@@ -222,42 +172,13 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      VERSION: ${{ needs.version.outputs.name }}
+      MISE_TASK_RUN_AUTO_INSTALL: false
     steps:
       - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          install: false
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Lay out the feeds
-        # Before the release goes public, so a bad layout fails while
-        # nothing points at it yet.
-        run: |
-          mkdir dist
-          tar -xf artifacts/flatpak/repo.tar -C dist
-          cp artifacts/macos/appcast.xml dist/
-          # One feed: the Linux job's, with Windows' entry merged in.
-          jq -e -s '.[0] * .[1]' artifacts/linux/latest.json \
-            artifacts/windows/windows.json > dist/latest.json
-          jq -e '.appimage and .windows' dist/latest.json >/dev/null
-          tool/release/pages.sh dist pages
-      - name: Release assets
-        run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --draft \
-                 --title "Loaf Chat $VERSION" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" --clobber \
-            artifacts/macos/*.dmg artifacts/linux/*.AppImage \
-            artifacts/windows/*-Setup.exe artifacts/windows/*.zip
-          # Public before any feed names them: a feed never points at a
-          # file that is not there.
-          gh release edit "$GITHUB_REF_NAME" --draft=false
-      - name: Push the feeds
-        run: |
-          cd pages
-          # One commit, replaced each time: the branch keeps no history.
-          git init -b gh-pages
-          git add -A
-          git -c user.name="loaf chat releases" -c user.email="releases@loaf.moe" \
-            commit -q -m "Loaf Chat $VERSION"
-          git push --force \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+      - run: mise run release:publish "$GITHUB_REF_NAME" artifacts

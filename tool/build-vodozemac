@@ -1,13 +1,13 @@
 #!/bin/sh
 # Builds vodozemac's native library for the encryption tests, without
-# building the app around it. Run after `flutter pub get`, from the repo
-# root; the tests find the result in build/vodozemac/. On Windows, run it
-# in Git Bash.
+# building the app around it. Run after `mise run dependencies:dart`, from
+# the repo root; the tests find the result in build/vodozemac/. On Windows,
+# run it in Git Bash.
 set -eu
 
 package=$(sed -n 's|.*"rootUri": "file://\(.*flutter_vodozemac[^"]*\)".*|\1|p' \
   .dart_tool/package_config.json | head -n 1)
-[ -n "$package" ] || { echo "run flutter pub get first" >&2; exit 1; }
+[ -n "$package" ] || { echo "run mise run dependencies:dart first" >&2; exit 1; }
 
 # A Windows file URI keeps a slash before the drive: /C:/Users/...
 case "$package" in /?:/*) package=${package#/} ;; esac

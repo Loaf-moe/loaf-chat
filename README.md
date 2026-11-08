@@ -4,14 +4,15 @@ A Matrix client for loaf.moe, shaped like a place you hang out.
 
 ## Running the tests
 
-Tools, environment and tasks all come from `mise.toml`: `mise install` once,
-then `mise tasks` lists what there is to run.
+Tools, environment and tasks all come from `mise.toml`. `mise install` brings
+the toolchains and then every Dart package and Rust crate; run it again after
+a pull to catch up. `mise tasks` lists what there is to run.
 
 Encryption tests load vodozemac's native library, and fail saying so without
 it. On macOS, build the app once with `mise run build:macos`. On Linux, build
-just the library once with `mise run vodozemac` (it needs `mise run deps`
-first). Then run `mise run test:all`, and `mise run check` for the analyzer
-and the formatter.
+just the library once with `mise run vodozemac` (after `mise install`). Then
+run `mise run test:all`, and `mise run check` for the analyzer and the
+formatter.
 
 ## Building on macOS
 
@@ -59,13 +60,16 @@ Setup installs for the current user only and never asks for admin.
 
 ## Releasing
 
-Push a tag like `v0.1.0` that sits on `main`. `.github/workflows/release.yml`
-does the rest: it builds, signs and notarizes (on Windows, only the feed
-entry is signed), publishes a GitHub Release, and rewrites get.loaf.moe,
-including the download page in `tool/release/site/`.
+`mise run release` tags the tip of `main` with the next patch version and
+pushes it, after asking; `mise run release v0.2.0` picks the version. The
+tag is the whole release: `.github/workflows/release.yml` does the rest. It
+builds, signs and notarizes (on Windows, only the feed entry is signed),
+publishes a GitHub Release, and rewrites get.loaf.moe, including the
+download page in `tool/release/site/`.
 The same tag sends iOS to TestFlight, where the Testing group picks it up.
-Preview that page with `tool/release/site.sh <latest.json> <out dir>`.
-The signing keys were made once by `tool/release/keygen.sh`.
+Every step it takes is a `release:*` task in `mise.toml`, runnable by hand.
+Preview that page with `mise run release:site <latest.json> <out dir>`.
+The signing keys were made once by `mise run release:keygen`.
 
 ## Licence
 
