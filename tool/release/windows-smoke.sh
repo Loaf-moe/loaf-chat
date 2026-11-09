@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # What a tester does with Setup, on the CI runner: install silently, open
 # the app, check it stays up, then uninstall and check nothing is left.
-# Between, it does what lib/update/bundle_swap.dart relies on: renames the
-# running app's own files and puts new ones under their names.
+# Between, it does what lib/update/windows/bundle_swap.dart relies on:
+# renames the running app's own files and puts new ones under their names.
 # Runs in Git Bash. usage: windows-smoke.sh <Setup.exe>
 set -euo pipefail
 # Git Bash would read /VERYSILENT as a path and rewrite it.
