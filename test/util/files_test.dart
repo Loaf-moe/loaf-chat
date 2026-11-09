@@ -35,4 +35,16 @@ void main() {
     expect(file.readAsBytesSync().toSet(), hasLength(1));
     expect(dir.listSync(), hasLength(1));
   });
+
+  test('a write it cannot rename into place leaves nothing beside', () async {
+    // A folder standing where the file should go: the write beside it
+    // succeeds and the rename over it cannot, so there is a .part left for
+    // the failure path to clear away.
+    final blocked = Directory(p.join(dir.path, 'd'))..createSync();
+    await expectLater(
+      writeAtomically(File(blocked.path), [1, 2, 3]),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(dir.listSync().map((e) => p.basename(e.path)), ['d']);
+  });
 }

@@ -50,4 +50,22 @@ void main() {
     );
     expect(calls, 1);
   });
+
+  test('fewer than one attempt is refused, not retried forever', () async {
+    var calls = 0;
+    for (final attempts in [0, -1]) {
+      await expectLater(
+        retry<void, FileSystemException>(
+          () async {
+            calls++;
+            throw const FileSystemException('held');
+          },
+          attempts: attempts,
+          delay: delay,
+        ),
+        throwsA(isA<RangeError>()),
+      );
+    }
+    expect(calls, 0);
+  });
 }

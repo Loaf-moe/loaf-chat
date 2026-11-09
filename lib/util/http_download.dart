@@ -24,15 +24,15 @@ Future<File> download(
 }) async {
   final part = File('${to.path}.$pid-${_downloads++}.part');
   try {
-    final response = await client
-        .send(http.Request('GET', url))
-        .timeout(idleTimeout);
+    final response = await _sent(client, url, idleTimeout);
     if (response.statusCode != 200) {
+      await _dropped(response);
       throw HttpException('${response.statusCode}', uri: url);
     }
     // A server that says the wrong length is refused before a byte lands.
     if (response.contentLength case final length?
         when length >= 0 && length != size) {
+      await _dropped(response);
       throw HttpException('Content-Length $length, not $size', uri: url);
     }
 
@@ -72,3 +72,27 @@ Future<File> download(
     rethrow;
   }
 }
+
+/// Asks [url] for its bytes, giving up after [idleTimeout] of silence.
+///
+/// A request in flight cannot be called off, so the answer to an abandoned
+/// one is dropped when it does arrive. Without that it would sit unread,
+/// holding its connection open until the collector reached it.
+Future<http.StreamedResponse> _sent(
+  http.Client client,
+  Uri url,
+  Duration idleTimeout,
+) async {
+  final sending = client.send(http.Request('GET', url));
+  try {
+    return await sending.timeout(idleTimeout);
+  } on Object {
+    unawaited(sending.then(_dropped).then((_) {}, onError: (_) {}));
+    rethrow;
+  }
+}
+
+/// Lets go of an answer we will not read, closing its connection now
+/// rather than whenever the response is collected.
+Future<void> _dropped(http.StreamedResponse response) =>
+    response.stream.listen(null).cancel();
