@@ -11,11 +11,13 @@ Future<AppearanceController> _pump(
   WidgetTester tester, {
   required DateTime now,
   AppearanceSettings settings = const AppearanceSettings(),
+  bool reduceMotionByDefault = false,
 }) async {
   final c = AppearanceController(
     store: MemoryStore<AppearanceSettings>(),
     settings: settings,
     clock: () => now,
+    reduceMotionByDefault: reduceMotionByDefault,
   );
   await tester.pumpWidget(
     MaterialApp(
@@ -87,6 +89,27 @@ void main() {
   testWidgets('no override note out of season', (tester) async {
     final c = await _pump(tester, now: _offSeason);
     expect(find.textContaining('to use your pick'), findsNothing);
+    await _done(tester, c);
+  });
+
+  testWidgets('the reduce motion box shows the default and drives the flag', (
+    tester,
+  ) async {
+    final c = await _pump(tester, now: _offSeason, reduceMotionByDefault: true);
+    Checkbox box() => tester.widget<Checkbox>(
+      find.descendant(
+        of: find.ancestor(
+          of: find.text('reduce motion'),
+          matching: find.byType(InkWell),
+        ),
+        matching: find.byType(Checkbox),
+      ),
+    );
+    expect(box().value, isTrue);
+    await tester.tap(find.text('reduce motion'));
+    await tester.pump();
+    expect(c.reduceMotion, isFalse);
+    expect(box().value, isFalse);
     await _done(tester, c);
   });
 }

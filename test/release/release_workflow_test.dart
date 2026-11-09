@@ -19,13 +19,23 @@ String _job(String name) {
   return next == null ? rest : rest.substring(0, next.start);
 }
 
+/// One mise task's block: from its header to the next one.
+String _task(String name) {
+  final tasks = File('mise.toml').readAsStringSync();
+  final start = tasks.indexOf('[tasks."$name"]');
+  expect(start, isNot(-1), reason: 'no $name task');
+  final next = tasks.indexOf('\n[', start + 1);
+  return next == -1 ? tasks.substring(start) : tasks.substring(start, next);
+}
+
 void main() {
   test('the ios job runs ios.sh with the release version and key', () {
     final ios = _job('ios');
     expect(ios, contains('needs: version'));
     expect(ios, contains('runs-on: macos-latest'));
     expect(ios, contains('environment: release'));
-    expect(ios, contains('tool/release/ios.sh'));
+    expect(ios, contains('mise run release:ios'));
+    expect(_task('release:ios'), contains('tool/release/ios.sh'));
     expect(ios, contains(r'${{ needs.version.outputs.name }}'));
     expect(ios, contains(r'${{ needs.version.outputs.build }}'));
     for (final secret in [

@@ -19,6 +19,7 @@ import '../widgets/error_note.dart';
 import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
 import '../widgets/loaf_field.dart';
+import '../widgets/loaf_progress.dart';
 import '../window/window_chrome.dart';
 import 'browser_wait.dart';
 import 'sign_in_controller.dart';
@@ -529,10 +530,7 @@ class _ServerRow extends StatelessWidget {
           SizedBox(
             width: 11,
             height: 11,
-            child: CircularProgressIndicator(
-              strokeWidth: 1.5,
-              color: tokens.textMuted,
-            ),
+            child: LoafSpinner(strokeWidth: 1.5, color: tokens.textMuted),
           ),
           const SizedBox(width: LoafSpace.x2),
         ],
@@ -582,10 +580,7 @@ class _WorkingNote extends StatelessWidget {
         SizedBox(
           width: 15,
           height: 15,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: tokens.accent,
-          ),
+          child: LoafSpinner(strokeWidth: 2, color: tokens.accent),
         ),
         const SizedBox(width: LoafSpace.x3),
         Flexible(

@@ -1,9 +1,9 @@
 /// Which theme loaf chat wears: the one picked in settings, unless a season
 /// is on and easter eggs are allowed to dress the app up anyway.
 ///
-/// The pick and the flag are saved to a small JSON file beside the account's
-/// database, and restored before the first frame so the app never flashes
-/// the wrong palette.
+/// The pick, the flags and the motion choice are saved to a small JSON file
+/// beside the account's database, and restored before the first frame so
+/// the app never flashes the wrong palette.
 library;
 
 import 'dart:async';
@@ -34,6 +34,7 @@ class AppearanceSettings implements Jsonable {
     this.theme = LoafThemeId.loafDark,
     this.easterEggs = true,
     this.externalMedia = true,
+    this.reduceMotion,
   });
 
   /// Anything unreadable falls back to that field's default, so a
@@ -42,6 +43,7 @@ class AppearanceSettings implements Jsonable {
     if (json is! Map) return const AppearanceSettings();
     final eggs = json['easterEggs'];
     final external = json['externalMedia'];
+    final motion = json['reduceMotion'];
     return AppearanceSettings(
       theme:
           LoafThemeId.values
@@ -50,6 +52,7 @@ class AppearanceSettings implements Jsonable {
           LoafThemeId.loafDark,
       easterEggs: eggs is bool ? eggs : true,
       externalMedia: external is bool ? external : true,
+      reduceMotion: motion is bool ? motion : null,
     );
   }
 
@@ -61,14 +64,19 @@ class AppearanceSettings implements Jsonable {
   /// encrypted room, whatever this says.
   final bool externalMedia;
 
+  /// Null until chosen: the device's default applies.
+  final bool? reduceMotion;
+
   AppearanceSettings copyWith({
     LoafThemeId? theme,
     bool? easterEggs,
     bool? externalMedia,
+    bool? reduceMotion,
   }) => AppearanceSettings(
     theme: theme ?? this.theme,
     easterEggs: easterEggs ?? this.easterEggs,
     externalMedia: externalMedia ?? this.externalMedia,
+    reduceMotion: reduceMotion ?? this.reduceMotion,
   );
 
   @override
@@ -76,6 +84,7 @@ class AppearanceSettings implements Jsonable {
     'theme': theme.name,
     'easterEggs': easterEggs,
     'externalMedia': externalMedia,
+    'reduceMotion': ?reduceMotion,
   };
 }
 
@@ -84,6 +93,7 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
     required this._store,
     this._settings = const AppearanceSettings(),
     this._clock = DateTime.now,
+    this._reduceMotionByDefault = false,
   }) {
     _lastEffective = effective;
     externalMediaListenable = ValueNotifier(_settings.externalMedia);
@@ -94,14 +104,17 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
   static Future<AppearanceController> load(
     Store<AppearanceSettings> store, {
     DateTime Function() clock = DateTime.now,
+    bool reduceMotionByDefault = false,
   }) async => AppearanceController(
     store: store,
     settings: await store.load() ?? const AppearanceSettings(),
     clock: clock,
+    reduceMotionByDefault: reduceMotionByDefault,
   );
 
   final Store<AppearanceSettings> _store;
   final DateTime Function() _clock;
+  final bool _reduceMotionByDefault;
   AppearanceSettings _settings;
   Timer? _midnight;
   late LoafThemeId _lastEffective;
@@ -109,6 +122,7 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
   LoafThemeId get chosen => _settings.theme;
   bool get easterEggs => _settings.easterEggs;
   bool get externalMedia => _settings.externalMedia;
+  bool get reduceMotion => _settings.reduceMotion ?? _reduceMotionByDefault;
 
   /// [externalMedia] for the Matrix side, which reads it without knowing
   /// about themes.
@@ -128,10 +142,14 @@ class AppearanceController extends ChangeNotifier with WidgetsBindingObserver {
   void setExternalMedia(bool on) =>
       _update(_settings.copyWith(externalMedia: on));
 
+  void setReduceMotion(bool on) =>
+      _update(_settings.copyWith(reduceMotion: on));
+
   void _update(AppearanceSettings next) {
     if (next.theme == chosen &&
         next.easterEggs == easterEggs &&
-        next.externalMedia == externalMedia) {
+        next.externalMedia == externalMedia &&
+        next.reduceMotion == _settings.reduceMotion) {
       return;
     }
     _settings = next;

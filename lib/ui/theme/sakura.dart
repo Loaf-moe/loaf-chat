@@ -3,8 +3,8 @@
 /// "日本 Again" trip checklist.
 ///
 /// Each draws nothing unless the theme asks for sakura, never takes a tap or
-/// a screen reader's attention, and holds still when the system asks for
-/// less motion.
+/// a screen reader's attention, holds still when the system asks for less
+/// motion, and pauses where it is while the app is unfocused.
 library;
 
 import 'dart:math' as math;
@@ -12,6 +12,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../widgets/still_when_unfocused.dart';
 import 'loaf_theme.dart';
 
 bool _wantsSakura(BuildContext context) =>
@@ -23,15 +24,21 @@ class SakuraPetals extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!_wantsSakura(context) || MediaQuery.disableAnimationsOf(context)) {
+    if (!_wantsSakura(context) || StillWhenUnfocused.preferStillOf(context)) {
       return const SizedBox.shrink();
     }
-    return const IgnorePointer(child: ExcludeSemantics(child: _Petals()));
+    return IgnorePointer(
+      child: ExcludeSemantics(
+        child: _Petals(running: StillWhenUnfocused.focusedOf(context)),
+      ),
+    );
   }
 }
 
 class _Petals extends StatefulWidget {
-  const _Petals();
+  const _Petals({required this.running});
+
+  final bool running;
 
   @override
   State<_Petals> createState() => _PetalsState();
@@ -39,6 +46,8 @@ class _Petals extends StatefulWidget {
 
 class _PetalsState extends State<_Petals> with SingleTickerProviderStateMixin {
   final _elapsed = ValueNotifier(Duration.zero);
+  // A ticker starts again from zero; the petals go on from where they held.
+  var _base = Duration.zero;
   late final Ticker _ticker;
   // Seeded per mount, so every mount falls the same petals and tests see one
   // picture; a shared Random would reshuffle after the first remount.
@@ -52,7 +61,18 @@ class _PetalsState extends State<_Petals> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _ticker = createTicker((elapsed) => _elapsed.value = elapsed)..start();
+    _ticker = createTicker((elapsed) => _elapsed.value = _base + elapsed);
+    if (widget.running) _ticker.start();
+  }
+
+  @override
+  void didUpdateWidget(_Petals old) {
+    super.didUpdateWidget(old);
+    if (widget.running && !_ticker.isActive) _ticker.start();
+    if (!widget.running && _ticker.isActive) {
+      _base = _elapsed.value;
+      _ticker.stop();
+    }
   }
 
   @override
@@ -171,11 +191,15 @@ class _ShinkansenRailState extends State<ShinkansenRail>
     if (View.of(context).viewInsets.bottom > 0) {
       return const SizedBox.shrink();
     }
+    final parked = StillWhenUnfocused.preferStillOf(context);
     return IgnorePointer(
       child: ExcludeSemantics(
         child: SizedBox(
           height: ShinkansenRail.height,
-          child: _Rail(moving: !MediaQuery.disableAnimationsOf(context)),
+          child: _Rail(
+            running: !parked && StillWhenUnfocused.focusedOf(context),
+            parked: parked,
+          ),
         ),
       ),
     );
@@ -183,9 +207,12 @@ class _ShinkansenRailState extends State<ShinkansenRail>
 }
 
 class _Rail extends StatefulWidget {
-  const _Rail({required this.moving});
+  const _Rail({required this.running, required this.parked});
 
-  final bool moving;
+  final bool running;
+
+  /// Motion is off by preference: the train waits at the right.
+  final bool parked;
 
   @override
   State<_Rail> createState() => _RailState();
@@ -193,19 +220,24 @@ class _Rail extends StatefulWidget {
 
 class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
   final _elapsed = ValueNotifier(Duration.zero);
-  late final Ticker _ticker = createTicker((e) => _elapsed.value = e);
+  // A ticker starts again from zero; the train goes on from where it held.
+  var _base = Duration.zero;
+  late final Ticker _ticker = createTicker((e) => _elapsed.value = _base + e);
 
   @override
   void initState() {
     super.initState();
-    if (widget.moving) _ticker.start();
+    if (widget.running) _ticker.start();
   }
 
   @override
   void didUpdateWidget(_Rail old) {
     super.didUpdateWidget(old);
-    if (widget.moving && !_ticker.isActive) _ticker.start();
-    if (!widget.moving && _ticker.isActive) _ticker.stop();
+    if (widget.running && !_ticker.isActive) _ticker.start();
+    if (!widget.running && _ticker.isActive) {
+      _base = _elapsed.value;
+      _ticker.stop();
+    }
   }
 
   @override
@@ -225,7 +257,7 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
         child: CustomPaint(
           painter: _RailPainter(
             elapsed: _elapsed,
-            moving: widget.moving,
+            parked: widget.parked,
             tokens: LoafTokens.of(context),
           ),
         ),
@@ -237,12 +269,12 @@ class _RailState extends State<_Rail> with SingleTickerProviderStateMixin {
 class _RailPainter extends CustomPainter {
   _RailPainter({
     required this.elapsed,
-    required this.moving,
+    required this.parked,
     required this.tokens,
   }) : super(repaint: elapsed);
 
   final ValueNotifier<Duration> elapsed;
-  final bool moving;
+  final bool parked;
   final LoafTokens tokens;
 
   /// The train's own drawing space: the checklist's SVG viewBox.
@@ -257,7 +289,7 @@ class _RailPainter extends CustomPainter {
     final t = elapsed.value.inMicroseconds / Duration.microsecondsPerSecond;
     final double left;
     final double bob;
-    if (moving) {
+    if (!parked) {
       final progress = (t % _crossing) / _crossing;
       left = -_trainWidth - 20 + progress * (size.width + _trainWidth + 40);
       // Up a pixel and back once a second, like a carriage on the joints.
@@ -371,5 +403,5 @@ class _RailPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_RailPainter old) =>
-      old.moving != moving || old.tokens != tokens;
+      old.parked != parked || old.tokens != tokens;
 }

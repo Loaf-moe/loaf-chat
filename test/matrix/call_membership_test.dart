@@ -274,6 +274,44 @@ void main() {
     expect(api.writes.single.content.containsKey('created_ts'), isFalse);
   });
 
+  test('asked to write again, says when you joined', () async {
+    final api = _Api();
+    final (client, room) = await _joined(api);
+    final membership = _membership(client, room);
+    await membership.join();
+
+    await membership.refresh();
+
+    expect(api.writes, hasLength(2));
+    expect(api.writes[1].content['created_ts'], _noon.millisecondsSinceEpoch);
+  });
+
+  test('asked to write again through a dropped connection, tries '
+      'again', () async {
+    final api = _Api();
+    final (client, room) = await _joined(api);
+    final membership = _membership(client, room);
+    await membership.join();
+    api.answers.add(null);
+
+    await membership.refresh();
+    await _until(() => api.writes.length >= 3);
+
+    expect(api.writes[2].content['expires'], _expiry);
+  });
+
+  test('asked to write again after leaving, writes nothing', () async {
+    final api = _Api();
+    final (client, room) = await _joined(api);
+    final membership = _membership(client, room);
+    await membership.join();
+    await membership.leave();
+
+    await membership.refresh();
+
+    expect(api.writes, hasLength(2));
+  });
+
   group('a refresh is tried again after', () {
     final failures = <String, http.Response?>{
       'a dropped connection': null,

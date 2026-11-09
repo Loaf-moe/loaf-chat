@@ -33,11 +33,13 @@ void main() {
       required DateTime now,
       AppearanceSettings settings = const AppearanceSettings(),
       Store<AppearanceSettings>? store,
+      bool reduceMotionByDefault = false,
     }) {
       final c = AppearanceController(
         store: store ?? MemoryStore<AppearanceSettings>(),
         settings: settings,
         clock: () => now,
+        reduceMotionByDefault: reduceMotionByDefault,
       );
       addTearDown(c.dispose);
       return c;
@@ -120,6 +122,74 @@ void main() {
       c.choose(LoafThemeId.nihon);
       await Future<void>.delayed(Duration.zero);
       expect(c.effective, LoafThemeId.nihon);
+    });
+
+    group('reduce motion', () {
+      test('off by default', () {
+        expect(make(now: offSeason).reduceMotion, isFalse);
+      });
+
+      test('never chosen, it follows the device default', () {
+        final c = make(now: offSeason, reduceMotionByDefault: true);
+        expect(c.reduceMotion, isTrue);
+      });
+
+      for (final (chosen, byDefault) in [(false, true), (true, false)]) {
+        test('chosen $chosen beats a default of $byDefault', () {
+          final c = make(
+            now: offSeason,
+            settings: AppearanceSettings(reduceMotion: chosen),
+            reduceMotionByDefault: byDefault,
+          );
+          expect(c.reduceMotion, chosen);
+        });
+      }
+
+      test('setting it notifies and saves', () async {
+        final store = MemoryStore<AppearanceSettings>();
+        final c = make(now: offSeason, store: store);
+        var heard = 0;
+        c.addListener(() => heard++);
+        c.setReduceMotion(true);
+        await Future<void>.delayed(Duration.zero);
+        expect(heard, 1);
+        expect(c.reduceMotion, isTrue);
+        expect(store.saved?.reduceMotion, isTrue);
+      });
+
+      test('picking what the default already gives keeps the choice', () {
+        final store = MemoryStore<AppearanceSettings>();
+        final c = make(
+          now: offSeason,
+          store: store,
+          reduceMotionByDefault: true,
+        );
+        c.setReduceMotion(true);
+        expect(store.saved?.reduceMotion, isTrue);
+      });
+
+      test('picking it again changes nothing', () {
+        final c = make(
+          now: offSeason,
+          settings: const AppearanceSettings(reduceMotion: true),
+        );
+        var heard = 0;
+        c.addListener(() => heard++);
+        c.setReduceMotion(true);
+        expect(heard, 0);
+      });
+
+      test('load keeps a saved choice over the default', () async {
+        final c = await AppearanceController.load(
+          MemoryStore<AppearanceSettings>(
+            const AppearanceSettings(reduceMotion: false),
+          ),
+          clock: () => offSeason,
+          reduceMotionByDefault: true,
+        );
+        addTearDown(c.dispose);
+        expect(c.reduceMotion, isFalse);
+      });
     });
 
     test('load restores what was saved', () async {
@@ -214,6 +284,33 @@ void main() {
         await JsonFileStore(file(), AppearanceSettings.fromJson).load(),
         isNull,
       );
+    });
+
+    test('a motion choice round-trips', () async {
+      for (final on in [true, false]) {
+        await JsonFileStore(
+          file(),
+          AppearanceSettings.fromJson,
+        ).save(AppearanceSettings(reduceMotion: on));
+        final back = await JsonFileStore(
+          file(),
+          AppearanceSettings.fromJson,
+        ).load();
+        expect(back?.reduceMotion, on);
+      }
+    });
+
+    test('no motion choice is written as none, and read back as none', () {
+      expect(
+        const AppearanceSettings().toJson(),
+        isNot(contains('reduceMotion')),
+      );
+      expect(AppearanceSettings.fromJson(const {}).reduceMotion, isNull);
+    });
+
+    test('a mistyped motion choice reads as none', () {
+      final back = AppearanceSettings.fromJson(const {'reduceMotion': 'yes'});
+      expect(back.reduceMotion, isNull);
     });
 
     test('unknown or mistyped fields fall back to the defaults', () async {

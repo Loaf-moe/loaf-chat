@@ -146,15 +146,15 @@ class _Logged implements CallMedia {
   /// The connection made last.
   CallConnection? last;
 
+  /// Held back until completed, when set: a connection just made.
+  Completer<void>? hold;
+
   @override
   Future<CallConnection> connect(Uri url, String jwt) async {
     _log.add('connected');
-    return last = _LoggedConnection(
-      await _inner.connect(url, jwt),
-      _log,
-      deviceSets,
-      volumeSets,
-    );
+    final connection = await _inner.connect(url, jwt);
+    await hold?.future;
+    return last = _LoggedConnection(connection, _log, deviceSets, volumeSets);
   }
 }
 
@@ -366,6 +366,7 @@ class _World {
       voice: voice,
       voiceApplying: voiceApplying,
       now: () => now,
+      callReconnectDelays: const [Duration(milliseconds: 20)],
     );
     addTearDown(rooms.dispose);
     calls = rooms.calls!;
@@ -1695,15 +1696,178 @@ void main() {
       expect(world.calls.session?.phase, CallPhase.live);
     });
 
-    test('lost for good fails the call and says so in the room', () async {
+    test(
+      'ended by the server fails the call and says so in the room',
+      () async {
+        final world = await _open();
+        await world.join();
+
+        world.network.value = CallLink.ended;
+        await _until(() => world.log.last == 'disconnected');
+
+        expect(world.calls.session?.phase, CallPhase.failed);
+        expect(world.log.skip(3), ['emptied membership', 'disconnected']);
+      },
+    );
+
+    test('lost, keeps the membership and shows reconnecting', () async {
       final world = await _open();
       await world.join();
 
       world.network.value = CallLink.lost;
       await _until(() => world.log.last == 'disconnected');
 
-      expect(world.calls.session?.phase, CallPhase.failed);
-      expect(world.log.skip(3), ['emptied membership', 'disconnected']);
+      expect(world.calls.session?.phase, CallPhase.reconnecting);
+      expect(world.calls.inCall, isTrue);
+      expect(world.log, isNot(contains('emptied membership')));
+    });
+
+    test('lost, is live again once the media can be reached', () async {
+      final world = await _open();
+      await world.join();
+      final startedAt = world.calls.session!.startedAt;
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+
+      world.network.value = CallLink.connected;
+      await _until(() => world.calls.session?.phase == CallPhase.live);
+
+      expect(world.calls.session?.startedAt, startedAt);
+      expect(world.log.skip(4), ['access', 'connected']);
+      expect(world.log.where((e) => e == 'wrote membership'), hasLength(1));
+    });
+
+    test('lost, keeps trying while the call server refuses', () async {
+      final world = await _open();
+      await world.join();
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+      world.api.callServerAnswer = _json({'errcode': 'M_FORBIDDEN'}, 403);
+      world.network.value = CallLink.connected;
+      await _until(() => world.log.where((e) => e == 'access').length >= 3);
+      expect(world.calls.session?.phase, CallPhase.reconnecting);
+
+      world.api.callServerAnswer = null;
+      await _until(() => world.calls.session?.phase == CallPhase.live);
+
+      expect(world.calls.session?.phase, CallPhase.live);
+    });
+
+    test('leaving while trying ends it', () async {
+      final world = await _open();
+      await world.join();
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+
+      await world.calls.leave();
+      await _settle();
+
+      expect(world.calls.session, isNull);
+      expect(world.log.last, 'emptied membership');
+      expect(world.log.where((e) => e == 'connected'), hasLength(1));
+    });
+
+    test('access answered after leaving connects nothing', () async {
+      final world = await _open();
+      await world.join();
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+      final hold = world.api.hold = Completer();
+      world.network.value = CallLink.connected;
+      await _until(() => world.log.where((e) => e == 'access').length == 2);
+
+      await world.calls.leave();
+      hold.complete();
+      await _settle();
+
+      expect(world.calls.session, isNull);
+      expect(world.log.where((e) => e == 'connected'), hasLength(1));
+    });
+
+    test('a connection made after leaving is dropped', () async {
+      final world = await _open();
+      await world.join();
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+      final hold = world._media.hold = Completer();
+      world.network.value = CallLink.connected;
+      await _until(() => world.log.where((e) => e == 'connected').length == 2);
+
+      await world.calls.leave();
+      hold.complete();
+      await _until(
+        () => world.log.where((e) => e == 'disconnected').length == 2,
+      );
+
+      expect(world.calls.session, isNull);
+    });
+
+    test('hung up while trying stops it', () async {
+      final world = await _open();
+      await world.join();
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+
+      await _sync(world.client, _oven, [
+        _state(
+          callSilenceType,
+          callHangUpContent(null),
+          key: callSilenceKey(_me),
+          sender: _ada,
+          ts: _noon.millisecondsSinceEpoch + _hour,
+        ),
+      ]);
+      await _until(() => world.calls.session?.phase == CallPhase.hungUp);
+      await _settle();
+
+      expect(world.log.where((e) => e == 'connected'), hasLength(1));
+    });
+
+    test('muted while trying is muted once back', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+
+      world.calls.toggleMute();
+      world.network.value = CallLink.connected;
+      await _until(() => world.calls.session?.phase == CallPhase.live);
+      await _settle();
+
+      expect(watcher.peers[_mine]?.muted, isTrue);
+    });
+
+    test("someone's volume is told to the new media", () async {
+      final world = await _open();
+      world.voice.value = const VoiceSettings(volumes: {_ada: 0.4});
+      await world.other(_ada, 'ADADEVICE');
+      await world.join();
+      await _until(() => world.volumes.isNotEmpty);
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+
+      world.network.value = CallLink.connected;
+      await _until(() => world.volumes.length >= 2);
+
+      expect(world.volumes, [
+        ('$_ada:ADADEVICE', 0.4),
+        ('$_ada:ADADEVICE', 0.4),
+      ]);
+    });
+
+    test('someone who arrived meanwhile is there once back', () async {
+      final world = await _open();
+      await world.join();
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+
+      world.network.value = CallLink.connected;
+      await world.other(_ada, 'ADADEVICE');
+      await _until(() => world.calls.session?.phase == CallPhase.live);
+      await _until(() => world.names.contains(_ada));
+
+      expect(world.names, [_ada]);
     });
   });
 
@@ -1801,6 +1965,37 @@ void main() {
     await _until(() => world.log.length > 3);
 
     expect(world.log.skip(3), ['wrote membership']);
+  });
+
+  test('your membership emptied from elsewhere, written again through a '
+      'dropped connection, keeps the call', () async {
+    final world = await _open();
+    await world.join();
+    await _sync(world.client, _oven, [_inCall(_me, _device)]);
+    world.api.dropMemberships = 1;
+
+    await _sync(world.client, _oven, [_inCall(_me, _device, left: true)]);
+    await _until(
+      () => world.log.where((e) => e == 'wrote membership').length == 2,
+    );
+    await _settle();
+
+    expect(world.calls.session?.phase, CallPhase.live);
+    expect(world.calls.inCall, isTrue);
+    expect(world.log, isNot(contains('emptied membership')));
+  });
+
+  test('your membership emptied from elsewhere and refused again ends the '
+      'call', () async {
+    final world = await _open();
+    await world.join();
+    await _sync(world.client, _oven, [_inCall(_me, _device)]);
+    world.api.refuseMembership = true;
+
+    await _sync(world.client, _oven, [_inCall(_me, _device, left: true)]);
+    await _until(() => world.calls.session?.phase == CallPhase.failed);
+
+    expect(world.calls.inCall, isFalse);
   });
 
   test('an old emptied membership of yours is not taken for leaving', () async {

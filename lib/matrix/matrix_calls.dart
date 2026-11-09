@@ -31,6 +31,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     this._voiceApplying,
     DateTime Function()? now,
     this._timings = const CallMembershipTimings(),
+    this._reconnectDelays = defaultReconnectDelays,
   }) : _now = now ?? DateTime.now {
     _sync = _client.onSync.stream.listen((_) => _onSync());
     _voice?.addListener(_changedVoice);
@@ -50,7 +51,19 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   final ValueNotifier<bool>? _voiceApplying;
   final DateTime Function() _now;
   final CallMembershipTimings _timings;
+
+  /// How long a call waits before each of its own tries at media it has
+  /// lost; the last one repeats.
+  final List<Duration> _reconnectDelays;
   late final StreamSubscription<SyncUpdate> _sync;
+
+  static const defaultReconnectDelays = [
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 4),
+    Duration(seconds: 8),
+    Duration(seconds: 15),
+  ];
 
   CallSession? _session;
   _Live? _live;
@@ -101,12 +114,12 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   Set<CallFeature> get features => const {};
 
   @override
-  CallQuality get quality => _live?.connection.quality ?? CallQuality.unknown;
+  CallQuality get quality => _live?.connection?.quality ?? CallQuality.unknown;
 
   @override
   bool get speaking =>
       // Muted is not heard, whatever the media has yet to notice.
-      !muted && (_live?.connection.speaking ?? false);
+      !muted && (_live?.connection?.speaking ?? false);
 
   @override
   CallSession? get session => _session;
@@ -216,30 +229,32 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     }
     if (!joined || attempt != _attempt) return;
 
-    final live = _live = _Live(room, connection!, membership!)
+    final live = _live = _Live(room, membership!)
       ..voice = _voice?.value
       ..silenced = _silences(room)[_client.userID];
+    _session = _session!.copyWith(startedAt: _now());
+    _carry(live, connection!);
+  }
+
+  /// Puts [connection] in [live]'s hands: the call is live on it from now.
+  void _carry(_Live live, CallConnection connection) {
+    live.connection = connection;
+    live.volumes.clear();
     connection.addListener(_onMedia);
     live.deviceChanges = connection.deviceChanges.listen((_) {
       if (identical(live, _live)) _applyAudio(live, voice: true);
     });
-    final occupants = _occupants(room);
-    _session = _session!.copyWith(
-      phase: CallPhase.live,
-      startedAt: _now(),
-      participants: _participants(room, occupants, connection),
-    );
-    _notify();
+    _session = _session?.copyWith(phase: CallPhase.live);
     _applyAudio(live, voice: true);
-    _syncVolumes(live, occupants);
+    _refresh(live);
   }
 
   /// Takes the live call out of this object's hands, for [_end] to finish.
   _Live? _detach() {
     final live = _live;
     _live = null;
-    live?.connection.removeListener(_onMedia);
-    unawaited(live?.deviceChanges.cancel());
+    live?.connection?.removeListener(_onMedia);
+    unawaited(live?.deviceChanges?.cancel());
     return live;
   }
 
@@ -254,7 +269,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     await live.membership.leave();
     _leaving.remove(live.room.id);
     live.membership.dispose();
-    await live.connection.disconnect();
+    await live.connection?.disconnect();
   }
 
   /// Empties any membership of this device's in a call it is not in: what a
@@ -327,13 +342,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     } else if (live.echoed) {
       // Emptied from elsewhere: say again that this device is here.
       live.echoed = false;
-      final attempt = _attempt;
-      unawaited(
-        live.membership.join().onError<Exception>((e, s) {
-          Logs().w("[loaf] couldn't say again that this device is here", e, s);
-          return _lost(attempt);
-        }),
-      );
+      unawaited(live.membership.refresh());
     }
     final silenced = _silences(live.room)[_client.userID];
     if (silenced != live.silenced) {
@@ -370,10 +379,14 @@ class MatrixCalls extends ChangeNotifier implements Calls {
 
   void _onMedia() {
     final live = _live;
-    if (live == null) return;
-    switch (live.connection.link) {
-      case CallLink.lost:
+    final connection = live?.connection;
+    if (live == null || connection == null) return;
+    switch (connection.link) {
+      case CallLink.ended:
         unawaited(_lost(_attempt));
+        return;
+      case CallLink.lost:
+        unawaited(_reconnect(live, connection, _attempt));
         return;
       case CallLink.reconnecting:
         _session = _session?.copyWith(phase: CallPhase.reconnecting);
@@ -381,6 +394,40 @@ class MatrixCalls extends ChangeNotifier implements Calls {
         _session = _session?.copyWith(phase: CallPhase.live);
     }
     _refresh(live);
+  }
+
+  /// The media gave up on [dead]: drops it and connects anew, over and
+  /// over, until the call is live again or you have moved on. The
+  /// membership stays, so everyone else still sees you in the call.
+  Future<void> _reconnect(_Live live, CallConnection dead, int attempt) async {
+    dead.removeListener(_onMedia);
+    unawaited(live.deviceChanges?.cancel());
+    live.connection = null;
+    live.deviceChanges = null;
+    _phase(CallPhase.reconnecting);
+    await dead.disconnect();
+    for (var tries = 0; ; tries++) {
+      final delay = tries < _reconnectDelays.length
+          ? _reconnectDelays[tries]
+          : _reconnectDelays.last;
+      await Future<void>.delayed(delay);
+      if (attempt != _attempt) return;
+      try {
+        final server = await callServer(_client);
+        final access = await sfuAccess(_client, server, live.room.id);
+        if (attempt != _attempt) return;
+        final connection = await _media.connect(access.url, access.jwt);
+        if (attempt != _attempt) {
+          await connection.disconnect();
+          return;
+        }
+        _carry(live, connection);
+        Logs().w("[loaf] the call's media is back");
+        return;
+      } on Exception catch (e, s) {
+        Logs().w("[loaf] couldn't connect the call's media again", e, s);
+      }
+    }
   }
 
   void _refresh(_Live live) {
@@ -395,6 +442,8 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   /// Tells [live]'s media how loud to play each device of everyone else
   /// among [occupants], where that is not what it was last told.
   void _syncVolumes(_Live live, List<CallOccupant> occupants) {
+    final connection = live.connection;
+    if (connection == null) return;
     final volumes = _voice?.value.volumes ?? const <String, double>{};
     for (final occupant in occupants) {
       if (occupant.member.id == _client.userID) continue;
@@ -403,7 +452,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
         final identity = '${occupant.member.id}:$device';
         if ((live.volumes[identity] ?? 1) == volume) continue;
         live.volumes[identity] = volume;
-        unawaited(live.connection.setVolume(identity, volume));
+        unawaited(connection.setVolume(identity, volume));
       }
     }
   }
@@ -486,17 +535,18 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     unawaited(() async {
       await before;
       try {
-        if (!identical(live, _live)) return;
+        final connection = live.connection;
+        if (!identical(live, _live) || connection == null) return;
         if (voice) {
           _switching(true);
           try {
-            await _applyVoice(live.connection);
+            await _applyVoice(connection);
           } finally {
             _switching(false);
           }
         }
-        await live.connection.setDeafened(deafened);
-        await live.connection.setMicrophone(!muted);
+        await connection.setDeafened(deafened);
+        await connection.setMicrophone(!muted);
       } on MicrophoneUnavailable {
         _muted = true;
         micBlocked = true;
@@ -606,13 +656,14 @@ class MatrixCalls extends ChangeNotifier implements Calls {
 
 /// The call this device is in.
 class _Live {
-  _Live(this.room, this.connection, this.membership);
+  _Live(this.room, this.membership);
 
   final Room room;
-  final CallConnection connection;
   final OwnCallMembership membership;
 
-  late final StreamSubscription<void> deviceChanges;
+  /// The media carrying the call; null while a new connection is sought.
+  CallConnection? connection;
+  StreamSubscription<void>? deviceChanges;
 
   /// The settings as of the last change this call looked at.
   VoiceSettings? voice;

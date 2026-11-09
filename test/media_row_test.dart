@@ -54,6 +54,7 @@ Future<void> _pump(
   WidgetTester tester,
   Widget row, {
   double column = 400,
+  bool reduceMotion = false,
 }) async {
   final root = Directory.systemTemp.createTempSync('loaf-media-row-test');
   addTearDown(() {
@@ -68,6 +69,10 @@ Future<void> _pump(
   await tester.pumpWidget(
     MaterialApp(
       theme: loafDarkTheme(),
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(disableAnimations: reduceMotion),
+        child: child!,
+      ),
       home: MediaSourceScope(
         source: MockMediaSource(root),
         child: Scaffold(
@@ -104,6 +109,26 @@ void main() {
         await _pump(tester, const MediaRow(media: _oven));
         expect(sizeOfRow(tester), const Size(400, 300));
       });
+    });
+
+    testWidgets('reduced motion: hovering the picture lets it move', (
+      tester,
+    ) async {
+      // With onOpen, as in the timeline: the tap layer lies over the picture.
+      await _pump(
+        tester,
+        MediaRow(media: _oven, onOpen: () {}),
+        reduceMotion: true,
+      );
+      bool reduced() =>
+          MediaQuery.disableAnimationsOf(tester.element(find.byType(Image)));
+      expect(reduced(), isTrue);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      addTearDown(mouse.removePointer);
+      await mouse.moveTo(tester.getCenter(find.byKey(MediaRow.pictureKey)));
+      await tester.pump();
+      expect(reduced(), isFalse);
     });
 
     testWidgets('a tall image stops at 360', (tester) async {

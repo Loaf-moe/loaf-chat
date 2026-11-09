@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/loaf_theme.dart';
+import '../widgets/loaf_progress.dart';
 
 class SettingsLabel extends StatelessWidget {
   const SettingsLabel({super.key, required this.label});
@@ -146,10 +147,7 @@ class SettingsChoice extends StatelessWidget {
                 if (busy)
                   SizedBox.square(
                     dimension: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: tokens.accent,
-                    ),
+                    child: LoafSpinner(strokeWidth: 2, color: tokens.accent),
                   )
                 else if (selected)
                   Icon(LucideIcons.check, size: 18, color: tokens.accent),

@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -71,6 +71,37 @@ Future<void> _settle(WidgetTester tester, Widget widget) async {
 final _painted = find.descendant(
   of: find.byType(AvatarPicture),
   matching: find.byType(CustomPaint),
+);
+
+/// An animated picture whose frames arrive when the test says.
+class _Frames extends ImageStreamCompleter {
+  Future<void> show(WidgetTester tester, [Color color = _red]) async {
+    final image = await tester.runAsync(() {
+      final recorder = ui.PictureRecorder();
+      Canvas(recorder).drawPaint(Paint()..color = color);
+      return recorder.endRecording().toImage(2, 2);
+    });
+    setImage(ImageInfo(image: image!));
+    await tester.pump();
+  }
+
+  bool get listening => hasListeners;
+}
+
+class _Animated extends ImageProvider<_Animated> {
+  _Animated(this.frames);
+  final _Frames frames;
+  @override
+  Future<_Animated> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture(this);
+  @override
+  ImageStreamCompleter loadImage(_Animated key, ImageDecoderCallback decode) =>
+      frames;
+}
+
+Widget _animated(_Frames frames, {required bool reduceMotion}) => MediaQuery(
+  data: MediaQueryData(disableAnimations: reduceMotion),
+  child: _host(AvatarPicture(provider: _Animated(frames))),
 );
 
 void main() {
@@ -335,6 +366,88 @@ void main() {
     for (final (x, y) in [(1, 1), (34, 1), (1, 34), (34, 34)]) {
       expect(at(x, y).a, 0, reason: 'corner ($x, $y)');
     }
+  });
+
+  group('an animated picture', () {
+    testWidgets('plays while motion is on', (tester) async {
+      final frames = _Frames();
+      await tester.pumpWidget(_animated(frames, reduceMotion: false));
+      await frames.show(tester);
+      expect(_painted, findsOneWidget);
+      expect(frames.listening, isTrue);
+    });
+
+    testWidgets(
+      'reduced motion: shows its first frame, then asks for no more',
+      (tester) async {
+        final frames = _Frames();
+        await tester.pumpWidget(_animated(frames, reduceMotion: true));
+        await frames.show(tester);
+        expect(_painted, findsOneWidget);
+        expect(frames.listening, isFalse);
+      },
+    );
+
+    testWidgets('motion off mid-play: stops asking for frames', (tester) async {
+      final frames = _Frames();
+      await tester.pumpWidget(_animated(frames, reduceMotion: false));
+      await frames.show(tester);
+      await tester.pumpWidget(_animated(frames, reduceMotion: true));
+      expect(_painted, findsOneWidget);
+      expect(frames.listening, isFalse);
+    });
+
+    testWidgets('a new picture as motion stops still shows its first frame', (
+      tester,
+    ) async {
+      final key = GlobalKey();
+      Widget at(_Frames frames, {required bool reduceMotion}) => MediaQuery(
+        data: MediaQueryData(disableAnimations: reduceMotion),
+        child: _host(
+          RepaintBoundary(
+            key: key,
+            child: SizedBox.square(
+              dimension: 36,
+              child: AvatarPicture(provider: _Animated(frames), gapless: true),
+            ),
+          ),
+        ),
+      );
+      final first = _Frames();
+      await tester.pumpWidget(at(first, reduceMotion: false));
+      await first.show(tester);
+      await tester.pumpAndSettle();
+      final next = _Frames();
+      await tester.pumpWidget(at(next, reduceMotion: true));
+      await next.show(tester, _blue);
+      await tester.pumpAndSettle();
+      final centre = await tester.runAsync(() async {
+        final boundary =
+            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        final image = await boundary.toImage();
+        final data = await image.toByteData();
+        image.dispose();
+        const i = (18 * 36 + 18) * 4;
+        return Color.fromARGB(
+          data!.getUint8(i + 3),
+          data.getUint8(i),
+          data.getUint8(i + 1),
+          data.getUint8(i + 2),
+        );
+      });
+      expect(centre, _blue);
+    });
+
+    testWidgets('motion back: plays on from where it rested', (tester) async {
+      final frames = _Frames();
+      await tester.pumpWidget(_animated(frames, reduceMotion: true));
+      await frames.show(tester);
+      await tester.pumpWidget(_animated(frames, reduceMotion: false));
+      expect(frames.listening, isTrue);
+      await frames.show(tester);
+      expect(_painted, findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 }
 

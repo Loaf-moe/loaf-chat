@@ -79,6 +79,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     this.externalMedia,
     @visibleForTesting this._now,
     @visibleForTesting Duration? warmAvatarsAfter,
+    @visibleForTesting this._callReconnectDelays,
   }) : avatarImages = MatrixAvatarImages(
          client,
          warmAfter: warmAvatarsAfter ?? MatrixAvatarImages.defaultWarmAfter,
@@ -206,6 +207,8 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       voice: _voice,
       voiceApplying: _voiceApplying,
       now: _now,
+      reconnectDelays:
+          _callReconnectDelays ?? MatrixCalls.defaultReconnectDelays,
     ),
     null => null,
   };
@@ -213,6 +216,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// The clock the unread counts back off by, and call memberships run out
   /// by; tests move it.
   final DateTime Function()? _now;
+
+  /// How long a call waits between its own tries at media it has lost;
+  /// tests shorten it.
+  final List<Duration>? _callReconnectDelays;
 
   /// Fires when the next call membership runs out, since no sync says so.
   Timer? _callExpiry;

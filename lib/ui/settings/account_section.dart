@@ -20,6 +20,7 @@ import '../theme/loaf_theme.dart';
 import '../widgets/action_menu.dart';
 import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
+import '../widgets/loaf_progress.dart';
 import '../widgets/toast.dart';
 import 'avatar_picker.dart';
 
@@ -343,9 +344,7 @@ class _AvatarRow extends StatelessWidget {
                       child: SizedBox(
                         width: 24,
                         height: 24,
-                        child: CircularProgressIndicator.adaptive(
-                          strokeWidth: 2.5,
-                        ),
+                        child: LoafSpinner(adaptive: true, strokeWidth: 2.5),
                       ),
                     ),
                   ),

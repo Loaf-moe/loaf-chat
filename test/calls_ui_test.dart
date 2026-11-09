@@ -326,6 +326,29 @@ void main() {
   );
 
   testWidgets(
+    'the hold lever keeps a call connecting until it is let go',
+    variant: _desktop,
+    (tester) async {
+      await _pumpShell(tester, _wide);
+      await _debug(tester, 'hold calls connecting');
+
+      await tester.tap(find.text('the hangout'));
+      await _connect(tester);
+      await _connect(tester);
+      expect(find.text('connecting…'), findsWidgets);
+
+      // The spinner never settles, so the menu opens on fixed pumps.
+      await tester.tap(find.byTooltip('Debug'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.text('let calls connect').last);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('connecting…'), findsNothing);
+      expect(_callView(), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'while the call reconnects, the channel list shows nobody as heard '
     'or muted',
     variant: _desktop,

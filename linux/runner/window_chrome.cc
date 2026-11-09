@@ -105,6 +105,13 @@ void method_call_cb(FlMethodChannel* channel, FlMethodCall* call,
   if (strcmp(method, "state") == 0) {
     g_autoptr(FlValue) state = state_value(self);
     response = FL_METHOD_RESPONSE(fl_method_success_response_new(state));
+  } else if (strcmp(method, "x11") == 0) {
+    gboolean x11 = FALSE;
+#ifdef GDK_WINDOWING_X11
+    x11 = GDK_IS_X11_DISPLAY(gtk_widget_get_display(GTK_WIDGET(self->window)));
+#endif
+    g_autoptr(FlValue) value = fl_value_new_bool(x11);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(value));
   } else {
     if (strcmp(method, "minimize") == 0) {
       gtk_window_iconify(self->window);

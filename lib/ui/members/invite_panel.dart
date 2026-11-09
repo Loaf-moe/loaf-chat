@@ -12,6 +12,7 @@ import '../theme/loaf_theme.dart';
 import '../widgets/adaptive_panel.dart';
 import '../widgets/loaf_avatar.dart';
 import '../widgets/loaf_button.dart';
+import '../widgets/loaf_progress.dart';
 
 /// A full Matrix id, such as `@someone:matrix.org`.
 final _mxid = RegExp(r'^@[^:\s]+:[^\s]+$');
@@ -302,7 +303,7 @@ class _InvitePanelState extends State<InvitePanel> {
                   ? const SizedBox(
                       width: 15,
                       height: 15,
-                      child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+                      child: LoafSpinner(adaptive: true, strokeWidth: 2),
                     )
                   : null,
               onTap: _sending || _selectedIds.isEmpty ? null : _send,
