@@ -251,7 +251,7 @@ void main() {
     c.dispose();
   });
 
-  group('FileAppearanceStore', () {
+  group('appearance settings in a file', () {
     late Directory dir;
     setUp(() => dir = Directory.systemTemp.createTempSync('appearance'));
     tearDown(() => dir.deleteSync(recursive: true));
