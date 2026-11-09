@@ -45,15 +45,23 @@ class WindowsUpdater extends SelfUpdater {
   String get relaunchPath =>
       p.join(installation.path, BundleSwap.executable.posix);
 
+  /// Finishes undoing a swap that was cut short, and clears what the last
+  /// one left behind. Throws while the undo cannot be finished: the `.old`
+  /// files it has still to put back are the only copy of them left, so
+  /// nothing may be swapped over them.
+  Future<void> _finishLastUpdate() async {
+    if (await _swap.cleanUp()) {
+      updateLog('an update cut short was undone');
+    }
+  }
+
   /// Clears what the last update left first.
   @override
   Future<void> start({
     Duration checkAfter = const Duration(seconds: 30),
   }) async {
     try {
-      if (await _swap.cleanUp()) {
-        updateLog('an update cut short was undone');
-      }
+      await _finishLastUpdate();
     } catch (e, s) {
       updateLog('could not clear the last update', e, s);
     }
@@ -62,6 +70,11 @@ class WindowsUpdater extends SelfUpdater {
 
   @override
   Future<void> install(VerifiedAsset asset) async {
+    // Before the download: an undo of the last swap may have been left
+    // part way through, by this run or an earlier one, and whatever is
+    // holding its files may since have let go. While it cannot be
+    // finished, this throws rather than download a build it may not swap.
+    await _finishLastUpdate();
     // Inside the install, so every rename of the swap stays on one volume.
     final work = _swap.work;
     try {

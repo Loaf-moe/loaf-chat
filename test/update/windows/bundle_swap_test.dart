@@ -11,10 +11,15 @@ const _disk = LocalFileSystem();
 
 /// The disk, except that every rename asks [before] first: a throw is a
 /// file someone else holds, a future that never ends is a crash mid-swap.
+/// A file [held] names cannot be deleted at all, as a running build's and a
+/// freshly placed build's cannot be on Windows.
 class _Held extends ForwardingFileSystem {
-  _Held(this.before) : super(_disk);
+  _Held(this.before, {this.held = _nothing}) : super(_disk);
 
   final Future<void> Function(String from) before;
+  final bool Function(String path) held;
+
+  static bool _nothing(String path) => false;
 
   @override
   File file(dynamic path) => _HeldFile(this, delegate.file(path));
@@ -45,6 +50,24 @@ class _HeldFile extends ForwardingFileSystemEntity<File, io.File>
     await fileSystem.before(path);
     return super.rename(newPath);
   }
+
+  @override
+  Future<File> delete({bool recursive = false}) async {
+    _refuseIfHeld();
+    return super.delete(recursive: recursive);
+  }
+
+  @override
+  void deleteSync({bool recursive = false}) {
+    _refuseIfHeld();
+    super.deleteSync(recursive: recursive);
+  }
+
+  void _refuseIfHeld() {
+    if (fileSystem.held(path)) {
+      throw FileSystemException('in use by the scanner', path);
+    }
+  }
 }
 
 /// Every file under [dir] as `relative/path` (always `/`) to its contents.
@@ -54,6 +77,11 @@ Map<String, String> _tree(Directory dir) => {
       p.posix.joinAll(p.split(p.relative(entity.path, from: dir.path))): entity
           .readAsStringSync(),
 };
+
+/// Leaves behind the journal of a swap cut off after [entry].
+void _journalOf(Directory install, JournalEntry entry) => install
+    .childFile(BundleSwap.journalName)
+    .writeAsStringSync('${entry.line}\n');
 
 void _write(Directory root, Map<String, String> files) {
   for (final MapEntry(key: path, value: body) in files.entries) {
@@ -203,6 +231,127 @@ void main() {
       expect(_tree(install), _installed);
     });
   }
+
+  // The undo meets the same locks the swap does. What it cannot put back
+  // keeps its `.old` self, and the journal stays to say so.
+  test(
+    'an undo a held file cuts short is finished by the next launch',
+    () async {
+      var calls = 0;
+      await expectLater(
+        BundleSwap(
+          install.path,
+          // The last rename fails with the new engine already in place, and
+          // nothing can delete that engine until the next launch.
+          fs: _Held((from) async {
+            if (calls++ == 9) throw FileSystemException('disk full', from);
+          }, held: (path) => p.basename(path) == 'flutter_windows.dll'),
+          attempts: 1,
+        ).apply(staged),
+        // The failure that started the undo, not one raised undoing it.
+        throwsA(
+          isA<FileSystemException>().having(
+            (e) => e.message,
+            'message',
+            'disk full',
+          ),
+        ),
+      );
+
+      final tree = _tree(install);
+      // The new engine could not go, so the old one waits under `.old` for
+      // the undo to be finished, and the journal says it is not.
+      expect(tree['flutter_windows.dll'], 'new engine');
+      expect(tree['flutter_windows.dll.old'], 'old engine');
+      expect(tree, contains(BundleSwap.journalName));
+      // Everything the undo did reach is back.
+      expect(tree['loaf-chat.exe'], 'old exe');
+      expect(tree['data/app.so'], 'old code');
+      expect(tree, isNot(contains('added.dll')));
+
+      // The next launch, with nothing held: the undo finishes, and the old
+      // build is whole again.
+      expect(await BundleSwap(install.path).cleanUp(), isTrue);
+      expect(_tree(install), _installed);
+    },
+  );
+
+  test('an undo waits for a file held for a moment', () async {
+    var refusals = 2;
+    await expectLater(
+      BundleSwap(
+        install.path,
+        fs: _Held(
+          // The new executable, swapped last, never goes in: by then the
+          // new engine is in place, and the undo has to take it out again.
+          (from) async {
+            if (p.basename(from) == 'loaf-chat.exe' &&
+                p.isWithin(staged.path, from)) {
+              throw FileSystemException('held for good', from);
+            }
+          },
+          // The scanner lets the new engine go while the undo is asking.
+          held: (path) =>
+              p.basename(path) == 'flutter_windows.dll' && refusals-- > 0,
+        ),
+        attemptDelay: Duration.zero,
+      ).apply(staged),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(refusals, isNegative, reason: 'the undo never asked for the engine');
+    // Waited for, so the undo ran to the end and took its journal with it.
+    expect(_tree(install), _installed);
+  });
+
+  test('a journal played again leaves the old build where it is', () async {
+    // An undo that finished but could not delete its own journal: every
+    // old file is back under its own name with no `.old` beside it, and
+    // the next launch must take none of them for the new build.
+    install
+        .childFile(BundleSwap.journalName)
+        .writeAsStringSync(
+          [
+            const SetAside(BuildFile('data/app.so')).line,
+            const PutInPlace(BuildFile('data/app.so')).line,
+            '',
+          ].join('\n'),
+        );
+    expect(await BundleSwap(install.path).cleanUp(), isTrue);
+    expect(_tree(install), _installed);
+  });
+
+  test('a swap is refused while an undo is unfinished', () async {
+    _journalOf(install, const SetAside(BuildFile('flutter_windows.dll')));
+    await expectLater(
+      BundleSwap(install.path).apply(staged),
+      throwsA(isA<StateError>()),
+    );
+    expect(_tree(install)..remove(BundleSwap.journalName), _installed);
+  });
+
+  test('an undo that cannot finish keeps what it has to put back', () async {
+    // Cut off with the engine stepped aside: that `.old` is the only copy
+    // of it left, and no launch may throw it away before it is back.
+    _journalOf(install, const SetAside(BuildFile('flutter_windows.dll')));
+    final engine = install.childFile('flutter_windows.dll');
+    engine.renameSync('${engine.path}${BuildFile.aside}');
+
+    await expectLater(
+      BundleSwap(
+        install.path,
+        fs: _Held((from) async {
+          if (from.endsWith(BuildFile.aside)) {
+            throw FileSystemException('in use by the scanner', from);
+          }
+        }),
+        attempts: 1,
+      ).cleanUp(),
+      throwsA(isA<StateError>()),
+    );
+    final tree = _tree(install);
+    expect(tree['flutter_windows.dll.old'], 'old engine');
+    expect(tree, contains(BundleSwap.journalName));
+  });
 
   group('a journal line', () {
     test('reads back as what was written', () {

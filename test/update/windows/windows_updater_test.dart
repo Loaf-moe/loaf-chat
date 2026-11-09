@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/update/updater.dart';
+import 'package:loaf_native/update/windows/bundle_swap.dart';
 import 'package:loaf_native/update/windows/windows_updater.dart';
 import 'package:path/path.dart' as p;
 
@@ -167,6 +168,55 @@ void main() {
     expect(u.state, isA<UpdateIdle>());
     expect(_read(install, 'loaf-chat.exe'), 'old exe');
     expect(Directory(p.join(install.path, 'update')).existsSync(), isFalse);
+  });
+
+  test(
+    'an undo the last update left is finished before the next swap',
+    () async {
+      // Cut off after the old code stepped aside: the journal says so, and
+      // `data/app.so.old` is the only copy of it left.
+      File(
+        p.join(install.path, BundleSwap.journalName),
+      ).writeAsStringSync('${const SetAside(BuildFile('data/app.so')).line}\n');
+      final code = File(p.join(install.path, 'data', 'app.so'));
+      code.renameSync('${code.path}${BuildFile.aside}');
+
+      server.offer();
+      final u = updater();
+      expect(await u.check(), UpdateCheck.ready);
+      // The undo ran first, so the swap had the whole old build to set aside.
+      expect(_read(install, 'data/app.so'), 'new code');
+      expect(_read(install, 'data/app.so.old'), 'old code');
+      expect(
+        File(p.join(install.path, BundleSwap.journalName)).existsSync(),
+        isFalse,
+      );
+    },
+  );
+
+  test('a check leaves the journal of an undo it cannot finish', () async {
+    // An undo that cannot finish: here a folder has taken the old file's
+    // place, where on Windows a file someone holds would.
+    File(
+      p.join(install.path, BundleSwap.journalName),
+    ).writeAsStringSync('${const SetAside(BuildFile('data/app.so')).line}\n');
+    final code = File(p.join(install.path, 'data', 'app.so'));
+    code.renameSync('${code.path}${BuildFile.aside}');
+    Directory(code.path).createSync();
+
+    server.offer();
+    final u = updater();
+    expect(await u.check(), UpdateCheck.failed);
+    // Nothing of the download is left, but the journal and the only copy
+    // of the file it has still to put back are where the next launch will
+    // find them.
+    expect(Directory(p.join(install.path, 'update')).existsSync(), isFalse);
+    expect(
+      File(p.join(install.path, BundleSwap.journalName)).existsSync(),
+      isTrue,
+    );
+    expect(_read(install, 'data/app.so.old'), 'old code');
+    expect(_read(install, 'loaf-chat.exe'), 'old exe');
   });
 
   test('launch clears what the last update set aside', () async {

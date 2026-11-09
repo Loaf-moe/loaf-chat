@@ -40,12 +40,19 @@ class BundleSwap {
   /// time.
   static const executable = BuildFile('loaf-chat.exe');
 
-  /// The updater's own folder inside the install: the download, the staged
-  /// build, the journal. Never swapped.
+  /// The updater's own folder inside the install: the download and the
+  /// staged build. Never swapped, and emptied whenever an update starts or
+  /// ends, so nothing that has to outlive one belongs in it.
   static const workName = 'update';
 
+  /// Beside [work] rather than inside it, because an undo still to be
+  /// finished has to survive the updater clearing its own folder: while a
+  /// journal names a file set aside, that `.old` is the only copy left of
+  /// what the install has lost.
+  static const journalName = 'update.journal';
+
   Directory get work => install.childDirectory(workName);
-  File get _journal => work.childFile('journal');
+  File get _journal => install.childFile(journalName);
 
   /// Puts [staged], an unpacked build, in place of the running one. Throws,
   /// with the old build put back, if any of it could not be done.
@@ -54,9 +61,13 @@ class BundleSwap {
     if (!incoming.contains(executable)) {
       throw StateError('the new build has no ${executable.posix}');
     }
+    // An undo of the last swap that is still to be finished: it holds the
+    // old build in `.old` files, which a swap starting now would strand.
+    if (_journal.existsSync()) {
+      throw StateError('the last update is still to be undone');
+    }
     final outgoing = _files(install).where((f) => f.swappable);
 
-    work.createSync(recursive: true);
     _journal.writeAsStringSync('');
     try {
       for (final file in _executableLast(outgoing)) {
@@ -71,7 +82,7 @@ class BundleSwap {
         await _rename(file.under(staged), to.path);
       }
     } catch (_) {
-      _rollBack();
+      await _rollBack();
       rethrow;
     }
     // The swap is whole: without a journal there is nothing to undo.
@@ -81,9 +92,15 @@ class BundleSwap {
   /// At launch: finishes undoing a swap a crash cut short, then deletes the
   /// set-aside files of the last one and the updater's leftovers. True when
   /// a swap was undone. Anything still held is left for the next launch.
+  ///
+  /// Throws when an undo could not be finished. Its journal and its `.old`
+  /// files stay as they are, holding the only copy of what the install has
+  /// lost, for the next launch to try again.
   Future<bool> cleanUp() async {
     final interrupted = _journal.existsSync();
-    if (interrupted) _rollBack();
+    if (interrupted && !await _rollBack()) {
+      throw StateError('the last update is only part way undone');
+    }
     for (final file in _files(install)) {
       if (file.isSetAside) _tryDelete(fs.file(file.under(install)));
     }
@@ -99,24 +116,59 @@ class BundleSwap {
 
   /// Plays the journal backwards: every new file out, every old file back
   /// under its own name. A line written for a rename that never happened
-  /// finds nothing to undo.
-  void _rollBack() {
-    final entries = _journal.readAsLinesSync().map(JournalEntry.parse);
-    for (final entry in entries.toList().reversed) {
-      switch (entry) {
-        case PutInPlace(:final file):
-          _tryDelete(fs.file(file.under(install)));
-        case SetAside(:final file):
-          final at = fs.file(file.under(install));
-          final aside = fs.file('${at.path}${BuildFile.aside}');
-          if (aside.existsSync()) {
-            if (at.existsSync()) at.deleteSync();
-            aside.renameSync(at.path);
-          }
-        case null: // torn by the crash
+  /// finds nothing to undo. It waits on a file someone else holds, as the
+  /// swap itself does, and goes on past one it never gets: putting back
+  /// all it can beats stopping at the first refusal. What it misses the
+  /// next launch plays again, which costs nothing: every line it already
+  /// undid finds its work done.
+  ///
+  /// True when every line was undone, the one case in which the journal
+  /// goes. While it is there, a `.old` file beside the install may be the
+  /// last copy of a file the install itself no longer has.
+  Future<bool> _rollBack() async {
+    final entries = _journal.readAsLinesSync().map(JournalEntry.parse).toList();
+    final setAside = {
+      for (final entry in entries)
+        if (entry is SetAside) entry.file,
+    };
+
+    // Whether [file]'s place in the install still holds the new build, so
+    // that deleting it undoes something. An old file this journal set
+    // aside and an earlier pass put back stands under its own name with
+    // no `.old` beside it: deleting that throws away the only copy.
+    bool stillNew(BuildFile file) =>
+        !setAside.contains(file) ||
+        fs.file('${file.under(install)}${BuildFile.aside}').existsSync();
+
+    var whole = true;
+    for (final entry in entries.reversed) {
+      try {
+        switch (entry) {
+          case PutInPlace(:final file):
+            if (stillNew(file)) await _delete(fs.file(file.under(install)));
+          case SetAside(:final file):
+            final at = fs.file(file.under(install));
+            final aside = fs.file('${at.path}${BuildFile.aside}');
+            if (aside.existsSync()) {
+              await _delete(at);
+              await _rename(aside.path, at.path);
+            }
+          case null: // torn by the crash
+        }
+      } on FileSystemException {
+        whole = false;
       }
     }
-    _journal.deleteSync();
+    if (whole) {
+      try {
+        _journal.deleteSync();
+      } on FileSystemException {
+        // Held: the next launch plays back a journal that finds its work
+        // already done, and deletes it then.
+        whole = false;
+      }
+    }
+    return whole;
   }
 
   /// Written and flushed before the rename it names, so the journal never
@@ -127,6 +179,16 @@ class BundleSwap {
     '${entry.line}\n',
     mode: FileMode.append,
     flush: true,
+  );
+
+  /// Through [fs], where a test holds a file. One that is not there has
+  /// been deleted already, by a pass of the undo this one repeats.
+  Future<void> _delete(File file) => retry<void, FileSystemException>(
+    () async {
+      if (file.existsSync()) await file.delete();
+    },
+    attempts: attempts,
+    delay: attemptDelay,
   );
 
   /// Through [fs], where a test holds a file.
@@ -178,11 +240,12 @@ extension type const BuildFile(String posix) {
   /// What the last swap set aside, for the next launch to delete.
   bool get isSetAside => posix.toLowerCase().endsWith(aside);
 
-  /// Part of the running build: not Setup's, not the updater's own folder,
-  /// not set aside by the last swap.
+  /// Part of the running build: not Setup's, not the updater's own folder
+  /// or journal, not set aside by the last swap.
   bool get swappable {
     final top = p.posix.split(posix).first.toLowerCase();
     return top != BundleSwap.workName &&
+        top != BundleSwap.journalName &&
         !_setupFiles.contains(top) &&
         !isSetAside;
   }
