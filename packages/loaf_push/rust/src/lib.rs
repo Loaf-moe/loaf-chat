@@ -3,8 +3,11 @@
 //! extension dlopens this from the app's Frameworks; there is no header,
 //! so the two C functions below are the whole contract.
 
+use serde_json::Value;
 use std::ffi::{CStr, CString, c_char};
 use vodozemac::megolm::{InboundGroupSession, InboundGroupSessionPickle, MegolmMessage};
+
+pub mod rules;
 
 /// The SDK's `String.toPickleKey()`: Dart's UTF-16 code units, each kept
 /// to its low byte by `Uint8List.fromList`, cut or zero-padded to 32.
@@ -49,7 +52,9 @@ pub unsafe extern "C" fn loaf_push_decrypt(
     ciphertext: *const c_char,
 ) -> *mut c_char {
     let plain = unsafe { (arg(pickle), arg(user_id), arg(ciphertext)) };
-    let (Some(p), Some(u), Some(c)) = plain else { return std::ptr::null_mut() };
+    let (Some(p), Some(u), Some(c)) = plain else {
+        return std::ptr::null_mut();
+    };
     decrypt(p, u, c)
         .and_then(|s| CString::new(s).ok())
         .map_or(std::ptr::null_mut(), CString::into_raw)
@@ -59,6 +64,44 @@ pub unsafe extern "C" fn loaf_push_decrypt(
 pub unsafe extern "C" fn loaf_push_free(p: *mut c_char) {
     if !p.is_null() {
         drop(unsafe { CString::from_raw(p) });
+    }
+}
+
+/// Whether the account's push rules notify for this event: `1` yes, `0` no,
+/// `-1` no verdict, which the extension shows rather than drops.
+///
+/// `rules_json` is `rules.json` whole; `event_json` is the event, decrypted
+/// where it arrived sealed; `members` is the room's joined count, negative
+/// for unknown; `power_json` is the room's `m.room.power_levels` content, or
+/// null when it could not be read. Same contract as [loaf_push_decrypt]:
+/// nothing here panics or unwraps.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn loaf_push_notifies(
+    rules_json: *const c_char,
+    event_json: *const c_char,
+    members: i64,
+    power_json: *const c_char,
+) -> i32 {
+    let args = unsafe { (arg(rules_json), arg(event_json)) };
+    let (Some(text), Some(json)) = args else {
+        return -1;
+    };
+    let (Some(account), Ok(event)) = (
+        rules::account_from_json(text),
+        serde_json::from_str::<Value>(json),
+    ) else {
+        return -1;
+    };
+    let power = unsafe { arg(power_json) }.and_then(|p| serde_json::from_str::<Value>(p).ok());
+    match rules::notifies(
+        &account,
+        &event,
+        u64::try_from(members).ok(),
+        power.as_ref(),
+    ) {
+        Some(true) => 1,
+        Some(false) => 0,
+        None => -1,
     }
 }
 
@@ -117,10 +160,19 @@ mod tests {
     fn c_abi_round_trip_and_null_inputs() {
         use std::ffi::{CStr, CString};
         let (pickle, ct) = sealed("@a:b");
-        let (p, u, c) = (CString::new(pickle).unwrap(), CString::new("@a:b").unwrap(), CString::new(ct).unwrap());
+        let (p, u, c) = (
+            CString::new(pickle).unwrap(),
+            CString::new("@a:b").unwrap(),
+            CString::new(ct).unwrap(),
+        );
         let out = unsafe { loaf_push_decrypt(p.as_ptr(), u.as_ptr(), c.as_ptr()) };
         assert!(!out.is_null());
-        assert!(unsafe { CStr::from_ptr(out) }.to_str().unwrap().contains("hi"));
+        assert!(
+            unsafe { CStr::from_ptr(out) }
+                .to_str()
+                .unwrap()
+                .contains("hi")
+        );
         unsafe { loaf_push_free(out) };
         assert!(unsafe { loaf_push_decrypt(std::ptr::null(), u.as_ptr(), c.as_ptr()) }.is_null());
     }

@@ -11,12 +11,12 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # The version flutter_vodozemac 0.8.1 pins: the pickles it writes are the ones read here.
 vodozemac = { version = "=0.10.0", features = ["libolm-compat"] }
+# The rules and the decrypted event, both JSON. No typed ruleset: serde's
+# derive would be a second dependency for no behaviour.
+serde_json = "1"
 
 [profile.release]
 opt-level = "z"
 lto = true
 strip = true
 panic = "abort"
-
-[dev-dependencies]
-serde_json = "1"
