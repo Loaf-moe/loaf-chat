@@ -2,12 +2,22 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** When Loaf Chat on iPhone is in the background or closed, a message the push rules say should notify arrives as a notification. It is decrypted on the phone, is titled like a desktop notice, and plays the chime. Tapping it opens the message. Once the room is read, its notifications are withdrawn.
+**Goal:** When Loaf Chat on iPhone is in the background or closed, a message the push rules say should notify arrives as a notification. It is decrypted on the phone, is titled like a desktop notice, and plays the chime. Tapping it opens the message. Once the room is read, its notifications are withdrawn. A message the rules say should *not* notify is dropped on the phone, after it is decrypted, and never shown: in an encrypted room the server cannot tell a mention from anything else, so the phone decides.
+
+> **Revised for the filtering entitlement.** Apple granted
+> `com.apple.developer.usernotifications.filtering` (Chris, November 2026).
+> The first draft of this plan was written without it and said so in its
+> constraints: the extension evaluated no rules, could not drop a push, and
+> the app worked around it by disabling `.m.rule.encrypted` alongside
+> `.m.rule.message`, which left mentions in mentions-only encrypted channels
+> unpushed. That workaround is gone. Tasks 1, 2 and 3 are done and unchanged.
+> Tasks 3a, 3b and 5a are new; Tasks 6, 7, 11, 12 and 13 changed.
+> **Execution order:** 1, 2, 3 (done), 3a, 3b, 4, 5, 5a, 6, 7, 8, 9, 10, 11, 12, 13.
 
 **Architecture:**
 - **Pusher.** Release builds register an `http` pusher with `event_id_only` under the one app id `moe.loaf.chat.ios`, sending to the Loaf Chat gateway `https://push.matrix.loaf.moe/_matrix/push/v1/notify`, a constant in the source as Element X and FluffyChat do.
 - **Shared storage.** The SDK database, `notifications.json` and a new `names.json` move into the App Group `group.moe.loaf.chat`, so the extension can read them.
-- **The extension.** A Notification Service Extension (Swift) reads the token and the room key from the database and fetches the event. It decrypts with `loaf_push`, a Rust `cdylib` wrapping vodozemac. A Dart build hook builds `loaf_push` (the same pattern as `loaf_notify` on Windows), Flutter embeds it in the app's `Frameworks/`, and the extension loads it with `dlopen`/`dlsym`.
+- **The extension.** A Notification Service Extension (Swift) reads the token and the room key from the database and fetches the event. It decrypts with `loaf_push`, a Rust `cdylib` wrapping vodozemac, then asks the same crate whether the account's push rules notify for the decrypted event, and delivers nothing when they do not. A Dart build hook builds `loaf_push` (the same pattern as `loaf_notify` on Windows), Flutter embeds it in the app's `Frameworks/`, and the extension loads it with `dlopen`/`dlsym`.
 - **Testable Swift.** The extension's logic lives in a local Swift package, `ios/LoafPushCore`, tested with `swift test`, the same pattern as `LoafMediaCore`.
 
 **Tech Stack:**
@@ -27,12 +37,44 @@
     - Accepted cost: the iOS release job now compiles Rust for `aarch64-apple-ios`, and `mise.toml` gains the iOS Rust targets.
   - **The gateway is a constant** (Chris, 2026-10-12): `https://push.matrix.loaf.moe/_matrix/push/v1/notify`, used by every user on every homeserver, the way Element X uses matrix.org and FluffyChat uses push.fluffychat.im. The gateway is a separate Rust project (another session); the app only needs its URL.
   - **One app id, no `.dev`.** The pusher's `app_id` is always `moe.loaf.chat.ios`. Only release builds (`kReleaseMode`) register a pusher. Debug builds never do. Push is tested on TestFlight.
-  - **No filtering entitlement yet.** This plan has no `LOAF_PUSH_FILTERING` code path and the extension evaluates no push rules: without the entitlement it could not drop a push anyway.
-    - Instead, the Channels default sets `.m.rule.encrypted` to match `.m.rule.message`, as the spec's fallback says.
-    - In-extension rule evaluation is a later, separate plan, once Apple grants the entitlement.
+- **Decisions after Apple granted filtering (2026-11-09):**
+- **The filtering entitlement is granted**, so the extension evaluates the
+  push rules itself and drops what they silence. There is no build setting
+  and no second code path: filtering is the only behaviour.
+  - `.m.rule.encrypted` is left enabled, always. Every encrypted message
+    reaches the phone and the phone decides. The Channels default writes
+    `.m.rule.message` alone (Task 11).
+  - **The evaluator is Rust, in `loaf_push`** (Aria's call, not Chris's).
+    The alternative was Swift in `LoafPushCore`. CI runs one Ubuntu job:
+    `cargo test` runs there on every PR, while the Swift package tasks say
+    "needs a Mac" and run only by hand (`mise.toml`, `test:media:apple`). A
+    Swift evaluator would be the one piece of notification logic that
+    nothing pins, next to a Dart implementation whose 245 cases are pinned
+    on every push. Rust also needs no new plumbing: the extension already
+    `dlopen`s the crate for decryption, so this is a third symbol.
+  - **Parity with the app is pinned by a shared corpus** (Task 3b), the
+    same trick Task 2 uses for the storage format: the Dart rules test
+    writes every case it already runs, and a Rust test must answer each the
+    same way. Dart and Rust drifting apart fails CI on Linux.
+  - **It fails open.** Where the extension cannot judge a message — no room
+    key, a fetch that failed, `rules.json` missing or unreadable — it shows
+    it rather than dropping it. A notification you did not need is a smaller
+    harm than a mention you never saw, and a silent drop is invisible to
+    the user (memory `honest-controls`).
+
 - **Deviations from the spec, all in the direction of plain:**
   - **Device settings stay in `notifications.json`.** It moves into the App Group on iOS. Shared `UserDefaults` would be a second store holding the same three flags.
-  - **There is no push-rule cache in the App Group.** It has no reader until filtering.
+  - **The rules reach the extension through `rules.json`** in the App Group,
+    written by the app whenever they change (Task 5a), holding the rules, your
+    user id and your display name. The extension reads it and never writes:
+    the app stays the only writer in the container, as it is for every other
+    file there. Where the file is missing or older than an hour, the extension
+    fetches `/pushrules/` with the token it already holds, uses that answer for
+    this one push, and still writes nothing, which honours the spec's hour of
+    freshness without racing the app.
+  - **Member counts ride in `names.json`** (Task 5), the file the app already
+    rewrites on every rooms change. The `room_member_count` conditions need
+    them, and the extension has no cheap way to count a room itself.
   - **There is no `.dev` app id.**
 - **Copy (lowercase, verbatim):**
   - The extension falls back to the desktop strings: `encrypted message` (no room key); `new message` (Show message text off, an expired or missing token, or a failed fetch).
@@ -44,7 +86,8 @@
 - **App Group layout** (the extension reads exactly these):
   - `<group>/loaf.sqlite` (with `-wal` and `-shm`);
   - `<group>/names.json`;
-  - `<group>/notifications.json`.
+  - `<group>/notifications.json`;
+  - `<group>/rules.json`.
   - The media cache stays in Application Support.
 - **The pickle key** is the SDK's `toPickleKey()`: the user id's UTF-16 code units, each truncated to one byte, then cut or zero-padded to 32 bytes. The libolm fallback key is `utf8.encode(userId)`.
 - **Never** log a token, a pickle or decrypted text. The extension logs only outcomes: `decrypted`, `no-key`, `no-token`, `fetch-failed`.
@@ -62,6 +105,22 @@
    - Task 9 tests a sweep that uses `settledBefore`.
 5. **The resume catch-up re-announcing pushed messages.** Expected: after a resume, messages push already delivered don't chime again.
    - Task 10 tests arrivals stamped between pause and resume.
+6. **The phone and the app disagreeing about a message.** Expected: the
+   verdict the extension reaches is the one `PushRules.notifies` would reach
+   in Dart, for every case the app's own suite covers.
+   - Task 3b runs both over one corpus; Task 13 case 3 checks it by hand.
+7. **A push that should have been dropped, shown anyway.** The extension gets
+   about 30 seconds; if it crashes or runs out of time, iOS shows whatever
+   alert the gateway sent, which for a dropped push is a notification the
+   rules forbade. Expected: this is the only way a silenced message appears,
+   and it is rare.
+   - Nothing in the extension blocks on anything but the two fetches, both
+     capped at 10 seconds; `serviceExtensionTimeWillExpire` delivers the
+     gateway's alert, as it does today. Task 13 case 3 watches for it.
+8. **Stale rules on a phone that has not synced.** A level changed on the Mac
+   while the phone slept. Expected: the hour-old refresh in the extension
+   catches it; a phone offline for longer judges by the last rules it saw,
+   and corrects itself on the next sync.
 
 ---
 
@@ -70,7 +129,9 @@
 | File | Responsibility |
 |---|---|
 | `packages/loaf_push/pubspec.yaml`, `hook/build.dart` | The Dart package whose only job is to build `loaf_push` for iOS and bundle it |
-| `packages/loaf_push/rust/` | The Rust crate: `loaf_push_decrypt`, `loaf_push_free`, the pickle key, tests and the fixture |
+| `packages/loaf_push/rust/` | The Rust crate: `loaf_push_decrypt`, `loaf_push_free`, `loaf_push_notifies`, the pickle key, the evaluator, tests and the fixtures |
+| `test/matrix/push_rules_corpus_test.dart` | Writes `packages/loaf_push/rust/tests/fixtures/rules.json` from the cases the app's own rules suite runs |
+| `lib/push/rules_file.dart` | Writes `rules.json`: the rules, your user id, your display name |
 | `test/push/storage_pin_test.dart` | Writes and checks `packages/loaf_push/rust/tests/fixtures/sdk.json` from a real SDK database |
 | `lib/push/app_group.dart` | The group path, the one-time move, and where the database and settings live |
 | `lib/push/room_names.dart` | Writes `names.json` from the rooms |
@@ -505,6 +566,227 @@ git commit -m "build(push): a build hook bundles loaf_push in the iOS app"
 
 ---
 
+### Task 3a: `loaf_push` evaluates the push rules
+
+The same judgement `lib/matrix/push_rules.dart` makes in the app, in Rust, on
+the decrypted event. Read that file and its doc comment first: it is 143 lines
+and it is the specification for this task. It wraps the SDK's evaluator and
+undoes three of its departures from the spec (the audit's F1, F4 and F6), and
+those compensations are part of what must be reproduced here, because the
+corpus in Task 3b is generated from it.
+
+**Files:**
+- Create: `packages/loaf_push/rust/src/rules.rs`, `packages/loaf_push/rust/tests/rules_test.rs`
+- Modify: `packages/loaf_push/rust/src/lib.rs` (the third symbol), `packages/loaf_push/rust/Cargo.toml` (`serde_json`), `mise.toml` (fold `rules.rs` into the existing `test:push` task), `.github/workflows/ci.yml` (only if `test:push` is not already in the Linux job)
+
+**Interfaces:**
+- Produces, in Rust:
+
+```rust
+/// What the app wrote to rules.json: the rules, and the two things about
+/// you the rules read.
+pub struct Account {
+    pub user_id: String,
+    pub display_name: Option<String>,
+    pub rules: PushRuleSet,
+}
+
+/// Whether the rules notify for `event` in a room of `members` people.
+/// `power` is the room's `m.room.power_levels` content, which the `@room`
+/// rules' `sender_notification_permission` condition needs. `None` for
+/// either means it could not be read, and the condition then holds.
+/// `None` for the verdict when it cannot be reached: a ruleset that is not
+/// an object, or an event with no `content`. The caller shows the message.
+pub fn notifies(
+    account: &Account,
+    event: &Value,
+    members: Option<u64>,
+    power: Option<&Value>,
+) -> Option<bool>;
+```
+
+- And across the C ABI, beside the two symbols Task 1 wrote:
+
+```rust
+/// 1 notify, 0 drop, -1 undecidable. `rules_json` is the whole file;
+/// `members` is negative for unknown; `power_json` is the room's
+/// `m.room.power_levels` content, or null when it could not be read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn loaf_push_notifies(
+    rules_json: *const c_char,
+    event_json: *const c_char,
+    members: i64,
+    power_json: *const c_char,
+) -> i32;
+```
+
+**The order of judgement**, which is Loaf's and not the SDK's:
+
+1. `override`, in order, then the `content` rules **as overrides**, each
+   rewritten to an `event_match` on `content.body` with the rule's pattern.
+   This is F4: the spec puts content ahead of room, the SDK does not.
+2. `room`, then `sender`, then `underride`.
+3. A disabled rule is skipped. The first rule whose every condition holds
+   decides, and it notifies when its actions contain `notify`. No rule
+   matching means no notification.
+4. When the event's `content` has an `m.mentions` key at all, whatever its
+   shape, the three legacy rules are dropped before any of this:
+   `.m.rule.contains_display_name`, `.m.rule.contains_user_name`,
+   `.m.rule.roomnotif`. This is F6, and it is what Synapse does.
+5. Every `room_member_count` condition is decided against `members`. With
+   `members` unknown the condition **holds**, because the one default rule a
+   count guards is the DM rule, and dropping it would turn a DM silent — the
+   fail-open direction. This is F1: the count comes from the room summary the
+   app recorded, never from members in memory. `is` is a number with an
+   optional `==`, `<`, `<=`, `>` or `>=`; bare means equal; unparsable never
+   holds.
+
+**The conditions** to implement, all five the SDK knows:
+
+- `event_match`: a glob (`*`, `?`) over a dotted key path into the
+  **flattened** event, case-insensitive. On `content.body` it matches on word
+  boundaries — the SDK builds `(^|\W)pattern($|\W)` — and on every other
+  field it matches the whole value (`^pattern$`). A field whose value is not
+  a string never matches. `\.` in a key is unescaped first, so
+  `content.m\.mentions.room` and the flattened `content.m.mentions.room` are
+  the same field.
+- `event_property_is` and `event_property_contains`: the modern intentional
+  mention rules (`.m.rule.is_user_mention`, `.m.rule.is_room_mention`) are
+  built from these, so they are not optional. `is` compares for equality and
+  requires the key to be **present** (null is a value); `contains` requires an
+  array holding the value. A value that is not a string, number, bool or null
+  makes the rule unusable.
+- `contains_display_name`: your display name in `content.body` on word
+  boundaries, case-insensitive, escaped as a literal rather than a glob. No
+  name, or no body, means it never holds.
+- `room_member_count`: above.
+- `sender_notification_permission`: the sender's power against the room's
+  `notifications[key]` (spec defaults: 0 for a user, 50 for `room`). The power
+  levels arrive as the `power` argument, not inside the event, so that an
+  injected key can never be matched by an `event_match`. With `power`
+  unknown the condition holds, for the same reason an unknown count does.
+
+An unknown condition kind makes the rule unusable, and an unusable rule is
+skipped entirely rather than treated as matching — the SDK drops it while
+building its evaluator, and the effect must be the same.
+
+**Where the spec and the SDK disagree, the corpus in Task 3b decides**, and the
+corpus comes from Dart. Do not implement the spec from memory and argue with
+the fixture.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `tests/rules_test.rs`, one case each, hand-built, so a failure names the
+rule it broke rather than a case number:
+- a `content` rule on your localpart beats a `room` rule with no actions (F4);
+- a message with `"m.mentions": {}` is not matched by
+  `.m.rule.contains_display_name`, and the same message without the key is
+  (F6);
+- `.m.rule.room_one_to_one` holds at `members == 2` and is dropped at 3 (F1);
+- an `override` rule with no actions silences everything after it (mute);
+- `.m.rule.master` enabled silences everything (do not disturb);
+- a disabled rule is skipped;
+- a glob `*foo*` matches `barfoobar`, and `?` matches one character;
+- `contains_display_name` matches `ada` in `hi ada!` and not in `adalovelace`;
+- unparsable rules JSON gives `None`, not `false`.
+
+- [ ] **Step 2: Run the tests to watch them fail**
+
+Run: `mise run test:push`
+Expected: a compile failure, then failures.
+
+- [ ] **Step 3: Implement**
+
+`serde_json::Value` throughout; no new dependency beyond `serde_json`. Keep
+`notifies` free of I/O and of the C ABI so the corpus test can call it
+directly. The C wrapper parses, calls, and maps to `1` / `0` / `-1`; it must
+not panic across the boundary, so wrap the body in
+`std::panic::catch_unwind` and return `-1` on a panic.
+
+- [ ] **Step 4: Run the tests to see them pass**
+
+Run: `mise run test:push`
+Expected: all pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/loaf_push mise.toml .github/workflows/ci.yml
+git commit -m "feat(push): loaf_push judges a message by the account's push rules"
+```
+
+---
+
+### Task 3b: one corpus, two implementations
+
+`test/matrix/matrix_arrivals_rules_test.dart` already runs 245 cases: every
+account level, room level, room kind and shape of mention, with an oracle
+(`_expected`) that encodes what the spec says each should do. This task makes
+that table the shared truth, so the phone and the app cannot drift.
+
+**Files:**
+- Create: `test/matrix/rules_cases.dart`, `test/matrix/push_rules_corpus_test.dart`, `packages/loaf_push/rust/tests/corpus_test.rs`
+- Modify: `test/matrix/matrix_arrivals_rules_test.dart` (import the cases it used to hold)
+
+**Interfaces:**
+- `test/matrix/rules_cases.dart` holds what both tests need, moved out of the
+  arrivals test unchanged: the `Account`, `RoomRule`, `Kind` and `Mention`
+  enums, the `expected(...)` oracle, and the builders that turn a case into a
+  `PushRuleSet` and an event. The arrivals test keeps driving the whole client
+  stack; only the table moves.
+- `test/matrix/push_rules_corpus_test.dart` runs every case through
+  `PushRules.notifies` directly, asserts it equals `expected(...)`, and, with
+  `LOAF_WRITE_CORPUS=1`, writes
+  `packages/loaf_push/rust/tests/fixtures/rules.json`:
+
+```json
+[{"name": "all/mentionsOnly/group/bodyLocalpart",
+  "account": {"user_id": "@ada:example.com", "display_name": "ada", "rules": {}},
+  "event": {}, "members": 5, "notify": true}]
+```
+
+- `corpus_test.rs` reads that file and asserts `notifies` returns
+  `Some(case.notify)` for every case, naming the case on failure.
+
+- [ ] **Step 1: Move the table, and write the Dart corpus test**
+
+The move must not change a single expectation: run
+`mise run test -- test/matrix/matrix_arrivals_rules_test.dart` before and
+after and compare the counts. Then write the corpus test over the moved table.
+
+Run: `mise run test -- test/matrix/`
+Expected: PASS, with the arrivals test's count unchanged.
+
+- [ ] **Step 2: Write the fixture, then run the Rust test**
+
+```bash
+LOAF_WRITE_CORPUS=1 mise run test -- test/matrix/push_rules_corpus_test.dart
+mise run test:push
+```
+
+Expected: the second fails, with the cases Rust gets wrong. Fix `rules.rs`
+until it passes. If a case looks wrong in Dart, stop: that is the app
+misbehaving on a real phone too, and it is a finding, not a fixture to edit.
+
+- [ ] **Step 3: Make the fixture's staleness visible**
+
+The corpus test without the variable checks the committed fixture still
+matches what Dart answers today, the way Task 2's storage pin does. An SDK
+change, or a change to `push_rules.dart`, then fails in the Dart lane with a
+message saying to regenerate.
+
+Run: `mise run test -- test/matrix/push_rules_corpus_test.dart`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add test/matrix packages/loaf_push/rust/tests
+git commit -m "test(push): Dart and Rust judge one corpus of rules the same way"
+```
+
+---
+
 ### Task 4: Shared storage — the App Group, the move, WAL
 
 **Files:**
@@ -688,14 +970,21 @@ git commit -m "feat(push): the database and device settings move into the App Gr
 **Interfaces:**
 - Consumes: `noticePlace` from `lib/ui/model/notice.dart`.
 - Produces:
-  - `Map<String, Object> roomNames(List<Space> spaces, List<Channel> homeRooms)`: `{roomId: {"place": String?, "dm": bool}}`, over every joined channel.
+  - `Map<String, Object> roomNames(List<Space> spaces, List<Channel> homeRooms)`: `{roomId: {"place": String?, "dm": bool, "members": int?}}`, over every joined channel.
+    - `members` is the joined-member count the push rules judge against, and
+      `Channel` does not carry it yet: add a nullable `memberCount` to
+      `Channel` in `lib/ui/model/models.dart` and fill it in `MatrixRooms`
+      from `room.summary.mJoinedMemberCount`, the one source
+      `lib/matrix/push_rules.dart` reads. `Invite` already has such a field,
+      filled the same way at `matrix_rooms.dart:882`; follow it.
   - `class RoomNamesWriter { RoomNamesWriter(Rooms rooms, File file); void dispose(); }`: writes on each rooms change, only when the content changed, to a temporary file that is then renamed.
 
 - [ ] **Step 1: Write the failing tests**
 
 There are three:
-- **The DM has no place:** a DM yields `{"place": null, "dm": true}`.
-- **A space channel:** a channel in space `Pack` named `general` yields `{"place": "#general · Pack", "dm": false}`.
+- **The DM has no place:** a DM yields `{"place": null, "dm": true, "members": 2}`.
+- **A space channel:** a channel in space `Pack` named `general` yields `{"place": "#general · Pack", "dm": false, "members": 12}`.
+- **A channel whose count the server never sent** yields `"members": null`.
 - **The writer writes once per change:** using `MockRooms` and a temp file, two notifications with equal names produce one write, as seen by the file's modified time and a counter on an injected `write`.
 
 ```dart
@@ -704,8 +993,8 @@ test('a DM has no place, a space channel names both', () {
     [Space(id: 's', name: 'Pack', channels: [Channel(id: '!g', name: 'general', joined: true)])],
     [Channel(id: '!d', name: 'mochi', kind: ChannelKind.direct, joined: true)],
   );
-  expect(names['!d'], {'place': null, 'dm': true});
-  expect(names['!g'], {'place': '#general · Pack', 'dm': false});
+  expect(names['!d'], {'place': null, 'dm': true, 'members': 2});
+  expect(names['!g'], {'place': '#general · Pack', 'dm': false, 'members': 12});
 });
 ```
 
@@ -721,8 +1010,62 @@ Expected: PASS.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add lib/push/room_names.dart test/push/room_names_test.dart lib/ui/shell/app_shell.dart
+git add lib/push/room_names.dart test/push/room_names_test.dart lib/ui/shell/app_shell.dart lib/ui/model/models.dart lib/matrix/matrix_rooms.dart
 git commit -m "feat(push): the app keeps room names where the extension can read them"
+```
+
+---
+
+### Task 5a: `rules.json`
+
+The rules themselves, plus the two things about you they read. Same shape as
+Task 5: one writer, atomic, only on change.
+
+**Files:**
+- Create: `lib/push/rules_file.dart`, `test/push/rules_file_test.dart`
+- Modify: `lib/ui/shell/app_shell.dart` (start it on iOS beside the names writer)
+
+**Interfaces:**
+- Produces:
+  - `Map<String, Object?> rulesFile({required String userId, required String? displayName, required PushRuleSet rules, required DateTime now})`:
+    `{"user_id": …, "display_name": …, "written_at": <ms since epoch>, "rules": <the ruleset as the server sends it>}`.
+  - `class RulesWriter { RulesWriter(Client client, File file); void dispose(); }`.
+- The rules go in **as the server sends them**, untouched: the compensations
+  (F1, F4, F6) belong to whoever evaluates, and Task 3a reproduces them. Do
+  not write a pre-chewed ruleset; the Rust side and `push_rules.dart` must see
+  the same input, or the corpus in Task 3b proves nothing.
+
+- [ ] **Step 1: Write the failing tests**
+
+- **The shape:** `rulesFile(...)` round-trips through `jsonEncode` and holds
+  the four keys, with `rules` deep-equal to `client.globalPushRules!.toJson()`.
+- **Writes on a rules change:** with `FakeMatrixApi`, new `m.push_rules`
+  account data writes the file once; the same rules arriving again write
+  nothing (compare the counter, as the names test does).
+- **Writes on a display-name change:** your profile name changing rewrites it,
+  because `contains_display_name` reads it.
+- **Atomic:** the file is written as `rules.json.tmp` and renamed.
+- **No rules yet:** `client.globalPushRules == null` writes nothing at all,
+  rather than a file holding an empty ruleset. An empty ruleset silences
+  everything, and the extension must not be handed that (it fails open only
+  on a *missing* file).
+
+- [ ] **Step 2: Run, watch them fail; implement; run, watch them pass**
+
+Watch `client.onSync` for `m.push_rules` in account data, and the same profile
+source `lib/matrix/matrix_profile.dart` uses for your display name. Keep the
+last JSON string and skip an equal one, like `RoomNamesWriter`. Start it in
+`app_shell.dart` next to the names writer, under the same
+`Platform.isIOS && widget.rooms != null` guard.
+
+Run: `mise run test -- test/push/rules_file_test.dart`
+Expected: PASS.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add lib/push/rules_file.dart test/push/rules_file_test.dart lib/ui/shell/app_shell.dart
+git commit -m "feat(push): the app keeps the push rules where the extension can read them"
 ```
 
 ---
@@ -730,7 +1073,7 @@ git commit -m "feat(push): the app keeps room names where the extension can read
 ### Task 6: `LoafPushCore`, the extension's logic in a Swift package
 
 **Files:**
-- Create: `ios/LoafPushCore/Package.swift`, `ios/LoafPushCore/Sources/LoafPushCore/{Store.swift,Names.swift,Content.swift}`, `ios/LoafPushCore/Tests/LoafPushCoreTests/{StoreTests.swift,ContentTests.swift}`
+- Create: `ios/LoafPushCore/Package.swift`, `ios/LoafPushCore/Sources/LoafPushCore/{Store.swift,Names.swift,Rules.swift,Content.swift}`, `ios/LoafPushCore/Tests/LoafPushCoreTests/{StoreTests.swift,ContentTests.swift,RulesTests.swift}`
 - Modify: `mise.toml` (the `test:push:apple` task: `swift test --package-path ios/LoafPushCore`)
 
 **Interfaces:**
@@ -748,10 +1091,18 @@ public struct RoomName: Decodable { public let place: String?; public let dm: Bo
 public func loadNames(_ url: URL) -> [String: RoomName]
 public struct DeviceSettings: Decodable { public var notifications = true, sound = true, showText = true }
 public func loadSettings(_ url: URL) -> DeviceSettings
+public struct Rules { public let json: Data; public let writtenAt: Date? }
+public func loadRules(_ url: URL) -> Rules?            // nil: missing or unreadable
+public func isStale(_ rules: Rules?, now: Date) -> Bool // nil, or written over an hour ago
+/// The verdict. nil when it cannot be reached; the caller then shows the
+/// message. Task 3a's `loaf_push_notifies` behind a seam, as `Decrypt` is.
+public typealias Notifies = (_ rules: Data, _ event: [String: Any], _ members: Int?, _ power: [String: Any]?) -> Bool?
 public typealias Decrypt = (_ pickle: String, _ userId: String, _ ciphertext: String) -> String?
-public struct Shown: Equatable { public let title: String; public let body: String; public let outcome: String }
+public struct Shown: Equatable { public let title: String; public let body: String; public let outcome: String; public let drop: Bool }
 public func content(roomId: String, event: [String: Any]?, senderName: String?, names: [String: RoomName],
-                    settings: DeviceSettings, store: Store?, decrypt: Decrypt, now: Date) -> Shown
+                    settings: DeviceSettings, store: Store?, decrypt: Decrypt,
+                    rules: Rules?, power: [String: Any]?, notifies: Notifies,
+                    now: Date) -> Shown
 ```
 
 - [ ] **Step 1: The package**
@@ -777,6 +1128,23 @@ Use `swift-tools-version:5.9`, platforms `.iOS(.v15), .macOS(.v13)` (macOS so th
 - **Long text:** 401 characters is cut to 400 plus `…`, by `Character`.
 - **A sender in a channel:** the title is `mochi in #general · Pack`.
 
+And the verdict, with a fake `Notifies`:
+- **The rules say no:** `drop == true`, outcome `dropped`, and the title and
+  body are empty. The fake records what it was handed: the **decrypted**
+  event, never the `m.room.encrypted` wrapper, and the room's `members` from
+  `names.json`.
+- **The rules say yes:** `drop == false`, and the text is as above.
+- **No rules file:** the fake is never called, `drop == false`, outcome
+  `no-rules`. It fails open.
+- **The verdict is nil:** `drop == false`, outcome `undecided`.
+- **No room key:** the fake is never called, `drop == false`, outcome
+  `no-key`. A message we could not read is a message we cannot judge.
+- **The fetch failed:** the fake is never called, `drop == false`, outcome
+  `fetch-failed`.
+- **Notifications off in settings:** `drop == true`, outcome `off`. The
+  pusher is supposed to be gone (Task 11), so this is belt and braces for a
+  push already in flight.
+
 - [ ] **Step 3: Run, watch them fail**
 
 Run: `mise run test:push:apple`
@@ -785,10 +1153,17 @@ Expected: a compile failure, because nothing is defined yet.
 - [ ] **Step 4: Implement**
 
 `Store` opens with `sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil)` and runs `PRAGMA query_only=1`. It reads `SELECT v FROM box_client WHERE k=?`, then decodes each `v` with `JSONSerialization` (`.fragmentsAllowed`), since the values are JSON-encoded. `token_expires_at` is decoded however Task 2's fixture shows it (milliseconds, number or string). The `content` function follows the spec's fallback order:
-1. no `event` → `fetch-failed`;
-2. `m.room.encrypted` → look up the key, check the key's `roomId == roomId`, decrypt, check the plaintext's `room_id == roomId`, and on any failure fall back to `no-key`;
-3. body from `msgtype`, with the desktop's strings and 400-character clip;
-4. `showText == false` → `new message`.
+1. `settings.notifications == false` → `drop`, outcome `off`;
+2. no `event` → `fetch-failed`, shown;
+3. `m.room.encrypted` → look up the key, check the key's `roomId == roomId`, decrypt, check the plaintext's `room_id == roomId`, and on any failure fall back to `no-key`, shown;
+4. **the verdict**, on the event as read (decrypted where it was encrypted):
+   no `rules` → `no-rules`, shown; `notifies` nil → `undecided`, shown;
+   `false` → `dropped`; `true` → carry on;
+5. body from `msgtype`, with the desktop's strings and 400-character clip;
+6. `showText == false` → `new message`.
+
+Steps 2 and 3 come before the verdict and win it: every path that could not
+read the message shows it. Only a message we read and judged is dropped.
 
 Keep the strings in one `enum Copy` at the top of `Content.swift`.
 
@@ -801,7 +1176,7 @@ Expected: all pass.
 
 ```bash
 git add ios/LoafPushCore mise.toml
-git commit -m "feat(push): LoafPushCore reads the store and builds a notification's text"
+git commit -m "feat(push): LoafPushCore reads the store, judges the rules, and builds the text"
 ```
 
 ---
@@ -833,7 +1208,18 @@ Then, on the `NotifyService` target, set:
 
 Under Frameworks and Libraries, add the local package `ios/LoafPushCore` (product `LoafPushCore`). Delete the Objective-C or template files Xcode generates. Quit Xcode, then confirm with `git diff --stat` that only `project.pbxproj` and the `ios/NotifyService/` files changed.
 
-The entitlements file holds only `com.apple.security.application-groups` = `[group.moe.loaf.chat]`.
+The entitlements file holds two keys: `com.apple.security.application-groups`
+= `[group.moe.loaf.chat]`, and
+`com.apple.developer.usernotifications.filtering` = `true`. Without the
+second, delivering an empty content shows an empty notification instead of
+suppressing one, so every drop would become a blank alert.
+
+**Before starting this task, confirm with Chris** that filtering is switched
+on for the `moe.loaf.chat.ios.notify` app id in the developer portal, and that
+the profile automatic signing fetches carries it. This plan's rule is that CI
+creates nothing new in Apple's account; a profile without the entitlement
+fails Task 12's gate, and that is the one failure in this plan that cannot be
+fixed from the repository.
 
 - [ ] **Step 2: `NotificationService.swift`**
 
@@ -866,16 +1252,27 @@ final class NotificationService: UNNotificationServiceExtension {
     let settings = loadSettings(group.appendingPathComponent("notifications.json"))
     let names = loadNames(group.appendingPathComponent("names.json"))
     let store = Store(path: group.appendingPathComponent("loaf.sqlite").path)
+    let cached = loadRules(group.appendingPathComponent("rules.json"))
     out.threadIdentifier = roomId
     out.userInfo = ["roomId": roomId, "eventId": eventId]
     out.sound = settings.sound ? UNNotificationSound(named: UNNotificationSoundName("chime.caf")) : nil
 
     Task {
-      let (event, sender) = await Self.fetch(store?.session(), roomId: roomId, eventId: eventId)
+      let session = store?.session()
+      let (event, sender) = await Self.fetch(session, roomId: roomId, eventId: eventId)
+      let power = await Self.state(session, roomId: roomId, type: "m.room.power_levels")
+      // Stale or missing: ask the server, for this push only. Nothing in
+      // the container is ever written from here.
+      let rules =
+        isStale(cached, now: Date())
+        ? await Self.rules(session, keeping: cached) ?? cached
+        : cached
       let shown = content(
         roomId: roomId, event: event, senderName: sender, names: names,
-        settings: settings, store: store, decrypt: LoafPush.decrypt, now: Date())
+        settings: settings, store: store, decrypt: LoafPush.decrypt,
+        rules: rules, power: power, notifies: LoafPush.notifies, now: Date())
       Self.log.info("\(shown.outcome, privacy: .public)")
+      if shown.drop { return self.suppress() }
       out.title = shown.title
       out.body = shown.body
       self.finish(out)
@@ -890,6 +1287,10 @@ final class NotificationService: UNNotificationServiceExtension {
     deliver?(content)
     deliver = nil
   }
+
+  /// Show nothing: the rules silenced this message. An empty content is how
+  /// a filtering extension drops a push.
+  private func suppress() { finish(UNNotificationContent()) }
 
   /// The event and its sender's display name; nil, nil when the token is
   /// missing or expired or either request fails.
@@ -912,6 +1313,31 @@ final class NotificationService: UNNotificationServiceExtension {
     let member = await get("_matrix/client/v3/rooms/\(room)/state/m.room.member/\(who)")
     return (event, (member?["displayname"] as? String) ?? sender)
   }
+
+  /// The account's rules, for a cache that is missing or over an hour old.
+  /// `/pushrules/` answers `{"global": {...}}` and knows nothing about your
+  /// display name, so the ruleset is unwrapped and the cached name carried
+  /// over: without it `contains_display_name` would stop matching on exactly
+  /// the pushes that took this path.
+  private static func rules(_ s: Session?, keeping cached: Rules?) async -> Rules? {
+    guard let s, (s.expiresAt ?? .distantFuture) > Date() else { return nil }
+    var req = URLRequest(url: s.homeserver.appendingPathComponent("_matrix/client/v3/pushrules/"))
+    req.setValue("Bearer \(s.token)", forHTTPHeaderField: "Authorization")
+    req.timeoutInterval = 10
+    guard let (data, resp) = try? await URLSession.shared.data(for: req),
+      (resp as? HTTPURLResponse)?.statusCode == 200,
+      let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+      let global = body["global"]
+    else { return nil }
+    var file: [String: Any] = ["user_id": s.userId, "rules": global]
+    if let cached, let old = try? JSONSerialization.jsonObject(with: cached.json),
+      let name = (old as? [String: Any])?["display_name"]
+    {
+      file["display_name"] = name
+    }
+    guard let wrapped = try? JSONSerialization.data(withJSONObject: file) else { return nil }
+    return Rules(json: wrapped, writtenAt: nil)
+  }
 }
 
 /// The two C functions of loaf_push, found in the app's Frameworks at run
@@ -919,22 +1345,45 @@ final class NotificationService: UNNotificationServiceExtension {
 enum LoafPush {
   private typealias DecryptFn = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
   private typealias FreeFn = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
+  private typealias NotifiesFn = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?, Int64, UnsafePointer<CChar>?) -> Int32
 
-  private static let fns: (DecryptFn, FreeFn)? = {
+  private static let fns: (DecryptFn, FreeFn, NotifiesFn)? = {
     // <appex>/../../Frameworks: the app's, as Task 3 recorded the name.
     let lib = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent()
       .appendingPathComponent("Frameworks/loaf_push.framework/loaf_push").path
-    guard let h = dlopen(lib, RTLD_NOW), let d = dlsym(h, "loaf_push_decrypt"), let f = dlsym(h, "loaf_push_free")
+    guard let h = dlopen(lib, RTLD_NOW), let d = dlsym(h, "loaf_push_decrypt"),
+      let f = dlsym(h, "loaf_push_free"), let n = dlsym(h, "loaf_push_notifies")
     else { return nil }
-    return (unsafeBitCast(d, to: DecryptFn.self), unsafeBitCast(f, to: FreeFn.self))
+    return (
+      unsafeBitCast(d, to: DecryptFn.self), unsafeBitCast(f, to: FreeFn.self),
+      unsafeBitCast(n, to: NotifiesFn.self)
+    )
   }()
 
   static func decrypt(_ pickle: String, _ userId: String, _ ciphertext: String) -> String? {
     guard let fns else { return nil }
-    let (d, free) = fns
-    guard let out = d(pickle, userId, ciphertext) else { return nil }
-    defer { free(out) }
+    guard let out = fns.0(pickle, userId, ciphertext) else { return nil }
+    defer { fns.1(out) }
     return String(cString: out)
+  }
+
+  /// nil when the library is missing or the verdict is undecidable: the
+  /// caller shows the message.
+  static func notifies(
+    _ rules: Data, _ event: [String: Any], _ members: Int?, _ power: [String: Any]?
+  ) -> Bool? {
+    guard let fns, let rulesText = String(data: rules, encoding: .utf8),
+      let eventData = try? JSONSerialization.data(withJSONObject: event),
+      let eventText = String(data: eventData, encoding: .utf8)
+    else { return nil }
+    let powerText = power
+      .flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+      .flatMap { String(data: $0, encoding: .utf8) }
+    switch fns.2(rulesText, eventText, Int64(members ?? -1), powerText) {
+    case 1: return true
+    case 0: return false
+    default: return nil
+    }
   }
 }
 ```
@@ -1131,13 +1580,23 @@ git commit -m "fix(notify): on iOS a resume doesn't chime for messages push deli
 
 **Interfaces:**
 - Produces: `enum ChannelDefault { all, mentions }`, plus `ChannelDefault readDefault(PushRuleSet rules)` and `Future<void> writeDefault(Client client, ChannelDefault d)`.
-  - Writing `all` enables `.m.rule.message` and `.m.rule.encrypted`.
-  - Writing `mentions` disables both. With the rules disabled, the default mention and keyword rules still notify, which is "mentions only" for unencrypted rooms.
+  - Writing `all` enables `.m.rule.message`. Writing `mentions` disables it.
   - Reading returns `mentions` when `.m.rule.message` is disabled, and `all` otherwise.
+  - **`.m.rule.encrypted` is never disabled**, at either setting. It is what
+    carries an encrypted message to the phone, where the extension decrypts it
+    and applies the real rules. Disabling it would hand the decision back to a
+    server that cannot see inside the message.
+  - Plus `Future<void> repairEncryptedRule(Client client)`: enables
+    `.m.rule.encrypted` when it is disabled, once, at sign-in and on the first
+    sync of an upgrade. The shipped build disabled it alongside
+    `.m.rule.message`, so a user who chose mentions-only before this release
+    has it off on the server, and without the repair their encrypted channels
+    would push nothing at all and the extension would never run.
 
 - [ ] **Step 1: Write the failing tests**
 
-- **Writes:** using `FakeMatrixApi` (which records requests), `writeDefault(mentions)` sends `PUT …/pushrules/global/underride/.m.rule.message/enabled {"enabled": false}`, and the same for `.m.rule.encrypted`. Both are underride rules in the Matrix spec. The DM rules (`.m.rule.room_one_to_one`, `.m.rule.encrypted_room_one_to_one`) and the mention overrides are never touched, which is what keeps DMs and unencrypted mentions notifying.
+- **Writes:** using `FakeMatrixApi` (which records requests), `writeDefault(mentions)` sends `PUT …/pushrules/global/underride/.m.rule.message/enabled {"enabled": false}` and **nothing else**: assert on the recorded request list, so a future edit that touches `.m.rule.encrypted` again fails here. The DM rules (`.m.rule.room_one_to_one`, `.m.rule.encrypted_room_one_to_one`) and the mention overrides are never touched either, which is what keeps DMs and unencrypted mentions notifying.
+- **The repair:** with `.m.rule.encrypted` disabled, `repairEncryptedRule` sends `PUT …/pushrules/global/underride/.m.rule.encrypted/enabled {"enabled": true}`; with it already enabled, it sends nothing.
 - **Reads:** `readDefault` reads them back.
 - **Widget, on iOS (`debugDefaultTargetPlatformOverride`):**
   - Notifications, Sound and Show message text show.
@@ -1147,7 +1606,9 @@ git commit -m "fix(notify): on iOS a resume doesn't chime for messages push deli
 
 - [ ] **Step 2: Run, fail; implement; run, pass**
 
-On iOS, Notifications, Sound and Show message text are now honest: push uses all three. Lift step D's `isDesktop` gate for them (memory `honest-controls`). Toggling Notifications calls `Pusher.sync()`.
+On iOS, Notifications, Sound and Show message text are now honest: push uses all three. Lift step D's `isDesktop` gate for them (memory `honest-controls`). Toggling Notifications calls `Pusher.sync()`. Call `repairEncryptedRule` where the client finishes its first sync, beside the rules writer from Task 5a.
+
+The Settings copy does not change, and it is now true on iOS without a caveat: a mentions-only encrypted channel pushes a mention and nothing else.
 
 Run: `mise run test -- test/ui/settings`
 Expected: PASS.
@@ -1193,6 +1654,8 @@ for target in "$app" "$app/PlugIns/NotifyService.appex"; do
 done
 ents "$app" | grep -q '"aps-environment":"production"' \
   || { echo "::error::Runner.app lacks aps-environment=production"; exit 1; }
+ents "$app/PlugIns/NotifyService.appex" | grep -q '"com.apple.developer.usernotifications.filtering":true' \
+  || { echo "::error::NotifyService.appex lacks the filtering entitlement"; exit 1; }
 ls "$app/Frameworks" | grep -qi loaf_push \
   || { echo "::error::loaf_push is not in the app's Frameworks"; exit 1; }
 ```
@@ -1211,13 +1674,18 @@ This needs Chris's phone. Ask what they saw for anything a screenshot can't show
 
 1. **Install and permission.** Install from TestFlight, then sign in. The permission prompt appears, and Settings shows Notifications on.
 2. **An encrypted DM with the phone locked.** mochi sends `hello`, using the throwaway sender in the handoff. Expected: `mochi` / `hello` with the chime. If it shows `encrypted message`, the phone's session lacks the key: verify it with the recovery key and retry.
-3. **Mentions only, in an encrypted channel.** With Channels set to mentions only, a plain message pushes nothing. A mention pushes nothing either: the server can't see a mention inside an encrypted message, and without the filtering entitlement the phone can't decide instead. Record it in the ledger as the known gap until filtering. In an unencrypted channel, the mention does push.
-4. **Tap with the app backgrounded.** It opens the DM at the message, which glows.
-5. **Tap with the app killed** (a cold start). It opens the message after the first sync.
-6. **Read on the Mac.** The phone's notification disappears after the phone's next sync.
-7. **Show message text off.** The notification says `new message`.
-8. **Notifications off.** No push, and the server's pusher list (`GET /_matrix/client/v3/pushers` with mochi's harness, or Chris's client) no longer lists the phone.
-9. **Background for 5 minutes, then open.** Console.app on the Mac, with the phone attached: no `0xdead10cc` termination for `moe.loaf.chat.ios`.
-10. **Update over v0.1.19** (the old database location). The app stays signed in, and older encrypted messages still read.
+3. **Mentions only, in an encrypted channel.** This is what the entitlement bought, and it is the case to spend time on. With Channels set to mentions only: mochi's plain message shows nothing, and mochi's mention of you shows a notification with the message in it. Then set the channel itself to mute and check the mention shows nothing. In an unencrypted channel, both still behave the same way.
+   - A push that arrives and is dropped looks exactly like a push that never came, so check the extension ran: attach the phone, and in Console.app filter on `moe.loaf.chat.ios.notify`. A drop logs `dropped`; nothing at all means the gateway or the pusher, not the rules.
+   - A **blank** notification, rather than none, means the filtering entitlement is missing from the signed appex. Task 12's gate should have caught it; say so if it did not.
+   - Compare against the Mac for each case: the two must agree, and they are the same corpus (Task 3b).
+4. **A level changed on another device while the phone sleeps.** Mute the channel on the Mac, wait a minute, then have mochi message it. The phone shows nothing: the extension's hour-old refresh fetched the new rules. Then with the phone awake and synced, the same holds from the cache.
+5. **Tap with the app backgrounded.** It opens the DM at the message, which glows.
+6. **Tap with the app killed** (a cold start). It opens the message after the first sync.
+7. **Read on the Mac.** The phone's notification disappears after the phone's next sync.
+8. **Show message text off.** The notification says `new message`.
+9. **Notifications off.** No push, and the server's pusher list (`GET /_matrix/client/v3/pushers` with mochi's harness, or Chris's client) no longer lists the phone.
+10. **Background for 5 minutes, then open.** Console.app on the Mac, with the phone attached: no `0xdead10cc` termination for `moe.loaf.chat.ios`.
+11. **Update over v0.1.19** (the old database location). The app stays signed in, and older encrypted messages still read.
+12. **Update with mentions-only chosen on the old build.** Set Channels to mentions only on v0.1.19 first, then update: `.m.rule.encrypted` is back on (check it in Settings on the Mac, or `GET /_matrix/client/v3/pushrules/`), and an encrypted mention pushes. Without the repair in Task 11 this is the case that silently stays broken.
 
 When testing ends, clean up as the handoff says: log mochi's token out, and delete `mochi.json`, `mochi.sqlite` and `mochi-media`.

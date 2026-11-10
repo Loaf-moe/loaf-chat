@@ -248,12 +248,11 @@ alert the gateway sent.
 **Filtering entitlement.** `com.apple.developer.usernotifications.filtering`
 lets the extension drop a push. Encrypted rooms need it: the server can't
 read an encrypted message, so it can't tell a mention from anything else.
-With the entitlement, the default push rule for encrypted messages is left
-at notify, and the extension applies the real rules after decrypting. Chris
-requests the entitlement from Apple. Until it's granted, the extension
-can't drop pushes, so the app sets `.m.rule.encrypted` to match the
-Channels default, and in mentions-only encrypted rooms mentions don't push.
-One build setting switches between the two.
+Apple granted it (November 2026), so the default push rule for encrypted
+messages is left at notify and the extension applies the real rules after
+decrypting. There is no fallback and no build setting: the app never
+disables `.m.rule.encrypted`, and a build that cannot filter is a build
+that shows every encrypted message.
 
 **In the app.** `willPresent` returns no presentation options: in front,
 the notifier and chime handle it. `didReceive` hands the route to Dart; on a
