@@ -3,8 +3,9 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/theme/appearance.dart';
+import 'package:loaf_native/util/json_store.dart';
 
-class _BrokenStore implements AppearanceStore {
+class _BrokenStore implements Store<AppearanceSettings> {
   @override
   Future<AppearanceSettings?> load() async => null;
   @override
@@ -31,11 +32,11 @@ void main() {
     AppearanceController make({
       required DateTime now,
       AppearanceSettings settings = const AppearanceSettings(),
-      AppearanceStore? store,
+      Store<AppearanceSettings>? store,
       bool reduceMotionByDefault = false,
     }) {
       final c = AppearanceController(
-        store: store ?? MemoryAppearanceStore(),
+        store: store ?? MemoryStore<AppearanceSettings>(),
         settings: settings,
         clock: () => now,
         reduceMotionByDefault: reduceMotionByDefault,
@@ -56,7 +57,7 @@ void main() {
     });
 
     test('external content is on by default, and the choice is kept', () {
-      final store = MemoryAppearanceStore();
+      final store = MemoryStore<AppearanceSettings>();
       final c = make(now: offSeason, store: store);
       expect(c.externalMedia, isTrue);
       expect(c.externalMediaListenable.value, isTrue);
@@ -92,7 +93,7 @@ void main() {
     });
 
     test('changes notify and save', () async {
-      final store = MemoryAppearanceStore();
+      final store = MemoryStore<AppearanceSettings>();
       final c = make(now: offSeason, store: store);
       var heard = 0;
       c.addListener(() => heard++);
@@ -145,7 +146,7 @@ void main() {
       }
 
       test('setting it notifies and saves', () async {
-        final store = MemoryAppearanceStore();
+        final store = MemoryStore<AppearanceSettings>();
         final c = make(now: offSeason, store: store);
         var heard = 0;
         c.addListener(() => heard++);
@@ -157,7 +158,7 @@ void main() {
       });
 
       test('picking what the default already gives keeps the choice', () {
-        final store = MemoryAppearanceStore();
+        final store = MemoryStore<AppearanceSettings>();
         final c = make(
           now: offSeason,
           store: store,
@@ -180,7 +181,9 @@ void main() {
 
       test('load keeps a saved choice over the default', () async {
         final c = await AppearanceController.load(
-          MemoryAppearanceStore(const AppearanceSettings(reduceMotion: false)),
+          MemoryStore<AppearanceSettings>(
+            const AppearanceSettings(reduceMotion: false),
+          ),
           clock: () => offSeason,
           reduceMotionByDefault: true,
         );
@@ -191,7 +194,7 @@ void main() {
 
     test('load restores what was saved', () async {
       final c = await AppearanceController.load(
-        MemoryAppearanceStore(
+        MemoryStore<AppearanceSettings>(
           const AppearanceSettings(theme: LoafThemeId.nihon, easterEggs: false),
         ),
         clock: () => offSeason,
@@ -207,7 +210,7 @@ void main() {
   ) async {
     var now = DateTime(2026, 10, 15, 23);
     final c = AppearanceController(
-      store: MemoryAppearanceStore(),
+      store: MemoryStore<AppearanceSettings>(),
       clock: () => now,
     );
     var heard = 0;
@@ -229,7 +232,7 @@ void main() {
     // can leave a woken laptop on yesterday's theme.
     var now = DateTime(2026, 10, 15, 23);
     final c = AppearanceController(
-      store: MemoryAppearanceStore(),
+      store: MemoryStore<AppearanceSettings>(),
       clock: () => now,
     );
     var heard = 0;
@@ -248,7 +251,7 @@ void main() {
     c.dispose();
   });
 
-  group('FileAppearanceStore', () {
+  group('appearance settings in a file', () {
     late Directory dir;
     setUp(() => dir = Directory.systemTemp.createTempSync('appearance'));
     tearDown(() => dir.deleteSync(recursive: true));
@@ -256,29 +259,43 @@ void main() {
     File file() => File('${dir.path}/appearance.json');
 
     test('round-trips', () async {
-      final store = FileAppearanceStore(file());
+      final store = JsonFileStore(file(), AppearanceSettings.fromJson);
       await store.save(
         const AppearanceSettings(theme: LoafThemeId.nihon, easterEggs: false),
       );
-      final back = await FileAppearanceStore(file()).load();
+      final back = await JsonFileStore(
+        file(),
+        AppearanceSettings.fromJson,
+      ).load();
       expect(back?.theme, LoafThemeId.nihon);
       expect(back?.easterEggs, isFalse);
     });
 
     test('a missing file loads as nothing', () async {
-      expect(await FileAppearanceStore(file()).load(), isNull);
+      expect(
+        await JsonFileStore(file(), AppearanceSettings.fromJson).load(),
+        isNull,
+      );
     });
 
     test('a garbage file loads as nothing', () async {
       file().writeAsStringSync('{not json');
-      expect(await FileAppearanceStore(file()).load(), isNull);
+      expect(
+        await JsonFileStore(file(), AppearanceSettings.fromJson).load(),
+        isNull,
+      );
     });
 
     test('a motion choice round-trips', () async {
       for (final on in [true, false]) {
-        await FileAppearanceStore(file())
-            .save(AppearanceSettings(reduceMotion: on));
-        final back = await FileAppearanceStore(file()).load();
+        await JsonFileStore(
+          file(),
+          AppearanceSettings.fromJson,
+        ).save(AppearanceSettings(reduceMotion: on));
+        final back = await JsonFileStore(
+          file(),
+          AppearanceSettings.fromJson,
+        ).load();
         expect(back?.reduceMotion, on);
       }
     });
@@ -298,7 +315,10 @@ void main() {
 
     test('unknown or mistyped fields fall back to the defaults', () async {
       file().writeAsStringSync('{"theme": "vaporwave", "easterEggs": "yes"}');
-      final back = await FileAppearanceStore(file()).load();
+      final back = await JsonFileStore(
+        file(),
+        AppearanceSettings.fromJson,
+      ).load();
       expect(back?.theme, LoafThemeId.loafDark);
       expect(back?.easterEggs, isTrue);
     });

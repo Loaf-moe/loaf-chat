@@ -12,6 +12,7 @@ import 'package:loaf_native/ui/settings/settings_controls.dart';
 import 'package:loaf_native/ui/shell/profile.dart';
 import 'package:loaf_native/ui/shell/profile_controller.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 /// The mock's profile, with a choice the test can hold in flight.
 class _Profile extends MockProfile {
@@ -46,7 +47,7 @@ Future<void> pumpSection(
 );
 
 NotificationController soundController() => NotificationController(
-  store: MemoryNotificationStore(),
+  store: MemoryStore<NotificationSettings>(),
   chime: FakeChime(),
 );
 
@@ -54,7 +55,7 @@ NotificationController desktopController(
   FakeDesktopNotifications desktop, {
   bool notifications = true,
 }) => NotificationController(
-  store: MemoryNotificationStore(),
+  store: MemoryStore<NotificationSettings>(),
   chime: FakeChime(),
   desktop: desktop,
   settings: NotificationSettings(notifications: notifications),
@@ -80,7 +81,7 @@ void main() {
     (tester) async {
       final chime = FakeChime();
       final controller = await NotificationController.load(
-        MemoryNotificationStore(),
+        MemoryStore<NotificationSettings>(),
         chime: chime,
       );
       await pumpSection(tester, controller);
@@ -131,7 +132,7 @@ void main() {
   testWidgets('on a phone: only sound', (tester) async {
     await onPlatform(TargetPlatform.iOS, () async {
       final c = NotificationController(
-        store: MemoryNotificationStore(),
+        store: MemoryStore<NotificationSettings>(),
         chime: FakeChime(),
       );
       await pumpSection(tester, c);

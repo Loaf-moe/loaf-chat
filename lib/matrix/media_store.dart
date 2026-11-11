@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 import 'package:http/http.dart' as http;
 import 'package:matrix/matrix.dart' show Logs;
 
@@ -129,7 +130,7 @@ class MediaStore {
       }
       total += size;
       entries.add(
-        _Entry(dir, _basename(dir.path), size, newest ?? DateTime(1970)),
+        _Entry(dir, p.basename(dir.path), size, newest ?? DateTime(1970)),
       );
     }
     entries.sort((a, b) => a.modified.compareTo(b.modified));
@@ -154,9 +155,6 @@ class MediaStore {
     }
     _running.clear();
   }
-
-  static String _basename(String path) =>
-      path.substring(path.lastIndexOf(Platform.pathSeparator) + 1);
 
   /// The sender's name made safe as one path segment: no directories, no
   /// characters a filesystem refuses, no name Windows keeps for a device,
@@ -232,12 +230,12 @@ class _Entry {
 class StoredFile extends ChangeNotifier implements MediaFile {
   StoredFile._(this._store, this._spec)
     : id = sha256.convert(utf8.encode(_spec.mxc.toString())).toString() {
-    final dir = '${_store.root.path}${Platform.pathSeparator}$id';
+    final dir = p.join(_store.root.path, id);
     final name = MediaStore.safeName(
       _spec.name,
       maxBytes: MediaStore.nameBudget(dir, windows: Platform.isWindows),
     );
-    _finalPath = '$dir${Platform.pathSeparator}$name';
+    _finalPath = p.join(dir, name);
     partialPath = '$_finalPath.part';
     _path.future.ignore(); // Failures reach callers through [error] as well.
   }
