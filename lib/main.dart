@@ -14,7 +14,7 @@ import 'platform/system_audio_devices.dart';
 import 'platform/x11.dart';
 import 'ui/auth/loaf_session.dart';
 import 'ui/auth/session_root.dart';
-import 'ui/model/updater.dart';
+import 'update/updater.dart';
 import 'ui/mock/mock_audio_devices.dart';
 import 'ui/mock/mock_session.dart';
 import 'ui/platform.dart';

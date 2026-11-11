@@ -1,11 +1,13 @@
-/// What the real updaters share: a state, and listeners told when it moves.
+/// What the real updaters share: a state, listeners told when it changes,
+/// and the restart into a staged build.
 library;
 
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../ui/model/updater.dart';
+import 'update_log.dart';
+import 'updater.dart';
 
 abstract class StateUpdater extends ChangeNotifier implements Updater {
   UpdateState _state = const UpdateIdle();
@@ -23,14 +25,35 @@ abstract class StateUpdater extends ChangeNotifier implements Updater {
   @override
   Future<UpdateCheck> check() async => UpdateCheck.upToDate;
 
+  /// Changes [state] to [next]: answers anyone waiting in [settled] once
+  /// [next] says how a check ended, then tells listeners. A state change
+  /// and nothing more; nothing is owned, moved or freed.
+  ///
   /// Does nothing after [dispose]: downloads and platform calls finish
   /// whenever they finish, and may find the updater gone.
   @protected
-  void move(UpdateState next) {
+  void transition(UpdateState next) {
     if (_disposed) return;
     _state = next;
     if (_outcome(next) case final outcome?) _answer(outcome);
     notifyListeners();
+  }
+
+  /// Starts the staged build. Throwing means it did not start, and the
+  /// update stays ready to try again.
+  @protected
+  Future<void> relaunch();
+
+  @override
+  Future<void> restart(UpdateReady ready) async {
+    if (!identical(state, ready)) return;
+    transition(UpdateApplying(ready.version));
+    try {
+      await relaunch();
+    } catch (e, s) {
+      updateLog('the new build did not start', e, s);
+      transition(ready);
+    }
   }
 
   /// How a check already under way ends: ready once something is staged,
@@ -45,9 +68,9 @@ abstract class StateUpdater extends ChangeNotifier implements Updater {
   }
 
   static UpdateCheck? _outcome(UpdateState state) => switch (state) {
-    UpdateReady() || UpdateApplying() => UpdateCheck.ready,
+    _ when state.staged => UpdateCheck.ready,
     UpdateIdle() => UpdateCheck.failed,
-    UpdatePreparing() => null,
+    _ => null,
   };
 
   void _answer(UpdateCheck outcome) {

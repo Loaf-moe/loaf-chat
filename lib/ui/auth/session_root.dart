@@ -5,7 +5,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../model/message_route.dart';
-import '../model/updater.dart';
+import '../../update/updater.dart';
 import '../rooms/rooms.dart';
 import '../shell/app_shell.dart';
 import '../shell/before_quit.dart';

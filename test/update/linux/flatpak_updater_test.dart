@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/model/updater.dart';
-import 'package:loaf_native/update/flatpak_portal.dart';
-import 'package:loaf_native/update/flatpak_updater.dart';
+import 'package:loaf_native/update/updater.dart';
+import 'package:loaf_native/update/linux/flatpak_portal.dart';
+import 'package:loaf_native/update/linux/flatpak_updater.dart';
+
+import '../fake_restarter.dart';
 
 class _Portal implements FlatpakPortal {
   int portalVersion = 2;
@@ -45,14 +47,14 @@ Future<void> _turn() => Future<void>.delayed(Duration.zero);
 
 void main() {
   late _Portal portal;
-  var quits = 0;
+  late FakeRestarter restarter;
   String? feedVersion;
 
   Future<FlatpakUpdater> started() async {
     final u = FlatpakUpdater(
       portal: portal,
       version: () async => feedVersion,
-      quit: () => quits++,
+      restarter: restarter,
     );
     addTearDown(u.dispose);
     await u.start();
@@ -61,7 +63,7 @@ void main() {
 
   setUp(() {
     portal = _Portal();
-    quits = 0;
+    restarter = FakeRestarter();
     feedVersion = '0.1.2';
   });
 
@@ -129,7 +131,7 @@ void main() {
     final u = FlatpakUpdater(
       portal: portal,
       version: () async => throw StateError('offline'),
-      quit: () => quits++,
+      restarter: restarter,
     );
     addTearDown(u.dispose);
     await u.start();
@@ -156,9 +158,9 @@ void main() {
     final u = await started();
     portal.commits.add(_installedAlready);
     await _turn();
-    await u.restart();
+    await u.restart(u.state as UpdateReady);
     expect(portal.spawns, 1);
-    expect(quits, 1);
+    expect(restarter.quits, 1);
     expect(u.state, isA<UpdateApplying>());
   });
 
@@ -167,8 +169,8 @@ void main() {
     portal.commits.add(_installedAlready);
     await _turn();
     portal.spawnFails = StateError('no');
-    await u.restart();
-    expect(quits, 0);
+    await u.restart(u.state as UpdateReady);
+    expect(restarter.quits, 0);
     expect(u.state, isA<UpdateReady>());
   });
 

@@ -7,8 +7,10 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/model/updater.dart';
-import 'package:loaf_native/update/appimage_updater.dart';
+import 'package:loaf_native/update/updater.dart';
+import 'package:loaf_native/update/linux/appimage_updater.dart';
+
+import '../fake_restarter.dart';
 
 const _old = 'the old build';
 const _new = 'the new build, which is longer';
@@ -82,8 +84,7 @@ void main() {
   late _Server server;
   late Directory dir;
   late File appImage;
-  final launched = <String>[];
-  var quits = 0;
+  late FakeRestarter restarter;
 
   AppImageUpdater updater({File? at, Duration? idleTimeout}) {
     final u = AppImageUpdater(
@@ -92,8 +93,7 @@ void main() {
       build: 1,
       feed: server.feedUri,
       verify: (message, signature) => signature == 'good',
-      launch: (path) async => launched.add(path),
-      quit: () => quits++,
+      restarter: restarter,
     );
     addTearDown(u.dispose);
     return u;
@@ -103,8 +103,7 @@ void main() {
     server = await _Server.start();
     dir = await Directory.systemTemp.createTemp('loaf-appimage');
     appImage = File('${dir.path}/Loaf-Chat.AppImage')..writeAsStringSync(_old);
-    launched.clear();
-    quits = 0;
+    restarter = FakeRestarter();
     server.downloadRequestCount = 0;
   });
 
@@ -113,8 +112,9 @@ void main() {
     dir.deleteSync(recursive: true);
   });
 
-  bool leftovers() =>
-      dir.listSync().any((entry) => entry.path.endsWith('.part'));
+  bool leftovers() => dir.listSync().any(
+    (entry) => entry.path.endsWith('.part') || entry.path.endsWith('.new'),
+  );
 
   test('a newer, signed build replaces the file and is ready', () async {
     server.offer();
@@ -131,17 +131,17 @@ void main() {
     server.offer();
     final u = updater();
     await u.check();
-    await u.restart();
-    expect(launched, [appImage.path]);
-    expect(quits, 1);
+    await u.restart(u.state as UpdateReady);
+    expect(restarter.launched, [appImage.path]);
+    expect(restarter.quits, 1);
     expect(u.state, isA<UpdateApplying>());
   });
 
-  test('restarting before anything is ready does nothing', () async {
+  test('restarting into a build no longer ready does nothing', () async {
     final u = updater();
-    await u.restart();
-    expect(launched, isEmpty);
-    expect(quits, 0);
+    await u.restart(const UpdateReady('0.1.2'));
+    expect(restarter.launched, isEmpty);
+    expect(restarter.quits, 0);
   });
 
   test('a launch that fails leaves the update ready', () async {
@@ -151,13 +151,12 @@ void main() {
       build: 1,
       feed: server.feedUri,
       verify: (_, signature) => signature == 'good',
-      launch: (_) async => throw const FileSystemException('no'),
-      quit: () => quits++,
+      restarter: restarter..launchFails = const FileSystemException('no'),
     );
     addTearDown(u.dispose);
     await u.check();
-    await u.restart();
-    expect(quits, 0);
+    await u.restart(u.state as UpdateReady);
+    expect(restarter.quits, 0);
     expect(u.state, isA<UpdateReady>());
   });
 
@@ -228,7 +227,7 @@ void main() {
     server.offer();
     // Where the download goes is taken by a folder, so no file can be made
     // there. Permissions would do it too, but not for root.
-    Directory('${appImage.path}.part').createSync();
+    Directory('${appImage.path}.new').createSync();
     final u = updater();
     await u.check();
     expect(u.state, isA<UpdateIdle>());

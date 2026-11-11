@@ -3,10 +3,12 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:loaf_native/ui/model/updater.dart';
-import 'package:loaf_native/update/windows_updater.dart';
+import 'package:loaf_native/update/updater.dart';
+import 'package:loaf_native/update/windows/bundle_swap.dart';
+import 'package:loaf_native/update/windows/windows_updater.dart';
+import 'package:path/path.dart' as p;
 
-final _sep = Platform.pathSeparator;
+import '../fake_restarter.dart';
 
 /// Serves `latest.json` and the zip. Tests change [feed] and [zip].
 class _Server {
@@ -52,14 +54,13 @@ class _Server {
 }
 
 String _read(Directory dir, String rel) =>
-    File('${dir.path}$_sep${rel.replaceAll('/', _sep)}').readAsStringSync();
+    File(p.joinAll([dir.path, ...p.posix.split(rel)])).readAsStringSync();
 
 void main() {
   late _Server server;
   late Directory root;
   late Directory install;
-  final launched = <String>[];
-  var quits = 0;
+  late FakeRestarter restarter;
   final signed = <String>[];
 
   /// Unpacks "the zip" as the build it stands for, unless told to fail.
@@ -70,7 +71,7 @@ void main() {
       ('loaf-chat.exe', 'new exe'),
       ('data/app.so', 'new code'),
     ]) {
-      File('${into.path}$_sep${rel.replaceAll('/', _sep)}')
+      File(p.joinAll([into.path, ...p.posix.split(rel)]))
         ..createSync(recursive: true)
         ..writeAsStringSync(body);
     }
@@ -78,7 +79,7 @@ void main() {
 
   WindowsUpdater updater() {
     final u = WindowsUpdater(
-      install: install,
+      installation: install,
       build: 1,
       feed: server.feedUri,
       verify: (message, signature) {
@@ -86,8 +87,7 @@ void main() {
         return signature == 'good';
       },
       unpack: unpack,
-      launch: (path) async => launched.add(path),
-      quit: () => quits++,
+      restarter: restarter,
     );
     addTearDown(u.dispose);
     return u;
@@ -96,19 +96,18 @@ void main() {
   setUp(() async {
     server = await _Server.start();
     root = Directory.systemTemp.createTempSync('windows_updater');
-    install = Directory('${root.path}${_sep}Loaf Chat')..createSync();
+    install = Directory(p.join(root.path, 'Loaf Chat'))..createSync();
     for (final (rel, body) in [
       ('loaf-chat.exe', 'old exe'),
       ('data/app.so', 'old code'),
       ('unins000.dat', 'uninstall log'),
     ]) {
-      File('${install.path}$_sep${rel.replaceAll('/', _sep)}')
+      File(p.joinAll([install.path, ...p.posix.split(rel)]))
         ..createSync(recursive: true)
         ..writeAsStringSync(body);
     }
-    launched.clear();
+    restarter = FakeRestarter();
     signed.clear();
-    quits = 0;
     unpackFails = false;
   });
 
@@ -129,16 +128,16 @@ void main() {
     // What was checked is the Windows build's text, not the AppImage's.
     expect(signed.single, startsWith('loaf-chat-windows\n0.1.2\n2\n'));
     // Nothing of the download is left but the set-aside old files.
-    expect(Directory('${install.path}${_sep}update').existsSync(), isFalse);
+    expect(Directory(p.join(install.path, 'update')).existsSync(), isFalse);
   });
 
   test('restarting starts the new build and quits', () async {
     server.offer();
     final u = updater();
     await u.check();
-    await u.restart();
-    expect(launched, ['${install.path}${_sep}loaf-chat.exe']);
-    expect(quits, 1);
+    await u.restart(u.state as UpdateReady);
+    expect(restarter.launched, [p.join(install.path, 'loaf-chat.exe')]);
+    expect(restarter.quits, 1);
     expect(u.state, isA<UpdateApplying>());
   });
 
@@ -168,14 +167,63 @@ void main() {
     expect(await u.check(), UpdateCheck.failed);
     expect(u.state, isA<UpdateIdle>());
     expect(_read(install, 'loaf-chat.exe'), 'old exe');
-    expect(Directory('${install.path}${_sep}update').existsSync(), isFalse);
+    expect(Directory(p.join(install.path, 'update')).existsSync(), isFalse);
+  });
+
+  test(
+    'an undo the last update left is finished before the next swap',
+    () async {
+      // Cut off after the old code stepped aside: the journal says so, and
+      // `data/app.so.old` is the only copy of it left.
+      File(
+        p.join(install.path, BundleSwap.journalName),
+      ).writeAsStringSync('${const SetAside(BuildFile('data/app.so')).line}\n');
+      final code = File(p.join(install.path, 'data', 'app.so'));
+      code.renameSync('${code.path}${BuildFile.aside}');
+
+      server.offer();
+      final u = updater();
+      expect(await u.check(), UpdateCheck.ready);
+      // The undo ran first, so the swap had the whole old build to set aside.
+      expect(_read(install, 'data/app.so'), 'new code');
+      expect(_read(install, 'data/app.so.old'), 'old code');
+      expect(
+        File(p.join(install.path, BundleSwap.journalName)).existsSync(),
+        isFalse,
+      );
+    },
+  );
+
+  test('a check leaves the journal of an undo it cannot finish', () async {
+    // An undo that cannot finish: here a folder has taken the old file's
+    // place, where on Windows a file someone holds would.
+    File(
+      p.join(install.path, BundleSwap.journalName),
+    ).writeAsStringSync('${const SetAside(BuildFile('data/app.so')).line}\n');
+    final code = File(p.join(install.path, 'data', 'app.so'));
+    code.renameSync('${code.path}${BuildFile.aside}');
+    Directory(code.path).createSync();
+
+    server.offer();
+    final u = updater();
+    expect(await u.check(), UpdateCheck.failed);
+    // Nothing of the download is left, but the journal and the only copy
+    // of the file it has still to put back are where the next launch will
+    // find them.
+    expect(Directory(p.join(install.path, 'update')).existsSync(), isFalse);
+    expect(
+      File(p.join(install.path, BundleSwap.journalName)).existsSync(),
+      isTrue,
+    );
+    expect(_read(install, 'data/app.so.old'), 'old code');
+    expect(_read(install, 'loaf-chat.exe'), 'old exe');
   });
 
   test('launch clears what the last update set aside', () async {
-    File('${install.path}${_sep}loaf-chat.exe.old').writeAsStringSync('x');
+    File(p.join(install.path, 'loaf-chat.exe.old')).writeAsStringSync('x');
     await updater().start(checkAfter: const Duration(hours: 1));
     expect(
-      File('${install.path}${_sep}loaf-chat.exe.old').existsSync(),
+      File(p.join(install.path, 'loaf-chat.exe.old')).existsSync(),
       isFalse,
     );
   });
