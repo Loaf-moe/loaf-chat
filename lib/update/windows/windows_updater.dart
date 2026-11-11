@@ -46,9 +46,10 @@ class WindowsUpdater extends SelfUpdater {
       p.join(installation.path, BundleSwap.executable.posix);
 
   /// Finishes undoing a swap that was cut short, and clears what the last
-  /// one left behind. Throws while the undo cannot be finished: the `.old`
-  /// files it has still to put back are the only copy of them left, so
-  /// nothing may be swapped over them.
+  /// one left behind. Throws while the undo cannot be finished, or a `.old`
+  /// is still held: the files an undo has still to put back are the only
+  /// copy of them left, and a `.old` it did not make would be taken for one
+  /// it did, so nothing may be swapped beside either.
   Future<void> _finishLastUpdate() async {
     if (await _swap.cleanUp()) {
       updateLog('an update cut short was undone');

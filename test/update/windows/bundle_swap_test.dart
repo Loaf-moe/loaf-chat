@@ -353,6 +353,46 @@ void main() {
     expect(tree, contains(BundleSwap.journalName));
   });
 
+  // A `.old` the last swap left is one the undo could not tell from its
+  // own: nothing may be swapped beside it.
+  test('a swap is refused beside a .old the last update left', () async {
+    install.childFile('flutter_windows.dll.old').writeAsStringSync('stale');
+    await expectLater(
+      BundleSwap(install.path).apply(staged),
+      throwsA(isA<StateError>()),
+    );
+    expect(_tree(install), {..._installed, 'flutter_windows.dll.old': 'stale'});
+  });
+
+  test('a launch leaves a .old it cannot delete, and says so', () async {
+    install.childFile('flutter_windows.dll.old').writeAsStringSync('stale');
+    await expectLater(
+      BundleSwap(
+        install.path,
+        fs: _Held((_) async {}, held: (path) => path.endsWith(BuildFile.aside)),
+        attempts: 1,
+      ).cleanUp(),
+      throwsA(isA<StateError>()),
+    );
+    expect(_tree(install), {..._installed, 'flutter_windows.dll.old': 'stale'});
+  });
+
+  test('a launch waits for a .old held for a moment', () async {
+    install.childFile('flutter_windows.dll.old').writeAsStringSync('stale');
+    var refusals = 2;
+    final swap = BundleSwap(
+      install.path,
+      fs: _Held(
+        (_) async {},
+        held: (path) => path.endsWith(BuildFile.aside) && refusals-- > 0,
+      ),
+      attemptDelay: Duration.zero,
+    );
+    expect(await swap.cleanUp(), isFalse);
+    expect(refusals, isNegative, reason: 'the sweep never asked for it');
+    expect(_tree(install), _installed);
+  });
+
   group('a journal line', () {
     test('reads back as what was written', () {
       for (final entry in [

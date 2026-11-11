@@ -30,9 +30,9 @@ class BundleSwap {
   /// The folder Setup installed into, holding the running build.
   final Directory install;
 
-  /// How many times a rename is tried, [attemptDelay] apart, before the
-  /// swap gives up: a file someone else holds (Defender scanning a new DLL,
-  /// say) is usually let go within a second or two.
+  /// How many times a rename or delete is tried, [attemptDelay] apart,
+  /// before the swap gives up: a file someone else holds (Defender scanning
+  /// a new DLL, say) is usually let go within a second or two.
   final int attempts;
   final Duration attemptDelay;
 
@@ -54,6 +54,14 @@ class BundleSwap {
   Directory get work => install.childDirectory(workName);
   File get _journal => install.childFile(journalName);
 
+  /// Throws while a `.old` of the last swap is still there. The undo could
+  /// not tell it from one of its own, so nothing may be swapped beside it.
+  void _refuseAsideLeft() {
+    if (_files(install).any((f) => f.isSetAside)) {
+      throw StateError('a file the last update set aside is still held');
+    }
+  }
+
   /// Puts [staged], an unpacked build, in place of the running one. Throws,
   /// with the old build put back, if any of it could not be done.
   Future<void> apply(Directory staged) async {
@@ -66,6 +74,7 @@ class BundleSwap {
     if (_journal.existsSync()) {
       throw StateError('the last update is still to be undone');
     }
+    _refuseAsideLeft();
     final outgoing = _files(install).where((f) => f.swappable);
 
     _journal.writeAsStringSync('');
@@ -91,19 +100,27 @@ class BundleSwap {
 
   /// At launch: finishes undoing a swap a crash cut short, then deletes the
   /// set-aside files of the last one and the updater's leftovers. True when
-  /// a swap was undone. Anything still held is left for the next launch.
+  /// a swap was undone.
   ///
-  /// Throws when an undo could not be finished. Its journal and its `.old`
-  /// files stay as they are, holding the only copy of what the install has
-  /// lost, for the next launch to try again.
+  /// Throws when an undo could not be finished, or a `.old` could not be
+  /// deleted. Journal and `.old` files stay as they are: while the undo is
+  /// unfinished they hold the only copy of what the install has lost, and
+  /// while a `.old` is there the next undo could not tell it from its own.
+  /// Nothing is swapped until a launch gets past this.
   Future<bool> cleanUp() async {
     final interrupted = _journal.existsSync();
     if (interrupted && !await _rollBack()) {
       throw StateError('the last update is only part way undone');
     }
     for (final file in _files(install)) {
-      if (file.isSetAside) _tryDelete(fs.file(file.under(install)));
+      if (!file.isSetAside) continue;
+      try {
+        await _delete(fs.file(file.under(install)));
+      } on FileSystemException {
+        // Held past every attempt; refused below.
+      }
     }
+    _refuseAsideLeft();
     if (work.existsSync()) {
       try {
         work.deleteSync(recursive: true);
@@ -181,8 +198,8 @@ class BundleSwap {
     flush: true,
   );
 
-  /// Through [fs], where a test holds a file. One that is not there has
-  /// been deleted already, by a pass of the undo this one repeats.
+  /// Through [fs], where a test holds a file. One that is not there is
+  /// already gone, by an earlier undo or sweep.
   Future<void> _delete(File file) => retry<void, FileSystemException>(
     () async {
       if (file.existsSync()) await file.delete();
@@ -209,14 +226,6 @@ class BundleSwap {
     ...files.where((f) => f != executable),
     if (files.contains(executable)) executable,
   ];
-
-  static void _tryDelete(File file) {
-    try {
-      if (file.existsSync()) file.deleteSync();
-    } on FileSystemException {
-      // Still held by the build that just quit; next launch.
-    }
-  }
 }
 
 /// A file's place inside a build, written the same on every platform:
