@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -7,7 +8,9 @@ import 'package:matrix/matrix.dart' show Logs;
 
 import 'log_file.dart';
 
+import 'push/ios_push.dart';
 import 'push/app_group.dart';
+import 'push/pusher.dart';
 import 'push/rules_file.dart';
 import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
@@ -159,6 +162,22 @@ Future<void> main() async {
         ),
         devices: system ?? const LiveKitAudioDevices(),
       );
+    }
+    // iOS has no desktop notifier: a push is what arrives, and tapping it
+    // is what opens the message.
+    if (Platform.isIOS) {
+      final push = IosPush();
+      noticeRoutes = push.clicks;
+      final pusher = Pusher(
+        client: matrix.client,
+        push: push,
+        enabled: () => notifications.notifications,
+      );
+      // Once there is an account to register for, and again whenever the
+      // toggle moves. Signing out needs nothing: the homeserver drops a
+      // device's pushers when that device logs out.
+      unawaited(matrix.client.onSync.stream.first.then((_) => pusher.sync()));
+      notifications.addListener(() => unawaited(pusher.sync()));
     }
     // The iOS notification extension judges a push with these. It watches
     // the client for as long as the app runs, so nothing disposes it; the

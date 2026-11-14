@@ -126,6 +126,8 @@ class MatrixSession extends ChangeNotifier implements LoafSession {
 
   Future<void> _signOut() async {
     try {
+      // The homeserver drops this device's pushers with the device, so
+      // nothing here has to unregister push.
       await client.logout();
     } on Exception {
       // The server may be unreachable; logout clears this device either way.
