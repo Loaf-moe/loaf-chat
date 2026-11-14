@@ -115,7 +115,7 @@ Future<void> main() async {
   notifications = await NotificationController.load(
     backend == 'mock'
         ? MemoryNotificationStore()
-        : await FileNotificationStore.inSupportDirectory(),
+        : await FileNotificationStore.inDataDirectory(),
     chime: chime,
     desktop: desktop,
   );

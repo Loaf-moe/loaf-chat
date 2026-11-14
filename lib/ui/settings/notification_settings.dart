@@ -1,16 +1,17 @@
 /// What loaf chat does when a message arrives somewhere you aren't looking.
 /// The chime, desktop notifications, and how much a notification says.
 ///
-/// Saved to a small JSON file beside `appearance.json` in the support
-/// directory. Like appearance, this is per device, not per account: a laptop
-/// on a desk and a phone in a pocket want different answers.
+/// Saved to a small JSON file in the data directory — on iOS the App Group
+/// container, because the notification extension reads these answers to
+/// decide what a push may say. Like appearance, this is per device, not per
+/// account: a laptop on a desk and a phone in a pocket want different answers.
 library;
 
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:loaf_native/push/app_group.dart';
 
 import '../model/chime.dart';
 import '../model/desktop_notifications.dart';
@@ -97,10 +98,10 @@ class MemoryNotificationStore implements NotificationStore {
 class FileNotificationStore implements NotificationStore {
   FileNotificationStore(this.file);
 
-  static Future<FileNotificationStore> inSupportDirectory() async =>
+  static Future<FileNotificationStore> inDataDirectory() async =>
       FileNotificationStore(
         File(
-          '${(await getApplicationSupportDirectory()).path}'
+          '${(await dataDirectory()).path}'
           '${Platform.pathSeparator}notifications.json',
         ),
       );
