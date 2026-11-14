@@ -217,6 +217,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// by; tests move it.
   final DateTime Function()? _now;
 
+  /// When the last two syncs completed; see [settledBefore].
+  DateTime? _syncedAt;
+  DateTime? _settledBefore;
+
   /// How long a call waits between its own tries at media it has lost;
   /// tests shorten it.
   final List<Duration>? _callReconnectDelays;
@@ -394,6 +398,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   @override
   List<Invite> get invites => _invites;
 
+  @override
+  DateTime? get settledBefore => _settledBefore;
+
   /// After the rooms and account data of a sync are applied, including
   /// syncs the SDK makes up itself (a leave the server has forgotten).
   /// `SyncStatus.finished` would miss those. Also invalidates a joined
@@ -407,6 +414,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       if (changed) _hierarchy.invalidateContaining(roomId);
     });
     _unread.apply(update);
+    // This sync's request went out when the previous one returned, so
+    // everything sent before THAT is in the counts just applied.
+    _settledBefore = _syncedAt;
+    _syncedAt = (_now ?? DateTime.now)();
     _synced = true;
     _progress = null;
     _rebuild();

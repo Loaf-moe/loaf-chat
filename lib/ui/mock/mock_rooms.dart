@@ -28,6 +28,11 @@ import 'mock_profile.dart';
 import 'mock_space_directory.dart';
 
 class MockRooms extends ChangeNotifier implements Rooms {
+  /// The mock never syncs, so nothing is ever settled and the sweeper
+  /// leaves its notifications alone.
+  @override
+  DateTime? get settledBefore => null;
+
   @override
   Future<String?> noticeAvatar(AvatarRef ref) async => null;
 

@@ -93,6 +93,13 @@ abstract interface class Rooms implements Listenable {
   /// still waiting on the server, which says nothing about how long.
   double? get syncProgress;
 
+  /// Everything sent before this moment is counted in the rooms' unread and
+  /// mention numbers. It is when the sync BEFORE the latest one completed,
+  /// because each sync's request starts the instant the previous one
+  /// returns: anything sent after that may not be in these counts yet. Null
+  /// until two syncs have completed, and for a backend that never syncs.
+  DateTime? get settledBefore;
+
   /// You, as the rooms know you.
   Member get me;
 

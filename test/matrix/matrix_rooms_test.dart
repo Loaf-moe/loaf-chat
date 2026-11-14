@@ -579,6 +579,32 @@ Future<void> _invited(Client client, {bool direct = false}) => _sync(client, {
 });
 
 void main() {
+  group('settledBefore', () {
+    // Each sync's request goes out the instant the previous one returns, so
+    // the counts a sync brings describe everything sent before the PREVIOUS
+    // one completed. The push sweeper withdraws only up to that moment.
+    test('is when the sync before the latest one completed', () async {
+      final client = await _client();
+      // Explicit syncs only: a background one would move the clock under us.
+      client.backgroundSync = false;
+      var clock = DateTime.utc(2026, 11, 14, 9);
+      final rooms = await _rooms(client, now: () => clock);
+
+      // Signing in leaves a sync of its own behind; from here the clock is
+      // ours, so the two that matter are at times nothing else can produce.
+      final first = DateTime.utc(2026, 11, 14, 10);
+      clock = first;
+      await _bakery(client);
+      await _settle();
+
+      clock = DateTime.utc(2026, 11, 14, 11);
+      await _bakery(client);
+      await _settle();
+
+      expect(rooms.settledBefore, first);
+    });
+  });
+
   group('unread', () {
     const general = '!general:example.com';
 

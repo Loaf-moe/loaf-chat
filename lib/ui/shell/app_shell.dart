@@ -44,6 +44,7 @@ import '../channel/timeline.dart' show messageUnavailable;
 import '../model/message_route.dart';
 import '../model/updater.dart';
 import '../../push/app_group.dart';
+import '../../push/push_sweeper.dart';
 import '../../push/room_names.dart';
 import '../platform.dart';
 import '../rooms/rooms.dart';
@@ -85,6 +86,7 @@ class AppShell extends StatefulWidget {
     this.updater,
     this.routes,
     this.beforeQuit,
+    this.withdrawPush,
   });
 
   /// Who is signed in, and how far this device is trusted. The app passes
@@ -103,6 +105,10 @@ class AppShell extends StatefulWidget {
   /// Messages to open, as notifications are clicked or tapped. One that
   /// comes before the first sync waits for it.
   final Stream<MessageRoute>? routes;
+
+  /// Takes an iOS notification back when its room is read. Null on every
+  /// other platform, and the shell then sweeps nothing.
+  final Future<void> Function(String roomId, {DateTime? before})? withdrawPush;
 
   /// Where the shell says what it must do before the app ends by a signal.
   /// A window closing asks the shell itself.
@@ -156,6 +162,9 @@ class _AppShellState extends State<AppShell> {
   /// extension to title a push with. Null everywhere else, and under the
   /// mock backend, which has no extension to read it.
   RoomNamesWriter? _roomNames;
+
+  /// Withdraws a room's notifications once it is read, on iOS.
+  PushSweeper? _sweeper;
   var _roomNamesStarted = false;
 
   Future<void> _startRoomNames() async {
@@ -169,6 +178,9 @@ class _AppShellState extends State<AppShell> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_sweeper == null && widget.withdrawPush != null) {
+      _sweeper = PushSweeper(rooms: _rooms, withdraw: widget.withdrawPush!);
+    }
     if (!_roomNamesStarted && Platform.isIOS && widget.rooms != null) {
       _roomNamesStarted = true;
       unawaited(_startRoomNames());
@@ -317,6 +329,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _sweeper?.dispose();
     _roomNames?.dispose();
     _notifier?.dispose();
     _noticer?.dispose();

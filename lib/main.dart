@@ -49,6 +49,9 @@ late final NotificationController notifications;
 /// Where clicked notifications lead, for the app's life; null without them.
 Stream<MessageRoute>? noticeRoutes;
 
+/// Takes an iOS notification back when its room is read; null elsewhere.
+Future<void> Function(String roomId, {DateTime? before})? withdrawPush;
+
 /// Which microphone and speaker calls use; null where there are no calls.
 /// Lives as long as the app, like [themeMode].
 VoiceController? voice;
@@ -168,6 +171,7 @@ Future<void> main() async {
     if (Platform.isIOS) {
       final push = IosPush();
       noticeRoutes = push.clicks;
+      withdrawPush = push.withdraw;
       final pusher = Pusher(
         client: matrix.client,
         push: push,
@@ -257,6 +261,7 @@ class LoafApp extends StatelessWidget {
                 updater: updater,
                 beforeQuit: beforeQuit,
                 routes: noticeRoutes,
+                withdrawPush: withdrawPush,
               ),
             ),
           ),
