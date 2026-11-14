@@ -18,7 +18,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 echo "$NOTARY_KEY_P8" | base64 --decode > "$work/key.p8"
 
-plutil -lint tool/release/ios-export.plist
+plutil -lint tool/release/ios-export.plist tool/release/ios-export-local.plist
 
 mise exec -- flutter build ios --release --config-only \
   --build-name="$version" --build-number="$build" \
@@ -30,6 +30,29 @@ mise exec -- flutter build ios --release --config-only \
 xcodebuild archive -workspace ios/Runner.xcworkspace -scheme Runner \
   -configuration Release -destination 'generic/platform=iOS' \
   -archivePath "$work/Runner.xcarchive" CODE_SIGNING_ALLOWED=NO
+
+# The archive is unsigned; export signs it. Prove the signed app and its
+# extension carry push and the App Group before anything reaches Apple.
+xcodebuild -exportArchive -archivePath "$work/Runner.xcarchive" \
+  -exportOptionsPlist tool/release/ios-export-local.plist \
+  -exportPath "$work/check" -allowProvisioningUpdates \
+  -authenticationKeyPath "$work/key.p8" \
+  -authenticationKeyID "$NOTARY_KEY_ID" \
+  -authenticationKeyIssuerID "$NOTARY_ISSUER_ID"
+unzip -q "$work/check/"*.ipa -d "$work/ipa"
+app="$work/ipa/Payload/Runner.app"
+ents() { codesign -d --entitlements - --xml "$1" 2>/dev/null | plutil -convert json -o - -- -; }
+for target in "$app" "$app/PlugIns/NotifyService.appex"; do
+  ents "$target" | grep -q '"group.moe.loaf.chat"' \
+    || { echo "::error::$(basename "$target") lacks the App Group"; exit 1; }
+done
+ents "$app" | grep -q '"aps-environment":"production"' \
+  || { echo "::error::Runner.app lacks aps-environment=production"; exit 1; }
+ents "$app/PlugIns/NotifyService.appex" | grep -q '"com.apple.developer.usernotifications.filtering":true' \
+  || { echo "::error::NotifyService.appex lacks the filtering entitlement"; exit 1; }
+# The extension dlopens exactly this path at <appex>/../../Frameworks.
+[ -d "$app/Frameworks/loaf_push.framework" ] \
+  || { echo "::error::loaf_push is not in the app's Frameworks"; exit 1; }
 
 # Signs with the cloud-managed certificate and uploads, in one step.
 status=0
