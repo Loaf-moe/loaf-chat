@@ -226,10 +226,13 @@ class _AppShellState extends State<AppShell> {
         retractions: _rooms.retractions,
         retract: noticer?.retract,
       );
-      // The first time the shell opens after sign-in is when macOS asks
-      // permission; asking again later does nothing.
-      if (desktop != null && notifications.notifications) {
-        unawaited(desktop.prepare());
+      // The first time the shell opens after sign-in is when macOS and iOS
+      // ask permission; asking again later does nothing. Not `desktop`:
+      // iOS has no desktop notifier at all, and gating on it meant a fresh
+      // install was never asked, so Settings said notifications were on
+      // while iOS showed none.
+      if (notifications.notifications) {
+        unawaited(notifications.permissions?.prepare());
       }
     }
     if (_callSounds == null && notifications != null) {

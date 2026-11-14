@@ -37,6 +37,30 @@ void main() {
     expect(read(from, 'loaf.sqlite'), isNull);
   });
 
+  // WAL is new in this release. Every install before it used the default
+  // DELETE journal, so an app killed mid-commit — which is exactly what
+  // 0xdead10cc does — leaves a hot loaf.sqlite-journal behind. Moving the
+  // database without it would strand half-applied pages with nothing left
+  // to roll them back.
+  test('a rollback journal from before WAL moves with its database', () async {
+    await put(from, 'loaf.sqlite', 'db');
+    await put(from, 'loaf.sqlite-journal', 'journal');
+    await moveIntoGroup(from: from, to: to);
+    expect(read(to, 'loaf.sqlite'), 'db');
+    expect(read(to, 'loaf.sqlite-journal'), 'journal');
+  });
+
+  test(
+    "never lays the old database's rollback journal beside the live one",
+    () async {
+      await put(from, 'loaf.sqlite', 'old');
+      await put(from, 'loaf.sqlite-journal', 'old journal');
+      await put(to, 'loaf.sqlite', 'new');
+      await moveIntoGroup(from: from, to: to);
+      expect(read(to, 'loaf.sqlite-journal'), isNull);
+    },
+  );
+
   test('a fresh install has nothing to move', () async {
     await moveIntoGroup(from: from, to: to);
     expect(to.listSync(), isEmpty);

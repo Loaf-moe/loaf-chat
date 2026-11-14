@@ -37,14 +37,19 @@ final class NotificationService: UNNotificationServiceExtension {
 
     Task {
       let session = store?.session()
-      let (event, sender) = await Self.fetch(session, roomId: roomId, eventId: eventId)
-      let power = await Self.state(session, roomId: roomId, type: "m.room.power_levels")
-      // Stale or missing: ask the server, for this push only. Nothing in
-      // the container is ever written from here.
-      let rules =
-        isStale(cached, now: Date())
-        ? await Self.rules(session, keeping: cached) ?? cached
-        : cached
+      // Concurrently: the extension gets about 30 seconds in all, and these
+      // three need nothing from each other. Run one after another and a slow
+      // network spends the whole budget, after which iOS shows the gateway's
+      // alert — which for a push the rules would have dropped is the one
+      // thing this extension exists to prevent.
+      async let fetched = Self.fetch(session, roomId: roomId, eventId: eventId)
+      async let powerLevels = Self.state(
+        session, roomId: roomId, type: "m.room.power_levels")
+      async let effectiveRules = Self.rulesIfStale(
+        session, cached: cached, now: Date())
+      let (event, sender) = await fetched
+      let power = await powerLevels
+      let rules = await effectiveRules
       let shown = content(
         roomId: roomId, event: event, senderName: sender, names: names,
         settings: settings, store: store, decrypt: LoafPush.decrypt,
@@ -74,7 +79,7 @@ final class NotificationService: UNNotificationServiceExtension {
   private static func get(_ s: Session, _ path: String) async -> [String: Any]? {
     var req = URLRequest(url: s.homeserver.appendingPathComponent(path))
     req.setValue("Bearer \(s.token)", forHTTPHeaderField: "Authorization")
-    req.timeoutInterval = 10
+    req.timeoutInterval = 8
     guard let (data, resp) = try? await URLSession.shared.data(for: req),
       (resp as? HTTPURLResponse)?.statusCode == 200
     else { return nil }
@@ -109,6 +114,16 @@ final class NotificationService: UNNotificationServiceExtension {
   private static func state(_ s: Session?, roomId: String, type: String) async -> [String: Any]? {
     guard let s = usable(s) else { return nil }
     return await get(s, "_matrix/client/v3/rooms/\(escaped(roomId))/state/\(type)")
+  }
+
+  /// The cached rules, or fresher ones when the cache is missing or stale.
+  /// Falls back to the cache when the request fails: stale rules judge
+  /// better than none, and none would mean showing everything.
+  private static func rulesIfStale(
+    _ s: Session?, cached: Rules?, now: Date
+  ) async -> Rules? {
+    guard isStale(cached, now: now) else { return cached }
+    return await rules(s, keeping: cached) ?? cached
   }
 
   /// The account's rules, for a cache that is missing or over an hour old.

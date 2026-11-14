@@ -37,9 +37,16 @@ import UserNotifications
   }
 
   /// iOS kills an app that is suspended while it still holds a lock on a file
-  /// in a shared container — `0xdead10cc`. This keeps us alive a few seconds
-  /// past backgrounding so the SDK's in-flight writes commit and no
-  /// transaction is open against the App Group database when we are suspended.
+  /// in a shared container — `0xdead10cc`. This buys three more seconds of
+  /// running time past backgrounding, which is usually enough for a sync that
+  /// is mid-write to finish.
+  ///
+  /// It is a fixed window, not a wait: nothing here can see the SDK's write
+  /// queue, so a sync still applying at +3 s is suspended mid-write anyway.
+  /// Narrowing the window is all this does. The simulator never enforces
+  /// 0xdead10cc, so no test here can prove it is enough — that is the hand
+  /// test on a device (plan Task 13, case 10), and until it has run the
+  /// claim is "narrower", not "safe".
   @objc private func holdOpenForDatabaseWrites() {
     let application = UIApplication.shared
     var task = UIBackgroundTaskIdentifier.invalid

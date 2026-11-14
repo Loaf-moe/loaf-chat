@@ -121,7 +121,17 @@ private func open(
       as? [String: Any],
     plaintext["room_id"] as? String == roomId
   else { return nil }
-  return plaintext
+  var authenticated = plaintext
+  // A Megolm plaintext is room_id, type and content; the sender is on the
+  // envelope, and the rules read it — sender rules match on it, and
+  // sender_notification_permission decides @room by it. Without this the
+  // extension judges every encrypted message as sent by nobody, so an
+  // @room in a mentions-only channel is dropped where the app shows it.
+  // Always the envelope's, never the plaintext's: a plaintext could claim
+  // a sender whose power it does not have. A missing one removes the key,
+  // which is what an unsigned event should look like.
+  authenticated["sender"] = event["sender"]
+  return authenticated
 }
 
 private func body(of event: [String: Any], showText: Bool) -> String {

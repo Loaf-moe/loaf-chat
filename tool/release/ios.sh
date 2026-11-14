@@ -53,6 +53,10 @@ ents "$app/PlugIns/NotifyService.appex" | grep -q '"com.apple.developer.usernoti
 # The extension dlopens exactly this path at <appex>/../../Frameworks.
 [ -d "$app/Frameworks/loaf_push.framework" ] \
   || { echo "::error::loaf_push is not in the app's Frameworks"; exit 1; }
+# UNNotificationSound(named: "chime.caf") resolves against the app bundle,
+# not the extension's; without it a push plays iOS's default sound.
+[ -f "$app/chime.caf" ] \
+  || { echo "::error::chime.caf is not in the app bundle"; exit 1; }
 
 # Signs with the cloud-managed certificate and uploads, in one step.
 status=0

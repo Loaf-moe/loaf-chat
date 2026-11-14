@@ -15,6 +15,9 @@ const appGroupId = 'group.moe.loaf.chat';
 const _moved = [
   'loaf.sqlite',
   'loaf.sqlite-wal',
+  // Pre-WAL installs used the default DELETE journal; a hot one must
+  // travel with its database or the rollback it holds is lost.
+  'loaf.sqlite-journal',
   'loaf.sqlite-shm',
   'notifications.json',
 ];

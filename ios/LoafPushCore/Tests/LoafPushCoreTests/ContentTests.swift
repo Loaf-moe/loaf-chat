@@ -206,6 +206,41 @@ final class ContentTests: XCTestCase {
     XCTAssertEqual(verdict.calls[0].members, 2)
   }
 
+  func testTheJudgedEventCarriesTheEnvelopesSender() throws {
+    // A Megolm plaintext is room_id, type and content — the sender lives
+    // only on the m.room.encrypted wrapper. The rules read `sender` for
+    // sender rules and for sender_notification_permission, which is what
+    // decides an @room mention, so losing it drops those silently.
+    let store = try storeWith(self, sessions: [(session, dm, "pickle")])
+    let verdict = Verdict(true)
+    var plaintext = message(room: dm, msgtype: "m.text", body: "hello all")
+    // A plaintext that claims someone else must not be believed.
+    plaintext["sender"] = "@liar:example.com"
+    var envelope = encrypted(room: dm, session: session)
+    envelope["sender"] = "@ada:loaf.moe"
+
+    _ = content(
+      roomId: dm, event: envelope, senderName: "mochi", names: names,
+      settings: DeviceSettings(), store: store, decrypt: decrypting(plaintext),
+      rules: someRules(), power: nil, notifies: verdict.notifies, now: Date()
+    )
+
+    XCTAssertEqual(verdict.calls.count, 1)
+    XCTAssertEqual(
+      verdict.calls[0].event["sender"] as? String,
+      "@ada:loaf.moe",
+      "the envelope's sender is the authenticated one"
+    )
+  }
+
+  func testAPlainEventKeepsItsOwnSender() {
+    let verdict = Verdict(true)
+    var event = message(room: dm, msgtype: "m.text", body: "hi")
+    event["sender"] = "@ada:loaf.moe"
+    _ = shown(event: event, rules: someRules(), notifies: verdict.notifies)
+    XCTAssertEqual(verdict.calls[0].event["sender"] as? String, "@ada:loaf.moe")
+  }
+
   func testTheRulesCanLetItThrough() {
     let verdict = Verdict(true)
     let result = shown(

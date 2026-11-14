@@ -74,14 +74,12 @@ case " $* " in
   *" -convert "*) cat ;;
 esac''');
     // The gate reads the signed app out of the exported ipa.
-    _stub(
-      'unzip',
-      r'''
+    _stub('unzip', r'''
 echo "unzip $*" >> "$CALLS"
 app="$4/Payload/Runner.app"
 mkdir -p "$app/PlugIns/NotifyService.appex"
-[ "${NO_FRAMEWORK:-}" = 1 ] || mkdir -p "$app/Frameworks/loaf_push.framework"''',
-    );
+[ "${NO_FRAMEWORK:-}" = 1 ] || mkdir -p "$app/Frameworks/loaf_push.framework"
+[ "${NO_CHIME:-}" = 1 ] || : > "$app/chime.caf"''');
     _stub('codesign', r'''
 case "$*" in
   *NotifyService.appex*) echo "$APPEX_ENTS" ;;
@@ -262,6 +260,15 @@ esac''');
       await stops(
         await _run(env: {'NO_FRAMEWORK': '1'}),
         'loaf_push is not in the app',
+      );
+    });
+
+    test('a build without the chime never reaches Apple', () async {
+      // UNNotificationSound names chime.caf and resolves it against the
+      // app bundle; without it a push plays iOS's default sound.
+      await stops(
+        await _run(env: {'NO_CHIME': '1'}),
+        'chime.caf is not in the app bundle',
       );
     });
   });
