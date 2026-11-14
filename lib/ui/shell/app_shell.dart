@@ -87,6 +87,7 @@ class AppShell extends StatefulWidget {
     this.routes,
     this.beforeQuit,
     this.withdrawPush,
+    this.pushActive,
   });
 
   /// Who is signed in, and how far this device is trusted. The app passes
@@ -109,6 +110,11 @@ class AppShell extends StatefulWidget {
   /// Takes an iOS notification back when its room is read. Null on every
   /// other platform, and the shell then sweeps nothing.
   final Future<void> Function(String roomId, {DateTime? before})? withdrawPush;
+
+  /// Whether a pusher is registered, so the extension announced what
+  /// arrived while the app was away. Null off iOS, and the shell then
+  /// watches no lifecycle at all.
+  final bool Function()? pushActive;
 
   /// Where the shell says what it must do before the app ends by a signal.
   /// A window closing asks the shell itself.
@@ -165,6 +171,10 @@ class _AppShellState extends State<AppShell> {
 
   /// Withdraws a room's notifications once it is read, on iOS.
   PushSweeper? _sweeper;
+
+  /// Watches for a resume, to raise the arrivals floor past what push
+  /// already announced. Only made where a pusher can be registered.
+  AppLifecycleListener? _lifecycle;
   var _roomNamesStarted = false;
 
   Future<void> _startRoomNames() async {
@@ -178,6 +188,15 @@ class _AppShellState extends State<AppShell> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_lifecycle == null && widget.pushActive != null) {
+      _lifecycle = AppLifecycleListener(
+        onResume: () {
+          // Without a pusher nothing announced those messages, and the
+          // chime on catching up is the right one.
+          if (widget.pushActive!()) _rooms.pushedUntil(DateTime.now());
+        },
+      );
+    }
     if (_sweeper == null && widget.withdrawPush != null) {
       _sweeper = PushSweeper(rooms: _rooms, withdraw: widget.withdrawPush!);
     }
@@ -329,6 +348,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _lifecycle?.dispose();
     _sweeper?.dispose();
     _roomNames?.dispose();
     _notifier?.dispose();

@@ -52,6 +52,9 @@ Stream<MessageRoute>? noticeRoutes;
 /// Takes an iOS notification back when its room is read; null elsewhere.
 Future<void> Function(String roomId, {DateTime? before})? withdrawPush;
 
+/// Whether iOS has a pusher registered; null elsewhere.
+bool Function()? pushActive;
+
 /// Which microphone and speaker calls use; null where there are no calls.
 /// Lives as long as the app, like [themeMode].
 VoiceController? voice;
@@ -181,6 +184,7 @@ Future<void> main() async {
       // toggle moves. Signing out needs nothing: the homeserver drops a
       // device's pushers when that device logs out.
       unawaited(matrix.client.onSync.stream.first.then((_) => pusher.sync()));
+      pushActive = () => pusher.registered;
       notifications.addListener(() => unawaited(pusher.sync()));
     }
     // The iOS notification extension judges a push with these. It watches
@@ -262,6 +266,7 @@ class LoafApp extends StatelessWidget {
                 beforeQuit: beforeQuit,
                 routes: noticeRoutes,
                 withdrawPush: withdrawPush,
+                pushActive: pushActive,
               ),
             ),
           ),

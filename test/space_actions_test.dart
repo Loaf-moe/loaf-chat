@@ -70,6 +70,9 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   DateTime? get settledBefore => null;
 
+  @override
+  void pushedUntil(DateTime t) {}
+
   _FakeRooms({this.spaces = const [], this.homeRooms = const []});
 
   @override

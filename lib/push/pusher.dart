@@ -34,6 +34,12 @@ class Pusher {
   final bool release;
   final String gateway;
 
+  var _registered = false;
+
+  /// Whether this device has a pusher right now, so something other
+  /// than the app itself is announcing messages.
+  bool get registered => _registered;
+
   Future<void> sync() async {
     if (!release) return;
     final token = await push.pushToken();
@@ -56,8 +62,10 @@ class Pusher {
           // One pusher for this device, replaced rather than added to.
           append: false,
         );
+        _registered = true;
       } else {
         await client.deletePusher(id);
+        _registered = false;
       }
     } on Object catch (e) {
       // Push is a convenience; the app works without it. Tried again next

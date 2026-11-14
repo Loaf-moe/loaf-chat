@@ -33,6 +33,10 @@ class MockRooms extends ChangeNotifier implements Rooms {
   @override
   DateTime? get settledBefore => null;
 
+  /// This backend never syncs, so nothing was pushed while away.
+  @override
+  void pushedUntil(DateTime t) {}
+
   @override
   Future<String?> noticeAvatar(AvatarRef ref) async => null;
 

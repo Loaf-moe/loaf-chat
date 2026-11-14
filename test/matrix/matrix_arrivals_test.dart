@@ -339,6 +339,39 @@ void main() {
       expect(rig.got, [const Arrival(roomId: _general, eventId: r'$m')]);
     });
 
+    // On iOS the extension already put these on screen while the app was
+    // away; the catch-up sync must not chime for them a second time.
+    test(
+      'after a resume, what push already announced does not arrive',
+      () async {
+        final client = await _client();
+        await _join(client);
+        final rig = await _rig(client);
+        final resumed = _launch.add(const Duration(minutes: 5));
+        rig.arrivals.pushedUntil(resumed);
+        await _deliver(client, [
+          _msg(r'$away', ts: resumed.millisecondsSinceEpoch - 1000),
+          _msg(r'$back', ts: resumed.millisecondsSinceEpoch + 1000),
+        ]);
+        await rig.reached(r'$back');
+        expect(rig.got.map((a) => a.eventId), [r'$back']);
+      },
+    );
+
+    test('the floor only ever rises', () async {
+      final client = await _client();
+      await _join(client);
+      final rig = await _rig(client);
+      // A resume earlier than launch would re-admit the backlog.
+      rig.arrivals.pushedUntil(_launch.subtract(const Duration(days: 1)));
+      await _deliver(client, [
+        _msg(r'$old', ts: _launch.millisecondsSinceEpoch - 1000),
+        _msg(r'$new', ts: _after),
+      ]);
+      await rig.reached(r'$new');
+      expect(rig.got.map((a) => a.eventId), [r'$new']);
+    });
+
     test('your own message does not', () async {
       final client = await _client();
       await _join(client);

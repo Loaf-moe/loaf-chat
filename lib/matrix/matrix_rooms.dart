@@ -401,6 +401,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   @override
   DateTime? get settledBefore => _settledBefore;
 
+  @override
+  void pushedUntil(DateTime t) => _arrivals.pushedUntil(t);
+
   /// After the rooms and account data of a sync are applied, including
   /// syncs the SDK makes up itself (a leave the server has forgotten).
   /// `SyncStatus.finished` would miss those. Also invalidates a joined
