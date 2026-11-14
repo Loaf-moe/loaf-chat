@@ -12,12 +12,28 @@
 > `.m.rule.message`, which left mentions in mentions-only encrypted channels
 > unpushed. That workaround is gone. Tasks 1, 2 and 3 are done and unchanged.
 > Tasks 3a, 3b and 5a are new; Tasks 6, 7, 11, 12 and 13 changed.
+>
+> **Revised again: one evaluator (Chris, 2026-11-14).** That first revision
+> left two implementations of one decision — the SDK's evaluator under a
+> 143-line Dart adapter in the app, and the Rust port in the extension — and
+> proposed to hold them together with a shared test corpus. Chris's call:
+> build it once. `loaf_push` is the only evaluator. The app calls it over FFI
+> on iOS, macOS, Linux and Windows; `lib/matrix/push_rules.dart` becomes that
+> binding and its adapter over `PushruleEvaluator` is deleted. Task 3b is now
+> that change, and the two-sided corpus it used to describe is gone, because
+> nothing is left to drift. Android is not built: there is no Android job in
+> `release.yml` and `android/` is unused scaffolding.
 > **Execution order:** 1, 2, 3 (done), 3a, 3b, 4, 5, 5a, 6, 7, 8, 9, 10, 11, 12, 13.
 
 **Architecture:**
 - **Pusher.** Release builds register an `http` pusher with `event_id_only` under the one app id `moe.loaf.chat.ios`, sending to the Loaf Chat gateway `https://push.matrix.loaf.moe/_matrix/push/v1/notify`, a constant in the source as Element X and FluffyChat do.
 - **Shared storage.** The SDK database, `notifications.json` and a new `names.json` move into the App Group `group.moe.loaf.chat`, so the extension can read them.
 - **The extension.** A Notification Service Extension (Swift) reads the token and the room key from the database and fetches the event. It decrypts with `loaf_push`, a Rust `cdylib` wrapping vodozemac, then asks the same crate whether the account's push rules notify for the decrypted event, and delivers nothing when they do not. A Dart build hook builds `loaf_push` (the same pattern as `loaf_notify` on Windows), Flutter embeds it in the app's `Frameworks/`, and the extension loads it with `dlopen`/`dlsym`.
+- **One evaluator, used by both.** `loaf_push` answers "does this notify?" for
+  the app as well as the extension. The Dart side calls it over FFI on every
+  platform Loaf ships, and the app no longer uses the SDK's
+  `PushruleEvaluator`. The phone and the Mac cannot reach different verdicts,
+  because it is one piece of code reaching them.
 - **Testable Swift.** The extension's logic lives in a local Swift package, `ios/LoafPushCore`, tested with `swift test`, the same pattern as `LoafMediaCore`.
 
 **Tech Stack:**
@@ -44,7 +60,8 @@
   - `.m.rule.encrypted` is left enabled, always. Every encrypted message
     reaches the phone and the phone decides. The Channels default writes
     `.m.rule.message` alone (Task 11).
-  - **The evaluator is Rust, in `loaf_push`** (Aria's call, not Chris's).
+  - **The evaluator is Rust, in `loaf_push`** (Aria's call; Chris then made it
+    the only one, 2026-11-14).
     The alternative was Swift in `LoafPushCore`. CI runs one Ubuntu job:
     `cargo test` runs there on every PR, while the Swift package tasks say
     "needs a Mac" and run only by hand (`mise.toml`, `test:media:apple`). A
@@ -52,10 +69,13 @@
     nothing pins, next to a Dart implementation whose 245 cases are pinned
     on every push. Rust also needs no new plumbing: the extension already
     `dlopen`s the crate for decryption, so this is a third symbol.
-  - **Parity with the app is pinned by a shared corpus** (Task 3b), the
-    same trick Task 2 uses for the storage format: the Dart rules test
-    writes every case it already runs, and a Rust test must answer each the
-    same way. Dart and Rust drifting apart fails CI on Linux.
+  - **There is one implementation, not two** (Chris, 2026-11-14). The app
+    calls `loaf_push` too (Task 3b), so there is no parity problem to pin: the
+    phone and the Mac run the same code. What can still differ is what each
+    is *handed* — the extension reads `rules.json` and `names.json`, the app
+    reads the live client — and that is what Review Focus 6 and 8 watch. The
+    app's 245-case table stops being a drift detector and becomes the
+    acceptance suite for the one evaluator, run through the FFI binding.
   - **It fails open.** Where the extension cannot judge a message — no room
     key, a fetch that failed, `rules.json` missing or unreadable — it shows
     it rather than dropping it. A notification you did not need is a smaller
@@ -105,10 +125,13 @@
    - Task 9 tests a sweep that uses `settledBefore`.
 5. **The resume catch-up re-announcing pushed messages.** Expected: after a resume, messages push already delivered don't chime again.
    - Task 10 tests arrivals stamped between pause and resume.
-6. **The phone and the app disagreeing about a message.** Expected: the
-   verdict the extension reaches is the one `PushRules.notifies` would reach
-   in Dart, for every case the app's own suite covers.
-   - Task 3b runs both over one corpus; Task 13 case 3 checks it by hand.
+6. **The phone and the app judging a message differently.** They run the same
+   evaluator, so the only way they can diverge is their inputs: the extension
+   judges by `rules.json` and `names.json`, the app by the live client.
+   Expected: for a phone that has synced, the two agree on every case.
+   - Task 5a writes the rules untouched, as the server sends them, so the
+     evaluator sees in the extension what it sees in the app; Task 13 case 3
+     checks it by hand against the Mac.
 7. **A push that should have been dropped, shown anyway.** The extension gets
    about 30 seconds; if it crashes or runs out of time, iOS shows whatever
    alert the gateway sent, which for a dropped push is a notification the
@@ -130,7 +153,8 @@
 |---|---|
 | `packages/loaf_push/pubspec.yaml`, `hook/build.dart` | The Dart package whose only job is to build `loaf_push` for iOS and bundle it |
 | `packages/loaf_push/rust/` | The Rust crate: `loaf_push_decrypt`, `loaf_push_free`, `loaf_push_notifies`, the pickle key, the evaluator, tests and the fixtures |
-| `test/matrix/push_rules_corpus_test.dart` | Writes `packages/loaf_push/rust/tests/fixtures/rules.json` from the cases the app's own rules suite runs |
+| `lib/matrix/push_rules.dart` | The FFI binding: hands `loaf_push` the ruleset, the event, the member count and the power levels, and reads back the verdict |
+| `test/matrix/rules_cases.dart` | The 245-case table and its oracle, shared by the arrivals test and the evaluator test |
 | `lib/push/rules_file.dart` | Writes `rules.json`: the rules, your user id, your display name |
 | `test/push/storage_pin_test.dart` | Writes and checks `packages/loaf_push/rust/tests/fixtures/sdk.json` from a real SDK database |
 | `lib/push/app_group.dart` | The group path, the one-time move, and where the database and settings live |
@@ -572,8 +596,8 @@ The same judgement `lib/matrix/push_rules.dart` makes in the app, in Rust, on
 the decrypted event. Read that file and its doc comment first: it is 143 lines
 and it is the specification for this task. It wraps the SDK's evaluator and
 undoes three of its departures from the spec (the audit's F1, F4 and F6), and
-those compensations are part of what must be reproduced here, because the
-corpus in Task 3b is generated from it.
+those compensations are part of what must be reproduced here, because Task 3b
+then deletes that adapter and leaves this crate as the only evaluator.
 
 **Files:**
 - Create: `packages/loaf_push/rust/src/rules.rs`, `packages/loaf_push/rust/tests/rules_test.rs`
@@ -670,9 +694,10 @@ An unknown condition kind makes the rule unusable, and an unusable rule is
 skipped entirely rather than treated as matching — the SDK drops it while
 building its evaluator, and the effect must be the same.
 
-**Where the spec and the SDK disagree, the corpus in Task 3b decides**, and the
-corpus comes from Dart. Do not implement the spec from memory and argue with
-the fixture.
+**Where the spec and the SDK disagree, the app's 245-case table decides**, and
+that table encodes the spec. Do not implement the spec from memory and argue
+with it: Task 3b runs this crate against every one of those cases, so a
+disagreement found here is found there too.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -698,10 +723,13 @@ Expected: a compile failure, then failures.
 - [ ] **Step 3: Implement**
 
 `serde_json::Value` throughout; no new dependency beyond `serde_json`. Keep
-`notifies` free of I/O and of the C ABI so the corpus test can call it
-directly. The C wrapper parses, calls, and maps to `1` / `0` / `-1`; it must
-not panic across the boundary, so wrap the body in
-`std::panic::catch_unwind` and return `-1` on a panic.
+`notifies` free of I/O and of the C ABI, so the crate's own tests — and Dart,
+after Task 3b — reach the same function. The C wrapper parses, calls, and maps
+to `1` / `0` / `-1`.
+
+> **As built (2026-11-09):** no `catch_unwind`. The plan asked for one, but the
+> release profile sets `panic = "abort"`, which makes it inert; the crate's
+> contract is that nothing in it unwraps. Revisit only if that profile changes.
 
 - [ ] **Step 4: Run the tests to see them pass**
 
@@ -717,72 +745,115 @@ git commit -m "feat(push): loaf_push judges a message by the account's push rule
 
 ---
 
-### Task 3b: one corpus, two implementations
+### Task 3b: one evaluator — the app calls `loaf_push`
 
-`test/matrix/matrix_arrivals_rules_test.dart` already runs 245 cases: every
-account level, room level, room kind and shape of mention, with an oracle
-(`_expected`) that encodes what the spec says each should do. This task makes
-that table the shared truth, so the phone and the app cannot drift.
+`lib/matrix/push_rules.dart` is 143 lines of adapter over the SDK's
+`PushruleEvaluator`, undoing three of its departures from the spec by
+reshaping what it hands that evaluator. Task 3a reproduced the whole
+judgement — the engine and those three corrections — in Rust. Keeping both is
+two implementations of one decision, so this task deletes the Dart one.
+
+`rules::notifies` already takes exactly what the adapter computes: the ruleset
+as the server sends it, the event, the room's joined-member count, and the
+room's `m.room.power_levels`. It applies the three corrections internally
+(`KINDS` puts content before room, `LEGACY` drops the three legacy rules for a
+message carrying `m.mentions`, and the member count is the one passed in). So
+the Dart side marshals four values and reads one verdict; nothing is reshaped
+in Dart any more.
 
 **Files:**
-- Create: `test/matrix/rules_cases.dart`, `test/matrix/push_rules_corpus_test.dart`, `packages/loaf_push/rust/tests/corpus_test.rs`
-- Modify: `test/matrix/matrix_arrivals_rules_test.dart` (import the cases it used to hold)
+- Create: `test/matrix/rules_cases.dart`
+- Modify: `lib/matrix/push_rules.dart` (becomes the FFI binding),
+  `packages/loaf_push/lib/loaf_push.dart` (the `@Native` declaration),
+  `packages/loaf_push/hook/build.dart` (build for macOS, Linux and Windows
+  too, not iOS alone), `packages/loaf_push/pubspec.yaml` (`ffi`),
+  `test/matrix/matrix_arrivals_rules_test.dart` (import the moved table),
+  `test/matrix/push_rules_test.dart` (the same assertions over the new path),
+  `mise.toml` (the Rust targets those platforms need)
+- Delete: no file. `push_rules.dart` keeps its path and its public shape, so
+  `lib/matrix/matrix_arrivals.dart:67` and every existing test keep calling
+  `PushRules(client).notifies(event)` unchanged.
 
 **Interfaces:**
-- `test/matrix/rules_cases.dart` holds what both tests need, moved out of the
-  arrivals test unchanged: the `Account`, `RoomRule`, `Kind` and `Mention`
-  enums, the `expected(...)` oracle, and the builders that turn a case into a
-  `PushRuleSet` and an event. The arrivals test keeps driving the whole client
-  stack; only the table moves.
-- `test/matrix/push_rules_corpus_test.dart` runs every case through
-  `PushRules.notifies` directly, asserts it equals `expected(...)`, and, with
-  `LOAF_WRITE_CORPUS=1`, writes
-  `packages/loaf_push/rust/tests/fixtures/rules.json`:
+- `PushRules.notifies(Event)` keeps its signature and its fail-open contract.
+  Inside, it passes `client.globalPushRules!.toJson()`, the event as JSON,
+  `event.room.summary.mJoinedMemberCount` (`-1` when null, which the C ABI
+  already reads as unknown) and the room's `m.room.power_levels` content, then
+  maps `1` / `0` / `-1` to `true` / `false` / `true`. The `-1` case is the
+  fail-open one: a ruleset the crate cannot parse shows the message rather
+  than hiding it (memory `honest-controls`).
+- `loaf_push.dart` declares the symbol with `@Native<Int32 Function(...)>(
+  symbol: 'loaf_push_notifies', assetId: …)`, the pattern
+  `packages/loaf_notify/lib/loaf_notify.dart` already uses, against the asset
+  id the hook's `CodeAsset` names.
+- The hook's `if (code.targetOS != OS.iOS) return;` becomes a switch over iOS,
+  macOS, Linux and Windows, each with its triple, keeping the early return for
+  anything else. Android is not built: `release.yml` has no Android job and
+  `android/` is unused scaffolding (Chris, 2026-11-14).
 
-```json
-[{"name": "all/mentionsOnly/group/bodyLocalpart",
-  "account": {"user_id": "@ada:example.com", "display_name": "ada", "rules": {}},
-  "event": {}, "members": 5, "notify": true}]
-```
+**Two things Chris decides before this is committed** (memory
+`ask-before-ci-risk`):
+- `mise.toml`'s `targets` list grows. Host targets come free, but a universal
+  macOS build needs `x86_64-apple-darwin` on an arm Mac.
+- The macOS, Linux and Windows release jobs start compiling this crate. They
+  already compile Rust for `loaf_media` and `loaf_chrome`, so it is one more
+  crate rather than a new toolchain — but it is release time, and release time
+  is Chris's.
 
-- `corpus_test.rs` reads that file and asserts `notifies` returns
-  `Some(case.notify)` for every case, naming the case on failure.
+- [ ] **Step 1: Move the 245-case table out of the arrivals test**
 
-- [ ] **Step 1: Move the table, and write the Dart corpus test**
-
-The move must not change a single expectation: run
-`mise run test -- test/matrix/matrix_arrivals_rules_test.dart` before and
-after and compare the counts. Then write the corpus test over the moved table.
+`test/matrix/matrix_arrivals_rules_test.dart` holds the table, the `Account`,
+`RoomRule`, `Kind` and `Mention` enums, the `expected(...)` oracle and the
+builders that turn a case into a `PushRuleSet` and an event. Move them to
+`test/matrix/rules_cases.dart` unchanged and import them back. The arrivals
+test keeps driving the whole client stack; only the table moves.
 
 Run: `mise run test -- test/matrix/`
-Expected: PASS, with the arrivals test's count unchanged.
+Expected: PASS, with the arrivals test's count unchanged at 245. Compare the
+count before and after — a changed expectation here is a mistake, not a
+discovery.
 
-- [ ] **Step 2: Write the fixture, then run the Rust test**
+- [ ] **Step 2: Write the failing test**
 
-```bash
-LOAF_WRITE_CORPUS=1 mise run test -- test/matrix/push_rules_corpus_test.dart
-mise run test:push
-```
+Point `test/matrix/push_rules_test.dart` at the new path; it already asserts
+the behaviour, so it needs no new cases except one: a ruleset the crate
+rejects must notify, not silence.
 
-Expected: the second fails, with the cases Rust gets wrong. Fix `rules.rs`
-until it passes. If a case looks wrong in Dart, stop: that is the app
-misbehaving on a real phone too, and it is a finding, not a fixture to edit.
+Run: `mise run test -- test/matrix/push_rules_test.dart`
+Expected: failure — there is no `loaf_push_notifies` binding yet.
 
-- [ ] **Step 3: Make the fixture's staleness visible**
+- [ ] **Step 3: Build the crate for this machine, and bind it**
 
-The corpus test without the variable checks the committed fixture still
-matches what Dart answers today, the way Task 2's storage pin does. An SDK
-change, or a change to `push_rules.dart`, then fails in the Dart lane with a
-message saying to regenerate.
+Extend the hook, declare the symbol, rewrite `notifies` over it, and delete
+the adapter: `_build`, `_evaluator`, `_evaluators`, `_legacy`, `_rules`,
+`_source`, `_built` and the `PushruleEvaluator` use all go. Keep the doc
+comment's account of the three departures, rewritten to say where they live
+now: it is the record of why `rules.rs` does what it does.
 
-Run: `mise run test -- test/matrix/push_rules_corpus_test.dart`
+Run: `mise run test -- test/matrix/push_rules_test.dart`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: The whole table, through the one evaluator**
+
+Run: `mise run test -- test/matrix/`
+Expected: PASS, all 245 cases, through Rust. A case that fails here is a real
+disagreement between the port and the spec the table encodes: fix `rules.rs`,
+never the table. If a case in the table itself looks wrong, stop — that is the
+app misbehaving on real phones today, and it is a finding for Chris, not a
+fixture to edit.
+
+- [ ] **Step 5: The suite**
+
+Run: `mise run test:all`
+Expected: exit 0. `packages/loaf_push/rust/tests/rules_test.rs` still passes
+unchanged; its 22 cases are now unit tests beneath an acceptance suite rather
+than the only evidence the evaluator works.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add test/matrix packages/loaf_push/rust/tests
-git commit -m "test(push): Dart and Rust judge one corpus of rules the same way"
+git add lib/matrix packages/loaf_push test/matrix mise.toml
+git commit -m "refactor(push): one evaluator, in Rust, for the app and the phone"
 ```
 
 ---
@@ -1032,8 +1103,8 @@ Task 5: one writer, atomic, only on change.
   - `class RulesWriter { RulesWriter(Client client, File file); void dispose(); }`.
 - The rules go in **as the server sends them**, untouched: the compensations
   (F1, F4, F6) belong to whoever evaluates, and Task 3a reproduces them. Do
-  not write a pre-chewed ruleset; the Rust side and `push_rules.dart` must see
-  the same input, or the corpus in Task 3b proves nothing.
+  not write a pre-chewed ruleset: the extension must hand the evaluator what
+  the app hands it, or one piece of code reaches two verdicts.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1677,7 +1748,7 @@ This needs Chris's phone. Ask what they saw for anything a screenshot can't show
 3. **Mentions only, in an encrypted channel.** This is what the entitlement bought, and it is the case to spend time on. With Channels set to mentions only: mochi's plain message shows nothing, and mochi's mention of you shows a notification with the message in it. Then set the channel itself to mute and check the mention shows nothing. In an unencrypted channel, both still behave the same way.
    - A push that arrives and is dropped looks exactly like a push that never came, so check the extension ran: attach the phone, and in Console.app filter on `moe.loaf.chat.ios.notify`. A drop logs `dropped`; nothing at all means the gateway or the pusher, not the rules.
    - A **blank** notification, rather than none, means the filtering entitlement is missing from the signed appex. Task 12's gate should have caught it; say so if it did not.
-   - Compare against the Mac for each case: the two must agree, and they are the same corpus (Task 3b).
+   - Compare against the Mac for each case: the two must agree — it is the same evaluator on both, so a disagreement means their inputs differ, not their logic.
 4. **A level changed on another device while the phone sleeps.** Mute the channel on the Mac, wait a minute, then have mochi message it. The phone shows nothing: the extension's hour-old refresh fetched the new rules. Then with the phone awake and synced, the same holds from the cache.
 5. **Tap with the app backgrounded.** It opens the DM at the message, which glows.
 6. **Tap with the app killed** (a cold start). It opens the message after the first sync.
