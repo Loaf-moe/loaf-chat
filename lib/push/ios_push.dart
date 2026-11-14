@@ -10,9 +10,10 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:matrix/matrix.dart' show Logs;
 
+import '../ui/model/desktop_notifications.dart';
 import '../ui/model/message_route.dart';
 
-class IosPush {
+class IosPush implements NotificationPermissions {
   IosPush({MethodChannel? channel, void Function(Object error)? log})
     : _channel = channel ?? const MethodChannel('moe.loaf.chat/notify'),
       _log = log ?? ((e) => Logs().w('[loaf] push', e)) {
@@ -64,6 +65,7 @@ class IosPush {
 
   Stream<MessageRoute> get clicks => _clicks.stream;
 
+  @override
   Future<void> prepare() => _call<void>('prepare');
 
   /// The APNs token as hex, or null: no permission, no network, or the 20 s
@@ -77,7 +79,9 @@ class IosPush {
     {'roomId': roomId, 'before': before?.millisecondsSinceEpoch},
   );
 
+  @override
   Future<bool> blocked() async => await _call<bool>('blocked') ?? false;
 
+  @override
   Future<void> openSystemSettings() => _call<void>('openSettings');
 }

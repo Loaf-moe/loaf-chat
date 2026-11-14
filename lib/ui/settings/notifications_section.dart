@@ -9,7 +9,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../platform.dart';
 import '../shell/profile.dart';
 import '../shell/profile_controller.dart';
 import '../theme/loaf_theme.dart';
@@ -52,7 +51,7 @@ class _NotificationsSectionState extends State<NotificationsSection>
   }
 
   Future<void> _check() async {
-    final blocked = await widget.controller.desktop?.blocked() ?? false;
+    final blocked = await widget.controller.permissions?.blocked() ?? false;
     if (mounted && blocked != _blocked) setState(() => _blocked = blocked);
   }
 
@@ -62,36 +61,43 @@ class _NotificationsSectionState extends State<NotificationsSection>
     super.dispose();
   }
 
-  String get _os =>
-      defaultTargetPlatform == TargetPlatform.windows ? 'windows' : 'macos';
+  String get _os => switch (defaultTargetPlatform) {
+    TargetPlatform.windows => 'windows',
+    TargetPlatform.iOS => 'ios',
+    _ => 'macos',
+  };
 
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final profile = widget.profile;
-    final desktop = isDesktop ? controller.desktop : null;
+    // Not isDesktop any more: on iOS a push notification is a real
+    // notification, and all three of these govern it.
+    final permissions = controller.permissions;
     return ListenableBuilder(
       listenable: Listenable.merge([controller, ?profile]),
       builder: (context, _) => ListView(
         padding: const EdgeInsets.all(LoafSpace.x6),
         children: [
           const SettingsLabel(label: 'on this device'),
-          if (desktop != null) ...[
+          if (permissions != null) ...[
             SettingsCheck(
               title: 'notifications',
               detail: "a notification when loaf chat isn't in front.",
               value: controller.notifications,
               onChanged: (on) {
                 controller.setNotifications(on);
-                if (on) unawaited(desktop.prepare().then((_) => _check()));
+                if (on) {
+                  unawaited(permissions.prepare().then((_) => _check()));
+                }
               },
             ),
             if (_blocked)
-              _BlockedLine(os: _os, onOpen: desktop.openSystemSettings),
+              _BlockedLine(os: _os, onOpen: permissions.openSystemSettings),
           ],
           SettingsCheck(
             title: 'sound',
-            detail: desktop != null
+            detail: permissions != null
                 ? 'a soft chime for messages in other channels, and on '
                       'notifications.'
                 : 'a soft chime for messages in other channels.',
@@ -102,7 +108,7 @@ class _NotificationsSectionState extends State<NotificationsSection>
               if (on) unawaited(controller.chime.play());
             },
           ),
-          if (desktop != null)
+          if (permissions != null)
             SettingsCheck(
               title: 'show message text',
               detail: 'off, a notification says only who wrote.',

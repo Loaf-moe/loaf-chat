@@ -628,18 +628,24 @@ void main() {
       expect(profile.channelDefault, ChannelDefault.mentions);
     });
 
-    test('mentions only turns off encrypted, then message', () async {
-      final (api, _, profile) = await _profile();
-      api.log.clear();
-      final done = profile.setChannelDefault(ChannelDefault.mentions);
-      expect(profile.channelDefault, ChannelDefault.mentions);
-      expect(profile.settingChannelDefault, isTrue);
-      await done;
-      await _settle();
-      expect(api.log, ['encrypted:false', 'message:false']);
-      expect(profile.channelDefault, ChannelDefault.mentions);
-      expect(profile.settingChannelDefault, isFalse);
-    });
+    // .m.rule.encrypted is deliberately untouched: it is what carries an
+    // encrypted message to the phone, where the extension decrypts it and
+    // applies the real rules. See lib/matrix/channel_default.dart.
+    test(
+      'mentions only turns off the message rule, and nothing else',
+      () async {
+        final (api, _, profile) = await _profile();
+        api.log.clear();
+        final done = profile.setChannelDefault(ChannelDefault.mentions);
+        expect(profile.channelDefault, ChannelDefault.mentions);
+        expect(profile.settingChannelDefault, isTrue);
+        await done;
+        await _settle();
+        expect(api.log, ['message:false']);
+        expect(profile.channelDefault, ChannelDefault.mentions);
+        expect(profile.settingChannelDefault, isFalse);
+      },
+    );
 
     test('choosing the level already set sends nothing', () async {
       final (api, _, profile) = await _profile();
@@ -649,48 +655,37 @@ void main() {
       expect(profile.settingChannelDefault, isFalse);
     });
 
-    test('all messages turns both back on', () async {
+    test('all messages turns the message rule back on', () async {
       final (api, _, profile) = await _profile();
       await profile.setChannelDefault(ChannelDefault.mentions);
       api.log.clear();
       await profile.setChannelDefault(ChannelDefault.all);
       await _settle();
-      expect(api.log, ['encrypted:true', 'message:true']);
+      expect(api.log, ['message:true']);
       expect(profile.channelDefault, ChannelDefault.all);
     });
 
-    test('a refused first write changes nothing and throws', () async {
+    test('a refused write snaps back and throws', () async {
       final (api, _, profile) = await _profile();
-      api.refuseEncrypted = true;
+      api.refuseMessage = true;
       api.log.clear();
       await expectLater(
         profile.setChannelDefault(ChannelDefault.mentions),
         throwsA(isA<MatrixException>()),
       );
-      expect(api.log, ['encrypted:false']);
+      expect(api.log, ['message:false']);
       expect(profile.channelDefault, ChannelDefault.all);
       expect(profile.settingChannelDefault, isFalse);
-    });
-
-    test('a refused second write snaps back and throws', () async {
-      final (api, _, profile) = await _profile();
-      api.refuseMessage = true;
-      await expectLater(
-        profile.setChannelDefault(ChannelDefault.mentions),
-        throwsA(isA<MatrixException>()),
-      );
-      await _settle();
-      expect(profile.channelDefault, ChannelDefault.all);
     });
 
     test('a later choice stands when an earlier one fails', () async {
       final (api, _, profile) = await _profile();
       final hold = Completer<void>();
       api.rulesHold = hold;
-      api.refuseEncrypted = true;
+      api.refuseMessage = true;
       final first = profile.setChannelDefault(ChannelDefault.mentions);
       await _settle();
-      api.refuseEncrypted = false;
+      api.refuseMessage = false;
       await profile.setChannelDefault(ChannelDefault.all);
       hold.complete();
       await expectLater(first, throwsA(isA<MatrixException>()));

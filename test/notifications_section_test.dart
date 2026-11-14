@@ -14,7 +14,26 @@ import 'package:loaf_native/ui/shell/profile_controller.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
 import 'package:loaf_native/util/json_store.dart';
 
+/// iOS's end of Settings: the three questions, and nothing else.
+class _Permissions implements NotificationPermissions {
+  _Permissions({this.isBlocked = false});
+
+  final bool isBlocked;
+  var prepared = 0;
+  var settingsOpened = 0;
+
+  @override
+  Future<void> prepare() async => prepared++;
+
+  @override
+  Future<bool> blocked() async => isBlocked;
+
+  @override
+  Future<void> openSystemSettings() async => settingsOpened++;
+}
+
 /// The mock's profile, with a choice the test can hold in flight.
+
 class _Profile extends MockProfile {
   Completer<void>? hold;
   var busy = false;
@@ -76,6 +95,51 @@ Future<void> onPlatform(
 }
 
 void main() {
+  // iOS has no DesktopNotifications at all; what Settings asks about there
+  // is the push bridge, which answers only these three.
+  group('on iOS', () {
+    NotificationController ios(_Permissions permissions) =>
+        NotificationController(
+          store: MemoryStore<NotificationSettings>(),
+          chime: FakeChime(),
+          permissions: permissions,
+        );
+
+    testWidgets('all three device controls show, because push honours them', (
+      tester,
+    ) async {
+      await onPlatform(TargetPlatform.iOS, () async {
+        await pumpSection(tester, ios(_Permissions()));
+        expect(find.text('notifications'), findsOneWidget);
+        expect(find.text('sound'), findsOneWidget);
+        expect(find.text('show message text'), findsOneWidget);
+      });
+    });
+
+    testWidgets('a block is named, and says where to undo it', (tester) async {
+      await onPlatform(TargetPlatform.iOS, () async {
+        await pumpSection(tester, ios(_Permissions(isBlocked: true)));
+        await tester.pump();
+        expect(
+          find.text('ios is blocking notifications from loaf chat.'),
+          findsOneWidget,
+        );
+        expect(find.text('open system settings'), findsOneWidget);
+      });
+    });
+
+    testWidgets('the channel default is offered here too', (tester) async {
+      await onPlatform(TargetPlatform.iOS, () async {
+        final controller = ProfileController(profile: _Profile());
+        addTearDown(controller.dispose);
+        await pumpSection(tester, ios(_Permissions()), profile: controller);
+        expect(find.text('all messages'), findsOneWidget);
+        expect(find.text('mentions only'), findsOneWidget);
+        expect(find.text('direct messages always notify.'), findsOneWidget);
+      });
+    });
+  });
+
   testWidgets(
     'sound can be turned off and on; turning it on plays the chime once',
     (tester) async {

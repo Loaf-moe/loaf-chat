@@ -12,6 +12,7 @@ import 'push/ios_push.dart';
 import 'push/app_group.dart';
 import 'push/pusher.dart';
 import 'push/rules_file.dart';
+import 'matrix/channel_default.dart';
 import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
 import 'platform/livekit_media.dart';
@@ -124,6 +125,10 @@ Future<void> main() async {
     reduceMotionByDefault: await drawsThroughX11(),
   );
   final chime = NativeChime();
+  // Made before the controller so Settings can ask it whether iOS is
+  // blocking notifications, and open the settings that change it. One
+  // instance: the channel keeps a single handler.
+  final iosPush = backend == 'mock' || !Platform.isIOS ? null : IosPush();
   final desktop = backend == 'mock'
       ? null
       : pickDesktopNotifications(chime: chime);
@@ -142,6 +147,7 @@ Future<void> main() async {
           ),
     chime: chime,
     desktop: desktop,
+    permissions: iosPush,
   );
   noticeRoutes = desktop == null ? null : fronted(desktop.clicks);
   // The stored session restores from disk before the first frame, so a
@@ -171,8 +177,7 @@ Future<void> main() async {
     }
     // iOS has no desktop notifier: a push is what arrives, and tapping it
     // is what opens the message.
-    if (Platform.isIOS) {
-      final push = IosPush();
+    if (iosPush case final push?) {
       noticeRoutes = push.clicks;
       withdrawPush = push.withdraw;
       final pusher = Pusher(
@@ -196,6 +201,14 @@ Future<void> main() async {
         File('${(await dataDirectory()).path}/rules.json'),
       );
     }
+    // Builds before this one disabled .m.rule.encrypted alongside
+    // .m.rule.message, which stops an encrypted channel pushing at all.
+    // Repaired once, when the rules have arrived.
+    unawaited(
+      matrix.client.onSync.stream.first.then(
+        (_) => repairEncryptedRule(matrix.client),
+      ),
+    );
     newRooms = () => MatrixRooms(
       matrix.client,
       externalMedia: appearance.externalMediaListenable,

@@ -11,6 +11,7 @@ import 'package:matrix/matrix.dart' hide Presence, Profile;
 import '../ui/members/presence.dart';
 import '../ui/model/models.dart';
 import '../ui/shell/profile.dart';
+import 'channel_default.dart';
 import '../ui/spaces/add_space.dart' show spaceColorFor;
 
 class MatrixProfile extends ChangeNotifier implements Profile {
@@ -123,17 +124,9 @@ class MatrixProfile extends ChangeNotifier implements Profile {
   @override
   bool get settingChannelDefault => _settingDefault > 0;
 
-  /// `.m.rule.message` decides. `.m.rule.encrypted` is written beside it;
-  /// a client that changed only one of the two still gets the answer for a
-  /// plain room.
   ChannelDefault _readChannelDefault() {
-    final rules = client.globalPushRules?.underride;
-    final message = rules
-        ?.where((rule) => rule.ruleId == '.m.rule.message')
-        .firstOrNull;
-    return message == null || message.enabled
-        ? ChannelDefault.all
-        : ChannelDefault.mentions;
+    final rules = client.globalPushRules;
+    return rules == null ? ChannelDefault.all : readDefault(rules);
   }
 
   @override
@@ -144,20 +137,8 @@ class MatrixProfile extends ChangeNotifier implements Profile {
     _channelDefault = level;
     _settingDefault++;
     _notify();
-    final enabled = level == ChannelDefault.all;
     try {
-      // The rule read back goes last: a first write that fails changes
-      // nothing anyone sees, and the next attempt redoes both.
-      await client.setPushRuleEnabled(
-        PushRuleKind.underride,
-        '.m.rule.encrypted',
-        enabled,
-      );
-      await client.setPushRuleEnabled(
-        PushRuleKind.underride,
-        '.m.rule.message',
-        enabled,
-      );
+      await writeDefault(client, level);
     } catch (_) {
       if (!_disposed && turn == _defaultTurn) {
         _channelDefault = previous;
