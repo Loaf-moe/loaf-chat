@@ -14,6 +14,7 @@ import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:path/path.dart' as p;
 
 /// The `dart:io` client behind the app's requests. Without a connect limit a
 /// dead network waits on the OS's own, which is minutes.
@@ -41,14 +42,18 @@ Future<Client> openClient({
   // The sqlite3 package bundles sqlite through build hooks on every
   // platform, so one ffi factory serves iOS, macOS and Linux alike.
   sqfliteFfiInit();
-  final path =
-      databasePath ??
-      '${(await dataDirectory()).path}${Platform.pathSeparator}loaf.sqlite';
-  final media =
+  // Asked only when needed: tests give a database path and have no
+  // platform to ask. The database goes in the data directory, which on iOS
+  // is the App Group container the notification extension reads; the media
+  // cache stays in Application Support, where nothing else needs it.
+  final (path, media) = switch (databasePath) {
+    final path? => (path, mediaPath),
+    null => (
+      p.join((await dataDirectory()).path, 'loaf.sqlite'),
       mediaPath ??
-      (databasePath == null
-          ? '${(await getApplicationSupportDirectory()).path}${Platform.pathSeparator}media'
-          : null);
+          p.join((await getApplicationSupportDirectory()).path, 'media'),
+    ),
+  };
   if (media != null) await Directory(media).create(recursive: true);
   final database = await MatrixSdkDatabase.init(
     'loaf',

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/model/chime.dart';
 import 'package:loaf_native/ui/settings/notification_settings.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 void main() {
   test('sound is on unless turned off', () {
@@ -16,15 +17,20 @@ void main() {
     final dir = await Directory.systemTemp.createTemp('notify');
     addTearDown(() => dir.delete(recursive: true));
     final file = File('${dir.path}/n/notifications.json');
-    await FileNotificationStore(file)
-        .save(const NotificationSettings(sound: false));
-    final back = await FileNotificationStore(file).load();
+    await JsonFileStore(
+      file,
+      NotificationSettings.fromJson,
+    ).save(const NotificationSettings(sound: false));
+    final back = await JsonFileStore(
+      file,
+      NotificationSettings.fromJson,
+    ).load();
     expect(back?.sound, isFalse);
   });
 
   test('a change goes to the store', () async {
     // The memory store saves synchronously, so there is no write to wait on.
-    final store = MemoryNotificationStore();
+    final store = MemoryStore<NotificationSettings>();
     final controller = await NotificationController.load(
       store,
       chime: FakeChime(),
@@ -40,12 +46,15 @@ void main() {
     addTearDown(() => dir.delete(recursive: true));
     final file = File('${dir.path}/notifications.json')
       ..writeAsStringSync('{nope');
-    expect(await FileNotificationStore(file).load(), isNull);
+    expect(
+      await JsonFileStore(file, NotificationSettings.fromJson).load(),
+      isNull,
+    );
   });
 
   test('setting the same value notifies no one', () async {
     final controller = await NotificationController.load(
-      MemoryNotificationStore(),
+      MemoryStore<NotificationSettings>(),
       chime: FakeChime(),
     );
     var heard = 0;
@@ -76,7 +85,10 @@ void main() {
   test('every field round-trips through the file store', () async {
     final dir = Directory.systemTemp.createTempSync('loaf-notify-settings');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final store = FileNotificationStore(File('${dir.path}/notifications.json'));
+    final store = JsonFileStore(
+      File('${dir.path}/notifications.json'),
+      NotificationSettings.fromJson,
+    );
     const saved = NotificationSettings(
       sound: false,
       notifications: false,
@@ -89,7 +101,7 @@ void main() {
   test(
     'turning notifications or message text off notifies and saves',
     () async {
-      final store = MemoryNotificationStore();
+      final store = MemoryStore<NotificationSettings>();
       final c = NotificationController(store: store, chime: FakeChime());
       var heard = 0;
       c.addListener(() => heard++);

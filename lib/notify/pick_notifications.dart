@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:window_to_front/window_to_front.dart';
+import 'package:path/path.dart' as p;
 
 import '../ui/model/chime.dart';
 import '../ui/model/desktop_notifications.dart';
@@ -38,12 +39,8 @@ DesktopNotifications? pickDesktopNotifications({
 
 /// Where Flutter bundles the chime on Linux: `data/flutter_assets` beside
 /// the exe.
-String bundledChime(String executable) => [
-  File(executable).parent.path,
-  'data',
-  'flutter_assets',
-  chimeAsset,
-].join(Platform.pathSeparator);
+String bundledChime(String executable) =>
+    p.join(p.dirname(executable), 'data', 'flutter_assets', chimeAsset);
 
 /// [clicks], each brought to the front before it is followed. One stream
 /// for the app's life: a shell that opens later listens again.

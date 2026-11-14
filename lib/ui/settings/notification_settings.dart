@@ -7,17 +7,14 @@
 /// account: a laptop on a desk and a phone in a pocket want different answers.
 library;
 
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/widgets.dart';
-import 'package:loaf_native/push/app_group.dart';
 
 import '../model/chime.dart';
 import '../model/desktop_notifications.dart';
+import '../../util/json_store.dart';
 
 @immutable
-class NotificationSettings {
+class NotificationSettings implements Jsonable {
   const NotificationSettings({
     this.sound = true,
     this.notifications = true,
@@ -58,6 +55,7 @@ class NotificationSettings {
     showText: showText ?? this.showText,
   );
 
+  @override
   Map<String, Object> toJson() => {
     'sound': sound,
     'notifications': notifications,
@@ -75,59 +73,6 @@ class NotificationSettings {
   int get hashCode => Object.hash(sound, notifications, showText);
 }
 
-abstract interface class NotificationStore {
-  /// Null when nothing has been saved, or what was saved can't be read.
-  Future<NotificationSettings?> load();
-
-  Future<void> save(NotificationSettings settings);
-}
-
-/// Forgets on exit: for tests and the mock backend.
-class MemoryNotificationStore implements NotificationStore {
-  MemoryNotificationStore([this.saved]);
-
-  NotificationSettings? saved;
-
-  @override
-  Future<NotificationSettings?> load() async => saved;
-
-  @override
-  Future<void> save(NotificationSettings settings) async => saved = settings;
-}
-
-class FileNotificationStore implements NotificationStore {
-  FileNotificationStore(this.file);
-
-  static Future<FileNotificationStore> inDataDirectory() async =>
-      FileNotificationStore(
-        File(
-          '${(await dataDirectory()).path}'
-          '${Platform.pathSeparator}notifications.json',
-        ),
-      );
-
-  final File file;
-
-  @override
-  Future<NotificationSettings?> load() async {
-    try {
-      return NotificationSettings.fromJson(
-        jsonDecode(await file.readAsString()),
-      );
-    } on FileSystemException {
-      return null;
-    } on FormatException {
-      return null;
-    }
-  }
-
-  @override
-  Future<void> save(NotificationSettings settings) async {
-    await file.parent.create(recursive: true);
-    await file.writeAsString(jsonEncode(settings.toJson()));
-  }
-}
-
 class NotificationController extends ChangeNotifier {
   NotificationController({
     required this._store,
@@ -137,7 +82,7 @@ class NotificationController extends ChangeNotifier {
   });
 
   static Future<NotificationController> load(
-    NotificationStore store, {
+    Store<NotificationSettings> store, {
     required Chime chime,
     DesktopNotifications? desktop,
   }) async => NotificationController(
@@ -147,7 +92,7 @@ class NotificationController extends ChangeNotifier {
     settings: await store.load() ?? const NotificationSettings(),
   );
 
-  final NotificationStore _store;
+  final Store<NotificationSettings> _store;
   NotificationSettings _settings;
 
   /// What plays the sound, here so Settings can preview it and the shell can

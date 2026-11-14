@@ -7,6 +7,7 @@ import 'package:loaf_native/ui/settings/settings_page.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/theme/appearance.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 /// Opens settings as the app does with a backend that lists sessions and
 /// signs out; either left out, its entry is left out too.
@@ -139,7 +140,9 @@ void main() {
   });
 
   testWidgets('appearance opens the theme picker', (tester) async {
-    final appearance = AppearanceController(store: MemoryAppearanceStore());
+    final appearance = AppearanceController(
+      store: MemoryStore<AppearanceSettings>(),
+    );
     await _open(tester, const Size(1440, 900), appearance: appearance);
 
     await tester.tap(find.text('appearance'));
@@ -175,7 +178,7 @@ void main() {
     tester,
   ) async {
     final voice = VoiceController(
-      store: MemoryVoiceStore(),
+      store: MemoryStore<VoiceSettings>(),
       devices: MemoryAudioDevices(),
     );
     addTearDown(voice.dispose);
@@ -188,7 +191,7 @@ void main() {
     tester,
   ) async {
     final voice = VoiceController(
-      store: MemoryVoiceStore(),
+      store: MemoryStore<VoiceSettings>(),
       devices: MemoryAudioDevices(),
     );
     addTearDown(voice.dispose);

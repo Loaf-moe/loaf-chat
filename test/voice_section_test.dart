@@ -7,6 +7,7 @@ import 'package:loaf_native/ui/settings/settings_controls.dart';
 import 'package:loaf_native/ui/settings/voice_section.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 const _rode = AudioDevice('rode', 'RODE NT-USB');
 const _sony = AudioDevice('sony', 'WH-1000XM3');
@@ -24,7 +25,7 @@ Future<VoiceController> _pump(
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   final controller = await VoiceController.load(
-    MemoryVoiceStore(saved),
+    MemoryStore<VoiceSettings>(saved),
     devices: MemoryAudioDevices(
       microphones: microphones ?? () => const [_rode, _sony],
       speakers: speakers ?? () => const [_desk],

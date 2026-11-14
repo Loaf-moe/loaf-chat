@@ -12,6 +12,7 @@ import 'package:loaf_native/ui/settings/notification_settings.dart';
 import 'package:loaf_native/ui/shell/app_shell.dart';
 import 'package:loaf_native/ui/shell/spaces_rail.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
+import 'package:loaf_native/util/json_store.dart';
 
 /// The mock rooms, with arrivals the test sends itself.
 class _Rooms extends MockRooms {
@@ -42,7 +43,7 @@ void main() {
     chime = FakeChime();
     desktop = FakeDesktopNotifications();
     notifications = await NotificationController.load(
-      MemoryNotificationStore(),
+      MemoryStore<NotificationSettings>(),
       chime: chime,
       desktop: desktop,
     );
