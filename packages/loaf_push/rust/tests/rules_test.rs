@@ -328,6 +328,34 @@ fn contains_display_name_matches_a_whole_word_only() {
 }
 
 #[test]
+fn a_pattern_longer_than_the_body_does_not_match_it() {
+    // "hi" is shorter than "ada". The crate aborts on panic, so a slice past
+    // the end of a two-character message would take the whole extension —
+    // and the app — down with it.
+    let rules = json!({
+        "override": [notify(
+            ".m.rule.contains_display_name",
+            json!([{"kind": "contains_display_name"}]),
+        )],
+    });
+    assert_eq!(
+        notifies(&account(rules), &msg("hi"), Some(5), None),
+        Some(false)
+    );
+}
+
+#[test]
+fn a_content_pattern_longer_than_the_body_does_not_match_it() {
+    let mut rule = notify(".m.rule.contains_user_name", json!([]));
+    rule["pattern"] = json!("lovelace");
+    let rules = json!({"content": [rule]});
+    assert_eq!(
+        notifies(&account(rules), &msg("hi"), Some(5), None),
+        Some(false)
+    );
+}
+
+#[test]
 fn an_intentional_user_mention_matches_by_property() {
     let rules = json!({
         "override": [notify(

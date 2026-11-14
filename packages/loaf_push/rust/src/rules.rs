@@ -341,7 +341,13 @@ fn bounded(pattern: &[char], text: &[char], as_glob: bool) -> bool {
         // The common case by far: a localpart, a display name or a keyword,
         // found by sliding rather than by trying every span.
         let len = pattern.len();
-        for start in 0..=n.saturating_sub(len) {
+        // Nothing to slide: a pattern longer than the text cannot be in it,
+        // and `saturating_sub` would otherwise leave one span to try, whose
+        // end is past the text.
+        if len > n {
+            return false;
+        }
+        for start in 0..=(n - len) {
             if start > 0 && is_word(text[start - 1]) {
                 continue;
             }

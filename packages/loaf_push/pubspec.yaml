@@ -1,5 +1,5 @@
 name: loaf_push
-description: "Decrypts push notifications for Loaf Chat's iOS Notification Service Extension: a Rust crate bundled by a build hook."
+description: "Loaf Chat's push-rule verdict and push decryption: a Rust crate bundled by a build hook, called by the app over FFI and by the iOS extension with dlopen."
 publish_to: none
 
 environment:
@@ -7,4 +7,5 @@ environment:
 
 dependencies:
   code_assets: ^2.1.0
+  ffi: ^2.1.4
   hooks: ^2.2.0

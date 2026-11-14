@@ -18,5 +18,11 @@ serde_json = "1"
 [profile.release]
 opt-level = "z"
 lto = true
-strip = true
+# No strip. Cargo's strip runs over every dylib the profile builds, proc
+# macros included, and on this toolchain that leaves a mis-aligned LINKEDIT
+# string pool: rustc then cannot dlopen serde_derive to compile with it, and
+# dyld cannot load the finished library either. `cargo build` with mise's
+# toolchain happens to survive it; the build hook, which lets rustup pick the
+# toolchain from rust-toolchain.toml, does not.
+strip = false
 panic = "abort"
