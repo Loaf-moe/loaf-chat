@@ -66,6 +66,13 @@ class _FakeRooms extends ChangeNotifier implements Rooms {
   @override
   Future<String?> noticeAvatar(AvatarRef ref) async => null;
 
+  // This fake never syncs, so nothing has settled.
+  @override
+  DateTime? get settledBefore => null;
+
+  @override
+  void pushedUntil(DateTime t) {}
+
   _FakeRooms({this.spaces = const [], this.homeRooms = const []});
 
   @override

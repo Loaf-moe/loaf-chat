@@ -93,6 +93,19 @@ abstract interface class Rooms implements Listenable {
   /// still waiting on the server, which says nothing about how long.
   double? get syncProgress;
 
+  /// Everything sent before this moment is counted in the rooms' unread and
+  /// mention numbers. It is when the sync BEFORE the latest one completed,
+  /// because each sync's request starts the instant the previous one
+  /// returns: anything sent after that may not be in these counts yet. Null
+  /// until two syncs have completed, and for a backend that never syncs.
+  DateTime? get settledBefore;
+
+  /// From now on, a message sent before [t] is not an arrival. iOS
+  /// calls it on resume while a pusher is registered: those messages
+  /// were announced by the notification extension while the app was
+  /// away, and the catch-up sync must not chime for them again.
+  void pushedUntil(DateTime t);
+
   /// You, as the rooms know you.
   Member get me;
 

@@ -1,0 +1,28 @@
+[package]
+name = "loaf_push"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+# cdylib for the app's Frameworks (the extension dlopens it); rlib for tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The version flutter_vodozemac 0.8.1 pins: the pickles it writes are the ones read here.
+vodozemac = { version = "=0.10.0", features = ["libolm-compat"] }
+# The rules and the decrypted event, both JSON. No typed ruleset: serde's
+# derive would be a second dependency for no behaviour.
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+# No strip. Cargo's strip runs over every dylib the profile builds, proc
+# macros included, and on this toolchain that leaves a mis-aligned LINKEDIT
+# string pool: rustc then cannot dlopen serde_derive to compile with it, and
+# dyld cannot load the finished library either. `cargo build` with mise's
+# toolchain happens to survive it; the build hook, which lets rustup pick the
+# toolchain from rust-toolchain.toml, does not.
+strip = false
+panic = "abort"

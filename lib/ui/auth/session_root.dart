@@ -21,6 +21,8 @@ class SessionRoot extends StatefulWidget {
     this.updater,
     this.routes,
     this.beforeQuit,
+    this.withdrawPush,
+    this.pushActive,
   });
 
   final LoafSession session;
@@ -37,6 +39,15 @@ class SessionRoot extends StatefulWidget {
 
   /// Handed to the shell; see [AppShell.beforeQuit].
   final BeforeQuit? beforeQuit;
+
+  /// Takes an iOS notification back when its room is read. Null on every
+  /// other platform, and the shell then sweeps nothing.
+  final Future<void> Function(String roomId, {DateTime? before})? withdrawPush;
+
+  /// Whether a pusher is registered, so the extension announced what
+  /// arrived while the app was away. Null off iOS, and the shell then
+  /// watches no lifecycle at all.
+  final bool Function()? pushActive;
 
   @override
   State<SessionRoot> createState() => _SessionRootState();
@@ -107,6 +118,8 @@ class _SessionRootState extends State<SessionRoot> {
         rooms: widget.rooms,
         updater: widget.updater,
         routes: widget.routes,
+        withdrawPush: widget.withdrawPush,
+        pushActive: widget.pushActive,
         beforeQuit: widget.beforeQuit,
       );
     }

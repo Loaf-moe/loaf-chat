@@ -9,6 +9,7 @@ import 'package:http/io_client.dart';
 import 'package:loaf_native/matrix/call_members.dart';
 import 'package:loaf_native/matrix/call_silence.dart';
 import 'package:loaf_native/matrix/loaf_http_client.dart';
+import 'package:loaf_native/push/app_group.dart';
 import 'package:matrix/encryption.dart';
 import 'package:matrix/matrix.dart';
 import 'package:path_provider/path_provider.dart';
@@ -42,23 +43,29 @@ Future<Client> openClient({
   // platform, so one ffi factory serves iOS, macOS and Linux alike.
   sqfliteFfiInit();
   // Asked only when needed: tests give a database path and have no
-  // platform to ask.
+  // platform to ask. The database goes in the data directory, which on iOS
+  // is the App Group container the notification extension reads; the media
+  // cache stays in Application Support, where nothing else needs it.
   final (path, media) = switch (databasePath) {
     final path? => (path, mediaPath),
-    null => switch ((await getApplicationSupportDirectory()).path) {
-      final support => (
-        p.join(support, 'loaf.sqlite'),
-        mediaPath ?? p.join(support, 'media'),
-      ),
-    },
+    null => (
+      p.join((await dataDirectory()).path, 'loaf.sqlite'),
+      mediaPath ??
+          p.join((await getApplicationSupportDirectory()).path, 'media'),
+    ),
   };
   if (media != null) await Directory(media).create(recursive: true);
   final database = await MatrixSdkDatabase.init(
     'loaf',
     database: await databaseFactoryFfi.openDatabase(
       path,
-      // Each in-memory open must be its own database, or tests share one.
-      options: OpenDatabaseOptions(singleInstance: false),
+      options: OpenDatabaseOptions(
+        // Each in-memory open must be its own database, or tests share one.
+        singleInstance: false,
+        // The iOS extension reads this database while the app writes it, and
+        // only WAL lets a reader in during a write.
+        onConfigure: (db) => db.rawQuery('PRAGMA journal_mode=WAL'),
+      ),
     ),
     sqfliteFactory: databaseFactoryFfi,
     fileStorageLocation: media == null ? null : Directory(media).uri,

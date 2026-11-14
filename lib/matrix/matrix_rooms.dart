@@ -217,6 +217,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// by; tests move it.
   final DateTime Function()? _now;
 
+  /// When the last two syncs completed; see [settledBefore].
+  DateTime? _syncedAt;
+  DateTime? _settledBefore;
+
   /// How long a call waits between its own tries at media it has lost;
   /// tests shorten it.
   final List<Duration>? _callReconnectDelays;
@@ -394,6 +398,12 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   @override
   List<Invite> get invites => _invites;
 
+  @override
+  DateTime? get settledBefore => _settledBefore;
+
+  @override
+  void pushedUntil(DateTime t) => _arrivals.pushedUntil(t);
+
   /// After the rooms and account data of a sync are applied, including
   /// syncs the SDK makes up itself (a leave the server has forgotten).
   /// `SyncStatus.finished` would miss those. Also invalidates a joined
@@ -407,6 +417,10 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
       if (changed) _hierarchy.invalidateContaining(roomId);
     });
     _unread.apply(update);
+    // This sync's request went out when the previous one returned, so
+    // everything sent before THAT is in the counts just applied.
+    _settledBefore = _syncedAt;
+    _syncedAt = (_now ?? DateTime.now)();
     _synced = true;
     _progress = null;
     _rebuild();
@@ -744,6 +758,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final topic = room.topic;
     final tally = _unread.of(room.id);
     final counted = _unread.knows(room.id);
+    // The count the push rules judge room_member_count against; 0 means the
+    // summary has not said, the same reading _invite takes.
+    final joinedMembers = room.summary.mJoinedMemberCount;
     final favourite = room.tags[TagType.favourite];
     final channel = Channel(
       id: room.id,
@@ -765,6 +782,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         ChannelKind.room => _members(room),
         _ => const [],
       },
+      memberCount: joinedMembers == null || joinedMembers == 0
+          ? null
+          : joinedMembers,
       favourite: favourite != null,
       favouriteOrder: favourite?.order,
       lowPriority: room.isLowPriority,

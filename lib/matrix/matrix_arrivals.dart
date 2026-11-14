@@ -31,7 +31,16 @@ class MatrixArrivals {
   final Client client;
 
   /// Messages sent before this are the backlog a launch catches up on.
-  final DateTime _startedAt;
+  DateTime _startedAt;
+
+  /// From now on, an event sent before [t] is not an arrival. iOS calls it
+  /// on resume while a pusher is registered: the extension already put
+  /// those messages on screen, and the catch-up sync must not chime for
+  /// them a second time. The floor only rises — a clock that went backwards
+  /// must never re-admit the backlog.
+  void pushedUntil(DateTime t) {
+    if (t.isAfter(_startedAt)) _startedAt = t;
+  }
 
   /// [now] by this device's clock, or the newest message already here
   /// by the servers' clocks, whichever is later: a clock behind would

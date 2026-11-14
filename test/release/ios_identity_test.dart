@@ -18,7 +18,11 @@ void main() {
       ids.where((id) => id == 'moe.loaf.chat.ios.RunnerTests'),
       hasLength(3),
     );
-    expect(ids, hasLength(6));
+    // The notification extension. Apple's filtering entitlement is granted
+    // against this exact App ID, so a drifted id means every push the rules
+    // drop becomes a blank alert instead of nothing.
+    expect(ids.where((id) => id == 'moe.loaf.chat.ios.notify'), hasLength(3));
+    expect(ids, hasLength(9));
   });
 
   test('nothing in the iOS project still names moe.loaf.native', () {

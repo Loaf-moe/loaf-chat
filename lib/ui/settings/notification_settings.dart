@@ -1,9 +1,10 @@
 /// What loaf chat does when a message arrives somewhere you aren't looking.
 /// The chime, desktop notifications, and how much a notification says.
 ///
-/// Saved to a small JSON file beside `appearance.json` in the support
-/// directory. Like appearance, this is per device, not per account: a laptop
-/// on a desk and a phone in a pocket want different answers.
+/// Saved to a small JSON file in the data directory — on iOS the App Group
+/// container, because the notification extension reads these answers to
+/// decide what a push may say. Like appearance, this is per device, not per
+/// account: a laptop on a desk and a phone in a pocket want different answers.
 library;
 
 import 'package:flutter/widgets.dart';
@@ -77,6 +78,7 @@ class NotificationController extends ChangeNotifier {
     required this._store,
     required this.chime,
     this.desktop,
+    this._permissions,
     this._settings = const NotificationSettings(),
   });
 
@@ -84,10 +86,12 @@ class NotificationController extends ChangeNotifier {
     Store<NotificationSettings> store, {
     required Chime chime,
     DesktopNotifications? desktop,
+    NotificationPermissions? permissions,
   }) async => NotificationController(
     store: store,
     chime: chime,
     desktop: desktop,
+    permissions: permissions,
     settings: await store.load() ?? const NotificationSettings(),
   );
 
@@ -101,6 +105,14 @@ class NotificationController extends ChangeNotifier {
   /// The desktop's notifications, for the shell to show and Settings to ask
   /// after; null on phones, in the mock, and in tests that leave it out.
   final DesktopNotifications? desktop;
+
+  final NotificationPermissions? _permissions;
+
+  /// Who can be asked whether notifications are allowed, and open the
+  /// settings that change it: the desktop notifier, or iOS's push
+  /// bridge. Null where nothing notifies, and Settings then hides the
+  /// controls that would lie.
+  NotificationPermissions? get permissions => _permissions ?? desktop;
 
   bool get sound => _settings.sound;
 

@@ -232,6 +232,14 @@ void main() {
     await _rules(client, message: false, oneToOne: true);
     final room = _joined(client);
     expect(PushRules(client).notifies(_message(room, 'hi')), isTrue);
+    // And one member known of two is not a direct message to the rules, so
+    // the room is judged by what is known rather than fail open. Only the
+    // extension, which has no members in memory, judges on an unknown count.
+    expect(
+      PushRules(client)
+          .notifies(_message(_joined(client, withAda: false), 'hi')),
+      isFalse,
+    );
   });
 
   test('new rules on a sync apply', () async {

@@ -598,6 +598,13 @@ packages:
       relative: true
     source: path
     version: "0.0.0"
+  loaf_push:
+    dependency: "direct main"
+    description:
+      path: "packages/loaf_push"
+      relative: true
+    source: path
+    version: "0.0.0"
   logger:
     dependency: transitive
     description:
@@ -735,7 +742,7 @@ packages:
     source: hosted
     version: "2.3.1"
   path_provider_foundation:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: path_provider_foundation
       sha256: "2a376b7d6392d80cd3705782d2caa734ca4727776db0b6ec36ef3f1855197699"
@@ -908,7 +915,7 @@ packages:
     source: hosted
     version: "2.4.3"
   sqlite3:
-    dependency: transitive
+    dependency: "direct dev"
     description:
       name: sqlite3
       sha256: "4c7fe79840389aaeaf05fd093f795b631b5a98e2bd28d54e555c100f4a9c7a1c"

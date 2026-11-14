@@ -234,8 +234,9 @@ For each push:
    behind a C ABI: unpickle with the user id's pickle key, decrypt the
    Megolm message, return the plaintext JSON.
 4. Evaluate the account's push rules (fetched with the event, cached in the
-   App Group for an hour) against the decrypted event. If they say don't
-   notify, deliver nothing (filtering entitlement).
+   App Group for an hour) against the decrypted event, with `loaf_push` —
+   the same evaluator the app itself uses. If they say don't notify, deliver
+   nothing (filtering entitlement).
 5. Set title and body as on desktop, `threadIdentifier` = room id,
    `userInfo` = the route, and the sound `chime.caf`.
 
@@ -248,12 +249,19 @@ alert the gateway sent.
 **Filtering entitlement.** `com.apple.developer.usernotifications.filtering`
 lets the extension drop a push. Encrypted rooms need it: the server can't
 read an encrypted message, so it can't tell a mention from anything else.
-With the entitlement, the default push rule for encrypted messages is left
-at notify, and the extension applies the real rules after decrypting. Chris
-requests the entitlement from Apple. Until it's granted, the extension
-can't drop pushes, so the app sets `.m.rule.encrypted` to match the
-Channels default, and in mentions-only encrypted rooms mentions don't push.
-One build setting switches between the two.
+Apple granted it (November 2026), so the default push rule for encrypted
+messages is left at notify and the extension applies the real rules after
+decrypting. There is no fallback and no build setting: the app never
+disables `.m.rule.encrypted`, and a build that cannot filter is a build
+that shows every encrypted message.
+
+**One evaluator** (Chris, 2026-11-14). The phone's verdict and the app's must
+be the same verdict, so they are reached by the same code: `loaf_push`
+evaluates the rules for the app too, over FFI, on every platform Loaf ships.
+This replaces the SDK's `PushruleEvaluator` and the Dart adapter that
+corrected it (the three departures in Findings), both of which go away. The
+app's 245-case rules table becomes the acceptance suite for the Rust
+evaluator. Android is not built; there is no Android release.
 
 **In the app.** `willPresent` returns no presentation options: in front,
 the notifier and chime handle it. `didReceive` hands the route to Dart; on a

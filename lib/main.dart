@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,11 @@ import 'package:matrix/matrix.dart' show Logs;
 
 import 'log_file.dart';
 
+import 'push/ios_push.dart';
+import 'push/app_group.dart';
+import 'push/pusher.dart';
+import 'push/rules_file.dart';
+import 'matrix/channel_default.dart';
 import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
 import 'platform/livekit_media.dart';
@@ -43,6 +49,12 @@ late final NotificationController notifications;
 
 /// Where clicked notifications lead, for the app's life; null without them.
 Stream<MessageRoute>? noticeRoutes;
+
+/// Takes an iOS notification back when its room is read; null elsewhere.
+Future<void> Function(String roomId, {DateTime? before})? withdrawPush;
+
+/// Whether iOS has a pusher registered; null elsewhere.
+bool Function()? pushActive;
 
 /// Which microphone and speaker calls use; null where there are no calls.
 /// Lives as long as the app, like [themeMode].
@@ -113,18 +125,29 @@ Future<void> main() async {
     reduceMotionByDefault: await drawsThroughX11(),
   );
   final chime = NativeChime();
+  // Made before the controller so Settings can ask it whether iOS is
+  // blocking notifications, and open the settings that change it. One
+  // instance: the channel keeps a single handler.
+  final iosPush = backend == 'mock' || !Platform.isIOS ? null : IosPush();
   final desktop = backend == 'mock'
       ? null
       : pickDesktopNotifications(chime: chime);
   notifications = await NotificationController.load(
     backend == 'mock'
         ? MemoryStore<NotificationSettings>()
-        : await JsonFileStore.inSupportDirectory(
-            'notifications.json',
+        // Not the support folder: on iOS these answers live in the App Group
+        // container, because the notification extension reads them to decide
+        // what a push may say.
+        : JsonFileStore(
+            File(
+              '${(await dataDirectory()).path}'
+              '${Platform.pathSeparator}notifications.json',
+            ),
             NotificationSettings.fromJson,
           ),
     chime: chime,
     desktop: desktop,
+    permissions: iosPush,
   );
   noticeRoutes = desktop == null ? null : fronted(desktop.clicks);
   // The stored session restores from disk before the first frame, so a
@@ -152,6 +175,40 @@ Future<void> main() async {
         devices: system ?? const LiveKitAudioDevices(),
       );
     }
+    // iOS has no desktop notifier: a push is what arrives, and tapping it
+    // is what opens the message.
+    if (iosPush case final push?) {
+      noticeRoutes = push.clicks;
+      withdrawPush = push.withdraw;
+      final pusher = Pusher(
+        client: matrix.client,
+        push: push,
+        enabled: () => notifications.notifications,
+      );
+      // Once there is an account to register for, and again whenever the
+      // toggle moves. Signing out needs nothing: the homeserver drops a
+      // device's pushers when that device logs out.
+      unawaited(matrix.client.onSync.stream.first.then((_) => pusher.sync()));
+      pushActive = () => pusher.registered;
+      notifications.addListener(() => unawaited(pusher.sync()));
+    }
+    // The iOS notification extension judges a push with these. It watches
+    // the client for as long as the app runs, so nothing disposes it; the
+    // process ending is its end.
+    if (Platform.isIOS) {
+      RulesWriter(
+        matrix.client,
+        File('${(await dataDirectory()).path}/rules.json'),
+      );
+    }
+    // Builds before this one disabled .m.rule.encrypted alongside
+    // .m.rule.message, which stops an encrypted channel pushing at all.
+    // Repaired once, when the rules have arrived.
+    unawaited(
+      matrix.client.onSync.stream.first.then(
+        (_) => repairEncryptedRule(matrix.client),
+      ),
+    );
     newRooms = () => MatrixRooms(
       matrix.client,
       externalMedia: appearance.externalMediaListenable,
@@ -221,6 +278,8 @@ class LoafApp extends StatelessWidget {
                 updater: updater,
                 beforeQuit: beforeQuit,
                 routes: noticeRoutes,
+                withdrawPush: withdrawPush,
+                pushActive: pushActive,
               ),
             ),
           ),

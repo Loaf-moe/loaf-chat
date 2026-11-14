@@ -7,6 +7,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/foundation.dart';
@@ -42,6 +43,9 @@ import 'notifier.dart';
 import '../channel/timeline.dart' show messageUnavailable;
 import '../model/message_route.dart';
 import '../model/updater.dart';
+import '../../push/app_group.dart';
+import '../../push/push_sweeper.dart';
+import '../../push/room_names.dart';
 import '../platform.dart';
 import '../rooms/rooms.dart';
 import '../theme/loaf_theme.dart';
@@ -82,6 +86,8 @@ class AppShell extends StatefulWidget {
     this.updater,
     this.routes,
     this.beforeQuit,
+    this.withdrawPush,
+    this.pushActive,
   });
 
   /// Who is signed in, and how far this device is trusted. The app passes
@@ -100,6 +106,15 @@ class AppShell extends StatefulWidget {
   /// Messages to open, as notifications are clicked or tapped. One that
   /// comes before the first sync waits for it.
   final Stream<MessageRoute>? routes;
+
+  /// Takes an iOS notification back when its room is read. Null on every
+  /// other platform, and the shell then sweeps nothing.
+  final Future<void> Function(String roomId, {DateTime? before})? withdrawPush;
+
+  /// Whether a pusher is registered, so the extension announced what
+  /// arrived while the app was away. Null off iOS, and the shell then
+  /// watches no lifecycle at all.
+  final bool Function()? pushActive;
 
   /// Where the shell says what it must do before the app ends by a signal.
   /// A window closing asks the shell itself.
@@ -149,9 +164,46 @@ class _AppShellState extends State<AppShell> {
   CallSounds? _callSounds;
   late final CallAudioHold _audioHold;
 
+  /// Keeps names.json level with the rooms, for the iOS notification
+  /// extension to title a push with. Null everywhere else, and under the
+  /// mock backend, which has no extension to read it.
+  RoomNamesWriter? _roomNames;
+
+  /// Withdraws a room's notifications once it is read, on iOS.
+  PushSweeper? _sweeper;
+
+  /// Watches for a resume, to raise the arrivals floor past what push
+  /// already announced. Only made where a pusher can be registered.
+  AppLifecycleListener? _lifecycle;
+  var _roomNamesStarted = false;
+
+  Future<void> _startRoomNames() async {
+    final file = File('${(await dataDirectory()).path}/names.json');
+    // The shell can go while we wait on the container path; _rooms is
+    // disposed by then, and a listener added to it would throw.
+    if (!mounted) return;
+    _roomNames = RoomNamesWriter(_rooms, file);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (_lifecycle == null && widget.pushActive != null) {
+      _lifecycle = AppLifecycleListener(
+        onResume: () {
+          // Without a pusher nothing announced those messages, and the
+          // chime on catching up is the right one.
+          if (widget.pushActive!()) _rooms.pushedUntil(DateTime.now());
+        },
+      );
+    }
+    if (_sweeper == null && widget.withdrawPush != null) {
+      _sweeper = PushSweeper(rooms: _rooms, withdraw: widget.withdrawPush!);
+    }
+    if (!_roomNamesStarted && Platform.isIOS && widget.rooms != null) {
+      _roomNamesStarted = true;
+      unawaited(_startRoomNames());
+    }
     // Not in initState: the scope is an inherited widget. The closures read
     // the controller live, so `find` takes no dependency and a toggle never
     // rebuilds the shell.
@@ -174,10 +226,13 @@ class _AppShellState extends State<AppShell> {
         retractions: _rooms.retractions,
         retract: noticer?.retract,
       );
-      // The first time the shell opens after sign-in is when macOS asks
-      // permission; asking again later does nothing.
-      if (desktop != null && notifications.notifications) {
-        unawaited(desktop.prepare());
+      // The first time the shell opens after sign-in is when macOS and iOS
+      // ask permission; asking again later does nothing. Not `desktop`:
+      // iOS has no desktop notifier at all, and gating on it meant a fresh
+      // install was never asked, so Settings said notifications were on
+      // while iOS showed none.
+      if (notifications.notifications) {
+        unawaited(notifications.permissions?.prepare());
       }
     }
     if (_callSounds == null && notifications != null) {
@@ -296,6 +351,9 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _lifecycle?.dispose();
+    _sweeper?.dispose();
+    _roomNames?.dispose();
     _notifier?.dispose();
     _noticer?.dispose();
     _callSounds?.dispose();
