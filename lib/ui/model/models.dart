@@ -295,6 +295,7 @@ class Channel {
     this.occupants = const [],
     this.joined = true,
     this.notify = NotifyLevel.all,
+    this.memberCount,
     this.members = const [],
     this.favourite = false,
     this.favouriteOrder,
@@ -333,6 +334,11 @@ class Channel {
   /// For a direct chat: everyone in it except you. One person is a 1:1
   /// DM, more is a group DM.
   final List<Member> members;
+
+  /// Joined members, as the room summary counts them, or null when the
+  /// server has not said. The push rules judge room_member_count against
+  /// this, so the iOS extension needs it as much as the app does.
+  final int? memberCount;
 
   /// The `m.favourite` room tag, and its `order` (0–1, lowest first).
   final bool favourite;
@@ -397,6 +403,7 @@ class Channel {
     joined: joined ?? this.joined,
     notify: notify ?? this.notify,
     members: members,
+    memberCount: memberCount,
     favourite: favourite ?? this.favourite,
     favouriteOrder: favouriteOrder ?? this.favouriteOrder,
     lowPriority: lowPriority ?? this.lowPriority,
