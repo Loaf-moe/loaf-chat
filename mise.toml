@@ -32,6 +32,7 @@ run = [
   "cargo fetch --locked --manifest-path packages/loaf_media/windows/rust/Cargo.toml",
   "cargo fetch --locked --manifest-path packages/loaf_notify/rust/Cargo.toml",
   "cargo fetch --locked --manifest-path packages/loaf_chrome/rust/Cargo.toml",
+  "cargo fetch --locked --manifest-path packages/loaf_push/rust/Cargo.toml",
   "cargo fetch --locked --manifest-path tool/chime/Cargo.toml",
 ]
 
