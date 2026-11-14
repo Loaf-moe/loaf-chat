@@ -744,6 +744,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final topic = room.topic;
     final tally = _unread.of(room.id);
     final counted = _unread.knows(room.id);
+    // The count the push rules judge room_member_count against; 0 means the
+    // summary has not said, the same reading _invite takes.
+    final joinedMembers = room.summary.mJoinedMemberCount;
     final favourite = room.tags[TagType.favourite];
     final channel = Channel(
       id: room.id,
@@ -765,6 +768,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
         ChannelKind.room => _members(room),
         _ => const [],
       },
+      memberCount: joinedMembers == null || joinedMembers == 0
+          ? null
+          : joinedMembers,
       favourite: favourite != null,
       favouriteOrder: favourite?.order,
       lowPriority: room.isLowPriority,

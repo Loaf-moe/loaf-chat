@@ -7,6 +7,8 @@ import 'package:matrix/matrix.dart' show Logs;
 
 import 'log_file.dart';
 
+import 'push/app_group.dart';
+import 'push/rules_file.dart';
 import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
 import 'platform/livekit_media.dart';
@@ -119,8 +121,14 @@ Future<void> main() async {
   notifications = await NotificationController.load(
     backend == 'mock'
         ? MemoryStore<NotificationSettings>()
-        : await JsonFileStore.inSupportDirectory(
-            'notifications.json',
+        // Not the support folder: on iOS these answers live in the App Group
+        // container, because the notification extension reads them to decide
+        // what a push may say.
+        : JsonFileStore(
+            File(
+              '${(await dataDirectory()).path}'
+              '${Platform.pathSeparator}notifications.json',
+            ),
             NotificationSettings.fromJson,
           ),
     chime: chime,
@@ -150,6 +158,15 @@ Future<void> main() async {
           VoiceSettings.fromJson,
         ),
         devices: system ?? const LiveKitAudioDevices(),
+      );
+    }
+    // The iOS notification extension judges a push with these. It watches
+    // the client for as long as the app runs, so nothing disposes it; the
+    // process ending is its end.
+    if (Platform.isIOS) {
+      RulesWriter(
+        matrix.client,
+        File('${(await dataDirectory()).path}/rules.json'),
       );
     }
     newRooms = () => MatrixRooms(

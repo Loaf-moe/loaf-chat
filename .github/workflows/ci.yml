@@ -54,16 +54,29 @@ jobs:
         run: mise run ci:test
       - if: ${{ !cancelled() }}
         run: mise run test:media
+      # Every crate the steps below build. loaf_chrome and loaf_notify are
+      # Windows code, but their logic tests compile and run anywhere, so this
+      # runner is where they are kept honest.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             packages/loaf_media/linux/rust
             packages/loaf_media/rust/loaf_streams
+            packages/loaf_notify/rust
+            packages/loaf_chrome/rust
+            packages/loaf_push/rust
+            tool/chime
       - if: ${{ !cancelled() }}
         run: mise run test:player:linux
       - if: ${{ !cancelled() }}
         run: mise run test:streams
       - if: ${{ !cancelled() }}
         run: mise run test:notify
+      - if: ${{ !cancelled() }}
+        run: mise run test:chrome
+      - if: ${{ !cancelled() }}
+        run: mise run test:push
+      - if: ${{ !cancelled() }}
+        run: mise run test:chime
       - if: ${{ !cancelled() }}
         run: mise run check

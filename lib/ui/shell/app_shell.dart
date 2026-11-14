@@ -7,6 +7,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/foundation.dart';
@@ -42,6 +43,8 @@ import 'notifier.dart';
 import '../channel/timeline.dart' show messageUnavailable;
 import '../model/message_route.dart';
 import '../model/updater.dart';
+import '../../push/app_group.dart';
+import '../../push/room_names.dart';
 import '../platform.dart';
 import '../rooms/rooms.dart';
 import '../theme/loaf_theme.dart';
@@ -149,9 +152,27 @@ class _AppShellState extends State<AppShell> {
   CallSounds? _callSounds;
   late final CallAudioHold _audioHold;
 
+  /// Keeps names.json level with the rooms, for the iOS notification
+  /// extension to title a push with. Null everywhere else, and under the
+  /// mock backend, which has no extension to read it.
+  RoomNamesWriter? _roomNames;
+  var _roomNamesStarted = false;
+
+  Future<void> _startRoomNames() async {
+    final file = File('${(await dataDirectory()).path}/names.json');
+    // The shell can go while we wait on the container path; _rooms is
+    // disposed by then, and a listener added to it would throw.
+    if (!mounted) return;
+    _roomNames = RoomNamesWriter(_rooms, file);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (!_roomNamesStarted && Platform.isIOS && widget.rooms != null) {
+      _roomNamesStarted = true;
+      unawaited(_startRoomNames());
+    }
     // Not in initState: the scope is an inherited widget. The closures read
     // the controller live, so `find` takes no dependency and a toggle never
     // rebuilds the shell.
@@ -296,6 +317,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _roomNames?.dispose();
     _notifier?.dispose();
     _noticer?.dispose();
     _callSounds?.dispose();
