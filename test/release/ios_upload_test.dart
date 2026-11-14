@@ -80,7 +80,11 @@ app="$4/Payload/Runner.app"
 mkdir -p "$app/PlugIns/NotifyService.appex"
 [ "${NO_FRAMEWORK:-}" = 1 ] || mkdir -p "$app/Frameworks/loaf_push.framework"
 [ "${NO_CHIME:-}" = 1 ] || : > "$app/chime.caf"''');
+    // Signing calls are logged; reading entitlements answers from the env.
     _stub('codesign', r'''
+case " $* " in
+  *" -s "*) echo "codesign $*" >> "$CALLS"; exit 0 ;;
+esac
 case "$*" in
   *NotifyService.appex*) echo "$APPEX_ENTS" ;;
   *) echo "$APP_ENTS" ;;
@@ -154,6 +158,44 @@ esac''');
         'plutil -lint tool/release/ios-export.plist '
         'tool/release/ios-export-local.plist',
       ),
+    );
+  });
+
+  test('the archive carries the entitlements the export signs in', () async {
+    // Export takes each binary's entitlements from its existing signature,
+    // and an unsigned archive has none: v0.1.27 exported without the App
+    // Group. An ad-hoc signature carries them without minting a certificate.
+    final result = await _run();
+    expect(result.exitCode, 0, reason: '${result.stdout}${result.stderr}');
+    final lines = _lines();
+    final archive = lines.indexWhere((l) => l.contains(' archive '));
+    final check = lines.indexWhere((l) => l.contains(' -exportArchive '));
+    final appex = lines.indexWhere(
+      (l) =>
+          l.startsWith('codesign ') &&
+          l.contains(
+            '--entitlements ios/NotifyService/NotifyService.entitlements',
+          ),
+    );
+    final app = lines.indexWhere(
+      (l) =>
+          l.startsWith('codesign ') &&
+          l.contains('--entitlements ios/Runner/Runner.entitlements'),
+    );
+    expect([archive, appex, app, check], everyElement(isNot(-1)));
+    // Inside out: signing the app seals the extension's signature into it.
+    expect(archive < appex && appex < app && app < check, isTrue);
+    expect(lines[appex], contains(' -s - '));
+    expect(
+      lines[appex],
+      endsWith(
+        'Runner.xcarchive/Products/Applications/Runner.app/PlugIns/NotifyService.appex',
+      ),
+    );
+    expect(lines[app], contains(' -s - '));
+    expect(
+      lines[app],
+      endsWith('Runner.xcarchive/Products/Applications/Runner.app'),
     );
   });
 

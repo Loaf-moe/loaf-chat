@@ -31,7 +31,16 @@ xcodebuild archive -workspace ios/Runner.xcworkspace -scheme Runner \
   -configuration Release -destination 'generic/platform=iOS' \
   -archivePath "$work/Runner.xcarchive" CODE_SIGNING_ALLOWED=NO
 
-# The archive is unsigned; export signs it. Prove the signed app and its
+# Export takes each binary's entitlements from its existing signature, and an
+# unsigned archive has none, so v0.1.27 exported without the App Group. An
+# ad-hoc signature carries them and needs no certificate. Inside out: signing
+# the app seals the extension into it.
+archived="$work/Runner.xcarchive/Products/Applications/Runner.app"
+codesign -f -s - --entitlements ios/NotifyService/NotifyService.entitlements \
+  "$archived/PlugIns/NotifyService.appex"
+codesign -f -s - --entitlements ios/Runner/Runner.entitlements "$archived"
+
+# Export signs it for distribution. Prove the signed app and its
 # extension carry push and the App Group before anything reaches Apple.
 xcodebuild -exportArchive -archivePath "$work/Runner.xcarchive" \
   -exportOptionsPlist tool/release/ios-export-local.plist \
