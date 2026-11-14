@@ -41,22 +41,41 @@ xcodebuild -exportArchive -archivePath "$work/Runner.xcarchive" \
   -authenticationKeyIssuerID "$NOTARY_ISSUER_ID"
 unzip -q "$work/check/"*.ipa -d "$work/ipa"
 app="$work/ipa/Payload/Runner.app"
+appex="$app/PlugIns/NotifyService.appex"
 ents() { codesign -d --entitlements - --xml "$1" 2>/dev/null | plutil -convert json -o - -- -; }
-for target in "$app" "$app/PlugIns/NotifyService.appex"; do
-  ents "$target" | grep -q '"group.moe.loaf.chat"' \
-    || { echo "::error::$(basename "$target") lacks the App Group"; exit 1; }
-done
-ents "$app" | grep -q '"aps-environment":"production"' \
-  || { echo "::error::Runner.app lacks aps-environment=production"; exit 1; }
-ents "$app/PlugIns/NotifyService.appex" | grep -q '"com.apple.developer.usernotifications.filtering":true' \
-  || { echo "::error::NotifyService.appex lacks the filtering entitlement"; exit 1; }
+
+# Every check runs, then one verdict: a release that is missing two things
+# should say both, so the next attempt fixes both.
+missing=""
+want() { # <what> <file> <pattern>
+  ents "$2" | grep -q "$3" || missing="$missing
+  $1"
+}
+want "Runner.app lacks the App Group" "$app" '"group.moe.loaf.chat"'
+want "NotifyService.appex lacks the App Group" "$appex" '"group.moe.loaf.chat"'
+want "Runner.app lacks aps-environment=production" "$app" '"aps-environment":"production"'
+want "NotifyService.appex lacks the filtering entitlement" "$appex" \
+  '"com.apple.developer.usernotifications.filtering":true'
 # The extension dlopens exactly this path at <appex>/../../Frameworks.
 [ -d "$app/Frameworks/loaf_push.framework" ] \
-  || { echo "::error::loaf_push is not in the app's Frameworks"; exit 1; }
+  || missing="$missing
+  loaf_push is not in the app's Frameworks"
 # UNNotificationSound(named: "chime.caf") resolves against the app bundle,
 # not the extension's; without it a push plays iOS's default sound.
 [ -f "$app/chime.caf" ] \
-  || { echo "::error::chime.caf is not in the app bundle"; exit 1; }
+  || missing="$missing
+  chime.caf is not in the app bundle"
+
+if [ -n "$missing" ]; then
+  # What the signed build actually carries, so the next run does not need
+  # another release to find out. Entitlements the provisioning profile does
+  # not grant are dropped silently at export, so this is usually the
+  # profile rather than the project.
+  echo "Runner.app entitlements:"; ents "$app"
+  echo "NotifyService.appex entitlements:"; ents "$appex"
+  echo "::error::the signed build is missing:$missing"
+  exit 1
+fi
 
 # Signs with the cloud-managed certificate and uploads, in one step.
 status=0
