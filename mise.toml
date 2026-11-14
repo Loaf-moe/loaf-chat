@@ -1,6 +1,6 @@
 [tools]
 flutter = "3.47.5"
-rust = { version = "1.96.1", targets = "aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios" }
+rust = { version = "1.96.1", targets = "aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios,x86_64-apple-darwin" }
 
 [env]
 # Flutter copies Swift packages with rsync and counts on Apple's, which makes
