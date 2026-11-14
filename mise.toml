@@ -121,6 +121,10 @@ run = "cargo test --locked --manifest-path packages/loaf_chrome/rust/Cargo.toml"
 description = "loaf_push's Rust tests"
 run = "cargo test --locked --manifest-path packages/loaf_push/rust/Cargo.toml"
 
+[tasks."test:push:apple"]
+description = "LoafPushCore's Swift tests; needs a Mac"
+run = "swift test --package-path ios/LoafPushCore"
+
 [tasks."test:player:linux"]
 description = "The Linux player's Rust tests; needs GStreamer"
 run = "cargo test --locked --manifest-path packages/loaf_media/linux/rust/Cargo.toml"
