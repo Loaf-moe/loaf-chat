@@ -1755,7 +1755,7 @@ This needs Chris's phone. Ask what they saw for anything a screenshot can't show
 7. **Read on the Mac.** The phone's notification disappears after the phone's next sync.
 8. **Show message text off.** The notification says `new message`.
 9. **Notifications off.** No push, and the server's pusher list (`GET /_matrix/client/v3/pushers` with mochi's harness, or Chris's client) no longer lists the phone.
-10. **Background for 5 minutes, then open.** Console.app on the Mac, with the phone attached: no `0xdead10cc` termination for `moe.loaf.chat.ios`.
+10. **Background for 5 minutes, then open.** Console.app on the Mac, with the phone attached: no `0xdead10cc` termination for `moe.loaf.chat.ios`. Do it while a sync is landing (send from the Mac, then background immediately) — the hold is a fixed 3 s that does not wait for the SDK's write to finish, so this case is the only thing that says whether 3 s is enough. If it terminates, the fix is to end the background task when the database is idle rather than on a timer.
 11. **Update over v0.1.19** (the old database location). The app stays signed in, and older encrypted messages still read.
 12. **Update with mentions-only chosen on the old build.** Set Channels to mentions only on v0.1.19 first, then update: `.m.rule.encrypted` is back on (check it in Settings on the Mac, or `GET /_matrix/client/v3/pushrules/`), and an encrypted mention pushes. Without the repair in Task 11 this is the case that silently stays broken.
 
