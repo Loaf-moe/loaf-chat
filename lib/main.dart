@@ -7,6 +7,8 @@ import 'package:matrix/matrix.dart' show Logs;
 
 import 'log_file.dart';
 
+import 'push/app_group.dart';
+import 'push/rules_file.dart';
 import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
 import 'platform/livekit_media.dart';
@@ -140,6 +142,15 @@ Future<void> main() async {
       voice = await VoiceController.load(
         await FileVoiceStore.inSupportDirectory(),
         devices: system ?? const LiveKitAudioDevices(),
+      );
+    }
+    // The iOS notification extension judges a push with these. It watches
+    // the client for as long as the app runs, so nothing disposes it; the
+    // process ending is its end.
+    if (Platform.isIOS) {
+      RulesWriter(
+        matrix.client,
+        File('${(await dataDirectory()).path}/rules.json'),
       );
     }
     newRooms = () => MatrixRooms(
