@@ -108,7 +108,7 @@ void main() {
     final file = _tempFile('rules.json');
     final writer = RulesWriter(client, file);
     addTearDown(writer.dispose);
-    await pumpEventQueue();
+    await _until(file.existsSync);
 
     expect(file.existsSync(), isTrue);
     expect(jsonDecode(file.readAsStringSync())['rules'], isNotNull);
@@ -152,7 +152,9 @@ void main() {
       Object? _,
     ) => {'displayname': 'Mochi the Second'};
     client.onUserProfileUpdate.add(_me);
-    await pumpEventQueue();
+    // The new name is fetched from the server before anything is written, so
+    // one turn of the event queue is not enough on a busy machine.
+    await _until(() => file.readAsStringSync() != 'sentinel');
 
     expect(
       jsonDecode(file.readAsStringSync())['display_name'],
@@ -165,9 +167,19 @@ void main() {
     final file = _tempFile('rules.json');
     final writer = RulesWriter(client, file);
     addTearDown(writer.dispose);
-    await pumpEventQueue();
+    await _until(file.existsSync);
 
     expect(file.existsSync(), isTrue);
     expect(File('${file.path}.tmp').existsSync(), isFalse);
   });
+}
+
+/// Waits until [done], however long a busy machine takes. The writer loads
+/// your display name from the server before its first write, so what follows
+/// a profile change or a fresh `RulesWriter` is not one event-queue turn away.
+Future<void> _until(bool Function() done) async {
+  final give = DateTime.now().add(const Duration(seconds: 10));
+  while (!done() && DateTime.now().isBefore(give)) {
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
 }
