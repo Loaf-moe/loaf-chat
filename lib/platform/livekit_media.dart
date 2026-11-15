@@ -9,7 +9,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 // ConnectionState is LiveKit's here, not the widgets library's.
 import 'package:flutter/widgets.dart'
-    show AppLifecycleListener, ObjectKey, Widget;
+    show
+        AppLifecycleState,
+        ObjectKey,
+        Widget,
+        WidgetsBinding,
+        WidgetsBindingObserver;
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc show Helper;
 import 'package:livekit_client/livekit_client.dart';
 import 'package:matrix/matrix.dart' show Logs;
@@ -147,13 +152,12 @@ class _AlwaysOnline extends ConnectivityPlatform {
       const Stream.empty();
 }
 
-class LiveKitConnection extends ChangeNotifier implements CallConnection {
+class LiveKitConnection extends ChangeNotifier
+    with WidgetsBindingObserver
+    implements CallConnection {
   LiveKitConnection(this._room, this._selectSpeaker) {
     _room.addListener(notifyListeners);
-    _lifecycle = AppLifecycleListener(
-      onHide: () => unawaited(_watch(false)),
-      onShow: () => unawaited(_watch(true)),
-    );
+    WidgetsBinding.instance.addObserver(this);
     _events = _room.createListener()
       ..on<RoomAttemptReconnectEvent>((event) {
         Logs().w(
@@ -197,7 +201,21 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
 
   /// A minimised window draws no frame, so no picture's widget is there to
   /// tell the server it went out of sight. This unsubscribes from them.
-  late final AppLifecycleListener _lifecycle;
+  ///
+  /// An observer of its own, not an `AppLifecycleListener`: quitting leaves
+  /// the call while the binding is still asking its observers about the
+  /// quit, and that class throws when asked after it is disposed.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final hidden = switch (state) {
+      AppLifecycleState.resumed || AppLifecycleState.inactive => false,
+      AppLifecycleState.hidden ||
+      AppLifecycleState.paused ||
+      AppLifecycleState.detached => true,
+    };
+    if (hidden != _hidden) unawaited(_watch(!hidden));
+  }
+
   var _hidden = false;
 
   /// Done when the last [_watch] has, so they run one at a time and a show
@@ -519,8 +537,14 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
   }
 
   @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
   Future<void> disconnect() async {
-    _lifecycle.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     _room.removeListener(notifyListeners);
     await _events.dispose();
     // Once LiveKit has said the media is gone there is nothing to leave,
