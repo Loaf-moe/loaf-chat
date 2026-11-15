@@ -16,16 +16,24 @@ const mockSpeakers = [
   AudioDevice('airpods-out', 'AirPods Pro'),
 ];
 
+const mockCameraDevices = [
+  AudioDevice('facetime', 'FaceTime HD Camera'),
+  AudioDevice('continuity', 'Continuity Camera'),
+];
+
 class MemoryAudioDevices implements AudioDevices {
   MemoryAudioDevices({
     List<AudioDevice> Function()? microphones,
     List<AudioDevice> Function()? speakers,
+    List<AudioDevice> Function()? cameras,
     this.changes = const Stream.empty(),
   }) : _microphones = microphones ?? (() => mockMicrophones),
-       _speakers = speakers ?? (() => mockSpeakers);
+       _speakers = speakers ?? (() => mockSpeakers),
+       _cameras = cameras ?? (() => mockCameraDevices);
 
   final List<AudioDevice> Function() _microphones;
   final List<AudioDevice> Function() _speakers;
+  final List<AudioDevice> Function() _cameras;
 
   @override
   final Stream<void> changes;
@@ -35,4 +43,7 @@ class MemoryAudioDevices implements AudioDevices {
 
   @override
   Future<List<AudioDevice>> speakers() async => _speakers();
+
+  @override
+  Future<List<AudioDevice>> cameras() async => _cameras();
 }

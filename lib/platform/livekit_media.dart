@@ -38,6 +38,10 @@ class LiveKitAudioDevices implements AudioDevices {
       _listed(() => Hardware.instance.audioOutputs());
 
   @override
+  Future<List<AudioDevice>> cameras() =>
+      _listed(() => Hardware.instance.videoInputs());
+
+  @override
   Stream<void> get changes async* {
     try {
       await _webRtcStarted;

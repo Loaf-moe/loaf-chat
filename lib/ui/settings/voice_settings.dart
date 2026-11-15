@@ -1,4 +1,4 @@
-/// Which microphone and which speaker a call uses, what is done to the
+/// Which microphone, speaker and camera a call uses, what is done to the
 /// microphone's sound, and how loud each person is played.
 ///
 /// Saved to `voice.json` beside the other settings in the support
@@ -13,7 +13,7 @@ import 'package:flutter/widgets.dart';
 
 import '../../util/json_store.dart';
 
-/// A microphone or a speaker, as the system names it.
+/// A microphone, a speaker or a camera, as the system names it.
 @immutable
 class AudioDevice {
   const AudioDevice(this.id, this.label);
@@ -64,6 +64,7 @@ class VoiceSettings implements Jsonable {
   const VoiceSettings({
     this.microphone,
     this.speaker,
+    this.camera,
     this.echoCancellation = true,
     this.noiseSuppression = true,
     this.automaticGain = true,
@@ -81,6 +82,7 @@ class VoiceSettings implements Jsonable {
     return VoiceSettings(
       microphone: AudioDevice.fromJson(json['microphone']),
       speaker: AudioDevice.fromJson(json['speaker']),
+      camera: AudioDevice.fromJson(json['camera']),
       echoCancellation: _switch(json['echoCancellation'], otherwise: true),
       noiseSuppression: _switch(json['noiseSuppression'], otherwise: true),
       automaticGain: _switch(json['automaticGain'], otherwise: true),
@@ -106,6 +108,7 @@ class VoiceSettings implements Jsonable {
   /// Null: whichever the system has as its default.
   final AudioDevice? microphone;
   final AudioDevice? speaker;
+  final AudioDevice? camera;
 
   /// Keeps what the speaker plays out of the microphone.
   final bool echoCancellation;
@@ -125,6 +128,7 @@ class VoiceSettings implements Jsonable {
   VoiceSettings copyWith({
     AudioDevice? Function()? microphone,
     AudioDevice? Function()? speaker,
+    AudioDevice? Function()? camera,
     bool? echoCancellation,
     bool? noiseSuppression,
     bool? automaticGain,
@@ -133,6 +137,7 @@ class VoiceSettings implements Jsonable {
   }) => VoiceSettings(
     microphone: microphone == null ? this.microphone : microphone(),
     speaker: speaker == null ? this.speaker : speaker(),
+    camera: camera == null ? this.camera : camera(),
     echoCancellation: echoCancellation ?? this.echoCancellation,
     noiseSuppression: noiseSuppression ?? this.noiseSuppression,
     automaticGain: automaticGain ?? this.automaticGain,
@@ -144,6 +149,7 @@ class VoiceSettings implements Jsonable {
   Map<String, Object> toJson() => {
     'microphone': ?microphone?.toJson(),
     'speaker': ?speaker?.toJson(),
+    'camera': ?camera?.toJson(),
     'echoCancellation': echoCancellation,
     'noiseSuppression': noiseSuppression,
     'automaticGain': automaticGain,
@@ -156,6 +162,7 @@ class VoiceSettings implements Jsonable {
       other is VoiceSettings &&
       other.microphone == microphone &&
       other.speaker == speaker &&
+      other.camera == camera &&
       other.echoCancellation == echoCancellation &&
       other.noiseSuppression == noiseSuppression &&
       other.automaticGain == automaticGain &&
@@ -166,6 +173,7 @@ class VoiceSettings implements Jsonable {
   int get hashCode => Object.hash(
     microphone,
     speaker,
+    camera,
     echoCancellation,
     noiseSuppression,
     automaticGain,
@@ -177,11 +185,13 @@ class VoiceSettings implements Jsonable {
   );
 }
 
-/// The machine's microphones and speakers.
+/// The machine's microphones, speakers and cameras.
 abstract interface class AudioDevices {
   Future<List<AudioDevice>> microphones();
 
   Future<List<AudioDevice>> speakers();
+
+  Future<List<AudioDevice>> cameras();
 
   /// An event whenever a device may have come or gone.
   Stream<void> get changes;
@@ -221,6 +231,7 @@ class VoiceController extends ChangeNotifier {
   /// What the machine has, as of the last [refresh]. Empty before the first.
   List<AudioDevice> microphones = const [];
   List<AudioDevice> speakers = const [];
+  List<AudioDevice> cameras = const [];
 
   /// Counts [refresh]es.
   var _asked = 0;
@@ -232,20 +243,23 @@ class VoiceController extends ChangeNotifier {
 
   AudioDevice? get microphone => settings.value.microphone;
   AudioDevice? get speaker => settings.value.speaker;
+  AudioDevice? get camera => settings.value.camera;
 
   /// Asks the machine again what it has, and from then on whenever it says
   /// that changed.
   Future<void> refresh() async {
     _changes ??= _devices.changes.listen((_) => unawaited(refresh()));
     final asked = ++_asked;
-    final (ins, outs) = await (
+    final (ins, outs, seen) = await (
       _devices.microphones(),
       _devices.speakers(),
+      _devices.cameras(),
     ).wait;
     // Overtaken: a later asking has the newer answer.
     if (asked != _asked) return;
     microphones = ins;
     speakers = outs;
+    cameras = seen;
     notifyListeners();
   }
 
@@ -255,6 +269,9 @@ class VoiceController extends ChangeNotifier {
 
   void chooseSpeaker(AudioDevice? device) =>
       _update(settings.value.copyWith(speaker: () => device));
+
+  void chooseCamera(AudioDevice? device) =>
+      _update(settings.value.copyWith(camera: () => device));
 
   void setEchoCancellation(bool on) =>
       _update(settings.value.copyWith(echoCancellation: on));

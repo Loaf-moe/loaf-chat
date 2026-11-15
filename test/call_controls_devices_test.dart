@@ -29,6 +29,9 @@ class _Slow implements AudioDevices {
   Future<List<AudioDevice>> speakers() async => const [];
 
   @override
+  Future<List<AudioDevice>> cameras() async => const [];
+
+  @override
   Stream<void> get changes => const Stream.empty();
 }
 

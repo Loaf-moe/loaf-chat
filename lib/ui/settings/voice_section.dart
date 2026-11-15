@@ -1,5 +1,5 @@
-/// Settings, voice: which microphone and which speaker calls use, and what
-/// is done to the microphone's sound.
+/// Settings, voice: which microphone, speaker and camera calls use, and
+/// what is done to the microphone's sound.
 library;
 
 import 'dart:async';
@@ -56,6 +56,15 @@ class _VoiceSectionState extends State<VoiceSection> {
               controller.chooseSpeaker,
             ),
             const SizedBox(height: LoafSpace.x4),
+            if (hasCallVideo) ...[
+              const SettingsLabel(label: 'camera'),
+              ..._choices(
+                controller.cameras,
+                settings.camera,
+                controller.chooseCamera,
+              ),
+              const SizedBox(height: LoafSpace.x4),
+            ],
           ],
           const SettingsLabel(label: 'processing'),
           SettingsCheck(

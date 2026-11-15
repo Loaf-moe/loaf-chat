@@ -3,6 +3,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/platform.dart';
 
 void main() {
+  test('only Linux has video in calls', () {
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    for (final platform in TargetPlatform.values) {
+      debugDefaultTargetPlatformOverride = platform;
+      expect(
+        hasCallVideo,
+        platform == TargetPlatform.linux,
+        reason: '$platform',
+      );
+    }
+  });
+
   testWidgets(
     'no system sign-in window means the browser',
     variant: TargetPlatformVariant(const {

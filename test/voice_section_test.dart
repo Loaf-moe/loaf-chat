@@ -12,12 +12,14 @@ import 'package:loaf_native/util/json_store.dart';
 const _rode = AudioDevice('rode', 'RODE NT-USB');
 const _sony = AudioDevice('sony', 'WH-1000XM3');
 const _desk = AudioDevice('desk', 'Desk Speakers');
+const _cam = AudioDevice('c920', 'HD Pro Webcam C920');
 
 /// The section over a machine with [microphones] and [speakers].
 Future<VoiceController> _pump(
   WidgetTester tester, {
   List<AudioDevice> Function()? microphones,
   List<AudioDevice> Function()? speakers,
+  List<AudioDevice> Function()? cameras,
   VoiceSettings saved = const VoiceSettings(),
   Stream<void> changes = const Stream.empty(),
 }) async {
@@ -29,6 +31,7 @@ Future<VoiceController> _pump(
     devices: MemoryAudioDevices(
       microphones: microphones ?? () => const [_rode, _sony],
       speakers: speakers ?? () => const [_desk],
+      cameras: cameras ?? () => const [_cam],
       changes: changes,
     ),
   );
@@ -67,6 +70,35 @@ Map<String, bool> _switches(WidgetTester tester) => {
 };
 
 void main() {
+  const linux = TargetPlatformVariant({TargetPlatform.linux});
+
+  testWidgets(
+    'on Linux, lists the cameras under the speakers',
+    variant: linux,
+    (tester) async {
+      await _pump(tester);
+
+      expect(_titles(tester), [
+        'system default',
+        'RODE NT-USB',
+        'WH-1000XM3',
+        'system default',
+        'Desk Speakers',
+        'system default',
+        'HD Pro Webcam C920',
+      ]);
+    },
+  );
+
+  testWidgets('tapping a camera chooses it', variant: linux, (tester) async {
+    final controller = await _pump(tester);
+
+    await tester.tap(find.text('HD Pro Webcam C920'));
+    await tester.pumpAndSettle();
+
+    expect(controller.camera, _cam);
+  });
+
   testWidgets(
     'iOS has no devices to choose: the system routes its sound',
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
