@@ -78,13 +78,20 @@ placeholder a tile draws for a camera or a screen is where the picture goes.
 - **Your camera.** The button turns it on and off. Your own tile shows it
   mirrored.
 - **Theirs.** A tile shows its person's camera while they send one.
-- **A screen share.** A tile shows its person's screen while they share
-  one, in place of their camera, and takes the spotlight unless a tile is
-  pinned. Of two shares the newest is spotlit.
+- **A screen share.** A screen someone shares is a tile of its own, after
+  that person's tile, so sharing hides no one: their camera or avatar
+  stays where it was. The screen's tile takes the spotlight unless a tile
+  is pinned. Of two shares the newest is spotlit.
 - **Fit.** A camera fills its tile, cropped. A screen is shown whole, with
   bars where its shape differs from the tile's.
+- **The grid on a computer.** The number of columns is whichever shows
+  the largest 16:9 picture in each tile, so a tall window has fewer
+  columns than a wide one, and no tile is taller than 4:3. A grid that
+  does not fill the pane sits in its middle. A phone's grid is as the
+  calls spec has it.
 - **Someone on two devices.** One tile, as now. It shows the first of
-  their devices that sends a camera, and the first that shares a screen.
+  their devices that sends a camera; their screen's tile, the first that
+  shares one.
 - **Choosing a camera.** The ⌄ beside the camera button lists the
   machine's cameras under "system default", read again as it opens. The
   voice section in settings has the same list under the microphone and the
@@ -174,8 +181,10 @@ microphone's does, and the ⌄ menu reads and writes it there in place of
 - Ending a call clears the flag.
 
 **The tile** (`lib/ui/call/call_tile.dart`). Takes the widget from
-`Calls.video` for its person and draws it under the name chip where the
-placeholder is: the screen's when they share one, else the camera's.
+`Calls.video` and draws it under the name chip where the placeholder is.
+A tile is a person or the screen they share; the call view lists a
+screen's tile after its person's, under an id of its own, and it is that
+id the spotlight names.
 
 **Flatpak** already has `--device=all`, which covers cameras.
 

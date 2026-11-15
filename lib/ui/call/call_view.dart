@@ -75,7 +75,14 @@ class CallView extends StatelessWidget {
                   ? _EndState(calls: calls, session: session)
                   : CallStage(
                       tiles: callTiles(calls, session),
-                      spotlight: calls.spotlight,
+                      // A pin names a tile; otherwise it is whoever
+                      // shares, and their screen's tile that is shown.
+                      spotlight:
+                          calls.pinned ??
+                          switch (calls.spotlight) {
+                            final sharer? => screenTileId(sharer),
+                            null => null,
+                          },
                       compact: compact,
                       tileBuilder: (info, {required small}) =>
                           _tile(context, info, session, small: small),
@@ -100,9 +107,8 @@ class CallView extends StatelessWidget {
     return CallTile(
       info: info,
       small: small,
-      // A screen takes the tile over its person's camera.
       video: info.screen || info.camera
-          ? calls.video(info.id, screen: info.screen)
+          ? calls.video(info.member.id, screen: info.screen)
           : null,
       // Name colour is power level, and DMs have no power levels.
       nameColor: session.direct ? null : tokens.nameColor(info.member.role),
@@ -123,7 +129,8 @@ class CallView extends StatelessWidget {
   }
 }
 
-/// You, then everyone else, as the stage draws them.
+/// You, then everyone else, as the stage draws them. A screen someone
+/// shares is a tile of its own after theirs, so sharing hides no one.
 List<TileInfo> callTiles(Calls calls, CallSession session) => [
   TileInfo(
     calls.me,
@@ -131,11 +138,14 @@ List<TileInfo> callTiles(Calls calls, CallSession session) => [
     muted: calls.muted,
     deafened: calls.deafened,
     camera: calls.camera,
-    screen: calls.sharing != null,
     speaking: calls.speaking,
     silenced: calls.silenced,
   ),
-  for (final p in session.participants) TileInfo.of(p),
+  if (calls.sharing != null) TileInfo(calls.me, you: true, screen: true),
+  for (final p in session.participants) ...[
+    TileInfo.of(p),
+    if (p.screen) TileInfo(p.member, screen: true),
+  ],
 ];
 
 enum _TileAction { pin, unpin }
@@ -166,7 +176,7 @@ Future<void> showTileActions(
       leading: [
         PersonCardEntry<_TileAction>(member: info.member, isYou: info.you),
         if (voice != null)
-          VolumeMenuEntry<_TileAction>(voice: voice, id: info.id),
+          VolumeMenuEntry<_TileAction>(voice: voice, id: info.member.id),
       ],
       items: items,
     );
@@ -177,7 +187,7 @@ Future<void> showTileActions(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           PersonCard(member: info.member, isYou: info.you),
-          if (voice != null) VolumeSlider(voice: voice, id: info.id),
+          if (voice != null) VolumeSlider(voice: voice, id: info.member.id),
         ],
       ),
       items: items,

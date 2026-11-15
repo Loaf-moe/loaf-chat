@@ -35,7 +35,6 @@ class TileInfo {
         muted: p.muted || p.silenced != null,
         deafened: p.deafened || p.silenced == CallSilence.deafened,
         camera: p.camera,
-        screen: p.screen,
         speaking: p.speaking,
         ring: p.ring,
         silenced: p.silenced,
@@ -46,6 +45,9 @@ class TileInfo {
   final bool muted;
   final bool deafened;
   final bool camera;
+
+  /// This tile is the screen [member] shares, not the person: they have a
+  /// tile of their own beside it.
   final bool screen;
   final bool speaking;
   final RingState? ring;
@@ -54,11 +56,15 @@ class TileInfo {
   /// already say so; this says whose doing it is.
   final CallSilence? silenced;
 
-  String get id => member.id;
+  /// What the tile is pinned and spotlit by.
+  String get id => screen ? screenTileId(member.id) : member.id;
 
   /// Rung but not here: still ringing, declined, or never answered.
   bool get waiting => ring != null && ring != RingState.joined;
 }
+
+/// The id of the tile for the screen [memberId] shares.
+String screenTileId(String memberId) => '$memberId screen';
 
 class CallTile extends StatefulWidget {
   CallTile({
