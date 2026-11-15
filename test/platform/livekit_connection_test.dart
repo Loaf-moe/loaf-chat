@@ -25,6 +25,9 @@ Future<void> _tell(Room room, RoomEvent event) async {
 }
 
 void main() {
+  // The connection listens for the app's lifecycle.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('a fresh connection is connected', () {
     final (:room, :connection) = _open();
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show Widget;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/call_media.dart';
@@ -215,6 +216,20 @@ class _LoggedConnection implements CallConnection {
     _deviceSets.add('speaker');
     return _inner.setSpeakerDevice(id);
   }
+
+  @override
+  String? get camera => _inner.camera;
+  @override
+  Future<void> setCamera(bool on) => _inner.setCamera(on);
+  @override
+  Future<void> setCameraDevice(String? id) {
+    _deviceSets.add('camera');
+    return _inner.setCameraDevice(id);
+  }
+
+  @override
+  Widget? video(String? identity, {bool screen = false}) =>
+      _inner.video(identity, screen: screen);
 
   @override
   void addListener(VoidCallback listener) => _inner.addListener(listener);

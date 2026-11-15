@@ -1,8 +1,9 @@
 /// A call's media, as [MatrixCalls] needs it: somewhere to connect, a
-/// microphone to send, and who else is there.
+/// microphone and a camera to send, and who else is there.
 library;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show Widget;
 
 import '../ui/call/calls.dart' show CallQuality;
 
@@ -27,18 +28,33 @@ enum CallLink {
 /// Someone else's device in the call.
 @immutable
 class CallPeer {
-  const CallPeer({required this.muted, required this.speaking});
+  const CallPeer({
+    required this.muted,
+    required this.speaking,
+    this.camera = false,
+    this.screen = false,
+  });
 
   /// Sending no microphone.
   final bool muted;
   final bool speaking;
 
-  @override
-  bool operator ==(Object other) =>
-      other is CallPeer && other.muted == muted && other.speaking == speaking;
+  /// Sending a camera.
+  final bool camera;
+
+  /// Sharing a screen.
+  final bool screen;
 
   @override
-  int get hashCode => Object.hash(muted, speaking);
+  bool operator ==(Object other) =>
+      other is CallPeer &&
+      other.muted == muted &&
+      other.speaking == speaking &&
+      other.camera == camera &&
+      other.screen == screen;
+
+  @override
+  int get hashCode => Object.hash(muted, speaking, camera, screen);
 }
 
 /// What is done to a microphone's sound before it is sent.
@@ -91,6 +107,16 @@ class MicrophoneUnavailable implements Exception {
 
   @override
   String toString() => 'MicrophoneUnavailable: $detail';
+}
+
+/// No camera could be opened.
+class CameraUnavailable implements Exception {
+  const CameraUnavailable(this.detail);
+
+  final String detail;
+
+  @override
+  String toString() => 'CameraUnavailable: $detail';
 }
 
 /// The speaker chosen could not be played on.
@@ -167,5 +193,26 @@ abstract interface class CallConnection implements Listenable {
   Future<void> setSpeakerDevice(String? id);
 
   /// Leaves the call. Media already gone has nothing to undo.
+  /// Starts or stops sending the camera. Throws [CameraUnavailable] when
+  /// none opens.
+  Future<void> setCamera(bool on);
+
+  /// The device the camera is taken from, by its id. Null is the system's
+  /// default.
+  String? get camera;
+
+  /// Takes the camera from the device with [id] from now on, or from the
+  /// system's default: for null, and for a device the machine does not
+  /// have as of this call. Throws [CameraUnavailable] when one being sent
+  /// does not reopen; it is then no longer sent.
+  Future<void> setCameraDevice(String? id);
+
+  /// Draws the camera, or with [screen] the screen, that the device with
+  /// [identity] sends, filling whatever box it is given; a null [identity]
+  /// is this device. Null while that device sends none. While the widget
+  /// is on screen the picture is asked of the server at the widget's size;
+  /// off screen, not at all.
+  Widget? video(String? identity, {bool screen = false});
+
   Future<void> disconnect();
 }
