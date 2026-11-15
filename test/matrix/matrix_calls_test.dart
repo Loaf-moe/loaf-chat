@@ -547,16 +547,22 @@ void main() {
       expect(watcher.peers[_mine]!.muted, isFalse);
     });
 
-    test('blocked, switching it does nothing', () async {
+    test('blocked, switching it tries again', () async {
       final world = await _open(camera: false);
       await world.join();
       world.calls.toggleCamera();
       await _until(() => world.calls.cameraBlocked);
+      final hold = world.fake.holdCamera = Completer<void>();
 
       world.calls.toggleCamera();
 
+      expect(world.calls.cameraBlocked, isFalse);
+      expect(world.calls.camera, isTrue);
+
+      hold.complete();
+      await _until(() => world.calls.cameraBlocked);
+
       expect(world.calls.camera, isFalse);
-      expect(world.calls.cameraBlocked, isTrue);
     });
 
     test('a change of devices lifts the block, still off', () async {

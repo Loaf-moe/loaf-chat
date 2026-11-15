@@ -95,8 +95,9 @@ placeholder a tile draws for a camera or a screen is where the picture goes.
   camera chosen that the machine does not have is listed as "not
   connected" and the default is used.
 - **A camera that does not open.** The camera is off, and the button shows
-  as blocked, as the microphone's does. The block lifts at the next choice
-  or change of devices; turning it back on is left to you.
+  as blocked, as the microphone's does. Clicking the blocked button tries
+  the camera again. The block also lifts at the next choice or change of
+  devices; turning it back on is then left to you.
 - **Leaving turns it off.** A call that ends, however it ends, leaves the
   camera off. The next call starts without it unless the lobby's toggle
   was switched on first. The lobby's toggle cannot be switched while you
@@ -216,9 +217,9 @@ its processor use under both X11 and Wayland.
   first sends one.
 - **Linux does not say when a camera comes or goes.** WebRTC's Linux
   plugin raises a change of devices for microphones and speakers only. A
-  blocked camera's block lifts when another camera is chosen, or when the
-  call ends; plugging one in does not lift it, and the settings list a
-  newly plugged camera only when next opened. A camera unplugged, or held
+  blocked camera's block lifts when its button is clicked, when another
+  camera is chosen, or when the call ends; plugging one in does not lift
+  it, and the settings list a newly plugged camera only when next opened. A camera unplugged, or held
   by another program, while it is being sent may go on showing as on with
   no picture.
 

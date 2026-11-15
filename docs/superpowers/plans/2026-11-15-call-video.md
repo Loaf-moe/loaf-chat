@@ -2073,7 +2073,7 @@ Expected: you join with the camera off.
 - Turn the camera on and leave within a second; join with the lobby's toggle on and leave at once. Expected: the light goes out both times.
 - Cut the network briefly with the camera on. Expected: after LiveKit reconnects, the Cinny user sees you again and your own tile recovers.
 - Open the camera in another program (a browser tab), then turn it on in the call. Write down whether the button ends blocked, or shows on over no picture.
-- With the camera blocked, plug a camera in. Expected (a known limitation): the block stays until another camera is picked from the ⌄ menu or the call is left.
+- With the camera blocked, plug a camera in. Expected (a known limitation): the block stays; clicking the blocked camera button then opens the camera.
 - Minimise and restore under X11 and under Wayland, once quickly, and once while someone joins or starts sharing. Expected: every picture returns. Write down whether Wayland stops the pictures at all.
 - Watch a picture while people start and stop speaking, and while pinning and unpinning. Write down any flicker or blank moment.
 - Change camera mid-call and have the Cinny user say how long your tile dropped to the avatar.

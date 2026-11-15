@@ -217,9 +217,12 @@ class CallControls extends StatelessWidget {
         icon: LucideIcons.videoOff,
         what: 'Camera',
         // On a computer the camera chosen did not open; the ⌄ beside it
-        // chooses another.
-        message: isDesktop ? "Couldn't open your camera" : null,
+        // chooses another, and a click tries this one again.
+        message: isDesktop
+            ? "Couldn't open your camera. Click to try again"
+            : null,
         size: _size,
+        onRetry: calls.toggleCamera,
       );
     }
     return CallButton(
@@ -343,8 +346,8 @@ class _CallButtonState extends State<CallButton> {
   }
 }
 
-/// A control that cannot be used. Disabled with a slash; says why on
-/// hover, or on a phone, on tap.
+/// A control that cannot be used. Dimmed with a slash; says why on hover,
+/// or on a phone, on tap.
 class _BlockedButton extends StatelessWidget {
   const _BlockedButton({
     required this.icon,
@@ -352,6 +355,7 @@ class _BlockedButton extends StatelessWidget {
     required this.size,
     this.message,
     this.explanation,
+    this.onRetry,
   });
 
   final IconData icon;
@@ -360,6 +364,10 @@ class _BlockedButton extends StatelessWidget {
 
   /// What hovering says. Null: that the system has denied [what].
   final String? message;
+
+  /// What a click on a computer does, where trying again may help. Null:
+  /// the control is disabled there.
+  final VoidCallback? onRetry;
 
   /// What tapping on a phone says under [message]. Null: where the system's
   /// setting for [what] is.
@@ -373,7 +381,7 @@ class _BlockedButton extends StatelessWidget {
       tooltip: message,
       size: size,
       onTap: isDesktop
-          ? null
+          ? onRetry
           : () => showActionSheet<void>(
               context,
               header: (context) => switch (explanation) {

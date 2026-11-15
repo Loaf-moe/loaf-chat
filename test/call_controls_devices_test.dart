@@ -319,6 +319,19 @@ void main() {
     },
   );
 
+  testWidgets('a blocked camera tries again when clicked', variant: _desktop, (
+    tester,
+  ) async {
+    final calls = _BlockedCamera();
+    await _pump(tester, calls: calls);
+
+    await tester.tap(
+      find.byTooltip("Couldn't open your camera. Click to try again"),
+    );
+
+    expect(calls.tried, 1);
+  });
+
   testWidgets('a blocked microphone keeps its device menu', variant: _desktop, (
     tester,
   ) async {
@@ -326,4 +339,17 @@ void main() {
 
     expect(find.byTooltip('Microphone settings'), findsOneWidget);
   });
+}
+
+/// Calls whose camera did not open, counting each try at it.
+class _BlockedCamera extends VoiceOnlyCalls {
+  _BlockedCamera() : super(features: const {CallFeature.camera});
+
+  var tried = 0;
+
+  @override
+  bool get cameraBlocked => true;
+
+  @override
+  void toggleCamera() => tried++;
 }

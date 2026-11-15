@@ -539,7 +539,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   @override
   void toggleCamera() {
     if (!_video) _lacks('camera');
-    if (cameraBlocked) return;
+    // Blocked, it is off, so this turns it on: another try at opening it.
+    // Linux does not say when a camera comes back, so nothing else would.
+    cameraBlocked = false;
     _camera = !_camera;
     _changedAudio();
   }
