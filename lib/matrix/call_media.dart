@@ -192,7 +192,6 @@ abstract interface class CallConnection implements Listenable {
   /// before.
   Future<void> setSpeakerDevice(String? id);
 
-  /// Leaves the call. Media already gone has nothing to undo.
   /// Starts or stops sending the camera. Throws [CameraUnavailable] when
   /// none opens.
   Future<void> setCamera(bool on);
@@ -214,5 +213,6 @@ abstract interface class CallConnection implements Listenable {
   /// off screen, not at all.
   Widget? video(String? identity, {bool screen = false});
 
+  /// Leaves the call. Media already gone has nothing to undo.
   Future<void> disconnect();
 }

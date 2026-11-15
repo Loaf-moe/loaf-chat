@@ -179,7 +179,7 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
       ..on<TrackSubscribedEvent>((event) async {
         final track = event.track;
         if (track is RemoteVideoTrack) {
-          if (_hidden) await event.publication.disable();
+          if (_hidden) await event.publication.unsubscribe();
           return;
         }
         if (track is! RemoteAudioTrack) return;
@@ -196,7 +196,7 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
   var _deafened = false;
 
   /// A minimised window draws no frame, so no picture's widget is there to
-  /// tell the server it went out of sight. This does.
+  /// tell the server it went out of sight. This unsubscribes from them.
   late final AppLifecycleListener _lifecycle;
   var _hidden = false;
 
@@ -429,12 +429,14 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
     );
   }
 
-  /// Asks the server for everyone's pictures again, or for none of them.
+  /// Subscribes to everyone's pictures again, or to none of them. Not
+  /// disable and enable: enable overrides adaptive stream for good, and
+  /// every picture would then be sent whether drawn or not.
   Future<void> _watch(bool seen) async {
     _hidden = !seen;
     for (final participant in _room.remoteParticipants.values) {
       for (final publication in participant.videoTrackPublications) {
-        await (seen ? publication.enable() : publication.disable());
+        await (seen ? publication.subscribe() : publication.unsubscribe());
       }
     }
   }
