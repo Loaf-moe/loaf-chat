@@ -67,6 +67,53 @@ Widget _tileActions(Calls calls, {bool you = false}) => Builder(
 );
 
 void main() {
+  group('a tile', () {
+    Widget tile({Widget? video}) => SizedBox(
+      width: 320,
+      height: 200,
+      child: CallTile(info: const TileInfo(_ada, camera: true), video: video),
+    );
+
+    testWidgets('draws the picture it is given', (tester) async {
+      await _pump(
+        tester,
+        tile(video: const SizedBox.expand(key: ValueKey('picture'))),
+      );
+
+      expect(find.byKey(const ValueKey('picture')), findsOneWidget);
+      expect(find.byIcon(LucideIcons.video), findsNothing);
+    });
+
+    testWidgets('with none, draws the camera placeholder', (tester) async {
+      await _pump(tester, tile());
+
+      expect(find.byIcon(LucideIcons.video), findsOneWidget);
+    });
+  });
+
+  testWidgets("the call asks for the picture of whoever's camera is on", (
+    tester,
+  ) async {
+    final calls = _Pictured()
+      ..session = const CallSession(
+        target: _oven,
+        phase: CallPhase.live,
+        participants: [CallParticipant(_ada, camera: true)],
+      );
+
+    await _pump(tester, CallView(calls: calls));
+
+    expect(
+      find.byKey(const ValueKey('picture-@ada:loaf.test-false')),
+      findsOneWidget,
+    );
+    // Your own camera is off: nothing is asked for.
+    expect(
+      find.byKey(const ValueKey('picture-@you:loaf.test-false')),
+      findsNothing,
+    );
+  });
+
   group('calls with voice alone, on a computer', () {
     testWidgets('keep mute, deafen and leave', variant: _desktop, (
       tester,
@@ -491,4 +538,11 @@ void main() {
       );
     }, variant: _desktop);
   });
+}
+
+/// Calls that have a picture for anyone asked about.
+class _Pictured extends VoiceOnlyCalls {
+  @override
+  Widget? video(String memberId, {bool screen = false}) =>
+      SizedBox.expand(key: ValueKey('picture-$memberId-$screen'));
 }

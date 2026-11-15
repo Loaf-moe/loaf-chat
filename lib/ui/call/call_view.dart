@@ -100,6 +100,10 @@ class CallView extends StatelessWidget {
     return CallTile(
       info: info,
       small: small,
+      // A screen takes the tile over its person's camera.
+      video: info.screen || info.camera
+          ? calls.video(info.id, screen: info.screen)
+          : null,
       // Name colour is power level, and DMs have no power levels.
       nameColor: session.direct ? null : tokens.nameColor(info.member.role),
       dimmed:

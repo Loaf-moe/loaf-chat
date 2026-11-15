@@ -2,7 +2,7 @@
 /// people in it, your own controls. [Calls] is the one thing they hold.
 library;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../model/models.dart';
 
@@ -185,7 +185,7 @@ enum CallFeature {
   camera,
   screenShare,
 
-  /// Choosing which camera.
+  /// Choosing which camera, among those the voice settings list.
   cameraDevices,
 
   /// Choosing speaker, earpiece or headset on a phone.
@@ -247,7 +247,6 @@ abstract interface class Calls implements Listenable {
   CallSilence? get silenced;
   bool get camera;
   AudioRoute get route;
-  String get cameraDevice;
 
   /// What you are sharing, if anything. Desktop only.
   String? get sharing;
@@ -265,6 +264,11 @@ abstract interface class Calls implements Listenable {
   /// How someone in a call you have not joined is set up, when that is
   /// known: muted, camera on.
   CallParticipant? lobbyState(String memberId);
+
+  /// Draws [memberId]'s camera, or with [screen] the screen they share,
+  /// filling whatever box it is given. Null where there is no picture to
+  /// draw: a tile then draws its placeholder.
+  Widget? video(String memberId, {bool screen = false});
 
   void joinVoice(Channel channel, {required String spaceName});
 
@@ -287,7 +291,6 @@ abstract interface class Calls implements Listenable {
   void toggleCamera();
   void flipCamera();
   void setRoute(AudioRoute value);
-  void setCameraDevice(String value);
   void startScreenShare(String source);
   void stopScreenShare();
   void pin(String? id);

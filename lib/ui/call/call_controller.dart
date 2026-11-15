@@ -5,6 +5,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show Widget;
 
 import '../mock/fixtures.dart';
 import 'calls.dart';
@@ -77,9 +78,6 @@ class CallController extends ChangeNotifier implements Calls {
   bool frontCamera = true;
   @override
   AudioRoute route = AudioRoute.speaker;
-  @override
-  String cameraDevice = 'FaceTime HD Camera';
-
   @override
   String? sharing;
 
@@ -278,11 +276,9 @@ class CallController extends ChangeNotifier implements Calls {
     notifyListeners();
   }
 
+  /// None: the mock's tiles draw their placeholders.
   @override
-  void setCameraDevice(String value) {
-    cameraDevice = value;
-    notifyListeners();
-  }
+  Widget? video(String memberId, {bool screen = false}) => null;
 
   @override
   void startScreenShare(String source) {

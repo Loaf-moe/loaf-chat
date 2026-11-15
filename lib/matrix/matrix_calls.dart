@@ -6,6 +6,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show Widget;
 // The SDK's own call module has classes of the same names.
 import 'package:matrix/matrix.dart' hide CallParticipant, CallSession;
 
@@ -625,8 +626,6 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   @override
   AudioRoute get route => AudioRoute.speaker;
   @override
-  String get cameraDevice => '';
-  @override
   CallParticipant? lobbyState(String memberId) => null;
 
   @override
@@ -648,7 +647,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   @override
   void setRoute(AudioRoute value) => _lacks('audioRoute');
   @override
-  void setCameraDevice(String value) => _lacks('devices');
+  Widget? video(String memberId, {bool screen = false}) => null;
 
   Never _lacks(String feature) =>
       throw UnsupportedError('MatrixCalls has no $feature');

@@ -67,6 +67,7 @@ class CallTile extends StatefulWidget {
     this.dimmed = false,
     this.pinned = false,
     this.small = false,
+    this.video,
     this.onTogglePin,
     this.onMenu,
     this.onFlipCamera,
@@ -83,6 +84,10 @@ class CallTile extends StatefulWidget {
 
   /// Filmstrip and compact-panel size: smaller avatar and label.
   final bool small;
+
+  /// Their camera or their screen, live. Null: the placeholder for
+  /// whichever [info] says they send.
+  final Widget? video;
 
   final VoidCallback? onTogglePin;
 
@@ -115,7 +120,9 @@ class _CallTileState extends State<CallTile> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (info.screen)
+          if (widget.video case final video?)
+            video
+          else if (info.screen)
             _ScreenPlaceholder(member: info.member)
           else if (info.camera)
             _VideoPlaceholder(member: info.member, mirrored: info.you)

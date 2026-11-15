@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/call/call_controls.dart';
+import 'package:loaf_native/ui/call/calls.dart';
 import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -57,6 +58,7 @@ Future<VoiceController> _pump(
         MemoryAudioDevices(
           microphones: microphones ?? () => const [_rode, _sony],
           speakers: () => const [_desk],
+          cameras: () => const [_cam],
         ),
   );
   addTearDown(voice.dispose);
@@ -80,7 +82,41 @@ Future<void> _open(WidgetTester tester, String menu) async {
   await tester.pumpAndSettle();
 }
 
+const _cam = AudioDevice('c920', 'HD Pro Webcam C920');
+
 void main() {
+  group('with a camera to choose', () {
+    VoiceOnlyCalls calls() => VoiceOnlyCalls(
+      features: const {CallFeature.camera, CallFeature.cameraDevices},
+    );
+
+    testWidgets(
+      'the camera menu lists the system default and the cameras',
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester, calls: calls());
+
+        await _open(tester, 'Camera settings');
+
+        expect(find.text('system default'), findsOneWidget);
+        expect(find.text('HD Pro Webcam C920'), findsOneWidget);
+        expect(find.text('RODE NT-USB'), findsNothing);
+      },
+    );
+
+    testWidgets('picking a camera chooses it', variant: _desktop, (
+      tester,
+    ) async {
+      final voice = await _pump(tester, calls: calls());
+      await _open(tester, 'Camera settings');
+
+      await tester.tap(find.text('HD Pro Webcam C920'));
+      await tester.pumpAndSettle();
+
+      expect(voice.camera, _cam);
+    });
+  });
+
   testWidgets(
     'the microphone and deafen each have a device menu',
     variant: _desktop,

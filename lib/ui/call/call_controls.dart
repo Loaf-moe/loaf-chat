@@ -23,7 +23,6 @@ String shortcutLabel(String key) =>
     ? '⌘⇧$key'
     : 'Ctrl+Shift+$key';
 
-const mockCameras = ['FaceTime HD Camera', 'Continuity Camera'];
 const mockShareSources = [
   'Entire screen',
   'Second display',
@@ -117,27 +116,18 @@ class CallControls extends StatelessWidget {
     else
       _micButton(context),
     if (_has(CallFeature.camera))
-      if (_has(CallFeature.cameraDevices))
+      if (voice != null && _has(CallFeature.cameraDevices))
         _WithMenu(
           button: _cameraButton(context),
           tooltip: 'Camera',
-          onOpen: (context, position) async {
-            final picked = await showActionMenu<String>(
-              context,
-              position: position,
-              items: [
-                for (final camera in mockCameras)
-                  ActionItem(
-                    value: camera,
-                    icon: camera == calls.cameraDevice
-                        ? LucideIcons.check
-                        : LucideIcons.dot,
-                    label: camera,
-                  ),
-              ],
-            );
-            if (picked != null) calls.setCameraDevice(picked);
-          },
+          onOpen: (context, position) => _chooseDevice(
+            context,
+            position,
+            voice: voice,
+            devices: () => voice.cameras,
+            chosen: () => voice.camera,
+            choose: voice.chooseCamera,
+          ),
         )
       else
         _cameraButton(context),
@@ -226,6 +216,9 @@ class CallControls extends StatelessWidget {
       return _BlockedButton(
         icon: LucideIcons.videoOff,
         what: 'Camera',
+        // On a computer the camera chosen did not open; the ⌄ beside it
+        // chooses another.
+        message: isDesktop ? "Couldn't open your camera" : null,
         size: _size,
       );
     }
