@@ -180,10 +180,28 @@ class LiveKitConnection extends ChangeNotifier
           _ => CallLink.lost,
         });
       })
+      // The server stops sending a picture this device's link cannot
+      // carry, and a picture sent in one size has no smaller one to fall
+      // back to: its tile is then black.
+      ..on<TrackStreamStateUpdatedEvent>((event) {
+        Logs().w(
+          '[loaf] the server has ${event.streamState.name} '
+          '${event.publication.source.name} from '
+          '${event.participant.identity}',
+        );
+      })
       ..on<TrackSubscribedEvent>((event) async {
         final track = event.track;
         if (track is RemoteVideoTrack) {
-          if (_hidden) await event.publication.unsubscribe();
+          final sent = event.publication;
+          Logs().w(
+            '[loaf] a picture from ${event.participant.identity}: '
+            '${sent.source.name} ${sent.mimeType} '
+            '${sent.dimensions?.width}x${sent.dimensions?.height} '
+            '${sent.simulcasted ? 'in several sizes' : 'in one size'}, '
+            '${sent.streamState.name}',
+          );
+          if (_hidden) await sent.unsubscribe();
           return;
         }
         if (track is! RemoteAudioTrack) return;
