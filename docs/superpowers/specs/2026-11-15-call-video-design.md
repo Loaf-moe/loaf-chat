@@ -187,7 +187,7 @@ textures, would slot in under the same Dart.
 - `MatrixCalls` against the in-memory `CallMedia`: the camera turning on
   and off reaches the connection; a peer's camera and screen show on their
   participant, from any of their devices; the newest share is spotlit and
-  a pin overrides it; no picture while the window is minimised; a camera that does not open ends off and blocked,
+  a pin overrides it; a camera that does not open ends off and blocked,
   and the block lifts on a change of devices; a call that ends leaves the
   camera off; a camera chosen in the settings reaches the connection;
   no feature is claimed where video is off.
