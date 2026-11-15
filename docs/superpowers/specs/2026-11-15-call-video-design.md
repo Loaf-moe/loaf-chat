@@ -113,11 +113,13 @@ filmstrip, or the call not on screen at all) is sent nothing; a small tile
 is sent a small copy. This is what keeps a full grid affordable without
 the graphics card.
 
-**Video is not a loop.** The motion budget rests whatever loops while the
-app is unfocused or under reduced motion. A call's pictures are neither:
-they play wherever their tile is on screen, focused or not. A call you are
-not looking at (the connected-call bar only) draws no picture and is sent
-none.
+**Only what is visible plays.** A picture is drawn, and asked of the
+server, only while its tile is on screen. A tile scrolled out of the
+filmstrip, a call you are not looking at (the connected-call bar only) and
+a minimised window draw none and are sent none. A window that is open but
+not focused keeps playing: Linux does not say whether such a window can be
+seen (motion budget spec, "Unfocused is not hidden"), and a call left open
+beside other work is the usual case.
 
 **The media interface** (`lib/matrix/call_media.dart`). `CallPeer` gains
 `camera` and `screen`: whether that device sends each. `CallConnection`
@@ -173,26 +175,19 @@ placeholder is: the screen's when they share one, else the camera's.
 
 ## Software video
 
-Everything here runs on the processor: encoding your camera three times
-over, decoding everyone else's, and copying each frame to Flutter. Nothing
-in this design depends on that. Which codec runs where is libwebrtc's
-business and how a frame reaches Flutter is the plugin's, both below
-`livekit_client`; a libwebrtc built with hardware codecs, or a plugin that
-hands over textures, would slot in under the same Dart.
-
-Whether it is good enough is measured before anything is built on it (see
-Order). If it is not, in the order they would be tried:
-
-1. Send 360p or 480p in place of 720p.
-2. Capture at fifteen or twenty frames a second.
-3. Drop simulcast, at the cost of everyone being sent the one size.
+Everything here runs on the processor: encoding your camera, decoding
+everyone else's, and copying each frame to Flutter. Nothing in this design
+depends on that. Which codec runs where is libwebrtc's business and how a
+frame reaches Flutter is the plugin's, both below `livekit_client`; a
+libwebrtc built with hardware codecs, or a plugin that hands over
+textures, would slot in under the same Dart.
 
 ## Testing
 
 - `MatrixCalls` against the in-memory `CallMedia`: the camera turning on
   and off reaches the connection; a peer's camera and screen show on their
   participant, from any of their devices; the newest share is spotlit and
-  a pin overrides it; a camera that does not open ends off and blocked,
+  a pin overrides it; no picture while the window is minimised; a camera that does not open ends off and blocked,
   and the block lifts on a change of devices; a call that ends leaves the
   camera off; a camera chosen in the settings reaches the connection;
   no feature is claimed where video is off.
@@ -217,11 +212,6 @@ its processor use under both X11 and Wayland.
 
 ## Order
 
-1. **The measurement.** The room's options, `setCamera` and `video` in
-   `livekit_media.dart`, and a tile that draws the widget, wired just far
-   enough to sit in a call with Cinny users with cameras on and read the
-   processor's use. Decides whether "Sending" stands or takes one of the
-   steps under "Software video".
-2. Camera on and off through `MatrixCalls`, with seeing everyone else's
+1. Camera on and off through `MatrixCalls`, with seeing everyone else's
    and their screen shares.
-3. Choosing a camera, in the menu and the settings.
+2. Choosing a camera, in the menu and the settings.
