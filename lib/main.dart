@@ -13,6 +13,7 @@ import 'push/app_group.dart';
 import 'push/pusher.dart';
 import 'push/rules_file.dart';
 import 'matrix/channel_default.dart';
+import 'matrix/encrypted_mentions.dart';
 import 'matrix/matrix_rooms.dart';
 import 'matrix/matrix_session.dart';
 import 'platform/livekit_media.dart';
@@ -209,6 +210,10 @@ Future<void> main() async {
         (_) => repairEncryptedRule(matrix.client),
       ),
     );
+    // A channel set to mentions only silences its encrypted messages at the
+    // server, mentions included; this carries them to the device to judge.
+    // Like the rules writer, it lives as long as the process.
+    EncryptedMentions(matrix.client);
     newRooms = () => MatrixRooms(
       matrix.client,
       externalMedia: appearance.externalMediaListenable,
