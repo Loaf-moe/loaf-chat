@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Loaf Chat</title>
+        <item>
+            <title>0.1.29</title>
+            <pubDate>Sun, 15 Nov 2026 23:21:59 +0000</pubDate>
+            <sparkle:version>544</sparkle:version>
+            <sparkle:shortVersionString>0.1.29</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/Loaf-moe/loaf-chat/releases/download/v0.1.29/Loaf-Chat-0.1.29.dmg" length="54520801" type="application/octet-stream" sparkle:edSignature="BSTvvRhIwqD1/0b65gm6yTmzBEYu9oFJwynfdoNV5HDnk//X/Zl9ptbdG8GElornxK5GDI1bf+kN7+x/R4F3BQ=="/>
+        </item>
+    </channel>
+</rss>

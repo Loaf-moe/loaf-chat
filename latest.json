@@ -1,0 +1,16 @@
+{
+  "version": "0.1.29",
+  "build": 544,
+  "appimage": {
+    "url": "https://github.com/Loaf-moe/loaf-chat/releases/download/v0.1.29/Loaf-Chat-0.1.29-x86_64.AppImage",
+    "sha256": "de4d49bdc58fec779fcdbafae00c5e4defab0f418bc766b80cf30ce4fb9950a3",
+    "size": 29780472,
+    "signature": "WjtCakfEQhqny1LW1/wp76vxazP4ax8RDzH7CB7Wm9Q1YnVg5iLk+1jsKDuEd3g6hOCG5SWH/60e0HHCuCekDw=="
+  },
+  "windows": {
+    "url": "https://github.com/Loaf-moe/loaf-chat/releases/download/v0.1.29/Loaf-Chat-0.1.29-windows-x64.zip",
+    "sha256": "cea3ff4228bb2dcd9995ddb150f70312112212cdc5c75462c282bf86eea83607",
+    "size": 28856051,
+    "signature": "C:/Program Files/Git/ZFTWgtl+9g71RkVpl/lwwS+NBn3ghg8O9jnQPM4vIlBCxfy8RMD9awxvWNCw7e2jMhcI0qvlYpso32sjb4vCQ=="
+  }
+}
