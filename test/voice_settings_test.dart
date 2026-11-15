@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -61,10 +62,53 @@ class _Slow implements AudioDevices {
   Future<List<AudioDevice>> speakers() async => const [];
 
   @override
+  Future<List<AudioDevice>> cameras() async => const [];
+
+  @override
   Stream<void> get changes => const Stream.empty();
 }
 
 void main() {
+  group('the camera', () {
+    const cam = AudioDevice('c920', 'HD Pro Webcam C920');
+
+    test('is kept beside the microphone and the speaker', () {
+      const settings = VoiceSettings(microphone: _rode, camera: cam);
+
+      final read = VoiceSettings.fromJson(
+        jsonDecode(jsonEncode(settings.toJson())),
+      );
+
+      expect(read.camera, cam);
+      expect(read, settings);
+    });
+
+    test('alone makes two settings differ', () {
+      expect(const VoiceSettings(camera: cam), isNot(const VoiceSettings()));
+    });
+
+    test('is chosen, and given back to the system default', () async {
+      final controller = await _controller();
+
+      controller.chooseCamera(cam);
+      expect(controller.camera, cam);
+      expect(controller.settings.value.camera, cam);
+
+      controller.chooseCamera(null);
+      expect(controller.camera, isNull);
+    });
+
+    test('is among what the machine is asked for', () async {
+      final controller = await _controller(
+        devices: MemoryAudioDevices(cameras: () => const [cam]),
+      );
+
+      await controller.refresh();
+
+      expect(controller.cameras, [cam]);
+    });
+  });
+
   test('nothing saved means the system default for both', () async {
     final controller = await _controller(store: MemoryStore<VoiceSettings>());
 

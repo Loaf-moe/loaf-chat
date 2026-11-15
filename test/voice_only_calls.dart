@@ -6,7 +6,7 @@ import 'package:loaf_native/ui/model/models.dart';
 /// sharing, camera choice or DM calls has them. Joining goes live at
 /// once.
 class VoiceOnlyCalls extends ChangeNotifier implements Calls {
-  VoiceOnlyCalls({this.canJoin = true, this.leaving});
+  VoiceOnlyCalls({this.canJoin = true, this.leaving, this.features = const {}});
 
   /// What [joinable] answers for every channel.
   final bool canJoin;
@@ -18,7 +18,7 @@ class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   final Member me = const Member('@you:loaf.test', 'you', Color(0xFF888888));
 
   @override
-  Set<CallFeature> get features => const {};
+  final Set<CallFeature> features;
 
   @override
   CallQuality quality = CallQuality.good;
@@ -109,8 +109,6 @@ class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   @override
   AudioRoute get route => AudioRoute.speaker;
   @override
-  String get cameraDevice => '';
-  @override
   CallParticipant? lobbyState(String memberId) => null;
 
   @override
@@ -132,7 +130,7 @@ class VoiceOnlyCalls extends ChangeNotifier implements Calls {
   @override
   void setRoute(AudioRoute value) => _lacks();
   @override
-  void setCameraDevice(String value) => _lacks();
+  Widget? video(String memberId, {bool screen = false}) => null;
 
   Never _lacks() => throw UnsupportedError('voice only');
 }

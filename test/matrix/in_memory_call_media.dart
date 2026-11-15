@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show SizedBox, ValueKey, Widget;
 import 'package:loaf_native/matrix/call_media.dart';
 
 /// A media server held in memory: devices that connect to one room see each
@@ -20,13 +21,14 @@ class InMemoryCallServer {
 }
 
 /// One device's way to an [InMemoryCallServer]: its [network], whether it
-/// has a [microphone], and which audio devices it has by id.
+/// has a [microphone] and a [camera], and which devices it has by id.
 class InMemoryCallMedia implements CallMedia {
   InMemoryCallMedia(
     this.server, {
     ValueListenable<CallLink>? network,
     ValueListenable<CallQuality>? quality,
     this.microphone = true,
+    this.camera = true,
     this.present,
     this.broken = const {},
   }) : network = network ?? ValueNotifier(CallLink.connected),
@@ -38,12 +40,16 @@ class InMemoryCallMedia implements CallMedia {
   /// How the server rates this device's link.
   final ValueListenable<CallQuality> quality;
   final bool microphone;
+  final bool camera;
 
-  /// The ids of the audio devices this machine has. Null: any id asked for.
+  /// The ids of the devices this machine has. Null: any id asked for.
   final ValueListenable<Set<String>>? present;
 
   /// The ids of devices this machine has but cannot open.
   final Set<String> broken;
+
+  /// Held back until completed, when set: a camera being turned on.
+  Completer<void>? holdCamera;
 
   @override
   Future<CallConnection> connect(Uri url, String jwt) async {
@@ -81,6 +87,14 @@ class InMemoryCallMedia implements CallMedia {
   }
 }
 
+/// Has the device behind [connection] start or stop sharing its screen.
+/// Only for a connection an [InMemoryCallMedia] made.
+void shareScreen(CallConnection connection, {required bool on}) {
+  final device = connection as _Connection;
+  device._screen = on;
+  device._media.server._changed(device._room);
+}
+
 class _Connection extends ChangeNotifier implements CallConnection {
   _Connection(this._media, this._identity, this._room);
 
@@ -89,6 +103,8 @@ class _Connection extends ChangeNotifier implements CallConnection {
   final String _room;
   final _deviceChanges = StreamController<void>.broadcast();
   var _microphone = false;
+  var _camera = false;
+  var _screen = false;
   var _gone = false;
 
   @override
@@ -96,6 +112,9 @@ class _Connection extends ChangeNotifier implements CallConnection {
 
   @override
   String? speaker;
+
+  @override
+  String? camera;
 
   @override
   MicrophoneProcessing processing = const MicrophoneProcessing();
@@ -124,13 +143,19 @@ class _Connection extends ChangeNotifier implements CallConnection {
 
   @override
   Map<String, CallPeer> get peers => {
-    for (final other in _media.server._rooms[_room] ?? const <_Connection>[])
-      if (!identical(other, this))
-        other._identity: CallPeer(
-          muted: !other._microphone,
-          speaking: other._microphone,
-        ),
+    for (final other in _others)
+      other._identity: CallPeer(
+        muted: !other._microphone,
+        speaking: other._microphone,
+        camera: other._camera,
+        screen: other._screen,
+      ),
   };
+
+  Iterable<_Connection> get _others => [
+    for (final other in _media.server._rooms[_room] ?? const <_Connection>[])
+      if (!identical(other, this)) other,
+  ];
 
   @override
   Future<void> setMicrophone(bool on) async {
@@ -171,6 +196,45 @@ class _Connection extends ChangeNotifier implements CallConnection {
       throw SpeakerUnavailable("$device doesn't open");
     }
     speaker = device;
+  }
+
+  @override
+  Future<void> setCamera(bool on) async {
+    final hold = _media.holdCamera;
+    if (on && hold != null) await hold.future;
+    if (on && (!_media.camera || _media.broken.contains(camera))) {
+      throw CameraUnavailable("${camera ?? 'the default'} doesn't open");
+    }
+    // As LiveKit's: a camera opened for a connection that is gone is closed
+    // again, not sent.
+    if (on && _gone) throw const CameraUnavailable('the call is gone');
+    _camera = on;
+    _media.server._changed(_room);
+  }
+
+  @override
+  Future<void> setCameraDevice(String? id) async {
+    camera = _present(id);
+    if (_camera && _media.broken.contains(camera)) {
+      _camera = false;
+      _media.server._changed(_room);
+      throw CameraUnavailable("$camera doesn't open");
+    }
+  }
+
+  @override
+  Widget? video(String? identity, {bool screen = false}) {
+    final device = identity == null
+        ? this
+        : _others.where((other) => other._identity == identity).firstOrNull;
+    if (device == null || !(screen ? device._screen : device._camera)) {
+      return null;
+    }
+    return SizedBox.shrink(
+      key: ValueKey(
+        'video-${device._identity}-${screen ? 'screen' : 'camera'}',
+      ),
+    );
   }
 
   @override

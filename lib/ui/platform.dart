@@ -36,3 +36,8 @@ bool get hasCalls => switch (defaultTargetPlatform) {
   TargetPlatform.windows => true,
   _ => false,
 };
+
+/// Whether a call has cameras and shows screen shares. Each platform needs
+/// its camera permission and a check by hand before it joins Linux here;
+/// see "Scope" in the call video design spec.
+bool get hasCallVideo => defaultTargetPlatform == TargetPlatform.linux;

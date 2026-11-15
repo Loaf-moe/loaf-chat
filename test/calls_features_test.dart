@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/call/call_controls.dart';
 import 'package:loaf_native/ui/call/calls.dart';
+import 'package:loaf_native/ui/call/call_stage.dart';
 import 'package:loaf_native/ui/call/call_tile.dart';
 import 'package:loaf_native/ui/call/call_view.dart';
 import 'package:loaf_native/ui/call/voice_channel_page.dart';
@@ -67,6 +68,124 @@ Widget _tileActions(Calls calls, {bool you = false}) => Builder(
 );
 
 void main() {
+  group('a tile', () {
+    Widget tile({Widget? video}) => SizedBox(
+      width: 320,
+      height: 200,
+      child: CallTile(info: const TileInfo(_ada, camera: true), video: video),
+    );
+
+    testWidgets('draws the picture it is given', (tester) async {
+      await _pump(
+        tester,
+        tile(video: const SizedBox.expand(key: ValueKey('picture'))),
+      );
+
+      expect(find.byKey(const ValueKey('picture')), findsOneWidget);
+      expect(find.byIcon(LucideIcons.video), findsNothing);
+    });
+
+    testWidgets('with none, draws the camera placeholder', (tester) async {
+      await _pump(tester, tile());
+
+      expect(find.byIcon(LucideIcons.video), findsOneWidget);
+    });
+  });
+
+  testWidgets("the call asks for the picture of whoever's camera is on", (
+    tester,
+  ) async {
+    final calls = _Pictured()
+      ..session = const CallSession(
+        target: _oven,
+        phase: CallPhase.live,
+        participants: [CallParticipant(_ada, camera: true)],
+      );
+
+    await _pump(tester, CallView(calls: calls));
+
+    expect(
+      find.byKey(const ValueKey('picture-@ada:loaf.test-false')),
+      findsOneWidget,
+    );
+    // Your own camera is off: nothing is asked for.
+    expect(
+      find.byKey(const ValueKey('picture-@you:loaf.test-false')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('a screen share has a tile of its own, beside its person', (
+    tester,
+  ) async {
+    final calls = _Shared()
+      ..session = const CallSession(
+        target: _oven,
+        phase: CallPhase.live,
+        participants: [CallParticipant(_ada, camera: true, screen: true)],
+      );
+
+    await _pump(tester, CallView(calls: calls));
+
+    // The screen is on the stage; their camera is still in the strip.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('spotlight')),
+        matching: find.byKey(const ValueKey('picture-@ada:loaf.test-true')),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('picture-@ada:loaf.test-false')),
+      findsOneWidget,
+    );
+  });
+
+  group('the grid, on a window taller than it is wide,', () {
+    Future<List<Size>> sizes(WidgetTester tester, int count, Size box) async {
+      await _pump(
+        tester,
+        Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox.fromSize(
+            size: box,
+            child: CallStage(
+              tiles: [
+                for (var i = 0; i < count; i++)
+                  TileInfo(Member('@m$i:loaf.test', 'm$i', _ada.color)),
+              ],
+              tileBuilder: (info, {required small}) =>
+                  SizedBox.expand(key: ValueKey(info.id)),
+            ),
+          ),
+        ),
+      );
+      return [
+        for (var i = 0; i < count; i++)
+          tester.getSize(find.byKey(ValueKey('@m$i:loaf.test'))),
+      ];
+    }
+
+    testWidgets('keeps six tiles wider than they are tall', (tester) async {
+      for (final size in await sizes(tester, 6, const Size(720, 780))) {
+        expect(size.width, greaterThanOrEqualTo(size.height), reason: '$size');
+      }
+    });
+
+    testWidgets('keeps one tile no taller than a camera', (tester) async {
+      final size = (await sizes(tester, 1, const Size(720, 780))).single;
+
+      expect(size.width, 720);
+      expect(size.height, 540);
+    });
+
+    testWidgets('still fills a wide window with one tile', (tester) async {
+      final size = (await sizes(tester, 1, const Size(1100, 500))).single;
+
+      expect(size, const Size(1100, 500));
+    });
+  });
+
   group('calls with voice alone, on a computer', () {
     testWidgets('keep mute, deafen and leave', variant: _desktop, (
       tester,
@@ -479,6 +598,47 @@ void main() {
       expect(find.byTooltip('Turn camera on'), findsNothing);
     });
 
+    testWidgets(
+      "with a camera, its toggle is locked while you are in another call",
+      variant: _desktop,
+      (tester) async {
+        final calls = VoiceOnlyCalls(features: {CallFeature.camera})
+          ..session = const CallSession(
+            target: Channel(id: '!kiln', name: 'kiln', kind: ChannelKind.voice),
+            phase: CallPhase.live,
+            participants: [],
+          );
+        await _pump(tester, _lobby(calls));
+
+        final toggle = tester.widget<CallButton>(
+          find.ancestor(
+            of: find.byTooltip('Turn camera on'),
+            matching: find.byType(CallButton),
+          ),
+        );
+        expect(toggle.onTap, isNull);
+      },
+    );
+
+    testWidgets(
+      'with a camera, its toggle switches while you are in no call',
+      variant: _desktop,
+      (tester) async {
+        await _pump(
+          tester,
+          _lobby(VoiceOnlyCalls(features: {CallFeature.camera})),
+        );
+
+        final toggle = tester.widget<CallButton>(
+          find.ancestor(
+            of: find.byTooltip('Turn camera on'),
+            matching: find.byType(CallButton),
+          ),
+        );
+        expect(toggle.onTap, isNotNull);
+      },
+    );
+
     testWidgets('of a channel that cannot be joined says why, with no button', (
       tester,
     ) async {
@@ -491,4 +651,17 @@ void main() {
       );
     }, variant: _desktop);
   });
+}
+
+/// Calls in which ada is the newest to share a screen.
+class _Shared extends _Pictured {
+  @override
+  String? get spotlight => pinned ?? _ada.id;
+}
+
+/// Calls that have a picture for anyone asked about.
+class _Pictured extends VoiceOnlyCalls {
+  @override
+  Widget? video(String memberId, {bool screen = false}) =>
+      SizedBox.expand(key: ValueKey('picture-$memberId-$screen'));
 }

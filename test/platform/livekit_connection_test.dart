@@ -1,3 +1,9 @@
+import 'dart:async';
+import 'dart:ui' show AppExitResponse;
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart'
+    show WidgetsBinding, WidgetsBindingObserver;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'package:loaf_native/matrix/call_media.dart';
@@ -25,6 +31,32 @@ Future<void> _tell(Room room, RoomEvent event) async {
 }
 
 void main() {
+  // The connection listens for the app's lifecycle.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'a call left while the app is quitting does not trip the quit',
+    () async {
+      // Asked before the connection, as the app's own quit handler is: it
+      // leaves the call while the others are still to be asked.
+      final quit = _LeavesOnQuit();
+      WidgetsBinding.instance.addObserver(quit);
+      addTearDown(() => WidgetsBinding.instance.removeObserver(quit));
+      // The binding reports what an observer throws; it does not rethrow.
+      final reported = <FlutterErrorDetails>[];
+      final before = FlutterError.onError;
+      FlutterError.onError = reported.add;
+      addTearDown(() => FlutterError.onError = before);
+      final (:room, :connection) = _open();
+      quit.connection = connection;
+
+      await WidgetsBinding.instance.handleRequestAppExit();
+
+      expect(quit.asked, isTrue);
+      expect(reported, isEmpty);
+    },
+  );
+
   test('a fresh connection is connected', () {
     final (:room, :connection) = _open();
 
@@ -129,4 +161,17 @@ void main() {
 
     expect(seen, contains(CallLink.reconnecting));
   });
+}
+
+/// Leaves the call when the app asks to quit, without waiting for it.
+class _LeavesOnQuit with WidgetsBindingObserver {
+  LiveKitConnection? connection;
+  var asked = false;
+
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    asked = true;
+    unawaited(connection?.disconnect());
+    return AppExitResponse.exit;
+  }
 }

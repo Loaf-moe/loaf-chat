@@ -1,10 +1,20 @@
-/// A call's media and the machine's audio devices over LiveKit: the one
-/// file that touches `livekit_client`.
+/// A call's media and the machine's devices over LiveKit: the one file
+/// that touches `livekit_client`.
 library;
+
+import 'dart:async';
 
 import 'package:connectivity_plus_platform_interface/connectivity_plus_platform_interface.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+// ConnectionState is LiveKit's here, not the widgets library's.
+import 'package:flutter/widgets.dart'
+    show
+        AppLifecycleState,
+        ObjectKey,
+        Widget,
+        WidgetsBinding,
+        WidgetsBindingObserver;
 import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc show Helper;
 import 'package:livekit_client/livekit_client.dart';
 import 'package:matrix/matrix.dart' show Logs;
@@ -18,6 +28,9 @@ final Future<void> _webRtcStarted = LiveKitClient.initialize();
 
 /// Muting switches the microphone off and leaves it open.
 const _capture = AudioCaptureOptions(stopAudioCaptureOnMute: false);
+
+/// As Element Call opens it.
+const _camera = CameraCaptureOptions(params: VideoParametersPresets.h720_169);
 
 /// [id] where [devices] has it, else the first: the one WebRTC opens when
 /// told none.
@@ -36,6 +49,10 @@ class LiveKitAudioDevices implements AudioDevices {
   @override
   Future<List<AudioDevice>> speakers() =>
       _listed(() => Hardware.instance.audioOutputs());
+
+  @override
+  Future<List<AudioDevice>> cameras() =>
+      _listed(() => Hardware.instance.videoInputs());
 
   @override
   Stream<void> get changes async* {
@@ -84,10 +101,24 @@ class LiveKitMedia implements CallMedia {
     }
     final room = Room(
       roomOptions: const RoomOptions(
-        // As Element Call publishes, so that either end hears the other the
-        // same way.
+        // As Element Call has them, so that either end hears and sees the
+        // other the same way. Adaptive stream asks the server only for the
+        // pictures on screen, at the size they are drawn; dynacast stops
+        // encoding the sizes nobody is being sent.
+        adaptiveStream: true,
+        dynacast: true,
         defaultAudioPublishOptions: AudioPublishOptions(dtx: true, red: false),
         defaultAudioCaptureOptions: _capture,
+        defaultCameraCaptureOptions: _camera,
+        defaultVideoPublishOptions: VideoPublishOptions(
+          videoCodec: 'vp8',
+          videoEncoding: VideoEncoding(maxBitrate: 1700000, maxFramerate: 30),
+          videoSimulcastLayers: [
+            VideoParametersPresets.h180_169,
+            VideoParametersPresets.h360_169,
+          ],
+          backupVideoCodec: BackupVideoCodec(enabled: false),
+        ),
       ),
     );
     try {
@@ -121,9 +152,12 @@ class _AlwaysOnline extends ConnectivityPlatform {
       const Stream.empty();
 }
 
-class LiveKitConnection extends ChangeNotifier implements CallConnection {
+class LiveKitConnection extends ChangeNotifier
+    with WidgetsBindingObserver
+    implements CallConnection {
   LiveKitConnection(this._room, this._selectSpeaker) {
     _room.addListener(notifyListeners);
+    WidgetsBinding.instance.addObserver(this);
     _events = _room.createListener()
       ..on<RoomAttemptReconnectEvent>((event) {
         Logs().w(
@@ -146,8 +180,30 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
           _ => CallLink.lost,
         });
       })
+      // The server stops sending a picture this device's link cannot
+      // carry, and a picture sent in one size has no smaller one to fall
+      // back to: its tile is then black.
+      ..on<TrackStreamStateUpdatedEvent>((event) {
+        Logs().w(
+          '[loaf] the server has ${event.streamState.name} '
+          '${event.publication.source.name} from '
+          '${event.participant.identity}',
+        );
+      })
       ..on<TrackSubscribedEvent>((event) async {
         final track = event.track;
+        if (track is RemoteVideoTrack) {
+          final sent = event.publication;
+          Logs().w(
+            '[loaf] a picture from ${event.participant.identity}: '
+            '${sent.source.name} ${sent.mimeType} '
+            '${sent.dimensions?.width}x${sent.dimensions?.height} '
+            '${sent.simulcasted ? 'in several sizes' : 'in one size'}, '
+            '${sent.streamState.name}',
+          );
+          if (_hidden) await sent.unsubscribe();
+          return;
+        }
         if (track is! RemoteAudioTrack) return;
         final volume = _volumes[event.participant.identity];
         if (volume != null) await _play(track, volume);
@@ -160,6 +216,35 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
   final Future<void> Function(String id)? _selectSpeaker;
   late final EventsListener<RoomEvent> _events;
   var _deafened = false;
+
+  /// A minimised window draws no frame, so no picture's widget is there to
+  /// tell the server it went out of sight. This unsubscribes from them.
+  ///
+  /// An observer of its own, not an `AppLifecycleListener`: quitting leaves
+  /// the call while the binding is still asking its observers about the
+  /// quit, and that class throws when asked after it is disposed.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final hidden = switch (state) {
+      AppLifecycleState.resumed || AppLifecycleState.inactive => false,
+      AppLifecycleState.hidden ||
+      AppLifecycleState.paused ||
+      AppLifecycleState.detached => true,
+    };
+    if (hidden != _hidden) unawaited(_watch(!hidden));
+  }
+
+  var _hidden = false;
+
+  /// Done when the last [_watch] has, so they run one at a time and a show
+  /// that lands mid-hide is not undone by the rest of the hide. Never
+  /// fails: a failure is the zone's to report, and the next one still runs.
+  Future<void> _watched = Future.value();
+
+  /// The camera chosen, and the one the camera is open from. Null: the
+  /// system's default, and none open.
+  String? _cameraChosen;
+  String? _cameraOpened;
 
   /// How loud each device is played, by identity, where one was set.
   final _volumes = <String, double>{};
@@ -225,6 +310,8 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
       participant.identity: CallPeer(
         muted: participant.isMuted,
         speaking: participant.isSpeaking,
+        camera: participant.isCameraEnabled(),
+        screen: participant.isScreenShareEnabled(),
       ),
   };
 
@@ -308,6 +395,110 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
   );
 
   @override
+  String? get camera => _cameraOpened == _cameraChosen ? _cameraChosen : null;
+
+  LocalTrackPublication? get _cameraSent =>
+      _room.localParticipant?.getTrackPublicationBySource(TrackSource.camera);
+
+  @override
+  Future<void> setCamera(bool on) async {
+    final local = _room.localParticipant;
+    if (local == null) return;
+    final sent = _cameraSent;
+    if (!on) {
+      // Unpublished, not muted: the camera closes and its light goes out,
+      // and the next one opens from whichever device is chosen by then.
+      // ponytail: each switching on negotiates anew; mute and unmute if
+      // that proves slow.
+      if (sent != null) await local.removePublishedTrack(sent.sid);
+      _cameraOpened = null;
+      return;
+    }
+    if (sent != null) return;
+    // Any failure, whatever LiveKit or WebRTC throws (WebRTC throws bare
+    // strings): a camera not sent is off and blocked, never left thought on.
+    try {
+      final id = _present(await Hardware.instance.videoInputs(), _cameraChosen);
+      final track = await LocalVideoTrack.createCameraTrack(
+        _camera.copyWith(deviceId: id),
+      );
+      try {
+        await local.publishVideoTrack(track);
+      } on Object {
+        // Opened and never published: nothing else would close it.
+        await track.stop();
+        rethrow;
+      }
+      _cameraOpened = id;
+    } on Object catch (e) {
+      throw CameraUnavailable(e.toString());
+    }
+  }
+
+  @override
+  Future<void> setCameraDevice(String? id) async {
+    _cameraChosen = id;
+    if (_cameraSent == null) return;
+    final String? now;
+    try {
+      now = _present(await Hardware.instance.videoInputs(), id);
+    } on PlatformException catch (e) {
+      throw CameraUnavailable(e.toString());
+    }
+    if (now == _cameraOpened) return;
+    await setCamera(false);
+    await setCamera(true);
+  }
+
+  @override
+  Widget? video(String? identity, {bool screen = false}) {
+    final Participant? participant = identity == null
+        ? _room.localParticipant
+        : _room.remoteParticipants.values
+              .where((participant) => participant.identity == identity)
+              .firstOrNull;
+    final publication = participant?.getTrackPublicationBySource(
+      screen ? TrackSource.screenShareVideo : TrackSource.camera,
+    );
+    final track = publication?.track;
+    if (publication == null || publication.muted || track is! VideoTrack) {
+      return null;
+    }
+    return VideoTrackRenderer(
+      track,
+      // A new track is a new picture, not the old one's next frame.
+      key: ObjectKey(track),
+      // A camera fills its tile, cropped; a screen is shown whole.
+      fit: screen ? VideoViewFit.contain : VideoViewFit.cover,
+      mirrorMode: identity == null && !screen
+          ? VideoViewMirrorMode.mirror
+          : VideoViewMirrorMode.off,
+    );
+  }
+
+  /// Subscribes to everyone's pictures again, or to none of them. Not
+  /// disable and enable: enable overrides adaptive stream for good, and
+  /// every picture would then be sent whether drawn or not.
+  Future<void> _watch(bool seen) async {
+    _hidden = !seen;
+    final before = _watched;
+    final done = Completer<void>();
+    _watched = done.future;
+    await before;
+    try {
+      // Copies: someone may join or leave while this awaits.
+      final hidden = _hidden;
+      for (final participant in _room.remoteParticipants.values.toList()) {
+        for (final publication in participant.videoTrackPublications.toList()) {
+          await (hidden ? publication.unsubscribe() : publication.subscribe());
+        }
+      }
+    } finally {
+      done.complete();
+    }
+  }
+
+  @override
   Future<void> setSpeakerDevice(String? id) async {
     _speaker = id;
     try {
@@ -364,7 +555,14 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
   }
 
   @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
   Future<void> disconnect() async {
+    WidgetsBinding.instance.removeObserver(this);
     _room.removeListener(notifyListeners);
     await _events.dispose();
     // Once LiveKit has said the media is gone there is nothing to leave,

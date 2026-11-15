@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loaf_native/ui/call/call_controls.dart';
+import 'package:loaf_native/ui/call/calls.dart';
 import 'package:loaf_native/ui/mock/mock_audio_devices.dart';
 import 'package:loaf_native/ui/settings/voice_settings.dart';
 import 'package:loaf_native/ui/theme/loaf_theme.dart';
@@ -27,6 +28,9 @@ class _Slow implements AudioDevices {
 
   @override
   Future<List<AudioDevice>> speakers() async => const [];
+
+  @override
+  Future<List<AudioDevice>> cameras() async => const [];
 
   @override
   Stream<void> get changes => const Stream.empty();
@@ -54,6 +58,7 @@ Future<VoiceController> _pump(
         MemoryAudioDevices(
           microphones: microphones ?? () => const [_rode, _sony],
           speakers: () => const [_desk],
+          cameras: () => const [_cam],
         ),
   );
   addTearDown(voice.dispose);
@@ -77,7 +82,41 @@ Future<void> _open(WidgetTester tester, String menu) async {
   await tester.pumpAndSettle();
 }
 
+const _cam = AudioDevice('c920', 'HD Pro Webcam C920');
+
 void main() {
+  group('with a camera to choose', () {
+    VoiceOnlyCalls calls() => VoiceOnlyCalls(
+      features: const {CallFeature.camera, CallFeature.cameraDevices},
+    );
+
+    testWidgets(
+      'the camera menu lists the system default and the cameras',
+      variant: _desktop,
+      (tester) async {
+        await _pump(tester, calls: calls());
+
+        await _open(tester, 'Camera settings');
+
+        expect(find.text('system default'), findsOneWidget);
+        expect(find.text('HD Pro Webcam C920'), findsOneWidget);
+        expect(find.text('RODE NT-USB'), findsNothing);
+      },
+    );
+
+    testWidgets('picking a camera chooses it', variant: _desktop, (
+      tester,
+    ) async {
+      final voice = await _pump(tester, calls: calls());
+      await _open(tester, 'Camera settings');
+
+      await tester.tap(find.text('HD Pro Webcam C920'));
+      await tester.pumpAndSettle();
+
+      expect(voice.camera, _cam);
+    });
+  });
+
   testWidgets(
     'the microphone and deafen each have a device menu',
     variant: _desktop,
@@ -280,6 +319,19 @@ void main() {
     },
   );
 
+  testWidgets('a blocked camera tries again when clicked', variant: _desktop, (
+    tester,
+  ) async {
+    final calls = _BlockedCamera();
+    await _pump(tester, calls: calls);
+
+    await tester.tap(
+      find.byTooltip("Couldn't open your camera. Click to try again"),
+    );
+
+    expect(calls.tried, 1);
+  });
+
   testWidgets('a blocked microphone keeps its device menu', variant: _desktop, (
     tester,
   ) async {
@@ -287,4 +339,17 @@ void main() {
 
     expect(find.byTooltip('Microphone settings'), findsOneWidget);
   });
+}
+
+/// Calls whose camera did not open, counting each try at it.
+class _BlockedCamera extends VoiceOnlyCalls {
+  _BlockedCamera() : super(features: const {CallFeature.camera});
+
+  var tried = 0;
+
+  @override
+  bool get cameraBlocked => true;
+
+  @override
+  void toggleCamera() => tried++;
 }

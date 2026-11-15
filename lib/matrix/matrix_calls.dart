@@ -1,11 +1,12 @@
 /// Voice channels for real: the call server's access, this device's
-/// membership in the room, and the media, behind the one [Calls] the shell
-/// and the call widgets read.
+/// membership in the room, and the media, sound and pictures, behind the
+/// one [Calls] the shell and the call widgets read.
 library;
 
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show Widget;
 // The SDK's own call module has classes of the same names.
 import 'package:matrix/matrix.dart' hide CallParticipant, CallSession;
 
@@ -29,6 +30,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     required this._me,
     this._voice,
     this._voiceApplying,
+    this._video = false,
     DateTime Function()? now,
     this._timings = const CallMembershipTimings(),
     this._reconnectDelays = defaultReconnectDelays,
@@ -49,6 +51,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
 
   /// Told true while a call takes those up, which can take seconds.
   final ValueNotifier<bool>? _voiceApplying;
+
+  /// Whether calls have cameras and show screen shares.
+  final bool _video;
   final DateTime Function() _now;
   final CallMembershipTimings _timings;
 
@@ -93,6 +98,10 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   var _muted = false;
   var _deafened = false;
 
+  /// Whether you want your camera sent. Chosen before a call, it is how
+  /// you join; a call that ends puts it back to off.
+  var _camera = false;
+
   @override
   bool get muted => _muted || silenced != null;
 
@@ -105,13 +114,20 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   bool micBlocked = false;
 
   @override
+  bool get camera => _camera;
+
+  @override
+  bool cameraBlocked = false;
+
+  @override
   bool switchingAudio = false;
 
   @override
   Member get me => _me();
 
   @override
-  Set<CallFeature> get features => const {};
+  Set<CallFeature> get features =>
+      _video ? const {CallFeature.camera, CallFeature.cameraDevices} : const {};
 
   @override
   CallQuality get quality => _live?.connection?.quality ?? CallQuality.unknown;
@@ -131,7 +147,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   String? get pinned => _pinned;
 
   @override
-  String? get spotlight => _pinned;
+  String? get spotlight => _pinned ?? _live?.sharing.lastOrNull;
 
   @override
   bool joinable(Channel channel) =>
@@ -166,6 +182,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     _attempt++;
     final live = _detach();
     final joins = _joins.toList();
+    _cameraOff();
     _session = null;
     _pinned = null;
     _notify();
@@ -177,6 +194,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   Future<void> _join(Channel channel, String spaceName) async {
     final attempt = ++_attempt;
     final before = _detach();
+    // Going from one call to another ends the first; a camera switched on
+    // with no call under way is how you asked to join this one.
+    if (before != null) _cameraOff();
     final room = _client.getRoomById(channel.id);
     micBlocked = false;
     _pinned = null;
@@ -313,6 +333,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     if (attempt != _attempt) return;
     _attempt++;
     final live = _detach();
+    _cameraOff();
     _phase(CallPhase.failed);
     await _end(live);
   }
@@ -365,6 +386,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     if (attempt != _attempt) return;
     _attempt++;
     final live = _detach();
+    _cameraOff();
     _phase(CallPhase.hungUp);
     await _end(live);
   }
@@ -432,9 +454,16 @@ class MatrixCalls extends ChangeNotifier implements Calls {
 
   void _refresh(_Live live) {
     final occupants = _occupants(live.room);
-    _session = _session?.copyWith(
-      participants: _participants(live.room, occupants, live.connection),
-    );
+    final participants = _participants(live.room, occupants, live.connection);
+    final sharing = {
+      for (final participant in participants)
+        if (participant.screen) participant.member.id,
+    };
+    // Kept in the order each began, so the newest is last.
+    live.sharing
+      ..removeWhere((id) => !sharing.contains(id))
+      ..addAll(sharing.difference(live.sharing.toSet()));
+    _session = _session?.copyWith(participants: participants);
     _notify();
     _syncVolumes(live, occupants);
   }
@@ -458,7 +487,8 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   }
 
   /// Everyone else among [occupants]. Someone is speaking if any of their
-  /// devices is, and muted unless one of them sends a microphone.
+  /// devices is, muted unless one of them sends a microphone, and seen or
+  /// sharing if any of them sends a camera or a screen.
   List<CallParticipant> _participants(
     Room room,
     List<CallOccupant> occupants,
@@ -478,6 +508,8 @@ class MatrixCalls extends ChangeNotifier implements Calls {
               occupant.member,
               muted: theirs.every((peer) => peer.muted),
               silenced: silences[occupant.member.id],
+              camera: theirs.any((peer) => peer.camera),
+              screen: theirs.any((peer) => peer.screen),
               speaking: theirs.any((peer) => peer.speaking),
             );
           }(),
@@ -504,6 +536,16 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     _changedAudio();
   }
 
+  @override
+  void toggleCamera() {
+    if (!_video) _lacks('camera');
+    // Blocked, it is off, so this turns it on: another try at opening it.
+    // Linux does not say when a camera comes back, so nothing else would.
+    cameraBlocked = false;
+    _camera = !_camera;
+    _changedAudio();
+  }
+
   void _changedAudio() {
     _notify();
     final live = _live;
@@ -524,10 +566,10 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     _syncVolumes(live, _occupants(live.room));
   }
 
-  /// Brings what [live] sends and plays in line with [muted] and
-  /// [deafened] as they stand when its turn comes; with [voice], first
-  /// the microphone, its processing and the speaker in line with those
-  /// chosen.
+  /// Brings what [live] sends and plays in line with [muted], [deafened]
+  /// and [camera] as they stand when its turn comes; with [voice], first
+  /// the microphone, its processing, the speaker and the camera in line
+  /// with those chosen.
   void _applyAudio(_Live live, {bool voice = false}) {
     final before = _audioApplied;
     final applied = Completer<void>();
@@ -537,24 +579,63 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       try {
         final connection = live.connection;
         if (!identical(live, _live) || connection == null) return;
-        if (voice) {
-          _switching(true);
-          try {
-            await _applyVoice(connection);
-          } finally {
-            _switching(false);
+        try {
+          if (voice) {
+            _switching(true);
+            try {
+              await _applyVoice(connection);
+            } finally {
+              _switching(false);
+            }
           }
+          await connection.setDeafened(deafened);
+          await connection.setMicrophone(!muted);
+        } on MicrophoneUnavailable {
+          _muted = true;
+          micBlocked = true;
+          _notify();
         }
-        await connection.setDeafened(deafened);
-        await connection.setMicrophone(!muted);
-      } on MicrophoneUnavailable {
-        _muted = true;
-        micBlocked = true;
-        _notify();
+        // After the sound, and whatever became of the microphone.
+        await _applyCamera(live, connection, chosen: voice);
       } finally {
         applied.complete();
       }
     }());
+  }
+
+  /// Sends the camera or stops, as [camera] has it; with [chosen], first
+  /// takes it from the camera chosen.
+  Future<void> _applyCamera(
+    _Live live,
+    CallConnection connection, {
+    required bool chosen,
+  }) async {
+    if (!_video) return;
+    try {
+      if (chosen) {
+        if (cameraBlocked) {
+          // Another camera may open where the last did not. Still off:
+          // turning it on is yours to do.
+          cameraBlocked = false;
+          _notify();
+        }
+        await connection.setCameraDevice(_voice?.value.camera?.id);
+      }
+      await connection.setCamera(_camera);
+    } on CameraUnavailable {
+      // Opening can take long enough for the call to have ended, which
+      // left the camera off and unblocked.
+      if (!identical(live, _live)) return;
+      _camera = false;
+      cameraBlocked = true;
+      _notify();
+    }
+  }
+
+  /// A call that has ended leaves the camera off, and free to be tried.
+  void _cameraOff() {
+    _camera = false;
+    cameraBlocked = false;
   }
 
   void _switching(bool on) {
@@ -596,6 +677,25 @@ class MatrixCalls extends ChangeNotifier implements Calls {
     _notify();
   }
 
+  @override
+  Widget? video(String memberId, {bool screen = false}) {
+    final live = _live;
+    final connection = live?.connection;
+    if (live == null || connection == null) return null;
+    if (memberId == _client.userID) {
+      return connection.video(null, screen: screen);
+    }
+    for (final occupant in _occupants(live.room)) {
+      if (occupant.member.id != memberId) continue;
+      // One tile a person: the first of their devices that sends one.
+      for (final device in occupant.devices) {
+        final video = connection.video('$memberId:$device', screen: screen);
+        if (video != null) return video;
+      }
+    }
+    return null;
+  }
+
   void _notify() {
     if (!_disposed) notifyListeners();
   }
@@ -617,15 +717,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   @override
   bool get encrypted => false;
   @override
-  bool get camera => false;
-  @override
-  bool get cameraBlocked => false;
-  @override
   String? get sharing => null;
   @override
   AudioRoute get route => AudioRoute.speaker;
-  @override
-  String get cameraDevice => '';
   @override
   CallParticipant? lobbyState(String memberId) => null;
 
@@ -638,8 +732,6 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   @override
   void decline() => _lacks('direct');
   @override
-  void toggleCamera() => _lacks('camera');
-  @override
   void flipCamera() => _lacks('camera');
   @override
   void startScreenShare(String source) => _lacks('screenShare');
@@ -647,8 +739,6 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   void stopScreenShare() => _lacks('screenShare');
   @override
   void setRoute(AudioRoute value) => _lacks('audioRoute');
-  @override
-  void setCameraDevice(String value) => _lacks('devices');
 
   Never _lacks(String feature) =>
       throw UnsupportedError('MatrixCalls has no $feature');
@@ -667,6 +757,9 @@ class _Live {
 
   /// The settings as of the last change this call looked at.
   VoiceSettings? voice;
+
+  /// Who is sharing a screen, by user id, in the order they began.
+  final sharing = <String>[];
 
   /// What a moderator has put on you here, as of the last sync.
   CallSilence? silenced;

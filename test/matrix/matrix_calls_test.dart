@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show Widget;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:loaf_native/matrix/call_media.dart';
@@ -22,6 +23,7 @@ const _me = '@test:fakeServer.notExisting';
 const _device = 'GHTYAJCE';
 const _mine = '$_me:$_device';
 const _ada = '@ada:example.com';
+const _bea = '@bea:example.com';
 const _oven = '!oven:example.com';
 const _kiln = '!kiln:example.com';
 const _hour = 3600000;
@@ -217,6 +219,20 @@ class _LoggedConnection implements CallConnection {
   }
 
   @override
+  String? get camera => _inner.camera;
+  @override
+  Future<void> setCamera(bool on) => _inner.setCamera(on);
+  @override
+  Future<void> setCameraDevice(String? id) {
+    _deviceSets.add('camera');
+    return _inner.setCameraDevice(id);
+  }
+
+  @override
+  Widget? video(String? identity, {bool screen = false}) =>
+      _inner.video(identity, screen: screen);
+
+  @override
   void addListener(VoidCallback listener) => _inner.addListener(listener);
   @override
   void removeListener(VoidCallback listener) => _inner.removeListener(listener);
@@ -310,6 +326,7 @@ class _World {
   late final Client client;
   late final Calls calls;
   late final _Logged _media;
+  late final InMemoryCallMedia fake;
 
   /// This device's connection to the call it joined last.
   CallConnection get connection => _media.last!;
@@ -322,6 +339,8 @@ class _World {
   /// the calls open.
   Future<void> open({
     bool microphone = true,
+    bool camera = true,
+    bool video = true,
     bool encrypted = false,
     List<Map<String, Object?>> already = const [],
     ValueListenable<Set<String>>? present,
@@ -350,11 +369,12 @@ class _World {
       ]);
     }
     _media = _Logged(
-      InMemoryCallMedia(
+      fake = InMemoryCallMedia(
         server,
         network: network,
         quality: quality,
         microphone: microphone,
+        camera: camera,
         present: present,
         broken: broken,
       ),
@@ -363,6 +383,7 @@ class _World {
     final rooms = MatrixRooms(
       client,
       callMedia: _media,
+      callVideo: video,
       voice: voice,
       voiceApplying: voiceApplying,
       now: () => now,
@@ -402,6 +423,8 @@ class _World {
 
 Future<_World> _open({
   bool microphone = true,
+  bool camera = true,
+  bool video = true,
   bool encrypted = false,
   List<Map<String, Object?>> already = const [],
   ValueListenable<Set<String>>? present,
@@ -410,6 +433,8 @@ Future<_World> _open({
   final world = _World();
   await world.open(
     microphone: microphone,
+    camera: camera,
+    video: video,
     encrypted: encrypted,
     already: already,
     present: present,
@@ -423,6 +448,456 @@ Future<void> _settle() =>
     Future<void>.delayed(const Duration(milliseconds: 100));
 
 void main() {
+  group('your camera', () {
+    const c920 = AudioDevice('c920', 'HD Pro Webcam C920');
+    const brio = AudioDevice('brio', 'Logitech BRIO');
+
+    test('is offered, with a choice of which, where video is on', () async {
+      final world = await _open();
+
+      expect(world.calls.features, {
+        CallFeature.camera,
+        CallFeature.cameraDevices,
+      });
+    });
+
+    test('is not offered where video is off', () async {
+      final world = await _open(video: false);
+
+      expect(world.calls.features, isEmpty);
+    });
+
+    test('is off when you join', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+
+      await world.join();
+      await _settle();
+
+      expect(world.calls.camera, isFalse);
+      expect(watcher.peers[_mine]!.camera, isFalse);
+    });
+
+    test('is sent when you turn it on', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      expect(world.calls.camera, isTrue);
+      expect(watcher.peers[_mine]!.camera, isTrue);
+    });
+
+    test('stops being sent when you turn it off', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      world.calls.toggleCamera();
+      await _until(() => !(watcher.peers[_mine]?.camera ?? true));
+
+      expect(world.calls.camera, isFalse);
+      expect(watcher.peers[_mine]!.camera, isFalse);
+    });
+
+    test('switched on before joining is sent once you are in', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+
+      world.calls.toggleCamera();
+      await world.join();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      expect(watcher.peers[_mine]!.camera, isTrue);
+    });
+
+    test('tells listeners when it is switched', () async {
+      final world = await _open();
+      var told = 0;
+      world.calls.addListener(() => told++);
+
+      world.calls.toggleCamera();
+
+      expect(told, 1);
+    });
+
+    test('that cannot open ends off, and says it is blocked', () async {
+      final world = await _open(camera: false);
+      await world.join();
+
+      world.calls.toggleCamera();
+      await _until(() => world.calls.cameraBlocked);
+
+      expect(world.calls.cameraBlocked, isTrue);
+      expect(world.calls.camera, isFalse);
+    });
+
+    test('that cannot open leaves your microphone sent', () async {
+      final world = await _open(camera: false);
+      final watcher = await world.watcher();
+      await world.join();
+
+      world.calls.toggleCamera();
+      await _until(() => world.calls.cameraBlocked);
+
+      expect(watcher.peers[_mine]!.muted, isFalse);
+    });
+
+    test('blocked, switching it tries again', () async {
+      final world = await _open(camera: false);
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => world.calls.cameraBlocked);
+      final hold = world.fake.holdCamera = Completer<void>();
+
+      world.calls.toggleCamera();
+
+      expect(world.calls.cameraBlocked, isFalse);
+      expect(world.calls.camera, isTrue);
+
+      hold.complete();
+      await _until(() => world.calls.cameraBlocked);
+
+      expect(world.calls.camera, isFalse);
+    });
+
+    test('a change of devices lifts the block, still off', () async {
+      final present = ValueNotifier(<String>{});
+      final world = await _open(camera: false, present: present);
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => world.calls.cameraBlocked);
+
+      present.value = {'c920'};
+      await _until(() => !world.calls.cameraBlocked);
+
+      expect(world.calls.cameraBlocked, isFalse);
+      expect(world.calls.camera, isFalse);
+    });
+
+    test('is off after you leave', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      await world.calls.leave();
+
+      expect(world.calls.camera, isFalse);
+    });
+
+    test('is off in the call you go to from another', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      world.calls.joinVoice(_kilnChannel, spaceName: 'Bakery');
+      await _until(
+        () =>
+            world.calls.session?.target.id == _kiln &&
+            world.calls.session?.phase == CallPhase.live,
+      );
+      await _settle();
+
+      expect(world.calls.camera, isFalse);
+      expect(world.connection.video(null), isNull);
+    });
+
+    test('that fails to open after you have left is not blocked', () async {
+      final world = await _open(camera: false);
+      await world.join();
+      final hold = world.fake.holdCamera = Completer<void>();
+
+      world.calls.toggleCamera();
+      await _settle();
+      await world.calls.leave();
+      hold.complete();
+      await _settle();
+
+      expect(world.calls.cameraBlocked, isFalse);
+      expect(world.calls.camera, isFalse);
+    });
+
+    test('is off after the call is lost', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      world.network.value = CallLink.ended;
+      await _until(() => world.calls.session?.phase == CallPhase.failed);
+
+      expect(world.calls.camera, isFalse);
+    });
+
+    test('is taken from the camera chosen', () async {
+      final world = await _open();
+      world.voice.value = const VoiceSettings(camera: c920);
+      await world.join();
+
+      world.calls.toggleCamera();
+      await _until(() => world.connection.camera == 'c920');
+
+      expect(world.connection.camera, 'c920');
+    });
+
+    test('choosing another during a call switches to it', () async {
+      final world = await _open();
+      world.voice.value = const VoiceSettings(camera: c920);
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => world.connection.camera == 'c920');
+
+      world.voice.value = const VoiceSettings(camera: brio);
+      await _until(() => world.connection.camera == 'brio');
+
+      expect(world.connection.camera, 'brio');
+      expect(world.calls.camera, isTrue);
+    });
+
+    test('a camera that does not open on being chosen ends off and '
+        'blocked', () async {
+      final world = await _open(broken: {'brio'});
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      world.voice.value = const VoiceSettings(camera: brio);
+      await _until(() => world.calls.cameraBlocked);
+
+      expect(world.calls.camera, isFalse);
+      expect(watcher.peers[_mine]!.camera, isFalse);
+    });
+
+    test('deafening leaves it sent', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      world.calls.toggleDeafen();
+      await _settle();
+
+      expect(watcher.peers[_mine]!.camera, isTrue);
+    });
+
+    test('is off after someone hangs up for you', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      await _sync(world.client, _oven, [
+        _state(
+          callSilenceType,
+          callHangUpContent(null),
+          key: callSilenceKey(_me),
+          sender: _ada,
+          ts: _noon.millisecondsSinceEpoch + _hour,
+        ),
+      ]);
+      await _until(() => world.calls.session?.phase == CallPhase.hungUp);
+
+      expect(world.calls.camera, isFalse);
+    });
+
+    test('a moderator deafening you leaves it sent', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      await _sync(world.client, _oven, [
+        _state(
+          callSilenceType,
+          callSilenceContent(CallSilence.deafened),
+          key: callSilenceKey(_me),
+          sender: _ada,
+        ),
+      ]);
+      await _until(() => world.calls.silenced == CallSilence.deafened);
+      await _settle();
+
+      expect(watcher.peers[_mine]!.camera, isTrue);
+    });
+  });
+
+  group('everyone else', () {
+    CallParticipant ada(_World world) => world.calls.session!.participants
+        .singleWhere((p) => p.member.id == _ada);
+
+    test('sending a camera shows it', () async {
+      final world = await _open();
+      final phone = await world.other(_ada, 'PHONE');
+      await world.join();
+
+      await phone.setCamera(true);
+      await _until(() => ada(world).camera);
+
+      expect(ada(world).camera, isTrue);
+      expect(ada(world).screen, isFalse);
+    });
+
+    test('sending one on either of two devices shows it', () async {
+      final world = await _open();
+      await world.other(_ada, 'PHONE');
+      final laptop = await world.other(_ada, 'LAPTOP');
+      await world.join();
+
+      await laptop.setCamera(true);
+      await _until(() => ada(world).camera);
+
+      expect(ada(world).camera, isTrue);
+    });
+
+    test('turning it off shows that too', () async {
+      final world = await _open();
+      final phone = await world.other(_ada, 'PHONE');
+      await world.join();
+      await phone.setCamera(true);
+      await _until(() => ada(world).camera);
+
+      await phone.setCamera(false);
+      await _until(() => !ada(world).camera);
+
+      expect(ada(world).camera, isFalse);
+    });
+
+    test('sharing a screen shows it and takes the spotlight', () async {
+      final world = await _open();
+      final phone = await world.other(_ada, 'PHONE');
+      await world.join();
+
+      shareScreen(phone, on: true);
+      await _until(() => world.calls.spotlight == _ada);
+
+      expect(ada(world).screen, isTrue);
+      expect(world.calls.spotlight, _ada);
+    });
+
+    test('of two shares, the newest is spotlit', () async {
+      final world = await _open();
+      final adas = await world.other(_ada, 'PHONE');
+      final beas = await world.other(_bea, 'PHONE');
+      await world.join();
+      shareScreen(adas, on: true);
+      await _until(() => world.calls.spotlight == _ada);
+
+      shareScreen(beas, on: true);
+      await _until(() => world.calls.spotlight == _bea);
+
+      expect(world.calls.spotlight, _bea);
+    });
+
+    test('the newest share ending gives the spotlight back', () async {
+      final world = await _open();
+      final adas = await world.other(_ada, 'PHONE');
+      final beas = await world.other(_bea, 'PHONE');
+      await world.join();
+      shareScreen(adas, on: true);
+      await _until(() => world.calls.spotlight == _ada);
+      shareScreen(beas, on: true);
+      await _until(() => world.calls.spotlight == _bea);
+
+      shareScreen(beas, on: false);
+      await _until(() => world.calls.spotlight == _ada);
+
+      expect(world.calls.spotlight, _ada);
+    });
+
+    test('a pin overrides a share', () async {
+      final world = await _open();
+      final adas = await world.other(_ada, 'PHONE');
+      await world.other(_bea, 'PHONE');
+      await world.join();
+      shareScreen(adas, on: true);
+      await _until(() => world.calls.spotlight == _ada);
+
+      world.calls.pin(_bea);
+
+      expect(world.calls.spotlight, _bea);
+    });
+
+    test('no share and no pin spotlights no one', () async {
+      final world = await _open();
+      await world.other(_ada, 'PHONE');
+      await world.join();
+
+      expect(world.calls.spotlight, isNull);
+    });
+  });
+
+  group('a picture', () {
+    test('is there for a camera being sent, and not for a screen', () async {
+      final world = await _open();
+      final phone = await world.other(_ada, 'PHONE');
+      await world.join();
+      expect(world.calls.video(_ada), isNull);
+
+      await phone.setCamera(true);
+      await _until(() => world.calls.video(_ada) != null);
+
+      expect(world.calls.video(_ada), isNotNull);
+      expect(world.calls.video(_ada, screen: true), isNull);
+    });
+
+    test('is there for a screen being shared', () async {
+      final world = await _open();
+      final phone = await world.other(_ada, 'PHONE');
+      await world.join();
+
+      shareScreen(phone, on: true);
+      await _until(() => world.calls.video(_ada, screen: true) != null);
+
+      expect(world.calls.video(_ada, screen: true), isNotNull);
+    });
+
+    test('is the first device of theirs that sends one', () async {
+      final world = await _open();
+      await world.other(_ada, 'PHONE');
+      final laptop = await world.other(_ada, 'LAPTOP');
+      await world.join();
+
+      await laptop.setCamera(true);
+      await _until(() => world.calls.video(_ada) != null);
+
+      expect(
+        world.calls.video(_ada)!.key,
+        const ValueKey('video-$_ada:LAPTOP-camera'),
+      );
+    });
+
+    test('of you is there while your camera is on', () async {
+      final world = await _open();
+      await world.join();
+      expect(world.calls.video(_me), isNull);
+
+      world.calls.toggleCamera();
+      await _until(() => world.calls.video(_me) != null);
+
+      expect(world.calls.video(_me), isNotNull);
+    });
+
+    test('is not there outside a call', () async {
+      final world = await _open();
+
+      expect(world.calls.video(_ada), isNull);
+      expect(world.calls.video(_me), isNull);
+    });
+  });
+
   group('joining', () {
     test('shows connecting at once, then live', () async {
       final world = await _open();
@@ -1735,6 +2210,25 @@ void main() {
       expect(world.calls.session?.startedAt, startedAt);
       expect(world.log.skip(4), ['access', 'connected']);
       expect(world.log.where((e) => e == 'wrote membership'), hasLength(1));
+    });
+
+    test('lost, sends your camera again once back', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+      final lost = world.connection;
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+
+      world.network.value = CallLink.connected;
+      await _until(() => world.calls.session?.phase == CallPhase.live);
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      expect(world.connection, isNot(same(lost)));
+      expect(watcher.peers[_mine]!.camera, isTrue);
+      expect(world.connection.video(null), isNotNull);
     });
 
     test('lost, keeps trying while the call server refuses', () async {

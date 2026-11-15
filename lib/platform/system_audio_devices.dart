@@ -23,6 +23,10 @@ class SystemAudioDevices implements AudioDevices {
   @override
   Future<List<AudioDevice>> speakers() => _listed('speakers');
 
+  /// None: the Mac has no video in calls yet.
+  @override
+  Future<List<AudioDevice>> cameras() async => const [];
+
   @override
   Stream<void> get changes {
     late final StreamController<void> changes;

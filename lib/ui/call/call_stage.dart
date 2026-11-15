@@ -115,36 +115,60 @@ class CallStage extends StatelessWidget {
 
   Widget _grid(BoxConstraints c) {
     final n = tiles.length;
-    final cols = columnsFor(n, c.maxWidth);
-    final rows = (n / cols).ceil();
-    final width = (c.maxWidth - _gap * (cols - 1)) / cols;
+    final cols = columnsFor(n, c.maxWidth, c.maxHeight);
+    final (width, fitted) = _tileSize(n, cols, c.maxWidth, c.maxHeight);
     const minHeight = 140.0;
-    final fitted = (c.maxHeight - _gap * (rows - 1)) / rows;
     final height = math.max(fitted, minHeight);
     // Past what fits, the grid scrolls rather than shrinking tiles into
-    // stamps.
-    return SingleChildScrollView(
-      child: Wrap(
-        spacing: _gap,
-        runSpacing: _gap,
-        alignment: WrapAlignment.center,
-        children: [
-          for (final t in tiles)
-            SizedBox(
-              width: width,
-              height: height,
-              child: tileBuilder(t, small: false),
-            ),
-        ],
+    // stamps. Short of filling the pane, it sits in the middle.
+    return Center(
+      child: SingleChildScrollView(
+        child: Wrap(
+          spacing: _gap,
+          runSpacing: _gap,
+          alignment: WrapAlignment.center,
+          children: [
+            for (final t in tiles)
+              SizedBox(
+                width: width,
+                height: height,
+                child: tileBuilder(t, small: false),
+              ),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// Columns for [count] tiles at [width]. A phone stacks two, then goes to
-/// two columns; a computer spreads out to three or four as it has room.
-int columnsFor(int count, double width) {
+/// The tallest a tile on a computer is for its width: 4:3. A camera is
+/// wider than that, and a taller tile crops it to a sliver.
+const _tallest = 3 / 4;
+
+/// How large each of [count] tiles is in [cols] columns of a [width] by
+/// [height] pane.
+(double, double) _tileSize(int count, int cols, double width, double height) {
+  final rows = (count / cols).ceil();
+  final w = (width - _gap * (cols - 1)) / cols;
+  final h = (height - _gap * (rows - 1)) / rows;
+  return (w, width < _narrow ? h : math.min(h, w * _tallest));
+}
+
+/// Columns for [count] tiles in a [width] by [height] pane. A phone stacks
+/// two, then goes to two columns. A computer takes whichever number shows
+/// the largest 16:9 picture in each tile, so a tall window gets fewer
+/// columns and a wide one more.
+int columnsFor(int count, double width, double height) {
   if (width < _narrow) return count <= 2 ? 1 : 2;
-  final most = width >= 1100 ? 4 : 3;
-  return math.min(count, count == 4 ? 2 : most);
+  var best = 1;
+  var most = 0.0;
+  for (var cols = 1; cols <= count; cols++) {
+    final (w, h) = _tileSize(count, cols, width, height);
+    final shown = math.min(w, h * 16 / 9) * math.min(h, w * 9 / 16);
+    if (shown > most) {
+      most = shown;
+      best = cols;
+    }
+  }
+  return best;
 }
