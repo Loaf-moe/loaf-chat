@@ -215,6 +215,7 @@ Future<void> main() async {
       callMedia: calls
           ? LiveKitMedia(selectSpeaker: system?.selectSpeaker)
           : null,
+      callVideo: calls && hasCallVideo,
       voice: voice?.settings,
       voiceApplying: voice?.applying,
     );

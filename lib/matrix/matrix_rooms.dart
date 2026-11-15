@@ -74,6 +74,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     this.client, {
     this._mediaRoot,
     this._callMedia,
+    this._callVideo = false,
     this._voice,
     this._voiceApplying,
     this.externalMedia,
@@ -191,6 +192,9 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
   /// What carries a call's audio. Null: this build has no calls.
   final CallMedia? _callMedia;
 
+  /// Whether calls have cameras and show screen shares.
+  final bool _callVideo;
+
   /// The microphone and the speaker a call uses. Null: the system's
   /// defaults.
   final ValueListenable<VoiceSettings>? _voice;
@@ -202,6 +206,7 @@ class MatrixRooms extends ChangeNotifier implements Rooms {
     final media? => _calls ??= MatrixCalls(
       client,
       media,
+      video: _callVideo,
       occupants: _occupants,
       me: () => me,
       voice: _voice,
