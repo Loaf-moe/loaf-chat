@@ -513,3 +513,75 @@ fn the_c_abi_reads_a_negative_member_count_as_unknown() {
         0
     );
 }
+
+// ------------------------------------------- encrypted mentions-only rooms
+
+/// A mentions-only encrypted room as Loaf leaves it: the SDK's silent room
+/// rule, the override `lib/matrix/encrypted_mentions.dart` adds so the
+/// server pushes its encrypted messages at all, and the mention rule.
+fn encrypted_mentions_only() -> Value {
+    json!({
+        "override": [
+            notify(
+                &format!("moe.loaf.encrypted_mentions.{ROOM}"),
+                json!([
+                    {"kind": "event_match", "key": "room_id", "pattern": ROOM},
+                    {"kind": "event_match", "key": "type", "pattern": "m.room.encrypted"},
+                ]),
+            ),
+            notify(
+                ".m.rule.is_user_mention",
+                json!([{
+                    "kind": "event_property_contains",
+                    "key": r"content.m\.mentions.user_ids",
+                    "value": ADA,
+                }]),
+            ),
+        ],
+        "room": [{"rule_id": ROOM, "default": false, "enabled": true, "actions": []}],
+        "underride": message_default(),
+    })
+}
+
+#[test]
+fn the_server_pushes_an_encrypted_message_in_a_mentions_only_room() {
+    // Without the override the silent room rule stops it here, and the
+    // extension never sees the mention inside.
+    let envelope = json!({
+        "type": "m.room.encrypted",
+        "room_id": ROOM,
+        "sender": BOB,
+        "content": {"algorithm": "m.megolm.v1.aes-sha2", "ciphertext": "…"},
+    });
+    assert_eq!(
+        notifies(
+            &account(encrypted_mentions_only()),
+            &envelope,
+            Some(5),
+            None
+        ),
+        Some(true)
+    );
+}
+
+#[test]
+fn the_device_still_drops_a_decrypted_plain_message_there() {
+    assert_eq!(
+        notifies(
+            &account(encrypted_mentions_only()),
+            &msg("morning all"),
+            Some(5),
+            None
+        ),
+        Some(false)
+    );
+}
+
+#[test]
+fn the_device_still_shows_a_decrypted_mention_there() {
+    let mine = mentioning("hey ada", json!({"user_ids": [ADA]}));
+    assert_eq!(
+        notifies(&account(encrypted_mentions_only()), &mine, Some(5), None),
+        Some(true)
+    );
+}
