@@ -48,6 +48,9 @@ class InMemoryCallMedia implements CallMedia {
   /// The ids of devices this machine has but cannot open.
   final Set<String> broken;
 
+  /// Held back until completed, when set: a camera being turned on.
+  Completer<void>? holdCamera;
+
   @override
   Future<CallConnection> connect(Uri url, String jwt) async {
     if (url != server.url) throw CallMediaUnreachable('no server at $url');
@@ -197,6 +200,7 @@ class _Connection extends ChangeNotifier implements CallConnection {
 
   @override
   Future<void> setCamera(bool on) async {
+    if (on) await _media.holdCamera?.future;
     if (on && (!_media.camera || _media.broken.contains(camera))) {
       throw CameraUnavailable("${camera ?? 'the default'} doesn't open");
     }

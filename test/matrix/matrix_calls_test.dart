@@ -326,6 +326,7 @@ class _World {
   late final Client client;
   late final Calls calls;
   late final _Logged _media;
+  late final InMemoryCallMedia fake;
 
   /// This device's connection to the call it joined last.
   CallConnection get connection => _media.last!;
@@ -368,7 +369,7 @@ class _World {
       ]);
     }
     _media = _Logged(
-      InMemoryCallMedia(
+      fake = InMemoryCallMedia(
         server,
         network: network,
         quality: quality,
@@ -601,6 +602,21 @@ void main() {
 
       expect(world.calls.camera, isFalse);
       expect(world.connection.video(null), isNull);
+    });
+
+    test('that fails to open after you have left is not blocked', () async {
+      final world = await _open(camera: false);
+      await world.join();
+      final hold = world.fake.holdCamera = Completer<void>();
+
+      world.calls.toggleCamera();
+      await _settle();
+      await world.calls.leave();
+      hold.complete();
+      await _settle();
+
+      expect(world.calls.cameraBlocked, isFalse);
+      expect(world.calls.camera, isFalse);
     });
 
     test('is off after the call is lost', () async {

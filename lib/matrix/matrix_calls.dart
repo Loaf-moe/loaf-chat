@@ -594,7 +594,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
           _notify();
         }
         // After the sound, and whatever became of the microphone.
-        await _applyCamera(connection, chosen: voice);
+        await _applyCamera(live, connection, chosen: voice);
       } finally {
         applied.complete();
       }
@@ -604,6 +604,7 @@ class MatrixCalls extends ChangeNotifier implements Calls {
   /// Sends the camera or stops, as [camera] has it; with [chosen], first
   /// takes it from the camera chosen.
   Future<void> _applyCamera(
+    _Live live,
     CallConnection connection, {
     required bool chosen,
   }) async {
@@ -620,6 +621,9 @@ class MatrixCalls extends ChangeNotifier implements Calls {
       }
       await connection.setCamera(_camera);
     } on CameraUnavailable {
+      // Opening can take long enough for the call to have ended, which
+      // left the camera off and unblocked.
+      if (!identical(live, _live)) return;
       _camera = false;
       cameraBlocked = true;
       _notify();
