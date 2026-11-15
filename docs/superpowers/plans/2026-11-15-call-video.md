@@ -2068,7 +2068,18 @@ Expected: the picture is back within a second or two.
 With your camera on, leave the call and join it again.
 Expected: you join with the camera off.
 
-- [ ] **Step 9: Record what was found**
+- [ ] **Step 9: What the branch review asked to be looked at**
+
+- Turn the camera on and leave within a second; join with the lobby's toggle on and leave at once. Expected: the light goes out both times.
+- Cut the network briefly with the camera on. Expected: after LiveKit reconnects, the Cinny user sees you again and your own tile recovers.
+- Open the camera in another program (a browser tab), then turn it on in the call. Write down whether the button ends blocked, or shows on over no picture.
+- With the camera blocked, plug a camera in. Expected (a known limitation): the block stays until another camera is picked from the ⌄ menu or the call is left.
+- Minimise and restore under X11 and under Wayland, once quickly, and once while someone joins or starts sharing. Expected: every picture returns. Write down whether Wayland stops the pictures at all.
+- Watch a picture while people start and stop speaking, and while pinning and unpinning. Write down any flicker or blank moment.
+- Change camera mid-call and have the Cinny user say how long your tile dropped to the avatar.
+- Try a webcam that cannot do 720p. Expected: it opens at what it can do.
+
+- [ ] **Step 10: Record what was found**
 
 If every step went as expected, there is nothing to commit. If one did not, fix it in `lib/platform/livekit_media.dart`, add what was learned to the spec's "Known limitations" where it is a limit and not a bug, and commit:
 
