@@ -200,6 +200,11 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
   late final AppLifecycleListener _lifecycle;
   var _hidden = false;
 
+  /// Done when the last [_watch] has, so they run one at a time and a show
+  /// that lands mid-hide is not undone by the rest of the hide. Never
+  /// fails: a failure is the zone's to report, and the next one still runs.
+  Future<void> _watched = Future.value();
+
   /// The camera chosen, and the one the camera is open from. Null: the
   /// system's default, and none open.
   String? _cameraChosen;
@@ -374,16 +379,22 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
       return;
     }
     if (sent != null) return;
+    // Any failure, whatever LiveKit or WebRTC throws (WebRTC throws bare
+    // strings): a camera not sent is off and blocked, never left thought on.
     try {
       final id = _present(await Hardware.instance.videoInputs(), _cameraChosen);
-      await local.setCameraEnabled(
-        true,
-        cameraCaptureOptions: _camera.copyWith(deviceId: id),
+      final track = await LocalVideoTrack.createCameraTrack(
+        _camera.copyWith(deviceId: id),
       );
+      try {
+        await local.publishVideoTrack(track);
+      } on Object {
+        // Opened and never published: nothing else would close it.
+        await track.stop();
+        rethrow;
+      }
       _cameraOpened = id;
-    } on TrackCreateException catch (e) {
-      throw CameraUnavailable(e.toString());
-    } on PlatformException catch (e) {
+    } on Object catch (e) {
       throw CameraUnavailable(e.toString());
     }
   }
@@ -434,10 +445,20 @@ class LiveKitConnection extends ChangeNotifier implements CallConnection {
   /// every picture would then be sent whether drawn or not.
   Future<void> _watch(bool seen) async {
     _hidden = !seen;
-    for (final participant in _room.remoteParticipants.values) {
-      for (final publication in participant.videoTrackPublications) {
-        await (seen ? publication.subscribe() : publication.unsubscribe());
+    final before = _watched;
+    final done = Completer<void>();
+    _watched = done.future;
+    await before;
+    try {
+      // Copies: someone may join or leave while this awaits.
+      final hidden = _hidden;
+      for (final participant in _room.remoteParticipants.values.toList()) {
+        for (final publication in participant.videoTrackPublications.toList()) {
+          await (hidden ? publication.unsubscribe() : publication.subscribe());
+        }
       }
+    } finally {
+      done.complete();
     }
   }
 

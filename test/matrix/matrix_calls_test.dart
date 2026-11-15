@@ -684,6 +684,48 @@ void main() {
 
       expect(watcher.peers[_mine]!.camera, isTrue);
     });
+
+    test('is off after someone hangs up for you', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      await _sync(world.client, _oven, [
+        _state(
+          callSilenceType,
+          callHangUpContent(null),
+          key: callSilenceKey(_me),
+          sender: _ada,
+          ts: _noon.millisecondsSinceEpoch + _hour,
+        ),
+      ]);
+      await _until(() => world.calls.session?.phase == CallPhase.hungUp);
+
+      expect(world.calls.camera, isFalse);
+    });
+
+    test('a moderator deafening you leaves it sent', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      await _sync(world.client, _oven, [
+        _state(
+          callSilenceType,
+          callSilenceContent(CallSilence.deafened),
+          key: callSilenceKey(_me),
+          sender: _ada,
+        ),
+      ]);
+      await _until(() => world.calls.silenced == CallSilence.deafened);
+      await _settle();
+
+      expect(watcher.peers[_mine]!.camera, isTrue);
+    });
   });
 
   group('everyone else', () {
@@ -2162,6 +2204,25 @@ void main() {
       expect(world.calls.session?.startedAt, startedAt);
       expect(world.log.skip(4), ['access', 'connected']);
       expect(world.log.where((e) => e == 'wrote membership'), hasLength(1));
+    });
+
+    test('lost, sends your camera again once back', () async {
+      final world = await _open();
+      final watcher = await world.watcher();
+      await world.join();
+      world.calls.toggleCamera();
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+      final lost = world.connection;
+      world.network.value = CallLink.lost;
+      await _until(() => world.log.last == 'disconnected');
+
+      world.network.value = CallLink.connected;
+      await _until(() => world.calls.session?.phase == CallPhase.live);
+      await _until(() => watcher.peers[_mine]?.camera ?? false);
+
+      expect(world.connection, isNot(same(lost)));
+      expect(watcher.peers[_mine]!.camera, isTrue);
+      expect(world.connection.video(null), isNotNull);
     });
 
     test('lost, keeps trying while the call server refuses', () async {

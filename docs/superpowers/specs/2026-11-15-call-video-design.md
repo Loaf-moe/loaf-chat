@@ -90,14 +90,17 @@ placeholder a tile draws for a camera or a screen is where the picture goes.
   voice section in settings has the same list under the microphone and the
   speaker. The choice is kept in `voice.json` beside them, as the device's
   id and label. One made while the camera is on reopens it from the new
-  device; a camera chosen that the machine does not have is listed as "not
+  device, and since the camera is closed and opened again, everyone else
+  sees your tile go back to your avatar for a moment while it does. A
+  camera chosen that the machine does not have is listed as "not
   connected" and the default is used.
 - **A camera that does not open.** The camera is off, and the button shows
   as blocked, as the microphone's does. The block lifts at the next choice
   or change of devices; turning it back on is left to you.
 - **Leaving turns it off.** A call that ends, however it ends, leaves the
   camera off. The next call starts without it unless the lobby's toggle
-  was switched on first.
+  was switched on first. The lobby's toggle cannot be switched while you
+  are in another call: it would switch that call's camera.
 - **Deafen** leaves pictures alone.
 - **Moderator mute and deafen** leave the camera alone.
 
@@ -138,8 +141,10 @@ mean writing that again. The in-memory `CallMedia` returns a plain box.
 
 **LiveKit** (`lib/platform/livekit_media.dart`). Still the one file that
 touches `livekit_client`. It sets the room's options as above, implements
-the four members over `setCameraEnabled`, `restartTrack` and
-`VideoTrackRenderer`, and lists cameras through `videoInputs()`.
+the four members, and lists cameras through `videoInputs()`. The camera is
+published when it is turned on and unpublished when it is turned off,
+which is also how a change of camera is made; `VideoTrackRenderer` draws
+the pictures.
 
 **Devices.** `AudioDevices` gains `cameras()`, and `VoiceSettings` a
 `camera` beside `microphone` and `speaker`. The names stay: a rename to
@@ -209,6 +214,13 @@ its processor use under both X11 and Wayland.
   same id, as with microphones.
 - **One tile per person.** A second device's camera is not shown while the
   first sends one.
+- **Linux does not say when a camera comes or goes.** WebRTC's Linux
+  plugin raises a change of devices for microphones and speakers only. A
+  blocked camera's block lifts when another camera is chosen, or when the
+  call ends; plugging one in does not lift it, and the settings list a
+  newly plugged camera only when next opened. A camera unplugged, or held
+  by another program, while it is being sent may go on showing as on with
+  no picture.
 
 ## Order
 

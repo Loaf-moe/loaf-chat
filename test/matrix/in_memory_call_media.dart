@@ -42,7 +42,7 @@ class InMemoryCallMedia implements CallMedia {
   final bool microphone;
   final bool camera;
 
-  /// The ids of the audio devices this machine has. Null: any id asked for.
+  /// The ids of the devices this machine has. Null: any id asked for.
   final ValueListenable<Set<String>>? present;
 
   /// The ids of devices this machine has but cannot open.
@@ -200,10 +200,14 @@ class _Connection extends ChangeNotifier implements CallConnection {
 
   @override
   Future<void> setCamera(bool on) async {
-    if (on) await _media.holdCamera?.future;
+    final hold = _media.holdCamera;
+    if (on && hold != null) await hold.future;
     if (on && (!_media.camera || _media.broken.contains(camera))) {
       throw CameraUnavailable("${camera ?? 'the default'} doesn't open");
     }
+    // As LiveKit's: a camera opened for a connection that is gone is closed
+    // again, not sent.
+    if (on && _gone) throw const CameraUnavailable('the call is gone');
     _camera = on;
     _media.server._changed(_room);
   }

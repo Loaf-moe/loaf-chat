@@ -177,7 +177,11 @@ class _Lobby extends StatelessWidget {
                   icon: calls.camera ? LucideIcons.video : LucideIcons.videoOff,
                   tooltip: calls.camera ? 'Turn camera off' : 'Turn camera on',
                   active: calls.camera,
-                  onTap: calls.cameraBlocked ? null : calls.toggleCamera,
+                  // In another call it would switch that call's camera,
+                  // and joining here would then clear it.
+                  onTap: calls.cameraBlocked || calls.inCall
+                      ? null
+                      : calls.toggleCamera,
                 ),
               ],
               const SizedBox(width: LoafSpace.x4),

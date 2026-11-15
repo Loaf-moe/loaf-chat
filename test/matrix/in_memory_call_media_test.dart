@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -52,6 +53,18 @@ void main() {
     final ada = await join('ada', camera: false);
 
     expect(() => ada.setCamera(true), throwsA(isA<CameraUnavailable>()));
+  });
+
+  test('a camera that opens after its connection is gone is not on', () async {
+    final media = InMemoryCallMedia(server)..holdCamera = Completer();
+    final ada = await media.connect(_url, _jwt('ada'));
+    final opening = ada.setCamera(true);
+
+    await ada.disconnect();
+    media.holdCamera!.complete();
+
+    await expectLater(opening, throwsA(isA<CameraUnavailable>()));
+    expect(ada.video(null), isNull);
   });
 
   test('a screen shared is seen, apart from the camera', () async {

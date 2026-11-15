@@ -526,6 +526,47 @@ void main() {
       expect(find.byTooltip('Turn camera on'), findsNothing);
     });
 
+    testWidgets(
+      "with a camera, its toggle is locked while you are in another call",
+      variant: _desktop,
+      (tester) async {
+        final calls = VoiceOnlyCalls(features: {CallFeature.camera})
+          ..session = const CallSession(
+            target: Channel(id: '!kiln', name: 'kiln', kind: ChannelKind.voice),
+            phase: CallPhase.live,
+            participants: [],
+          );
+        await _pump(tester, _lobby(calls));
+
+        final toggle = tester.widget<CallButton>(
+          find.ancestor(
+            of: find.byTooltip('Turn camera on'),
+            matching: find.byType(CallButton),
+          ),
+        );
+        expect(toggle.onTap, isNull);
+      },
+    );
+
+    testWidgets(
+      'with a camera, its toggle switches while you are in no call',
+      variant: _desktop,
+      (tester) async {
+        await _pump(
+          tester,
+          _lobby(VoiceOnlyCalls(features: {CallFeature.camera})),
+        );
+
+        final toggle = tester.widget<CallButton>(
+          find.ancestor(
+            of: find.byTooltip('Turn camera on'),
+            matching: find.byType(CallButton),
+          ),
+        );
+        expect(toggle.onTap, isNotNull);
+      },
+    );
+
     testWidgets('of a channel that cannot be joined says why, with no button', (
       tester,
     ) async {
