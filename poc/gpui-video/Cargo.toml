@@ -1,0 +1,12 @@
+[package]
+name = "gpui-video-poc"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+
+[profile.release]
+debug = 1
