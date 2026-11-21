@@ -7,7 +7,7 @@ colour bar came out at the RGB its BT.709 limited-range YUV encodes, within
 a few levels. This exercises the upload, the padded strides, the shader and
 the colour matrix together. Exits non-zero on a mismatch.
 
-    tools/check_colours.py target/release/gpui-video-poc [out.png]
+    tools/check_colours.py target/release/gpui-video-poc [out.png] [wait seconds]
 """
 
 import subprocess
@@ -38,9 +38,10 @@ def near(a, b, tol=TOLERANCE):
 def main():
     binary = sys.argv[1]
     out = sys.argv[2] if len(sys.argv) > 2 else None
+    wait = float(sys.argv[3]) if len(sys.argv) > 3 else 3.0
     app = subprocess.Popen([binary, "--tiles", "4", "--fps", "30"], stderr=subprocess.DEVNULL)
     try:
-        time.sleep(3.0)
+        time.sleep(wait)
         shot = subprocess.run(["grim", "-t", "ppm", "-"], check=True, capture_output=True).stdout
     finally:
         app.terminate()

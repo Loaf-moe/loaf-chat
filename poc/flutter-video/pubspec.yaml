@@ -1,0 +1,25 @@
+name: flutter_video_poc
+description: "The Dart app's Linux WebRTC video path, for comparison with the GPUI PoC."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # The fork and revision loaf-native main pins; only its native build is
+  # used, for libwebrtc.so and its headers.
+  flutter_webrtc:
+    git:
+      url: https://github.com/Loaf-moe/flutter-webrtc.git
+      ref: 5462125ba21f460a2c55a5b806ce8da8197eb5d0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

@@ -40,26 +40,37 @@ means importing decoder output as dmabuf (VA-API decode), a separate step.
   renders at its expected RGB. Result on 2026-11-20: all eight bars within
   ±1 level.
 
-## Cost
+## Cost, against the Dart app's path
 
-`tools/measure.py target/release/gpui-video-poc 20`. CPU is % of one core,
-GPU is the process's own graphics-engine time from DRM fdinfo, both over 20 s
-after a 3 s warm-up. Synthetic frames are generated up front, so this is the
-display path alone (decode is extra and the same in any UI).
+`tools/measure.py <binary> 20`, run on both binaries back to back. CPU is %
+of one core, GPU is the process's own graphics-engine time from DRM fdinfo,
+both over 20 s after a 5 s warm-up. Synthetic frames are generated up front,
+so this is the display path alone (decode is extra and the same in either).
 
-Ryzen 9 5900X, Radeon RX 9070 (RADV, Vulkan), Wayland, 1600×900 window,
-2026-11-20:
+The Flutter side is `../flutter-video`: flutter_webrtc's Linux renderer path
+(per-raster `ConvertToARGB` into a pixel buffer texture, the same
+`libwebrtc.so`) in Flutter 3.47.5, which used Impeller on OpenGL ES here.
 
-| Scenario | CPU % core | GPU % | RSS MiB |
-|---|---:|---:|---:|
-| idle, 4 tiles, no frames | 0.0 | 0.00 | 88 |
-| 4 × 720p30 | 4.5 | 1.36 | 169 |
-| 9 × 720p30 | 7.7 | 2.64 | 169 |
-| 4 × 1080p30 | 7.1 | 2.39 | 269 |
-| 1 × 1080p60 | 4.1 | 1.81 | 268 |
+Ryzen 9 5900X, Radeon RX 9070 (RADV), Wayland, 2026-11-20:
 
-Every delivered frame was painted (the app counts both). Idle is zero: GPUI
-draws nothing when nothing changes.
+| Scenario | GPUI CPU | Flutter CPU | GPUI GPU | Flutter GPU | GPUI RSS | Flutter RSS |
+|---|---:|---:|---:|---:|---:|---:|
+| idle, 4 tiles | 0.0 | 0.0 | 0.00 | 0.00 | 88 | 268 |
+| 4 × 720p30 | 3.5 | 12.0 | 1.78 | 4.55 | 169 | 277 |
+| 9 × 720p30 | 6.3 | 20.1 | 3.68 | 7.37 | 169 | 285 |
+| 4 × 1080p30 | 5.7 | 20.6 | 2.19 | 7.55 | 268 | 396 |
+| 1 × 1080p60 | 3.3 | 15.5 | 3.65 | 5.63 | 269 | 371 |
+
+CPU and GPU in %, RSS in MiB. Both delivered and painted every frame. GPUI
+uses 3.2–4.7× less CPU and 1.5–3.5× less GPU. Runs vary by about a point
+of CPU (an earlier GPUI run read 4.5 / 7.7 / 7.1 / 4.1). The compositor
+tiled the two windows to its own sizes, so raster area isn't identical;
+uploads and conversion don't depend on it.
+
+**Colour.** `check_colours.py` fails the Flutter path: yellow renders as
+(252, 255, 12), red as (233, 0, 3), blue as (3, 0, 243). libwebrtc's
+`ConvertToARGB` (libyuv `I420ToABGR`) always applies BT.601, so BT.709 video
+shows shifted colours. The GPUI path applies each frame's own matrix.
 
 ## Run
 

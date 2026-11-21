@@ -21,7 +21,7 @@ SCENARIOS = [
     ("4 x 1080p30", ["--tiles", "4", "--res", "1920x1080", "--fps", "30"]),
     ("1 x 1080p60", ["--tiles", "1", "--res", "1920x1080", "--fps", "60"]),
 ]
-WARMUP = 3.0
+WARMUP = 5.0
 CLK_TCK = os.sysconf("SC_CLK_TCK")
 
 
