@@ -2,6 +2,7 @@ mod cosmic_text_system;
 mod wgpu_atlas;
 mod wgpu_context;
 mod wgpu_renderer;
+mod wgpu_video;
 
 pub use cosmic_text_system::*;
 pub use wgpu;

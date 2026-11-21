@@ -1,4 +1,5 @@
 // Modified for gpui-pre (snapshot of zed@d2a4fb6): adapt device queues and sRGB detection to wgpu 30.0.1.
+use crate::wgpu_video::VideoResources;
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
@@ -82,13 +83,6 @@ impl From<Bounds<ScaledPixels>> for PodBounds {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct SurfaceParams {
-    bounds: PodBounds,
-    content_mask: PodBounds,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
 struct GammaParams {
     gamma_ratios: [f32; 4],
     grayscale_enhanced_contrast: f32,
@@ -133,7 +127,6 @@ struct WgpuPipelines {
     mono_sprites: wgpu::RenderPipeline,
     subpixel_sprites: Option<wgpu::RenderPipeline>,
     poly_sprites: wgpu::RenderPipeline,
-    #[allow(dead_code)]
     surfaces: wgpu::RenderPipeline,
 }
 
@@ -195,6 +188,7 @@ struct WgpuResources {
     path_intermediate_view: Option<wgpu::TextureView>,
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
+    video: VideoResources,
 }
 
 struct CachedTextureBindGroup {
@@ -602,49 +596,7 @@ impl WgpuRendererCore {
             ],
         });
 
-        let surfaces = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("surfaces_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: NonZeroU64::new(
-                            std::mem::size_of::<SurfaceParams>() as u64
-                        ),
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+        let surfaces = VideoResources::bind_group_layout(device);
 
         WgpuBindGroupLayouts {
             globals,
@@ -1362,6 +1314,8 @@ impl WgpuRendererCore {
         });
         let max_texture_size = device.limits().max_texture_dimension_2d;
 
+        let video = VideoResources::new(&device);
+
         Self {
             resources: WgpuResources {
                 device,
@@ -1378,6 +1332,7 @@ impl WgpuRendererCore {
                 path_intermediate_view: None,
                 path_msaa_texture: None,
                 path_msaa_view: None,
+                video,
             },
             atlas,
             path_globals_offset,
@@ -1522,6 +1477,15 @@ impl WgpuRendererCore {
                 )
             })?;
         self.prepare_texture_bind_groups(scene);
+        {
+            let resources = &mut self.resources;
+            resources.video.prepare(
+                &resources.device,
+                &resources.queue,
+                &resources.bind_group_layouts.surfaces,
+                &scene.surfaces,
+            );
+        }
 
         let mut encoder =
             self.resources()
@@ -1634,9 +1598,14 @@ impl WgpuRendererCore {
                             &mut pass,
                         )?;
                     }
-                    // Surfaces are macOS-only for video playback and are not
-                    // implemented by the WGPU renderer.
-                    PrimitiveBatch::Surfaces(_surfaces) => {}
+                    PrimitiveBatch::Surfaces(range) => {
+                        let resources = self.resources();
+                        pass.set_pipeline(&resources.pipelines.surfaces);
+                        pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+                        for slot in range {
+                            resources.video.draw(slot, &scene.surfaces[slot], &mut pass);
+                        }
+                    }
                 }
             }
         }

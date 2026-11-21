@@ -1311,23 +1311,23 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
 }
 
 // --- surfaces --- //
+// An I420 video frame: Y at full size, U and V at half, each an R8 texture.
+// `yuv_to_rgb` holds the rows of a 3x4 matrix that applies the frame's range
+// and colour matrix in one step (see `wgpu_video::yuv_to_rgb`).
 
 struct SurfaceParams {
     bounds: Bounds,
     content_mask: Bounds,
+    yuv_to_rgb_r: vec4<f32>,
+    yuv_to_rgb_g: vec4<f32>,
+    yuv_to_rgb_b: vec4<f32>,
 }
 
 @group(1) @binding(0) var<uniform> surface_locals: SurfaceParams;
 @group(1) @binding(1) var t_y: texture_2d<f32>;
-@group(1) @binding(2) var t_cb_cr: texture_2d<f32>;
-@group(1) @binding(3) var s_surface: sampler;
-
-const ycbcr_to_RGB = mat4x4<f32>(
-    vec4<f32>( 1.0000f,  1.0000f,  1.0000f, 0.0),
-    vec4<f32>( 0.0000f, -0.3441f,  1.7720f, 0.0),
-    vec4<f32>( 1.4020f, -0.7141f,  0.0000f, 0.0),
-    vec4<f32>(-0.7010f,  0.5291f, -0.8860f, 1.0),
-);
+@group(1) @binding(2) var t_u: texture_2d<f32>;
+@group(1) @binding(3) var t_v: texture_2d<f32>;
+@group(1) @binding(4) var s_surface: sampler;
 
 struct SurfaceVarying {
     @builtin(position) position: vec4<f32>,
@@ -1348,15 +1348,20 @@ fn vs_surface(@builtin(vertex_index) vertex_id: u32) -> SurfaceVarying {
 
 @fragment
 fn fs_surface(input: SurfaceVarying) -> @location(0) vec4<f32> {
-    // Alpha clip after using the derivatives.
+    // Sample before the clip test so every invocation reaches the samples.
+    let yuv = vec4<f32>(
+        textureSampleLevel(t_y, s_surface, input.texture_position, 0.0).r,
+        textureSampleLevel(t_u, s_surface, input.texture_position, 0.0).r,
+        textureSampleLevel(t_v, s_surface, input.texture_position, 0.0).r,
+        1.0);
+
     if (any(input.clip_distances < vec4<f32>(0.0))) {
         return vec4<f32>(0.0);
     }
 
-    let y_cb_cr = vec4<f32>(
-        textureSampleLevel(t_y, s_surface, input.texture_position, 0.0).r,
-        textureSampleLevel(t_cb_cr, s_surface, input.texture_position, 0.0).rg,
-        1.0);
-
-    return ycbcr_to_RGB * y_cb_cr;
+    let rgb = vec3<f32>(
+        dot(surface_locals.yuv_to_rgb_r, yuv),
+        dot(surface_locals.yuv_to_rgb_g, yuv),
+        dot(surface_locals.yuv_to_rgb_b, yuv));
+    return vec4<f32>(saturate(rgb), 1.0);
 }

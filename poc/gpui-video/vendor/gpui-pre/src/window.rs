@@ -5421,6 +5421,27 @@ impl Window {
         });
     }
 
+    /// Paint a decoded video frame into the scene for the next frame at the
+    /// current z-index. The renderer uploads its planes only when the frame's
+    /// generation differs from the one it last uploaded for the stream.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    pub fn paint_video_frame(&mut self, bounds: Bounds<Pixels>, frame: Arc<crate::VideoFrame>) {
+        use crate::PaintSurface;
+
+        self.invalidator.debug_assert_paint();
+
+        let bounds = self.snap_bounds(bounds);
+        let content_mask = self.snapped_content_mask();
+        self.next_frame.scene.insert_primitive(PaintSurface {
+            order: 0,
+            bounds,
+            content_mask,
+            frame,
+        });
+    }
+
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
         for frame_index in 0..data.frame_count() {

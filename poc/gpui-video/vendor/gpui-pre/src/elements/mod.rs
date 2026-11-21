@@ -11,6 +11,8 @@ mod surface;
 mod svg;
 mod text;
 mod uniform_list;
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+mod video_frame;
 
 pub use anchored::*;
 pub use animation::*;
@@ -25,3 +27,5 @@ pub use surface::*;
 pub use svg::*;
 pub use text::*;
 pub use uniform_list::*;
+#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+pub use video_frame::*;

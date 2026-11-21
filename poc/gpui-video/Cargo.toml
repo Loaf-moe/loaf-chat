@@ -8,5 +8,15 @@ publish = false
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
 
+[dev-dependencies]
+# The version wgpu 30 validates with.
+naga = { version = "=30.0.2", features = ["wgsl-in"] }
+
+# The fork: gpui-pre 0.3.12 and gpui-pre-wgpu 0.3.12 with I420 video surfaces
+# on the wgpu renderer. `git diff dbf655b -- vendor` is the whole patch.
+[patch.crates-io]
+gpui-pre = { path = "vendor/gpui-pre" }
+gpui-pre-wgpu = { path = "vendor/gpui-pre-wgpu" }
+
 [profile.release]
 debug = 1
