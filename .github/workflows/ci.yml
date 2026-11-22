@@ -1,0 +1,32 @@
+# Every pull request and every push to rust: lints and tests on one Linux
+# runner. Each step is a mise task and runs the same on your machine.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [rust]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Crates are fetched after the cache restores, not by mise install's hook.
+env:
+  MISE_NO_HOOKS: 1
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - uses: Swatinem/rust-cache@v2
+      - run: mise run dependencies
+      - run: mise run lint
+      - if: ${{ !cancelled() }}
+        run: mise run test
