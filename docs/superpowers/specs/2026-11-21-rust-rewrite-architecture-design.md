@@ -38,6 +38,11 @@ renders BT.709 video with BT.601 colours.
   easier to support. `docs/mscs.md` is the full list of MSCs the apps use,
   each marked required of the homeserver or optional, with the feature that
   brought it in.
+- **Ports and adapters.** The core is pure logic. Every I/O, the Matrix SDK
+  and livekit included, sits behind a port: a trait the core defines in its
+  own types. Adapters implement ports and live outside `loaf-core`, so the
+  core never depends on an SDK and is tested against fakes. An adapter can be
+  replaced without touching the core.
 
 ## Stack
 
@@ -58,7 +63,8 @@ rust branch
 ├─ Cargo.toml              workspace; [patch.crates-io] → vendor/
 ├─ mise.toml
 ├─ crates/
-│  ├─ loaf-core/           state and services; no UI or FFI dependencies
+│  ├─ loaf-core/           pure logic and ports; no SDK, I/O, UI or FFI dependencies
+│  ├─ loaf-matrix/         Matrix adapter over matrix-sdk and matrix-sdk-ui
 │  ├─ loaf-ffi/            UniFFI surface → LoafCore Swift package
 │  ├─ loaf-desktop/        GPUI app
 │  └─ gpui-fork-tests/     tests for vendor/ (see "The GPUI fork")
@@ -69,9 +75,8 @@ rust branch
 
 ## 1. The core
 
-**One handle.** A shell calls `Core::start(CoreConfig { data_dir, platform })`
-once; `platform` carries the platform-service implementations (section 5). It
-returns `Arc<Core>` with one handle per area: `session()`, `rooms()`,
+**One handle.** A shell builds the adapters (section 5) and calls
+`Core::start(adapters)` once. It returns `Arc<Core>` with one handle per area: `session()`, `rooms()`,
 `timeline(room_id)`, `calls()`, `notifications()`, `settings()`.
 
 **Commands in.** Every action is an `async fn` returning
@@ -83,13 +88,14 @@ parsing text.
 observables. Lists (rooms, timeline, participants) are `eyeball-im` vectors
 emitting `VectorDiff`, so a new message is one `PushBack`. Values are
 immutable view models the core defines (`RoomSummary`, `TimelineItem`,
-`Participant`, …). No matrix-sdk or livekit type crosses the boundary.
+`Participant`, …). `loaf-core` has no matrix-sdk or livekit dependency, so
+none of their types can cross the boundary.
 
 **Runtime.** The core owns a tokio runtime. Each public `async fn` runs its
 work on that runtime and returns a future any executor can await, so GPUI's
 executor and Swift's concurrency never need tokio.
 
-**Inside.** Each area runs tasks that subscribe to SDK streams, apply Loaf's
+**Inside.** Each area runs tasks that subscribe to its ports' streams, apply Loaf's
 own rules (unread state, mentions, the notifier's decision) and publish view
 models. A task that fails publishes an error state; a view is never silently
 stale.
@@ -130,8 +136,8 @@ extension. matrix-sdk's SQLite store lives in the data directory (on iOS, the
 App Group container), encrypted with a key also held in the keychain. A
 stored session restores signed in with no network; sync retries.
 
-**Token refresh** is matrix-sdk's. New tokens are persisted as soon as the SDK
-reports them. The SDK's cross-process refresh lock is enabled so the app and
+**Token refresh** is matrix-sdk's. The Matrix adapter reports new tokens and
+the core persists them through `SecretStore` at once. The SDK's cross-process refresh lock is enabled so the app and
 the iOS extension never race. A refresh in flight is never shown as signed
 out.
 
@@ -149,13 +155,14 @@ out.
 wipes the store and keychain entries. The local wipe happens even when the
 server can't be reached.
 
-**Sync.** After sign-in or restore the core starts `SyncService`. Its state
+**Sync.** After sign-in or restore the core starts sync through the Matrix
+port; the adapter runs `SyncService`. Its state
 (`Running`, `Offline` retrying with backoff, `Error`) is observable. Desktop
 keeps syncing in the background. iOS stops sync when backgrounded, leaving it
 to push, and resumes in the foreground.
 
-**Rooms.** `RoomListService` entries and the space hierarchy are mapped into
-`RoomSummary` and `Space`. Unread state and mentions are computed by
+**Rooms.** The Matrix adapter maps `RoomListService` entries and the space
+hierarchy into port types; the core turns them into `RoomSummary` and `Space`. Unread state and mentions are computed by
 the core, by rules the sync and room list spec sets.
 
 Verification and recovery are a later feature. This spec only requires that
@@ -165,7 +172,7 @@ Verification and recovery are a later feature. This spec only requires that
 
 `loaf-desktop` is one binary for Linux, macOS and Windows.
 
-- **`app/`**: startup. Builds the platform implementations, starts the core,
+- **`app/`**: startup. Builds the adapters (`loaf-matrix` and `platform/`), starts the core,
   opens the window, routes session state to sign-in or the shell.
 - **`bridge/`**: the only code that subscribes to the core. Each observable
   becomes a GPUI entity updated from a task on GPUI's executor, followed by
@@ -218,7 +225,8 @@ validation of the shaders the renderer compiles, ported from the PoC's
 
 ## 4. iOS
 
-**`loaf-ffi`** is UniFFI over `loaf-core`, with no logic of its own.
+**`loaf-ffi`** is UniFFI over `loaf-core`, with no logic of its own. It builds
+the Matrix adapter and takes the Swift platform adapters.
 Commands become `async throws`; area errors become Swift error enums.
 Subscriptions are `subscribe(listener) -> TaskHandle`, the listener a Swift
 callback interface receiving values or `VectorDiff`s; dropping the handle
@@ -242,8 +250,8 @@ source of truth. Swift owns only the CallKit and `AVAudioSession` glue, driven
 through `CallSystem`.
 
 **Notification Service Extension.** It links `LoafCore` but starts only the
-notification entry point, `notification(room_id, event_id)`, which opens the
-shared store through `NotificationClient` under the cross-process lock,
+notification entry point, `notification(room_id, event_id)`. The Matrix
+adapter opens the shared store through `NotificationClient` under the cross-process lock,
 fetches and decrypts the event (syncing for missing room keys if needed),
 judges it with the same push-rule evaluator as the app, and returns
 `Show { title, body, thread, route }` or `Drop` (the filtering entitlement).
@@ -253,11 +261,18 @@ starts none of the app's services, and its peak memory is tested.
 
 The push gateway URL is a build setting, `LOAF_PUSH_GATEWAY`.
 
-## 5. Platform services
+## 5. Ports and adapters
 
-Defined in `loaf-core::platform`, handed to `Core::start` as
-`Arc<dyn Trait + Send + Sync>`. Each is a small async trait, added only when
-the feature needing it is ported.
+Ports are defined in `loaf-core::ports` and handed to `Core::start` as
+`Arc<dyn Trait + Send + Sync>`. Each is a small async trait in the core's own
+types, added only when the feature needing it is ported.
+
+**Matrix.** The Matrix ports are implemented by `loaf-matrix` over matrix-sdk
+and matrix-sdk-ui. Their shape is set by each feature's spec, starting with
+sign-in. The adapter maps SDK types and errors into port types; nothing
+from the SDK reaches the core. livekit gets its own adapter with calls.
+
+**Platform.**
 
 | Trait | Calls | Arrives with |
 |---|---|---|
@@ -269,11 +284,11 @@ the feature needing it is ported.
 | `CallSystem` | `report_incoming`, `report_connected`, `report_ended`, `set_audio_route` | calls |
 | `Updater` | `check()`, `apply(update)` | desktop updates |
 
-- **The core decides; traits execute.** No policy lives in a trait. `Notice`
+- **The core decides; adapters execute.** No policy lives in an adapter. `Notice`
   is finished text and a route.
 - **Answers come back as commands:** a notification tap is `core.open(route)`,
   a CallKit answer `core.calls().answer(id)`, a new push token
-  `core.push().token_changed(token)`. Traits never call into the core.
+  `core.push().token_changed(token)`. Adapters never call into the core.
 - **Differences are values:** Linux has no notification permission, so
   `permission()` is `NotApplicable` and settings hide that line.
   Core logic has no `#[cfg]`.
@@ -282,11 +297,13 @@ the feature needing it is ported.
   restored.
 - Swift implements them as UniFFI foreign traits
   (`#[uniffi::export(with_foreign)]`); desktop in `loaf-desktop/platform/`.
-- `loaf-core` ships fakes for each, so every decision is tested headless.
+- `loaf-core` ships a fake for every port, Matrix included, so every
+  decision is tested headless.
 
 ## 6. Errors and tests
 
-**Errors and logs.** SDK errors are mapped into area enums at the boundary.
+**Errors and logs.** SDK errors are mapped into port errors in the adapter,
+and into area enums in the core.
 Every crate denies `clippy::unwrap_used`, `expect_used`, `panic` and
 `indexing_slicing` outside tests; UniFFI turns a panic that escapes into an
 error rather than a Swift crash. Logging is `tracing`, a span per area, to
@@ -295,7 +312,7 @@ logged, and a test checks it.
 
 **Tests.**
 
-1. Core unit tests: pure logic, platform fakes, controllable time.
+1. Core unit tests: pure logic against port fakes, controllable time.
 2. Behaviour tests: each feature's spec states its rules, and its plan
    covers every rule with tests written for the new code.
 3. Desktop view tests on GPUI's `TestAppContext`.
@@ -323,8 +340,9 @@ Each feature gets its own spec, plan and PR.
 
 1. **Sign-in and session** (section 2), on the scaffolded workspace, in four
    steps, each its own spec, plan and PR:
-   1. **Core:** the session area in `loaf-core`, with the `SecretStore` and
-      `AuthBrowser` traits and their fakes.
+   1. **Core:** the session area in `loaf-core`, its Matrix ports and the
+      `SecretStore` and `AuthBrowser` ports with their fakes, and the
+      `loaf-matrix` adapter for sign-in and session.
    2. **Desktop:** the sign-in screens and the desktop `SecretStore` and
       `AuthBrowser`.
    3. **iOS:** `loaf-ffi`, the iOS project, the sign-in screens and the Swift
