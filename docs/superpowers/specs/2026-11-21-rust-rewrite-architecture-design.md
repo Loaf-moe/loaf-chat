@@ -33,8 +33,11 @@ renders BT.709 video with BT.601 colours.
   no targets, seams or CI.
 - **No migrations.** The apps are prerelease. The rewrite starts from a fresh
   sign-in; nothing is read from the Dart app's storage.
-- **MSCs are spec.** Where Matrix has an MSC for something, it is used.
-  Simplified sliding sync (MSC4186) is required of the homeserver.
+- **MSCs, feature by feature.** Each feature's spec identifies every MSC
+  relevant to it and decides which to use because they make the feature
+  easier to support. `docs/mscs.md` is the full list of MSCs the apps use,
+  each marked required of the homeserver or optional, with the feature that
+  brought it in.
 
 ## Stack
 
@@ -284,7 +287,7 @@ the feature needing it is ported.
   (`#[uniffi::export(with_foreign)]`); desktop in `loaf-desktop/platform/`.
 - `loaf-core` ships fakes for each, so every decision is tested headless.
 
-## 6. Errors, tests and gates
+## 6. Errors and tests
 
 **Errors and logs.** SDK errors are mapped into area enums at the boundary.
 `loaf-core` and `loaf-ffi` deny `clippy::unwrap_used`, `expect_used`, `panic`
@@ -302,17 +305,6 @@ logged, and a test checks it.
 3. Desktop view tests on GPUI's `TestAppContext`.
 4. iOS: XCTest over stores and bindings; the extension tested with a peak
    memory assertion.
-
-**Gates.**
-
-| Gate | Threshold |
-|---|---|
-| Desktop idle | 0% CPU when nothing changes |
-| Linux video | 4 × 720p30 ≤ 6% of one core and ≤ 3% GPU on the reference machine |
-| iOS extension | peak memory ≤ 20 MB |
-
-Features that cost something add their own (cold start to a restored room
-list, for one). GPU gates are measured on the reference machine, not in CI.
 
 **CI** (GitHub Actions). Every step is a mise task; the workflow calls only
 `mise run` and holds wiring and secrets. Every PR: `cargo fmt --check`,
@@ -353,5 +345,4 @@ Each feature gets its own spec, plan and PR.
 |---|---|
 | Android | Dropped |
 | Reading the Dart app's data | No migrations |
-| Homeservers without simplified sliding sync | MSC4186 is required |
 | Hardware video decode and dmabuf import | A later optimisation; the CPU copy left is wgpu's upload staging |
