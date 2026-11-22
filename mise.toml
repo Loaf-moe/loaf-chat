@@ -1,10 +1,17 @@
 [tools]
 rust = { version = "1.100.0", components = "clippy,rustfmt" }
+"cargo:cargo-nextest" = "0.9.152"
+shellcheck = "0.11.0"
+shfmt = "3.14.1"
 
 # `mise install` fetches every crate once the toolchain is in, and catches up
 # after a pull.
 [hooks]
 postinstall = { task = "dependencies" }
+
+[tasks.setup]
+description = "Run the commit gate before every commit"
+run = "git config core.hooksPath .hooks"
 
 [tasks.dependencies]
 description = "Fetch every crate in the workspace"
@@ -12,19 +19,27 @@ run = "cargo fetch --locked"
 
 [tasks.build]
 description = "Build every crate"
-run = "cargo build --workspace --locked"
+run = "cargo build --workspace --all-targets --locked"
 
+# --no-tests=warn only while the workspace has no tests; it goes with the
+# first one.
 [tasks.test]
 description = "Run every test"
-run = "cargo test --workspace --locked"
+run = "cargo nextest run --workspace --locked --no-tests=warn"
 
 [tasks.fmt]
 description = "Format the workspace"
 run = "cargo fmt --all"
 
 [tasks.lint]
-description = "Check formatting and run clippy with warnings as errors"
+description = "Check formatting, run clippy with warnings as errors, lint the hooks"
 run = [
   "cargo fmt --all --check",
   "cargo clippy --workspace --all-targets --locked -- -D warnings",
+  "shellcheck .hooks/*",
+  "shfmt --diff .hooks",
 ]
+
+[tasks.check]
+description = "The commit gate: formatting, lints, build and tests"
+depends = ["lint", "build", "test"]

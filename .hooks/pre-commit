@@ -1,0 +1,5 @@
+#!/bin/sh
+# Every commit passes the same gate as CI. `mise run setup` points git here.
+set -eu
+
+exec mise run check

@@ -9,12 +9,16 @@ rust-version = "1.100"
 license = "AGPL-3.0-only"
 publish = false
 
-# Every group on to start; lints are loosened one by one as we learn which
-# are worth keeping.
+# A crate that needs unsafe opts out in its own [lints] table.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+# pedantic and restriction on whole. restriction contradicts itself in places
+# (mod_module_files vs self_named_module_files); one side of each is allowed
+# as code first hits it. nursery lints are opted into by name.
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 restriction = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
 blanket_clippy_restriction_lints = "allow"
 # Tail expressions, not `return`; needless_return stays on to enforce it.
 implicit_return = "allow"
