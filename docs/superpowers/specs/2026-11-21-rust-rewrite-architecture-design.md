@@ -46,7 +46,7 @@ renders BT.709 video with BT.601 colours.
 | Desktop | GPUI and gpui-component ("GPUIKit", gpui-kit.com), on the `gpui-pre` snapshot gpui-component pins; GPUI forked in-repo |
 | iOS | SwiftUI over UniFFI bindings |
 | iOS project | XcodeGen (`ios/project.yml`); the `.pbxproj` is generated, not committed |
-| Tooling | `mise.toml` pins toolchains and defines tasks |
+| Tooling | `mise.toml` pins toolchains and defines every task (build, test, lint, generate); CI only calls `mise run` |
 
 ## Repository
 
@@ -207,15 +207,14 @@ It lives in `vendor/gpui-pre` and `vendor/gpui-pre-wgpu`, applied with
 `[patch.crates-io]`, and is reviewed in the same PRs as the code using it.
 Upstreaming is not a goal. Snapshots move only when gpui-component moves, all
 `gpui-pre-*` crates together, by re-vendoring and replaying the patch, gated on
-the patch tests and the colour check. The DirectX renderer (Windows) gets the
+the patch tests. The DirectX renderer (Windows) gets the
 same primitive as part of the calls feature.
 
 The vendored crates' own test targets cannot build outside Zed's monorepo
 (they read its assets and dev-dependencies), so the fork's tests live in a
-workspace crate of ours, `crates/gpui-fork-tests`: frame validation, naga
-validation of the shaders the renderer compiles, and the colour check and
-cost measurement brought over from the PoC (`tests/patch.rs`,
-`tools/check_colours.py`, `tools/measure.py`).
+workspace crate of ours, `crates/gpui-fork-tests`: frame validation and naga
+validation of the shaders the renderer compiles, ported from the PoC's
+`tests/patch.rs`. The PoC's measurement scripts stay in the PoC.
 
 ## 4. iOS
 
@@ -297,15 +296,11 @@ logged, and a test checks it.
 **Tests.**
 
 1. Core unit tests: pure logic, platform fakes, controllable time.
-2. Core integration tests against Synapse in Docker with simplified sliding
-   sync, driven by real matrix-sdk clients: sign-in (password; SSO and OAuth
-   through `FakeAuthBrowser`), offline restore, soft logout, sync, rooms, E2EE
-   between two clients, `NotificationClient` decrypt and filter.
-3. Parity suites: main's tests define "1:1". Each feature's plan names the
+2. Parity suites: main's tests define "1:1". Each feature's plan names the
    main tests it ports (the 245-case push-rules table as is; others rewritten
    to the new API). A feature is done when they pass.
-4. Desktop view tests on GPUI's `TestAppContext`.
-5. iOS: XCTest over stores and bindings; the extension tested with a peak
+3. Desktop view tests on GPUI's `TestAppContext`.
+4. iOS: XCTest over stores and bindings; the extension tested with a peak
    memory assertion.
 
 **Gates.**
@@ -313,14 +308,15 @@ logged, and a test checks it.
 | Gate | Threshold |
 |---|---|
 | Desktop idle | 0% CPU when nothing changes |
-| Linux video | colour check passes; 4 × 720p30 ≤ 6% of one core and ≤ 3% GPU on the reference machine |
+| Linux video | 4 × 720p30 ≤ 6% of one core and ≤ 3% GPU on the reference machine |
 | iOS extension | peak memory ≤ 20 MB |
 
 Features that cost something add their own (cold start to a restored room
-list, for one). GPU gates run on a Linux machine with a real GPU.
+list, for one). GPU gates are measured on the reference machine, not in CI.
 
-**CI** (GitHub Actions). Every PR: `cargo fmt --check`, `cargo clippy -D
-warnings`, all tests, `cargo deny` (licences compatible with AGPL-3.0,
+**CI** (GitHub Actions). Every step is a mise task; the workflow calls only
+`mise run` and holds wiring and secrets. Every PR: `cargo fmt --check`,
+`cargo clippy -D warnings`, all tests, `cargo deny` (licences compatible with AGPL-3.0,
 advisories, no duplicate SDK versions), and **rust-doctor** over `crates/`
 (not `vendor/`). rust-doctor's version is pinned in `mise.toml`. Its gate: no
 new findings in changed files (`--diff`), and the workspace score never drops;
@@ -329,9 +325,9 @@ suppression carries its reason on the same line. Its SARIF is uploaded for
 inline PR annotations. Advisories are left to `cargo deny` so a CVE fails CI
 once.
 
-Jobs: Linux (all of the above, Synapse integration, desktop build); macOS
-(desktop build, XCFramework, iOS build and XCTest); Windows (desktop build).
-Changes under `vendor/` also need the patch tests and the colour check.
+One job, on Linux: all of the above and the desktop build. No macOS or
+Windows runners. Cargo's registry and target directory are cached, so a PR
+rebuilds only what it touched.
 
 ## Order of work
 
