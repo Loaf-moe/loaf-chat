@@ -95,7 +95,7 @@ once. Its state is one observable:
 ```rust
 struct SignInState {
     server: String,                 // as typed, never the delegated base URL
-    check: ServerCheck,             // Probing | Found(AuthenticationMethods) | CouldntReach
+    check: ServerCheck,             // Probing | Found(AuthMethods) | CouldntReach
     activity: Activity,             // Idle | InBrowser | CheckingPassword | SignedIn
     wrong_password: bool,
     retry_in: Option<Duration>,
@@ -103,7 +103,7 @@ struct SignInState {
     failure: Option<SignInFailure>,
 }
 
-struct AuthenticationMethods {
+struct AuthMethods {
     browser: Vec<BrowserMethod>,       // OAuth, or SSO identity providers
     password: bool,
 }
@@ -126,7 +126,7 @@ ignored. Ports `serverNameFrom` and `serverFromUserId` as they are.
 **Discovery** goes through matrix-sdk
 (`ClientBuilder::server_name_or_homeserver_url`), then reads `/login` and
 the OAuth server metadata. Any failure is `CouldntReach`. A server that
-answers but offers no method loaf can use is `Found` with empty `AuthenticationMethods`.
+answers but offers no method loaf can use is `Found` with empty `AuthMethods`.
 
 **Authentication methods.**
 - **OAuth 2.0** (Matrix v1.15) when the server publishes its metadata. It is
