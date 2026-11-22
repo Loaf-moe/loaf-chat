@@ -8,10 +8,17 @@ edition = "2024"
 rust-version = "1.100"
 publish = false
 
-# The no-panic policy for loaf-core and loaf-ffi: a panic in the core takes
-# down the app, and across UniFFI it would only surface as an opaque error.
-# clippy.toml lifts these inside tests.
+# Every group on to start; lints are loosened one by one as we learn which
+# are worth keeping.
 [workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+restriction = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+blanket_clippy_restriction_lints = "allow"
+
+# The no-panic policy: a panic in the core takes down the app, and across
+# UniFFI it would only surface as an opaque error. clippy.toml lifts these
+# inside tests.
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
