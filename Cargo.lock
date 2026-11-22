@@ -3,10 +3,6 @@
 version = 4
 
 [[package]]
-name = "gpui-fork-tests"
-version = "0.1.0"
-
-[[package]]
 name = "loaf-core"
 version = "0.1.0"
 
