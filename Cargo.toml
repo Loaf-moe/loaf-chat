@@ -25,3 +25,12 @@ unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
 indexing_slicing = "deny"
+
+# Lints are silenced with #[expect], which flags itself once it's moot.
+allow_attributes = "deny"
+# Debugging leftovers and unfinished code never land.
+dbg_macro = "deny"
+todo = "deny"
+# Output goes through tracing.
+print_stdout = "deny"
+print_stderr = "deny"
