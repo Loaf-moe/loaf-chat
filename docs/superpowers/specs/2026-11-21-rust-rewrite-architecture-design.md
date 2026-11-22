@@ -333,9 +333,15 @@ rebuilds only what it touched.
 
 Each feature gets its own spec, plan and PR.
 
-1. **Workspace and CI**, with sign-in and session (section 2). Brings
-   `SecretStore` and `AuthBrowser`, the sign-in screens on desktop and iOS,
-   and the CI above.
+1. **Sign-in and session** (section 2), on the scaffolded workspace, in four
+   steps, each its own spec, plan and PR:
+   1. **Core:** the session area in `loaf-core`, with the `SecretStore` and
+      `AuthBrowser` traits and their fakes.
+   2. **Desktop:** the sign-in screens and the desktop `SecretStore` and
+      `AuthBrowser`.
+   3. **iOS:** `loaf-ffi`, the iOS project, the sign-in screens and the Swift
+      `SecretStore` and `AuthBrowser`.
+   4. **CI:** the rest of the CI above.
 2. **Sync and the room list:** spaces, channels, unread state.
 3. Then main's features in its own order: timeline; E2EE and verification;
    media; notifications and iOS push; calls (with the Windows video port);
