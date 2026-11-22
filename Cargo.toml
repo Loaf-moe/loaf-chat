@@ -15,6 +15,8 @@ pedantic = { level = "warn", priority = -1 }
 restriction = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 blanket_clippy_restriction_lints = "allow"
+# Tail expressions, not `return`; needless_return stays on to enforce it.
+implicit_return = "allow"
 
 # The no-panic policy: a panic in the core takes down the app, and across
 # UniFFI it would only surface as an opaque error. clippy.toml lifts these
