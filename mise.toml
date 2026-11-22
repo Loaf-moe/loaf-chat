@@ -21,15 +21,14 @@ run = "cargo fetch --locked"
 description = "Build every crate"
 run = "cargo build --workspace --all-targets --locked"
 
-# --no-tests=warn only while the workspace has no tests; it goes with the
-# first one.
+# --no-tests=warn only while the workspace has no tests.
 [tasks.test]
 description = "Run every test"
 run = "cargo nextest run --workspace --locked --no-tests=warn"
 
 [tasks.fmt]
-description = "Format the workspace"
-run = "cargo fmt --all"
+description = "Format the workspace and the hooks"
+run = ["cargo fmt --all", "shfmt -w .hooks"]
 
 [tasks.lint]
 description = "Check formatting, run clippy with warnings as errors, lint the hooks"

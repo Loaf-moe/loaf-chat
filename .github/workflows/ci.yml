@@ -29,4 +29,6 @@ jobs:
       - run: mise run dependencies
       - run: mise run lint
       - if: ${{ !cancelled() }}
+        run: mise run build
+      - if: ${{ !cancelled() }}
         run: mise run test
