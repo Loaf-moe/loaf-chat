@@ -24,11 +24,10 @@ renders BT.709 video with BT.601 colours.
 
 ## Ground rules
 
-- **Features 1:1, built black-box.** Each feature reproduces what the Dart app
-  does, as observed running it: defaults, copy, edge cases, failure handling.
-  Its code, tests and documents are never read or ported, since its license
-  follows a dependency's. Specs, plans and tests are written fresh from that
-  behaviour and the Matrix spec.
+- **From scratch.** Every feature is designed anew, as Chris wants it. The
+  Dart app is not a reference: its behaviour is not matched, and its code,
+  tests and documents are not read or ported. Only its UI work and branding
+  may be borrowed.
 - **Production grade.** Every change is specced, planned and reviewed.
 - **Platforms:** Linux, macOS, Windows desktop; iOS. **Android is dropped**:
   no targets, seams or CI.
@@ -100,7 +99,7 @@ The core uses it for sync and for the notifier.
 
 ## 2. Session and sync
 
-One account per install, as in main.
+One account per install.
 
 **Signing in.** `core.session().begin_sign_in()` returns a `SignInFlow` that
 starts discovering **loaf.moe** at once, so the screen opens on loaf.moe's
@@ -156,10 +155,8 @@ keeps syncing in the background. iOS stops sync when backgrounded, leaving it
 to push, and resumes in the foreground.
 
 **Rooms.** `RoomListService` entries and the space hierarchy are mapped into
-`RoomSummary` and `Space`. Unread state and mentions follow main's rules,
-computed by the core: unread follows messages, not push rules; mentions by
-`m.mentions` with the body fallback; limited syncs filled from `/messages`
-up to 99 events.
+`RoomSummary` and `Space`. Unread state and mentions are computed by
+the core, by rules the sync and room list spec sets.
 
 Verification and recovery are a later feature. This spec only requires that
 `trust` is correct.
@@ -229,8 +226,8 @@ unsubscribes. It builds static libraries for `aarch64-apple-ios` and
 `aarch64-apple-ios-sim`, packaged with the generated Swift as the local Swift
 package `LoafCore`.
 
-**`ios/`**, generated from `project.yml` (`mise run ios:project`), keeps
-main's identifiers: app `moe.loaf.chat.ios`, extension
+**`ios/`**, generated from `project.yml` (`mise run ios:project`), uses these
+identifiers: app `moe.loaf.chat.ios`, extension
 `moe.loaf.chat.ios.notify`, App Group `group.moe.loaf.chat`, team
 `6W2A5N37N3`. Entitlements: push, the App Group, a shared keychain group, and
 notification filtering.
@@ -250,11 +247,11 @@ shared store through `NotificationClient` under the cross-process lock,
 fetches and decrypts the event (syncing for missing room keys if needed),
 judges it with the same push-rule evaluator as the app, and returns
 `Show { title, body, thread, route }` or `Drop` (the filtering entitlement).
-Fallbacks are main's: "Encrypted message" with no key, "New message" when the
-fetch fails. The extension's memory limit is about 24 MB, so this entry point
+What it shows without the room key or after a failed fetch is the
+notifications spec's to set. The extension's memory limit is about 24 MB, so this entry point
 starts none of the app's services, and its peak memory is tested.
 
-The push gateway URL is a build setting, `LOAF_PUSH_GATEWAY`, as in main.
+The push gateway URL is a build setting, `LOAF_PUSH_GATEWAY`.
 
 ## 5. Platform services
 
@@ -278,7 +275,7 @@ the feature needing it is ported.
   a CallKit answer `core.calls().answer(id)`, a new push token
   `core.push().token_changed(token)`. Traits never call into the core.
 - **Differences are values:** Linux has no notification permission, so
-  `permission()` is `NotApplicable` and settings hide that line, as in main.
+  `permission()` is `NotApplicable` and settings hide that line.
   Core logic has no `#[cfg]`.
 - **Failures are typed, never fatal.** A failed `show` is logged. A failed
   `SecretStore::set` fails sign-in rather than leave a session that cannot be
@@ -334,7 +331,7 @@ Each feature gets its own spec, plan and PR.
       `SecretStore` and `AuthBrowser`.
    4. **CI:** the rest of the CI above.
 2. **Sync and the room list:** spaces, channels, unread state.
-3. Then main's features in its own order: timeline; E2EE and verification;
+3. Then, each specced in turn: timeline; E2EE and verification;
    media; notifications and iOS push; calls (with the Windows video port);
    window chrome; desktop updates; releases.
 
