@@ -5,9 +5,8 @@ session area of `loaf-core`, with the `SecretStore` and `AuthBrowser` traits
 and their fakes. Desktop, iOS and CI are later steps with their own specs;
 this one defines only the seams they plug into.
 
-The Dart app is a black box. This spec, its plan and its tests are written
-from the app's observable behaviour and the Matrix spec, never from the Dart
-app's code, tests or documents.
+Built from scratch: the Dart app is not a reference. The rules below are
+this design's own, on the Matrix spec.
 
 ## Why
 
