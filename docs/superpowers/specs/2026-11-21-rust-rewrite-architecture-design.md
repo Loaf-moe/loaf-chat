@@ -24,10 +24,11 @@ renders BT.709 video with BT.601 colours.
 
 ## Ground rules
 
-- **Features 1:1, architecture new.** Each feature reproduces main's behaviour
-  exactly: defaults, copy, edge cases, failure handling (main's specs and code
-  are the reference). How the code is organised is decided fresh; nothing of
-  the Flutter structure is carried over.
+- **Features 1:1, built black-box.** Each feature reproduces what the Dart app
+  does, as observed running it: defaults, copy, edge cases, failure handling.
+  Its code, tests and documents are never read or ported, since its license
+  follows a dependency's. Specs, plans and tests are written fresh from that
+  behaviour and the Matrix spec.
 - **Production grade.** Every change is specced, planned and reviewed.
 - **Platforms:** Linux, macOS, Windows desktop; iOS. **Android is dropped**:
   no targets, seams or CI.
@@ -298,9 +299,8 @@ logged, and a test checks it.
 **Tests.**
 
 1. Core unit tests: pure logic, platform fakes, controllable time.
-2. Parity suites: main's tests define "1:1". Each feature's plan names the
-   main tests it ports (the 245-case push-rules table as is; others rewritten
-   to the new API). A feature is done when they pass.
+2. Behaviour tests: each feature's spec states its rules, and its plan
+   covers every rule with tests written for the new code.
 3. Desktop view tests on GPUI's `TestAppContext`.
 4. iOS: XCTest over stores and bindings; the extension tested with a peak
    memory assertion.
