@@ -109,9 +109,8 @@ behind a link because loaf.moe advertises `m.login.password`.
 - **Another server** is `flow.set_server(input)`: a name, a URL, or a full
   user id of which only the domain is kept. A full id typed into the username
   field re-points the server after a debounce. The screen shows the name typed,
-  never the delegated base URL. Three failures are told apart: nothing
-  answered; not a Matrix server; `.well-known` points to a server that didn't
-  answer.
+  never the delegated base URL. A server that can't be found or used is one
+  failure, "couldn't reach <name>".
 - **Ways in** come from the server: OAuth 2.0 (MSC3861) where advertised; SSO
   with its identity providers; password only where `m.login.password` is
   offered.
