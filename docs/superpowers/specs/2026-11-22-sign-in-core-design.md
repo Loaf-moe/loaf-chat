@@ -5,10 +5,9 @@ session area of `loaf-core`, with the `SecretStore` and `AuthBrowser` traits
 and their fakes. Desktop, iOS and CI are later steps with their own specs;
 this one defines only the seams they plug into.
 
-Reference: the architecture spec (PR #25, branch `docs/architecture`),
-sections 1, 2, 5 and 6, and main's sign-in (`lib/ui/auth/`,
-`lib/matrix/matrix_session.dart`, `lib/matrix/matrix_homeserver.dart`,
-`lib/matrix/sso_browser.dart`) for behaviour.
+The Dart app is a black box. This spec, its plan and its tests are written
+from the app's observable behaviour and the Matrix spec, never from the Dart
+app's code, tests or documents.
 
 ## Why
 
@@ -19,8 +18,8 @@ the Desktop and iOS steps only draw screens and implement two small traits.
 
 ## Goals
 
-- Sign in to any homeserver by OAuth 2.0, SSO or password, behaving as main
-  does (the rules below).
+- Sign in to any homeserver by OAuth 2.0, SSO or password, by the rules
+  below.
 - Restore a stored session at start, signed in, with no network.
 - Keep tokens in the platform keychain and the SDK store encrypted at rest.
 - Sign out, wiping local data even when the server can't be reached.
@@ -33,12 +32,12 @@ the Desktop and iOS steps only draw screens and implement two small traits.
 |---|---|
 | Starting `SyncService`, sync state, MSC4186 | Sync and the room list (phase 2) |
 | `trust` on `SignedIn` | Sync: device keys only load once sync runs, so it can't be correct before |
-| `SoftLoggedOut` and `SessionRevoked` | Sync: they're detected on authenticated requests, and sync makes the first ones. Until then main's behaviour holds: a token the SDK can't refresh signs out |
+| `SoftLoggedOut` and `SessionRevoked` | Sync: they're detected on authenticated requests, and sync makes the first ones. Until then a token the SDK can't refresh signs out |
 | Removing the pusher on sign-out | iOS push |
 | Clearing downloaded media on sign-out | Media |
 | The SDK's cross-process refresh lock | The Notification Service Extension, the second process |
 | Log files | The shells' steps; this step only emits `tracing` events |
-| Screens, copy, platform `SecretStore`/`AuthBrowser` | Desktop and iOS steps |
+| Screens, copy, device names, platform `SecretStore`/`AuthBrowser` | Desktop and iOS steps |
 | Verification, recovery | Their own feature |
 
 ## Approaches
@@ -47,7 +46,7 @@ the Desktop and iOS steps only draw screens and implement two small traits.
 |---|---|---|
 | **A (chosen)** | `SignInFlow` state machine over a crate-private `Homeserver` trait; the real one wraps matrix-sdk, a fake drives the flow tests | One trait and a fake (~100 lines) buy deterministic timing tests on paused tokio time |
 | B | `SignInFlow` calls matrix-sdk directly; every test goes through matrix-sdk's mock server | Fewer types, but the mock server is a real socket on real time, so debounce, countdown and late-answer tests sleep and race |
-| C | A, with discovery over hand-rolled HTTP | Only needed to tell discovery failures apart, which was dropped: one "couldn't reach" is enough |
+| C | A, with discovery over hand-rolled HTTP | Only needed to tell discovery failures apart, which isn't wanted: one "couldn't reach" is enough |
 
 Chris picked A, and matrix-sdk's mock server for the session tests.
 
@@ -67,14 +66,13 @@ session.sign_out().await     // never fails visibly
 ```
 
 `Core::start` is async and resolves once restore has finished, so a shell
-opens on the right screen with no flash of sign-in, as main does.
+opens on the right screen with no flash of sign-in.
 
 One flow at a time: `begin_sign_in()` makes any earlier `SignInFlow` inert
 (its answers are dropped as stale), so two flows can never both commit.
 
 `Platform` holds only the two traits this step needs; later features add
-theirs. `Core` has only `session()` for now. Main's device names ("loaf on
-<host>", "loaf on iPhone") are the shells' to build.
+theirs. `Core` has only `session()` for now.
 
 ```rust
 enum SessionState {
@@ -104,7 +102,7 @@ struct SignInState {
 }
 
 struct AuthMethods {
-    browser: Vec<BrowserMethod>,       // OAuth, or SSO identity providers
+    browser: Vec<BrowserMethod>,    // OAuth, or SSO identity providers
     password: bool,
 }
 ```
@@ -115,13 +113,13 @@ state: `set_server(input)`, `retry()`, `username_changed(text)`,
 `sign_in_with_password(user, password)`. Dropping the flow cancels whatever it
 has in flight.
 
-### Rules (main's, unless marked)
+### Rules
 
-**Server input.** `set_server` takes a name, a URL, or a full user id of which
-only the domain is kept: trimmed, scheme and path stripped, lowercased, kept
-only if it looks like a host (a dot with something either side, or
-`localhost`; optional port; no spaces). Input that names no server is
-ignored. Ports `serverNameFrom` and `serverFromUserId` as they are.
+**Server input.** `set_server` takes a server name, a URL, or a full user id.
+It keeps only the host (with any port), lowercased: from a URL, the authority;
+from a user id, the part after the first `:`. Input with no plausible host
+yet (empty, no dot and not `localhost`, containing spaces) is ignored, since
+half-typed input is normal.
 
 **Discovery** goes through matrix-sdk
 (`ClientBuilder::server_name_or_homeserver_url`), then reads `/login` and
@@ -131,18 +129,17 @@ answers but offers no method loaf can use is `Found` with empty `AuthMethods`.
 **Authentication methods.**
 - **OAuth 2.0** (Matrix v1.15) when the server publishes its metadata. It is
   then the only browser method, one "continue with <server>", and any
-  `m.login.sso` providers are not shown *(new: main deferred OAuth; its
-  design spec says it looks like this)*.
+  `m.login.sso` providers are not shown.
 - Otherwise **SSO**, one `BrowserMethod` per `identity_providers` entry, in the
   server's order, named by `name` or else `id`. `m.login.sso` listing no
-  providers is one method named "single sign-on" with no provider id.
+  providers is one method with no provider id.
 - **Password** wherever `/login` offers `m.login.password`.
 
-**A full id in the username field** re-points the server once typing pauses
-for 400 ms, if it names a different server and the flow is idle; the form
-stays up and `repointing` names the server being probed. A password submitted
-while a re-point is pending or in flight is held and sent once that server is
-found, if it takes passwords.
+**A full user id in the username field** re-points the server once typing
+pauses for 400 ms, if it names a different server and the flow is idle; the
+form stays up and `repointing` names the server being probed. A password
+submitted while a re-point is pending or in flight is held and sent once that
+server is found, if it takes passwords, so it never goes to the old server.
 
 **Password sign-in** does nothing unless idle, not rate-limited, and both the
 trimmed username and the password are non-empty. It signs in as `m.id.user`
@@ -177,17 +174,10 @@ tokens, `activity` becomes `SignedIn` and stays there: cancel, `set_server`
 and new attempts are ignored. If keeping the session then fails (below), the
 token is logged out, `failure` is set, and the controls come back.
 
-**Failures are typed.** The shell words them; main's copy is the reference:
-
-| `SignInFailure` | Main's copy |
-|---|---|
-| `CouldntReach` | "couldn't reach <server>" |
-| `Refused { message }` | "<server> said no: <message>" |
-| `BrowserDidntOpen` | "couldn't open the sign-in page" |
-| `ProviderDidntFinish { name }` | "<name> didn't finish signing you in" (a refused login token) |
-| `CouldntFinish` | "couldn't finish signing in to <server>" |
-
-`CouldntReach` as a `ServerCheck` is "couldn't reach <server>" too.
+**Failures are typed** so the shells word them without parsing text:
+`CouldntReach`, `Refused { message }` (the server's own error text),
+`BrowserDidntOpen`, `ProviderDidntFinish { name }` (the server refused the
+login token), `CouldntFinish` (keeping the session failed).
 
 ## Keeping the session
 
@@ -216,8 +206,7 @@ next launch can still restore.
 **Token refresh** is matrix-sdk's (`handle_refresh_tokens`). New tokens are
 written to `SecretStore` as soon as the SDK reports them. A refresh in flight
 never changes `SessionState`. If the SDK reports an unknown token after a
-failed refresh, the core wipes local data and publishes `SignedOut`, as main
-does.
+failed refresh, the core wipes local data and publishes `SignedOut`.
 
 **Signing out.** A second call while one is in flight does nothing. The core
 logs out on the server (best effort, 15 s timeout), then always deletes
@@ -257,7 +246,7 @@ enum AuthBrowserError { Cancelled, CouldntOpen }
 
 This refines the architecture spec's
 `authenticate(url, callback) -> Result<Url, AuthCancelled>`: the loopback
-port isn't known until the listener binds, and main's "open it again" needs
+port isn't known until the listener binds, and "open it again" needs
 `reopen`.
 
 ## Inside
@@ -270,8 +259,7 @@ port isn't known until the listener binds, and main's "open it again" needs
 
 SDK and platform errors are mapped to the types above at this boundary; no
 matrix-sdk type is public. The lint policy from the scaffold (PR #24) applies.
-Tokens, passwords and the store passphrase are never logged; a test captures
-the `tracing` output of a full sign-in, refresh and sign-out and checks.
+Tokens, passwords and the store passphrase are never logged.
 
 **Dependencies:** `matrix-sdk` 0.19.1 (`sqlite`, `e2e-encryption`), `tokio`,
 `eyeball`, `thiserror`, `tracing`, `url`; dev: `matrix-sdk`'s `testing`
@@ -279,46 +267,61 @@ feature (its mock server). No `matrix-sdk-ui` yet: nothing here uses it.
 
 ## Fakes
 
-`FakeSecretStore` (in memory; can be told to fail the next write) and
-`FakeAuthBrowser` (scripted redirect and callback, or cancel, or fails to
-open; records reopen and cancel). `FakeHomeserver` is crate-private. All are
-`#[cfg(test)]` for now; they become public when a shell's tests need them.
+`FakeSecretStore` (in memory; can be told to fail) and `FakeAuthBrowser`
+(scripted redirect and callback, or cancel, or fails to open; records reopen
+and cancel). `FakeHomeserver` is crate-private. All are `#[cfg(test)]` for
+now; they become public when a shell's tests need them.
 
 ## Tests
 
-Unit tests with the fakes on paused tokio time, and the session tests on
-matrix-sdk's mock server. The plan ports main's tests by name:
+Written from the rules above. `SignInFlow` runs over `FakeHomeserver` on
+paused tokio time; session keeping runs on matrix-sdk's mock server with
+`FakeSecretStore` and `FakeAuthBrowser`. Each rule gets at least one test;
+these are the cases the plan must cover:
 
-**`test/sign_in_controller_test.dart`** → `SignInFlow` over `FakeHomeserver`.
-All of it, with these changes: "each failure is its own problem" becomes one
-`CouldntReach`; "a computer waits on the browser" and "a phone finishes in the
-system sheet" become one `InBrowser` test; "the failure lever turns a right
-password away once" is dropped (main's debug lever for the mock).
+**Server input:** names, URLs and user ids each give the host; ports are
+kept; case and whitespace are normalised; every prefix of a typed name,
+URL or id either gives nothing or a plausible host, never an error.
 
-**`test/sign_in_state_test.dart`** → the server-input parsing tests, all of
-them; "each discovery failure says something different" is dropped (one
-failure now). "The fixture servers cover every face" and "a provider without
-an icon falls back to its initial" are mock and UI concerns and are not ported.
+**Discovery and methods:** the flow opens probing `loaf.moe`; a found server
+publishes its methods; any failure is `CouldntReach`, and `retry()` probes
+again; OAuth hides SSO providers; SSO providers keep the server's order and
+fall back to their id for a name; no providers is one method; password shows
+only when offered; no usable method is `Found` with nothing in it.
 
-**`test/matrix/matrix_session_test.dart`** → on the mock server: a fresh
-store is signed out; signing in signs the session in; signing out signs it
-out; signing in again after signing out works; a second sign-out in flight
-does nothing; a failed store open inside sign-in is a failure, not a panic; a
-token refresh in flight does not sign out; the device keys made at sign-in
-are the ones the restored client has. Not ported here: "keys not yet
-known never read as no identity" (trust, with sync), "signing out clears
-downloaded media" (media), "device names say where they are" (the shells).
+**Re-pointing:** a full user id re-points after 400 ms of quiet, not before;
+a plain username leaves the server alone; a password submitted inside the
+debounce or during the re-point probe goes to the new server.
 
-**New, for behaviour main didn't have:** OAuth discovery hides SSO
-providers; an OAuth sign-in completes through `FakeAuthBrowser`; a failed
-`SecretStore` write fails sign-in and logs the token out; a stored session
-restores signed in with the mock server offline; a `SecretStore` error at
-start signs out without wiping; a second `begin_sign_in()` makes the first
-flow inert; refreshed tokens reach
-`SecretStore`; secrets never appear in logs.
+**Password:** right credentials sign in; empty fields do nothing;
+`M_FORBIDDEN` sets `wrong_password`; `M_LIMIT_EXCEEDED` counts down by the
+second and refuses sign-in until zero; the 30 s default and the 1 s minimum;
+changing server clears the countdown; other errors set `failure`, which the
+next attempt clears.
 
-**`test/session_root_test.dart`** and **`test/login_page_test.dart`** are
-screen tests and belong to the Desktop and iOS steps.
+**Browser:** SSO and OAuth each sign in through `FakeAuthBrowser`;
+`reopen_browser()` reaches the browser; cancel returns to idle and drops a
+late answer; a browser that won't open is `BrowserDidntOpen`; a refused login
+token is `ProviderDidntFinish`.
+
+**Staleness and the point of no return:** an answer to an old probe is
+dropped; a sign-in answering after cancel or a server change never signs in,
+and its token is logged out; after commit, cancel and `set_server` are
+ignored; a commit that fails brings the controls back; a second
+`begin_sign_in()` makes the first flow inert.
+
+**Keeping the session** (mock server): a fresh `data_dir` starts signed out;
+signing in publishes `SignedIn`; a stored session restores signed in with the
+server unreachable; the device keys made at sign-in are the restored client's;
+a failed `SecretStore` write fails sign-in and logs the token out; a
+`SecretStore` error at start signs out without wiping; a corrupt `session`
+wipes; refreshed tokens reach `SecretStore`; a refresh in flight never
+signs out; an unrefreshable token signs out and wipes; signing out wipes
+even with the server unreachable; a second sign-out in flight does nothing;
+signing in again after signing out works.
+
+**Logs:** the `tracing` output of a full sign-in, refresh and sign-out
+contains no token, password or passphrase.
 
 ## Left to the plan
 
