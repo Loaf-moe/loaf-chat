@@ -40,9 +40,8 @@ renders BT.709 video with BT.601 colours.
   brought it in.
 - **Ports and adapters.** The core is pure logic. Every I/O, the Matrix SDK
   and livekit included, sits behind a port: a trait the core defines in its
-  own types. Adapters implement ports and live outside `loaf-core`, so the
-  core never depends on an SDK and is tested against fakes. An adapter can be
-  replaced without touching the core.
+  own types. Adapters implement ports; core logic sees only the ports, so it
+  is tested against fakes and an adapter can be replaced without touching it.
 
 ## Stack
 
@@ -63,8 +62,7 @@ rust branch
 ├─ Cargo.toml              workspace; [patch.crates-io] → vendor/
 ├─ mise.toml
 ├─ crates/
-│  ├─ loaf-core/           pure logic and ports; no SDK, I/O, UI or FFI dependencies
-│  ├─ loaf-matrix/         Matrix adapter over matrix-sdk and matrix-sdk-ui
+│  ├─ loaf-core/           logic, ports and the Matrix adapter; no UI or FFI dependencies
 │  ├─ loaf-ffi/            UniFFI surface → LoafCore Swift package
 │  ├─ loaf-desktop/        GPUI app
 │  └─ gpui-fork-tests/     tests for vendor/ (see "The GPUI fork")
@@ -75,8 +73,8 @@ rust branch
 
 ## 1. The core
 
-**One handle.** A shell builds the adapters (section 5) and calls
-`Core::start(adapters)` once. It returns `Arc<Core>` with one handle per area: `session()`, `rooms()`,
+**One handle.** A shell calls `Core::start(CoreConfig { data_dir, platform })`
+once; `platform` carries the platform adapters (section 5). It returns `Arc<Core>` with one handle per area: `session()`, `rooms()`,
 `timeline(room_id)`, `calls()`, `notifications()`, `settings()`.
 
 **Commands in.** Every action is an `async fn` returning
@@ -88,8 +86,7 @@ parsing text.
 observables. Lists (rooms, timeline, participants) are `eyeball-im` vectors
 emitting `VectorDiff`, so a new message is one `PushBack`. Values are
 immutable view models the core defines (`RoomSummary`, `TimelineItem`,
-`Participant`, …). `loaf-core` has no matrix-sdk or livekit dependency, so
-none of their types can cross the boundary.
+`Participant`, …). No matrix-sdk or livekit type crosses the boundary.
 
 **Runtime.** The core owns a tokio runtime. Each public `async fn` runs its
 work on that runtime and returns a future any executor can await, so GPUI's
@@ -172,7 +169,7 @@ Verification and recovery are a later feature. This spec only requires that
 
 `loaf-desktop` is one binary for Linux, macOS and Windows.
 
-- **`app/`**: startup. Builds the adapters (`loaf-matrix` and `platform/`), starts the core,
+- **`app/`**: startup. Builds the platform adapters, starts the core,
   opens the window, routes session state to sign-in or the shell.
 - **`bridge/`**: the only code that subscribes to the core. Each observable
   becomes a GPUI entity updated from a task on GPUI's executor, followed by
@@ -225,8 +222,7 @@ validation of the shaders the renderer compiles, ported from the PoC's
 
 ## 4. iOS
 
-**`loaf-ffi`** is UniFFI over `loaf-core`, with no logic of its own. It builds
-the Matrix adapter and takes the Swift platform adapters.
+**`loaf-ffi`** is UniFFI over `loaf-core`, with no logic of its own.
 Commands become `async throws`; area errors become Swift error enums.
 Subscriptions are `subscribe(listener) -> TaskHandle`, the listener a Swift
 callback interface receiving values or `VectorDiff`s; dropping the handle
@@ -267,10 +263,11 @@ Ports are defined in `loaf-core::ports` and handed to `Core::start` as
 `Arc<dyn Trait + Send + Sync>`. Each is a small async trait in the core's own
 types, added only when the feature needing it is ported.
 
-**Matrix.** The Matrix ports are implemented by `loaf-matrix` over matrix-sdk
-and matrix-sdk-ui. Their shape is set by each feature's spec, starting with
-sign-in. The adapter maps SDK types and errors into port types; nothing
-from the SDK reaches the core. livekit gets its own adapter with calls.
+**Matrix.** The Matrix adapter is a module of `loaf-core` over matrix-sdk and
+matrix-sdk-ui, built by `Core::start` from `data_dir`. Its only other
+implementation is the test fake. The ports' shape is set by each feature's
+spec, starting with sign-in. The adapter maps SDK types and errors into port
+types; core logic never sees the SDK. livekit gets its own adapter with calls.
 
 **Platform.**
 
@@ -342,7 +339,7 @@ Each feature gets its own spec, plan and PR.
    steps, each its own spec, plan and PR:
    1. **Core:** the session area in `loaf-core`, its Matrix ports and the
       `SecretStore` and `AuthBrowser` ports with their fakes, and the
-      `loaf-matrix` adapter for sign-in and session.
+      Matrix adapter for sign-in and session.
    2. **Desktop:** the sign-in screens and the desktop `SecretStore` and
       `AuthBrowser`.
    3. **iOS:** `loaf-ffi`, the iOS project, the sign-in screens and the Swift
