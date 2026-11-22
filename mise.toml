@@ -1,5 +1,5 @@
 [tools]
-rust = { version = "1.96.1", components = "clippy,rustfmt" }
+rust = { version = "1.100.0", components = "clippy,rustfmt" }
 
 # `mise install` fetches every crate once the toolchain is in, and catches up
 # after a pull.

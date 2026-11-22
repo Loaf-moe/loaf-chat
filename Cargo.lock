@@ -13,13 +13,7 @@ version = "0.1.0"
 [[package]]
 name = "loaf-desktop"
 version = "0.1.0"
-dependencies = [
- "loaf-core",
-]
 
 [[package]]
 name = "loaf-ffi"
 version = "0.1.0"
-dependencies = [
- "loaf-core",
-]
