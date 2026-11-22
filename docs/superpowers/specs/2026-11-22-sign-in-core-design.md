@@ -95,7 +95,7 @@ once. Its state is one observable:
 ```rust
 struct SignInState {
     server: String,                 // as typed, never the delegated base URL
-    check: ServerCheck,             // Probing | Found(WaysIn) | CouldntReach
+    check: ServerCheck,             // Probing | Found(AuthenticationMethods) | CouldntReach
     activity: Activity,             // Idle | InBrowser | CheckingPassword | SignedIn
     wrong_password: bool,
     retry_in: Option<Duration>,
@@ -103,15 +103,15 @@ struct SignInState {
     failure: Option<SignInFailure>,
 }
 
-struct WaysIn {
-    browser: Vec<BrowserWay>,       // OAuth, or SSO identity providers
+struct AuthenticationMethods {
+    browser: Vec<BrowserMethod>,       // OAuth, or SSO identity providers
     password: bool,
 }
 ```
 
 Commands are plain methods that return at once; their outcome lands in the
 state: `set_server(input)`, `retry()`, `username_changed(text)`,
-`continue_with(way)`, `reopen_browser()`, `cancel_browser()`,
+`continue_with(method)`, `reopen_browser()`, `cancel_browser()`,
 `sign_in_with_password(user, password)`. Dropping the flow cancels whatever it
 has in flight.
 
@@ -126,16 +126,16 @@ ignored. Ports `serverNameFrom` and `serverFromUserId` as they are.
 **Discovery** goes through matrix-sdk
 (`ClientBuilder::server_name_or_homeserver_url`), then reads `/login` and
 the OAuth server metadata. Any failure is `CouldntReach`. A server that
-answers but offers no way loaf can use is `Found` with empty `WaysIn`.
+answers but offers no method loaf can use is `Found` with empty `AuthenticationMethods`.
 
-**Ways in.**
+**Authentication methods.**
 - **OAuth 2.0** (Matrix v1.15) when the server publishes its metadata. It is
-  then the only browser way, one "continue with <server>", and any
+  then the only browser method, one "continue with <server>", and any
   `m.login.sso` providers are not shown *(new: main deferred OAuth; its
   design spec says it looks like this)*.
-- Otherwise **SSO**, one `BrowserWay` per `identity_providers` entry, in the
+- Otherwise **SSO**, one `BrowserMethod` per `identity_providers` entry, in the
   server's order, named by `name` or else `id`. `m.login.sso` listing no
-  providers is one way named "single sign-on" with no provider id.
+  providers is one method named "single sign-on" with no provider id.
 - **Password** wherever `/login` offers `m.login.password`.
 
 **A full id in the username field** re-points the server once typing pauses
@@ -154,7 +154,7 @@ with the trimmed username and requests a refresh token.
 - Any other error → `failure`. A new attempt clears `failure` and
   `wrong_password`.
 
-**Browser sign-in.** `continue_with(way)` sets `InBrowser` and asks the
+**Browser sign-in.** `continue_with(method)` sets `InBrowser` and asks the
 `AuthBrowser` for its redirect URI, then:
 - OAuth: registers loaf as a public client dynamically (each sign-in; nothing
   cached), builds the authorization URL, and finishes from the callback.
