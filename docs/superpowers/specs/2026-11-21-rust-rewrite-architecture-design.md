@@ -287,8 +287,8 @@ the feature needing it is ported.
 ## 6. Errors and tests
 
 **Errors and logs.** SDK errors are mapped into area enums at the boundary.
-`loaf-core` and `loaf-ffi` deny `clippy::unwrap_used`, `expect_used`, `panic`
-and `indexing_slicing` outside tests; UniFFI turns a panic that escapes into an
+Every crate denies `clippy::unwrap_used`, `expect_used`, `panic` and
+`indexing_slicing` outside tests; UniFFI turns a panic that escapes into an
 error rather than a Swift crash. Logging is `tracing`, a span per area, to
 rotating files in the data directory. Message bodies, tokens and keys are never
 logged, and a test checks it.
