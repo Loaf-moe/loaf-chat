@@ -1,9 +1,10 @@
 # Sign-in and session: Core
 
 Phase 1, step 1 of the rewrite (architecture spec, "Order of work"): the
-session area of `loaf-core`, with the `SecretStore` and `AuthBrowser` traits
-and their fakes. Desktop, iOS and CI are later steps with their own specs;
-this one defines only the seams they plug into.
+session area of `loaf-core`, the Matrix port for sign-in and session, the
+`SecretStore` and `AuthBrowser` ports, a fake for each, and the Matrix
+adapter over matrix-sdk. Desktop, iOS and CI are later steps with their own
+specs; this one defines only the ports they implement and the API they call.
 
 Built from scratch: the Dart app is not a reference. The rules below are
 this design's own, on the Matrix spec.
@@ -13,7 +14,7 @@ this design's own, on the Matrix spec.
 Every later feature needs a signed-in matrix-sdk `Client`. This step gives
 the shells one: find a server, sign in to it by browser or password, keep the
 session across launches, and sign out. It is headless and fully tested, so
-the Desktop and iOS steps only draw screens and implement two small traits.
+the Desktop and iOS steps only draw screens and implement two small ports.
 
 ## Goals
 
@@ -22,8 +23,9 @@ the Desktop and iOS steps only draw screens and implement two small traits.
 - Restore a stored session at start, signed in, with no network.
 - Keep tokens in the platform keychain and the SDK store encrypted at rest.
 - Sign out, wiping local data even when the server can't be reached.
-- `SecretStore` and `AuthBrowser` defined, with fakes; every rule tested
-  headless.
+- The Matrix, `SecretStore` and `AuthBrowser` ports defined, each with a
+  fake; every rule tested headless against the fakes, and the Matrix adapter
+  tested on matrix-sdk's mock server.
 
 ## Non-goals
 
@@ -43,11 +45,13 @@ the Desktop and iOS steps only draw screens and implement two small traits.
 
 | | Shape | Trade-off |
 |---|---|---|
-| **A (chosen)** | `SignInFlow` state machine over a crate-private `Homeserver` trait; the real one wraps matrix-sdk, a fake drives the flow tests | One trait and a fake (~100 lines) buy deterministic timing tests on paused tokio time |
+| **A (chosen)** | `SignInFlow` and session keeping over a Matrix port; the adapter wraps matrix-sdk, a fake drives the logic tests | A trait and a fake buy deterministic timing tests on paused tokio time |
 | B | `SignInFlow` calls matrix-sdk directly; every test goes through matrix-sdk's mock server | Fewer types, but the mock server is a real socket on real time, so debounce, countdown and late-answer tests sleep and race |
 | C | A, with discovery over hand-rolled HTTP | Only needed to tell discovery failures apart, which isn't wanted: one "couldn't reach" is enough |
 
-Chris picked A, and matrix-sdk's mock server for the session tests.
+Chris picked A, and matrix-sdk's mock server for the adapter's tests. The
+architecture spec has since made A the rule for every I/O ("Ports and
+adapters").
 
 ## Public surface
 
@@ -70,8 +74,10 @@ opens on the right screen with no flash of sign-in.
 One flow at a time: `begin_sign_in()` makes any earlier `SignInFlow` inert
 (its answers are dropped as stale), so two flows can never both commit.
 
-`Platform` holds only the two traits this step needs; later features add
-theirs. `Core` has only `session()` for now.
+`Platform` holds only the two platform ports this step needs; later features
+add theirs. `Core::start` builds the Matrix adapter from `data_dir`; tests
+start the core with the Matrix fake instead. `Core` has only `session()` for
+now.
 
 ```rust
 enum SessionState {
@@ -120,9 +126,9 @@ from a user id, the part after the first `:`. Input with no plausible host
 yet (empty, no dot and not `localhost`, containing spaces) is ignored, since
 half-typed input is normal.
 
-**Discovery** goes through matrix-sdk
-(`ClientBuilder::server_name_or_homeserver_url`), then reads `/login` and
-the OAuth server metadata. Any failure is `CouldntReach`. A server that
+**Discovery** goes through the Matrix port; the adapter resolves the server
+with matrix-sdk and reads `/login` and the OAuth server metadata. Any failure
+is `CouldntReach`. A server that
 answers but offers no method loaf can use is `Found` with empty `AuthMethods`.
 
 **Authentication methods.**
@@ -181,15 +187,17 @@ login token), `CouldntFinish` (keeping the session failed).
 ## Keeping the session
 
 **Committing a sign-in.** Each attempt signs in on its own client, on a
-fresh SQLite store in `data_dir/pending-<epoch>` with a random passphrase and
-end-to-end encryption on. The device's encryption keys are made there, once,
-and keep their identity through the commit. An abandoned attempt's store is
-deleted. Once an attempt is current and has its tokens:
+fresh SQLite store in `data_dir/pending-<epoch>` with end-to-end encryption
+on, encrypted with a random passphrase the core makes. The device's
+encryption keys are made there, once, and keep their identity through the
+commit. An abandoned attempt's store is deleted. Once an attempt is current
+and has its tokens:
 1. Write the session and the passphrase to `SecretStore`. A failed write
    fails the sign-in (`CouldntFinish`) rather than leave a session that can't
    be restored.
-2. Close the attempt's client, move its store to `data_dir/matrix`, reopen
-   it as the app's client with the session restored, and publish `SignedIn`.
+2. Commit the attempt through the Matrix port: the adapter closes its client,
+   moves its store to `data_dir/matrix`, and reopens it as the account with
+   the session restored. Then publish `SignedIn`.
 
 What `SecretStore` holds: `session` (homeserver URL, user id, device id, and
 either the access and refresh tokens or, for OAuth, the client id and its
@@ -202,10 +210,11 @@ what's there and starts `SignedOut`. A `SecretStore` that errors (a keychain
 not yet unlocked or not running) starts `SignedOut` *without* wiping, so the
 next launch can still restore.
 
-**Token refresh** is matrix-sdk's (`handle_refresh_tokens`). New tokens are
-written to `SecretStore` as soon as the SDK reports them. A refresh in flight
-never changes `SessionState`. If the SDK reports an unknown token after a
-failed refresh, the core wipes local data and publishes `SignedOut`.
+**Token refresh** is matrix-sdk's (`handle_refresh_tokens`). The adapter
+reports new tokens on the account's session changes, and the core writes them
+to `SecretStore` at once. A refresh in flight never changes `SessionState`. If
+the adapter reports a token that couldn't be refreshed, the core wipes local
+data and publishes `SignedOut`.
 
 **Signing out.** A second call while one is in flight does nothing. The core
 logs out on the server (best effort, 15 s timeout), then always deletes
@@ -214,11 +223,38 @@ Signing in again afterwards starts clean. A wipe step that fails is logged
 and the rest still run; since restore needs both the store and `session`,
 losing either one means the next launch wipes the other.
 
-## Platform traits
+## Ports
 
-In `loaf-core::platform`, passed as `Arc<dyn Trait + Send + Sync>`.
-Dyn-compatible async; the plan picks `async-trait` or boxed futures, whichever
-UniFFI's foreign traits need for the iOS step.
+In `loaf-core::ports`, each a small trait in the core's own types, held as
+`Arc<dyn Trait + Send + Sync>`. Dyn-compatible async; the plan picks
+`async-trait` or boxed futures, whichever UniFFI's foreign traits need for
+the iOS step.
+
+### Matrix
+
+What sign-in and session need from a homeserver, and nothing else. Its parts:
+
+- **Probe** a server name: its `AuthMethods`, or `Unreachable`. A found
+  server comes back as an attempt, with its pending store opened under the
+  passphrase the core passes in.
+- **On an attempt:** sign in with a password (wrong password, rate limit
+  with its delay, or the server's refusal text); build the browser URL for a
+  `BrowserMethod` and redirect URI; finish from the callback URL (or the
+  login token refused); commit, which yields the account; discard, which
+  logs out any token it got (15 s) and deletes its store.
+- **Restore** the account from a stored session and passphrase, with no
+  network, or say the store won't restore.
+- **On the account:** session changes (new tokens, or a token that couldn't
+  be refreshed) and server logout.
+- **Wipe** `data_dir/matrix`.
+
+The stored session (homeserver URL, user id, device id, tokens, and the
+OAuth client id where used) is a core type the adapter fills; the core
+serialises it into `SecretStore`. The adapter maps matrix-sdk's types and
+errors into these; nothing above it sees the SDK. The plan sets the exact
+signatures.
+
+### Platform
 
 ```rust
 trait SecretStore {
@@ -251,14 +287,13 @@ port isn't known until the listener binds, and "open it again" needs
 ## Inside
 
 - `session/flow.rs`: `SignInFlow`, its state, epochs, debounce and countdown.
-- `session/homeserver.rs`: the crate-private `Homeserver` trait (probe,
-  password, browser sign-in) and its matrix-sdk implementation.
-- `session/store.rs`: committing, restoring, refresh persistence, sign-out.
-- `platform/`: the two traits.
+- `session/keeping.rs`: committing, restoring, refresh persistence, sign-out.
+- `ports/`: the Matrix, `SecretStore` and `AuthBrowser` ports.
+- `matrix/`: the Matrix adapter over matrix-sdk.
 
-SDK and platform errors are mapped to the types above at this boundary; no
-matrix-sdk type is public. The lint policy from the scaffold (PR #24) applies.
-Tokens, passwords and the store passphrase are never logged.
+The adapter maps SDK errors into port errors; the session area maps port
+errors into the types above. The scaffold's lint policy applies. Tokens,
+passwords and the store passphrase are never logged.
 
 **Dependencies:** `matrix-sdk` 0.19.1 (`sqlite`, `e2e-encryption`), `tokio`,
 `eyeball`, `thiserror`, `tracing`, `url`; dev: `matrix-sdk`'s `testing`
@@ -266,17 +301,19 @@ feature (its mock server). No `matrix-sdk-ui` yet: nothing here uses it.
 
 ## Fakes
 
-`FakeSecretStore` (in memory; can be told to fail) and `FakeAuthBrowser`
-(scripted redirect and callback, or cancel, or fails to open; records reopen
-and cancel). `FakeHomeserver` is crate-private. All are `#[cfg(test)]` for
-now; they become public when a shell's tests need them.
+`FakeMatrix` (scripted probe answers, sign-in results and session changes,
+each answering when the test says; records commits, discards, logouts and
+wipes), `FakeSecretStore` (in memory; can be told to fail) and
+`FakeAuthBrowser` (scripted redirect and callback, or cancel, or fails to
+open; records reopen and cancel). All are `#[cfg(test)]` for now; they become
+public when a shell's tests need them.
 
 ## Tests
 
-Written from the rules above. `SignInFlow` runs over `FakeHomeserver` on
-paused tokio time; session keeping runs on matrix-sdk's mock server with
-`FakeSecretStore` and `FakeAuthBrowser`. Each rule gets at least one test;
-these are the cases the plan must cover:
+Written from the rules above. The flow and session keeping run over the
+three fakes on paused tokio time. The Matrix adapter runs on matrix-sdk's
+mock server. Each rule gets at least one test; these are the cases the plan
+must cover:
 
 **Server input:** names, URLs and user ids each give the host; ports are
 kept; case and whitespace are normalised; every prefix of a typed name,
@@ -309,15 +346,23 @@ and its token is logged out; after commit, cancel and `set_server` are
 ignored; a commit that fails brings the controls back; a second
 `begin_sign_in()` makes the first flow inert.
 
-**Keeping the session** (mock server): a fresh `data_dir` starts signed out;
-signing in publishes `SignedIn`; a stored session restores signed in with the
-server unreachable; the device keys made at sign-in are the restored client's;
-a failed `SecretStore` write fails sign-in and logs the token out; a
-`SecretStore` error at start signs out without wiping; a corrupt `session`
-wipes; refreshed tokens reach `SecretStore`; a refresh in flight never
-signs out; an unrefreshable token signs out and wipes; signing out wipes
-even with the server unreachable; a second sign-out in flight does nothing;
-signing in again after signing out works.
+**Keeping the session:** nothing stored starts signed out; signing in
+publishes `SignedIn`; a stored session restores signed in; a failed
+`SecretStore` write fails sign-in and discards the attempt; a `SecretStore`
+error at start signs out without wiping; a corrupt `session` or a store that
+won't restore wipes; refreshed tokens reach `SecretStore`; a refresh in
+flight never signs out; an unrefreshable token signs out and wipes; signing
+out wipes even when server logout fails; a second sign-out in flight does
+nothing; signing in again after signing out works.
+
+**The Matrix adapter** (mock server): probing reports OAuth, SSO providers
+and password as the server offers them, and an unreachable server; password,
+SSO and OAuth sign-ins each finish; a forbidden and a rate-limited password
+map to their port errors; a refused login token maps to its error; a
+discarded attempt logs out and leaves no store; a committed attempt restores
+from `data_dir/matrix` with the server unreachable and keeps the device keys
+made at sign-in; refreshed tokens and an unrefreshable token are reported;
+wipe leaves no store.
 
 **Logs:** the `tracing` output of a full sign-in, refresh and sign-out
 contains no token, password or passphrase.
