@@ -1,0 +1,41 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+license = "AGPL-3.0-only"
+publish = false
+
+# A crate that needs unsafe opts out in its own [lints] table.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+# pedantic and restriction on whole. restriction contradicts itself in places
+# (mod_module_files vs self_named_module_files); one side of each is allowed
+# as code first hits it. nursery lints are opted into by name.
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+restriction = { level = "warn", priority = -1 }
+blanket_clippy_restriction_lints = "allow"
+# Tail expressions, not `return`; needless_return stays on to enforce it.
+implicit_return = "allow"
+
+# The no-panic policy: a panic in the core takes down the app, and across
+# UniFFI it would only surface as an opaque error. clippy.toml lifts these
+# inside tests.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+
+# Lints are silenced with #[expect], which flags itself once it's moot.
+allow_attributes = "deny"
+# Debugging leftovers and unfinished code never land.
+dbg_macro = "deny"
+todo = "deny"
+# Output goes through tracing.
+print_stdout = "deny"
+print_stderr = "deny"

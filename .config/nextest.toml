@@ -1,0 +1,3 @@
+# Marks a test slow at 30 seconds and kills it, failed, at two minutes.
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 4 }
