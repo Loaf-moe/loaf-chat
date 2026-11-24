@@ -14,7 +14,6 @@ pub use server::{AuthMethods, BrowserMethod};
 pub use stored::{CorruptSession, StoredAuth, StoredSession};
 
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 use eyeball::Subscriber;
 use serde::{Deserialize, Serialize};
@@ -77,18 +76,12 @@ pub struct Session {
     /// The runtime the core started on; flows spawn their work there, so a
     /// shell may call in, or drop a flow, from any thread.
     runtime: Handle,
-    /// Bumped by each `begin_sign_in`; a flow from an older generation is inert.
-    flow_generation: Arc<AtomicU64>,
 }
 
 impl Session {
     /// A handle over `keeping` whose flows run on `runtime`.
     pub(crate) fn new(keeping: Arc<Keeping>, runtime: Handle) -> Self {
-        Self {
-            keeping,
-            runtime,
-            flow_generation: Arc::new(AtomicU64::new(0)),
-        }
+        Self { keeping, runtime }
     }
 
     /// A subscriber whose first `next()` yields the current state at once;
@@ -102,16 +95,12 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// [`NotSignedOut`] while an account is signed in.
+    /// [`NotSignedOut`] while an account is signed in or a sign-in is being kept.
     pub fn begin_sign_in(&self) -> Result<SignInFlow, NotSignedOut> {
-        if self.keeping.state().get() != SessionState::SignedOut {
-            return Err(NotSignedOut);
-        }
-        let generation = self.flow_generation.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+        let generation = self.keeping.begin_flow()?;
         Ok(SignInFlow::begin(
             Arc::clone(&self.keeping),
             self.runtime.clone(),
-            Arc::clone(&self.flow_generation),
             generation,
         ))
     }

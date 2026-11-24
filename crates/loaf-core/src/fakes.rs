@@ -23,6 +23,7 @@ use crate::session::{BrowserMethod, StoredSession};
 pub struct FakeSecretStore {
     values: Mutex<HashMap<String, String>>,
     fail_next_set: AtomicBool,
+    fail_next_set_of: Mutex<Option<String>>,
     fail_gets: AtomicBool,
 }
 
@@ -34,6 +35,11 @@ impl FakeSecretStore {
     /// The next `set` fails; the one after succeeds.
     pub fn fail_next_set(&self) {
         self.fail_next_set.store(true, Ordering::SeqCst);
+    }
+
+    /// The next `set` of `key` fails; sets of other keys still succeed.
+    pub fn fail_next_set_of(&self, key: &str) {
+        *lock(&self.fail_next_set_of) = Some(key.to_owned());
     }
 
     /// Every `get` fails from now on.
@@ -62,7 +68,15 @@ impl SecretStore for FakeSecretStore {
     }
 
     async fn set(&self, key: &str, value: &str) -> Result<(), SecretStoreError> {
-        if self.fail_next_set.swap(false, Ordering::SeqCst) {
+        let failing_key = {
+            let mut failing = lock(&self.fail_next_set_of);
+            let matches = failing.as_deref() == Some(key);
+            if matches {
+                *failing = None;
+            }
+            matches
+        };
+        if self.fail_next_set.swap(false, Ordering::SeqCst) || failing_key {
             return Err(SecretStoreError("keychain locked".into()));
         }
         self.values().insert(key.to_owned(), value.to_owned());

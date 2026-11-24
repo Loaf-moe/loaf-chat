@@ -1,16 +1,16 @@
-//! Keeping the session across launches: restoring it at start.
+//! Keeping the session across launches: committing a sign-in and restoring it at start.
 
 use alloc::sync::Arc;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use eyeball::{SharedObservable, Subscriber};
 
 use crate::core::Platform;
 use crate::ports::auth_browser::AuthBrowser;
-use crate::ports::matrix::{Account, Matrix};
-use crate::ports::secret_store::SecretStore;
+use crate::ports::matrix::{Account, Attempt, Matrix};
+use crate::ports::secret_store::{SecretStore, SecretStoreError};
 use crate::session::stored::{PASSPHRASE_KEY, SESSION_KEY};
-use crate::session::{SessionState, StoredSession};
+use crate::session::{NotSignedOut, SessionState, StoredSession};
 
 /// Owns the session state and the stored secrets behind it.
 pub(crate) struct Keeping {
@@ -24,12 +24,39 @@ pub(crate) struct Keeping {
     #[expect(dead_code, reason = "used from Task 8")]
     auth_browser: Arc<dyn AuthBrowser>,
     /// The name other sessions see for this device.
-    #[expect(dead_code, reason = "used from Task 6")]
     device_name: String,
-    /// The signed-in account; the refresh listener starts on it in Task 10.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 10"))]
+    /// The signed-in account, restored or committed.
     account: Mutex<Option<Arc<dyn Account>>>,
+    /// Which flow may sign in, and whether one is being kept. Beginning a
+    /// flow and claiming a commit both decide under this one lock, so two
+    /// flows can never both commit.
+    flows: Mutex<Flows>,
 }
+
+/// The sign-in flows' share of [`Keeping`], behind `Keeping::flows`.
+struct Flows {
+    /// Bumped by each new flow; only the flow holding the latest may commit.
+    generation: u64,
+    /// A claimed commit is under way; no flow begins or commits until it ends.
+    committing: bool,
+}
+
+/// The right to commit one sign-in, from [`Keeping::claim_commit`]. Dropping
+/// it, after the commit has published its outcome, lets flows begin again.
+pub(crate) struct CommitClaim<'keeping> {
+    /// Released on drop.
+    keeping: &'keeping Keeping,
+}
+
+impl Drop for CommitClaim<'_> {
+    fn drop(&mut self) {
+        self.keeping.flows().committing = false;
+    }
+}
+
+/// Keeping a signed-in session failed; nothing of it was kept.
+#[derive(Debug)]
+pub(crate) struct CommitFailed;
 
 impl Keeping {
     /// A keeper that starts signed out, before [`Self::restore`] has run.
@@ -41,6 +68,109 @@ impl Keeping {
             auth_browser: platform.auth_browser,
             device_name,
             account: Mutex::new(None),
+            flows: Mutex::new(Flows {
+                generation: 0,
+                committing: false,
+            }),
+        }
+    }
+
+    /// A poisoned lock only means a panic elsewhere; its fields are plain
+    /// values assigned whole, so they stay consistent.
+    fn flows(&self) -> MutexGuard<'_, Flows> {
+        self.flows.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Starts a new flow generation, making every earlier flow inert.
+    ///
+    /// # Errors
+    ///
+    /// [`NotSignedOut`] while an account is signed in or a sign-in is being kept.
+    pub(crate) fn begin_flow(&self) -> Result<u64, NotSignedOut> {
+        let mut flows = self.flows();
+        if flows.committing || self.state.get() != SessionState::SignedOut {
+            return Err(NotSignedOut);
+        }
+        flows.generation = flows.generation.wrapping_add(1);
+        Ok(flows.generation)
+    }
+
+    /// Whether no flow has begun since the one in `generation`.
+    pub(crate) fn is_current_flow(&self, generation: u64) -> bool {
+        self.flows().generation == generation
+    }
+
+    /// The right to commit, for the flow in `generation` if it is still the
+    /// newest, nothing is signed in and no other commit is under way.
+    pub(crate) fn claim_commit(&self, generation: u64) -> Option<CommitClaim<'_>> {
+        let mut flows = self.flows();
+        if flows.generation != generation || flows.committing || self.state.get() != SessionState::SignedOut {
+            return None;
+        }
+        flows.committing = true;
+        Some(CommitClaim { keeping: self })
+    }
+
+    /// The name other sessions see for this device.
+    pub(crate) fn device_name(&self) -> &str {
+        &self.device_name
+    }
+
+    /// Keeps a signed-in `session`: writes it and the store passphrase to the
+    /// secret store, commits `attempt`'s store as the account's own, then
+    /// publishes `SignedIn`. A failure deletes the secrets written so far,
+    /// and an attempt not yet committed is discarded, logging its token out.
+    pub(crate) async fn commit(
+        &self,
+        claim: CommitClaim<'_>,
+        attempt: Box<dyn Attempt>,
+        session: StoredSession,
+        passphrase: String,
+    ) -> Result<(), CommitFailed> {
+        if let Err(error) = self.secrets.set(SESSION_KEY, &session.to_secret()).await {
+            return self.abandon(attempt, &[], &error).await;
+        }
+        if let Err(error) = self.secrets.set(PASSPHRASE_KEY, &passphrase).await {
+            return self.abandon(attempt, &[SESSION_KEY], &error).await;
+        }
+        match attempt.commit(&session).await {
+            Ok(account) => {
+                *self.account.lock().unwrap_or_else(PoisonError::into_inner) = Some(account);
+                self.state.set(SessionState::SignedIn {
+                    user: session.user,
+                    device: session.device,
+                });
+                drop(claim);
+                Ok(())
+            }
+            Err(error) => {
+                tracing::warn!(%error, "couldn't keep the signed-in account");
+                self.delete_secrets(&[SESSION_KEY, PASSPHRASE_KEY]).await;
+                Err(CommitFailed)
+            }
+        }
+    }
+
+    /// Gives up on a commit whose secret write failed: discards `attempt`,
+    /// logging its token out, and deletes the secrets already `written`.
+    async fn abandon(
+        &self,
+        attempt: Box<dyn Attempt>,
+        written: &[&str],
+        error: &SecretStoreError,
+    ) -> Result<(), CommitFailed> {
+        tracing::warn!(%error, "couldn't store the signed-in session");
+        attempt.discard().await;
+        self.delete_secrets(written).await;
+        Err(CommitFailed)
+    }
+
+    /// Deletes `keys` from the secret store, logging any that fail.
+    async fn delete_secrets(&self, keys: &[&str]) {
+        for &key in keys {
+            if let Err(error) = self.secrets.delete(key).await {
+                tracing::warn!(%error, key, "couldn't delete a stored secret");
+            }
         }
     }
 
@@ -96,11 +226,7 @@ impl Keeping {
         if let Err(error) = self.matrix.wipe().await {
             tracing::warn!(%error, "couldn't delete the Matrix store");
         }
-        for key in [SESSION_KEY, PASSPHRASE_KEY] {
-            if let Err(error) = self.secrets.delete(key).await {
-                tracing::warn!(%error, key, "couldn't delete a stored secret");
-            }
-        }
+        self.delete_secrets(&[SESSION_KEY, PASSPHRASE_KEY]).await;
     }
 }
 
@@ -226,6 +352,21 @@ mod tests {
         assert_eq!(start.await.unwrap(), SessionState::SignedOut);
         assert_eq!(fake.wipes(), 1);
         assert!(both_deleted(&secrets));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_the_newest_flow_claims_the_commit_and_begin_waits_for_it() {
+        let secrets = Arc::new(FakeSecretStore::new());
+        let keeping = Keeping::new(config(&secrets).platform, "Test".into(), FakeMatrix::new());
+        let first = keeping.begin_flow().unwrap();
+        let second = keeping.begin_flow().unwrap();
+        assert!(keeping.claim_commit(first).is_none());
+
+        let claim = keeping.claim_commit(second).unwrap();
+        assert!(keeping.claim_commit(second).is_none());
+        keeping.begin_flow().unwrap_err();
+        drop(claim);
+        keeping.begin_flow().unwrap();
     }
 
     #[tokio::test(start_paused = true)]
