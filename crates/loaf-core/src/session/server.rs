@@ -23,7 +23,6 @@ pub enum BrowserMethod {
 
 /// The host (with any port, lowercased) in a server name, URL or full user id,
 /// or `None` while the input isn't a plausible host yet.
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
 pub(crate) fn parse_server(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if trimmed.starts_with('@') {
@@ -34,7 +33,6 @@ pub(crate) fn parse_server(input: &str) -> Option<String> {
 
 /// The server named by a full user id typed into the username field, so a
 /// plain username leaves the server alone.
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
 pub(crate) fn user_id_server(text: &str) -> Option<String> {
     let rest = text.trim().strip_prefix('@')?;
     let (_localpart, server) = rest.split_once(':')?;
@@ -79,7 +77,6 @@ fn typed_port(url_text: &str) -> Option<&str> {
 
 /// OAuth is the one browser method when published; otherwise SSO, one per
 /// provider in the server's order.
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
 pub(crate) fn auth_methods(offer: &ServerOffer) -> AuthMethods {
     let browser = if offer.oauth {
         vec![BrowserMethod::OAuth]

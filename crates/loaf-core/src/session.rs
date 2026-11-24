@@ -1,5 +1,7 @@
 //! Signing in, keeping the session across launches and signing out.
 
+/// The sign-in flow: discovery, its state and its stale answers.
+mod flow;
 /// Restoring at start, and later the refresh and sign-out that keep the session.
 pub(crate) mod keeping;
 /// Server input and the sign-in methods a server offers.
@@ -7,13 +9,16 @@ mod server;
 /// The session as the secret store keeps it.
 mod stored;
 
+pub use flow::{Activity, ServerCheck, SignInFailure, SignInFlow, SignInState};
 pub use server::{AuthMethods, BrowserMethod};
 pub use stored::{CorruptSession, StoredAuth, StoredSession};
 
 use alloc::sync::Arc;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use eyeball::Subscriber;
 use serde::{Deserialize, Serialize};
+use tokio::runtime::Handle;
 
 use keeping::Keeping;
 
@@ -60,21 +65,54 @@ pub enum SessionState {
     SignedIn { user: UserId, device: DeviceId },
 }
 
+/// `begin_sign_in` was called while an account is signed in.
+#[derive(Debug, thiserror::Error)]
+#[error("an account is already signed in")]
+pub struct NotSignedOut;
+
 /// The handle a shell uses to watch and change the session.
 pub struct Session {
     /// Holds the state and the secrets behind it.
     keeping: Arc<Keeping>,
+    /// The runtime the core started on; flows spawn their work there, so a
+    /// shell may call in, or drop a flow, from any thread.
+    runtime: Handle,
+    /// Bumped by each `begin_sign_in`; a flow from an older generation is inert.
+    flow_generation: Arc<AtomicU64>,
 }
 
 impl Session {
-    /// A handle over `keeping`.
-    pub(crate) const fn new(keeping: Arc<Keeping>) -> Self {
-        Self { keeping }
+    /// A handle over `keeping` whose flows run on `runtime`.
+    pub(crate) fn new(keeping: Arc<Keeping>, runtime: Handle) -> Self {
+        Self {
+            keeping,
+            runtime,
+            flow_generation: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     /// A subscriber whose first `next()` yields the current state at once;
     /// each later `next()` waits for a change.
     pub fn state(&self) -> Subscriber<SessionState> {
         self.keeping.state()
+    }
+
+    /// Starts signing in, probing the default server at once. Any earlier
+    /// flow becomes inert, so two flows can never both sign in.
+    ///
+    /// # Errors
+    ///
+    /// [`NotSignedOut`] while an account is signed in.
+    pub fn begin_sign_in(&self) -> Result<SignInFlow, NotSignedOut> {
+        if self.keeping.state().get() != SessionState::SignedOut {
+            return Err(NotSignedOut);
+        }
+        let generation = self.flow_generation.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+        Ok(SignInFlow::begin(
+            Arc::clone(&self.keeping),
+            self.runtime.clone(),
+            Arc::clone(&self.flow_generation),
+            generation,
+        ))
     }
 }

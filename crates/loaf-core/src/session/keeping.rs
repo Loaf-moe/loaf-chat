@@ -21,10 +21,10 @@ pub(crate) struct Keeping {
     /// The homeserver side: restoring and wiping the SDK store.
     matrix: Arc<dyn Matrix>,
     /// The system browser for browser sign-ins.
-    #[expect(dead_code, reason = "used from Task 5")]
+    #[expect(dead_code, reason = "used from Task 8")]
     auth_browser: Arc<dyn AuthBrowser>,
     /// The name other sessions see for this device.
-    #[expect(dead_code, reason = "used from Task 5")]
+    #[expect(dead_code, reason = "used from Task 6")]
     device_name: String,
     /// The signed-in account; the refresh listener starts on it in Task 10.
     #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 10"))]
@@ -42,6 +42,11 @@ impl Keeping {
             device_name,
             account: Mutex::new(None),
         }
+    }
+
+    /// The homeserver side, for probing during sign-in.
+    pub(crate) fn matrix(&self) -> &Arc<dyn Matrix> {
+        &self.matrix
     }
 
     /// A subscriber whose first `next()` yields the current state; later ones wait for a change.

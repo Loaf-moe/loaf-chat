@@ -3,6 +3,8 @@
 use alloc::sync::Arc;
 use std::path::PathBuf;
 
+use tokio::runtime::Handle;
+
 use crate::ports::auth_browser::AuthBrowser;
 use crate::ports::matrix::Matrix;
 use crate::ports::secret_store::SecretStore;
@@ -37,7 +39,8 @@ impl Core {
         let keeping = Arc::new(Keeping::new(config.platform, config.device_name, matrix));
         keeping.restore().await;
         Arc::new(Self {
-            session: Session::new(keeping),
+            // `start_with` is async, so it runs inside the caller's runtime.
+            session: Session::new(keeping, Handle::current()),
         })
     }
 
