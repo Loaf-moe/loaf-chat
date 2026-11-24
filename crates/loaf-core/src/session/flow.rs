@@ -7,11 +7,11 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use eyeball::{SharedObservable, Subscriber};
 use tokio::runtime::Handle;
-use tokio::time::interval;
+use tokio::time::{Instant, interval, sleep_until};
 
 use crate::ports::matrix::{Attempt, PasswordError, Probe, Unreachable};
 use crate::session::keeping::{CommitClaim, Keeping};
-use crate::session::server::{auth_methods, parse_server};
+use crate::session::server::{auth_methods, parse_server, user_id_server};
 use crate::session::{AuthMethods, StoredSession};
 
 /// The server a flow probes before the person types one.
@@ -20,6 +20,8 @@ const DEFAULT_SERVER: &str = "loaf.moe";
 const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(30);
 /// How often the rate-limit countdown moves.
 const COUNTDOWN_TICK: Duration = Duration::from_secs(1);
+/// How long typing must pause before a full user id re-points the server.
+const REPOINT_QUIET: Duration = Duration::from_millis(400);
 
 /// Everything a sign-in screen shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +120,32 @@ struct Inner {
     /// The attempt the found server started, kept for the sign-in that
     /// follows. A password call takes it out while in flight.
     probe: Option<Pending>,
+    /// Bumped by every username change, so only the latest one's quiet
+    /// period may re-point the server.
+    debounce: u64,
+    /// A full user id naming another server is waiting out its quiet period.
+    repoint_waiting: bool,
+    /// A password submitted while a re-point was pending, sent once that
+    /// server is found to take passwords.
+    held: Option<Credentials>,
+}
+
+impl Inner {
+    /// Cancels a pending re-point's quiet period and drops any held password.
+    fn cancel_repoint(&mut self) {
+        self.debounce = self.debounce.wrapping_add(1);
+        self.repoint_waiting = false;
+        self.held = None;
+    }
+}
+
+/// A trimmed user and the password as typed. No `Debug`, so the password
+/// can't reach a log.
+struct Credentials {
+    /// The username, trimmed.
+    user: String,
+    /// Never logged, never in [`SignInState`].
+    password: String,
 }
 
 /// An attempt and the passphrase its pending store was opened under.
@@ -152,7 +180,13 @@ impl SignInFlow {
             runtime,
             generation,
             state: SharedObservable::new(SignInState::probing(DEFAULT_SERVER.to_owned())),
-            inner: Mutex::new(Inner { epoch: 0, probe: None }),
+            inner: Mutex::new(Inner {
+                epoch: 0,
+                probe: None,
+                debounce: 0,
+                repoint_waiting: false,
+                held: None,
+            }),
         });
         Shared::start_probe(&shared, |_| Some(DEFAULT_SERVER.to_owned()));
         Self { shared }
@@ -188,6 +222,14 @@ impl SignInFlow {
         }
         Shared::start_password(&self.shared, trimmed.to_owned(), password.to_owned());
     }
+
+    /// Re-points the flow to the server a full user id in the username field
+    /// names, once typing pauses for [`REPOINT_QUIET`], if that server differs
+    /// and the flow is idle. Any other text cancels a pending re-point.
+    pub fn username_changed(&self, text: &str) {
+        let named = user_id_server(text);
+        Shared::schedule_repoint(&self.shared, named);
+    }
 }
 
 impl Drop for SignInFlow {
@@ -197,6 +239,7 @@ impl Drop for SignInFlow {
         let held = {
             let mut inner = self.shared.lock();
             inner.epoch = inner.epoch.wrapping_add(1);
+            inner.cancel_repoint();
             inner.probe.take()
         };
         self.shared.discard_later(held);
@@ -254,6 +297,7 @@ impl Shared {
     /// hands back the epoch and the attempt it replaces. Call with the lock held.
     fn enter_probe(&self, inner: &mut Inner, next: SignInState) -> (u64, Option<Pending>) {
         inner.epoch = inner.epoch.wrapping_add(1);
+        inner.cancel_repoint();
         self.state.update(|state| *state = next);
         (inner.epoch, inner.probe.take())
     }
@@ -269,43 +313,76 @@ impl Shared {
     }
 
     /// Publishes a probe's answer if `epoch` is still current; otherwise
-    /// discards the attempt it started.
-    async fn apply_probe(&self, epoch: u64, answer: Result<Probe, Unreachable>, passphrase: String) {
-        let unwanted = {
+    /// discards the attempt it started. A re-point's answer moves the flow to
+    /// the re-pointed server either way, since the person typed that id, and
+    /// settles a held password: sent when the server takes passwords,
+    /// dropped when it doesn't or couldn't be reached.
+    async fn apply_probe(self: &Arc<Self>, epoch: u64, answer: Result<Probe, Unreachable>, passphrase: String) {
+        let (unwanted, send) = {
             let mut inner = self.lock();
             if self.is_current(&inner, epoch) {
-                if let Ok(Probe { offer, attempt }) = answer {
-                    self.state
-                        .update(|state| state.check = ServerCheck::Found(auth_methods(&offer)));
-                    inner.probe.replace(Pending { attempt, passphrase })
-                } else {
-                    self.state.update(|state| state.check = ServerCheck::CouldntReach);
-                    None
-                }
+                // A held password waits through a newer re-point still waiting
+                // out its quiet period, so it reaches the server last typed.
+                let held = if inner.repoint_waiting { None } else { inner.held.take() };
+                let found = answer
+                    .ok()
+                    .map(|Probe { offer, attempt }| (auth_methods(&offer), attempt));
+                let takes_passwords = found.as_ref().is_some_and(|(methods, _)| methods.password);
+                let dropping_held = held.is_some() && !takes_passwords;
+                let check = found.as_ref().map_or(ServerCheck::CouldntReach, |(methods, _)| {
+                    ServerCheck::Found(methods.clone())
+                });
+                self.state.update(|state| {
+                    if let Some(server) = state.repointing.take() {
+                        state.server = server;
+                    }
+                    state.check = check;
+                    if dropping_held {
+                        state.activity = Activity::Idle;
+                    }
+                });
+                let unwanted = found.and_then(|(_, attempt)| inner.probe.replace(Pending { attempt, passphrase }));
+                let send = held
+                    .filter(|_| takes_passwords)
+                    .and_then(|credentials| Some((inner.probe.take()?, credentials)))
+                    .map(|(pending, credentials)| (pending, self.enter_password(&mut inner), credentials));
+                (unwanted, send)
             } else {
-                answer.ok().map(|probe| Pending {
+                let unwanted = answer.ok().map(|probe| Pending {
                     attempt: probe.attempt,
                     passphrase,
-                })
+                });
+                (unwanted, None)
             }
         };
+        if let Some((pending, password_epoch, credentials)) = send {
+            self.spawn_password(pending, password_epoch, credentials);
+        }
         if let Some(pending) = unwanted {
             pending.attempt.discard().await;
         }
     }
 
     /// Sends `user` and `password` through the held attempt in a new epoch,
-    /// if the state allows a password sign-in now.
+    /// if the state allows a password sign-in now. While a re-point is
+    /// pending or in flight they are held for the re-pointed server, so the
+    /// password never goes to the server being left.
     fn start_password(self: &Arc<Self>, user: String, password: String) {
+        let credentials = Credentials { user, password };
         let (pending, epoch) = {
             let mut inner = self.lock();
             let current = self.state.get();
+            if !self.is_current_flow() || current.activity != Activity::Idle {
+                return;
+            }
+            // The re-pointed server's own offer and rate limit decide once it is found.
+            if inner.repoint_waiting || current.repointing.is_some() {
+                inner.held = Some(credentials);
+                self.show_checking_password();
+                return;
+            }
             let takes_passwords = matches!(&current.check, ServerCheck::Found(methods) if methods.password);
-            if !self.is_current_flow()
-                || current.activity != Activity::Idle
-                || !takes_passwords
-                || current.retry_in.is_some()
-            {
+            if !takes_passwords || current.retry_in.is_some() {
                 return;
             }
             // The attempt is needed by value across the call; a server change
@@ -313,22 +390,107 @@ impl Shared {
             let Some(pending) = inner.probe.take() else {
                 return;
             };
-            inner.epoch = inner.epoch.wrapping_add(1);
-            self.state.update(|state| {
-                state.activity = Activity::CheckingPassword;
-                state.failure = None;
-                state.wrong_password = false;
-            });
-            (pending, inner.epoch)
+            (pending, self.enter_password(&mut inner))
         };
+        self.spawn_password(pending, epoch, credentials);
+    }
+
+    /// Starts the epoch a password call runs in and shows it checking.
+    /// Call with the lock held.
+    fn enter_password(&self, inner: &mut Inner) -> u64 {
+        inner.epoch = inner.epoch.wrapping_add(1);
+        self.show_checking_password();
+        inner.epoch
+    }
+
+    /// Shows a password sign-in under way, clearing the last one's outcome.
+    /// Call with the lock held.
+    fn show_checking_password(&self) {
+        self.state.update(|state| {
+            state.activity = Activity::CheckingPassword;
+            state.failure = None;
+            state.wrong_password = false;
+        });
+    }
+
+    /// Sends `credentials` through `pending`'s attempt for work started at `epoch`.
+    fn spawn_password(self: &Arc<Self>, pending: Pending, epoch: u64, credentials: Credentials) {
         let shared = Arc::clone(self);
         self.runtime.spawn(async move {
             let answer = pending
                 .attempt
-                .sign_in_with_password(&user, &password, shared.keeping.device_name())
+                .sign_in_with_password(&credentials.user, &credentials.password, shared.keeping.device_name())
                 .await;
             shared.apply_password(epoch, pending, answer).await;
         });
+    }
+
+    /// Restarts the quiet period before re-pointing to `named`, the server a
+    /// full user id in the username field names. `None`, or the server the
+    /// flow is already on or heading to, only cancels a pending re-point.
+    fn schedule_repoint(self: &Arc<Self>, named: Option<String>) {
+        let (debounce, server) = {
+            let mut inner = self.lock();
+            let current = self.state.get();
+            if !self.is_current_flow() || current.activity == Activity::SignedIn {
+                return;
+            }
+            // A held password belongs to the username it was submitted with.
+            if inner.held.take().is_some() {
+                self.state.update(|state| state.activity = Activity::Idle);
+            }
+            inner.debounce = inner.debounce.wrapping_add(1);
+            let target = current.repointing.as_ref().unwrap_or(&current.server);
+            let Some(server) = named.filter(|server| server != target) else {
+                inner.repoint_waiting = false;
+                return;
+            };
+            inner.repoint_waiting = true;
+            (inner.debounce, server)
+        };
+        // Measured from the keystroke, not from when the task first runs.
+        let Some(deadline) = Instant::now().checked_add(REPOINT_QUIET) else {
+            return;
+        };
+        let shared = Arc::clone(self);
+        self.runtime.spawn(async move {
+            sleep_until(deadline).await;
+            shared.repoint(debounce, server);
+        });
+    }
+
+    /// Probes `server` for the re-point whose quiet period `debounce` ended,
+    /// if no later username change, server change or drop has cancelled it
+    /// and the flow is idle or holding a password for it. The form stays up
+    /// while `repointing` names the server being probed.
+    fn repoint(self: &Arc<Self>, debounce: u64, server: String) {
+        let (epoch, replaced) = {
+            let mut inner = self.lock();
+            if inner.debounce != debounce || !self.is_current_flow() {
+                return;
+            }
+            inner.repoint_waiting = false;
+            let current = self.state.get();
+            let holding = inner.held.is_some();
+            if current.activity != Activity::Idle && !holding {
+                return;
+            }
+            if current.repointing.as_ref().unwrap_or(&current.server) == &server {
+                // Nothing will be probed, so a held password would wait forever.
+                if inner.held.take().is_some() {
+                    self.state.update(|state| state.activity = Activity::Idle);
+                }
+                return;
+            }
+            inner.epoch = inner.epoch.wrapping_add(1);
+            self.state.update(|state| {
+                state.repointing = Some(server.clone());
+                state.retry_in = None;
+            });
+            (inner.epoch, inner.probe.take())
+        };
+        self.discard_later(replaced);
+        self.spawn_probe(server, epoch);
     }
 
     /// Applies a password answer from `epoch`: commits the session when
@@ -1125,5 +1287,271 @@ mod tests {
         advance(Duration::from_secs(30)).await;
         settle().await;
         assert_eq!(found.flow.state().get().retry_in, None);
+    }
+
+    /// An offer from a server that signs in only through the browser.
+    fn browser_only() -> ServerOffer {
+        ServerOffer {
+            password: false,
+            ..offer()
+        }
+    }
+
+    /// Whether no probe is queued once spawned work has run, without moving
+    /// the paused clock.
+    async fn no_probe_queued(fake: &FakeMatrix) -> bool {
+        settle().await;
+        timeout(Duration::ZERO, fake.next_probe()).await.is_err()
+    }
+
+    /// Moves the paused clock by `millis` and lets woken work run.
+    async fn advance_ms(millis: u64) {
+        advance(Duration::from_millis(millis)).await;
+        settle().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn full_id_repoints_after_400ms_quiet() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        advance_ms(399).await;
+        assert!(no_probe_queued(&found.fake).await);
+        assert_eq!(found.flow.state().get().repointing, None);
+
+        advance_ms(1).await;
+        let probe = next_probe(&found.fake).await;
+        assert_eq!(probe.server, "other.org");
+        let probing_other = found.flow.state().get();
+        assert_eq!(probing_other.repointing.as_deref(), Some("other.org"));
+        assert_eq!(probing_other.check, ServerCheck::Found(auth_methods(&offer())));
+        assert_eq!(probing_other.server, "loaf.moe");
+
+        probe.reply(Ok(FakeProbe::new(browser_only())));
+        until(|| found.flow.state().get().repointing.is_none()).await;
+        let on_other = found.flow.state().get();
+        assert_eq!(on_other.server, "other.org");
+        assert_eq!(on_other.check, ServerCheck::Found(auth_methods(&browser_only())));
+        // The loaf.moe attempt was let go when the re-point began.
+        assert_eq!(found.fake.discarded(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn typing_restarts_the_debounce() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        advance_ms(300).await;
+        found.flow.username_changed("@ab:other.org");
+        advance_ms(399).await;
+        assert!(no_probe_queued(&found.fake).await);
+        advance_ms(1).await;
+        assert_eq!(next_probe(&found.fake).await.server, "other.org");
+        assert!(no_probe_queued(&found.fake).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn plain_username_leaves_server_alone() {
+        let found = found_flow().await;
+        let before = found.flow.state().get();
+        found.flow.username_changed("alice");
+        advance_ms(1000).await;
+        assert!(no_probe_queued(&found.fake).await);
+
+        // Backing out of a full id cancels its pending re-point.
+        found.flow.username_changed("@a:other.org");
+        advance_ms(200).await;
+        found.flow.username_changed("@a");
+        advance_ms(1000).await;
+        assert!(no_probe_queued(&found.fake).await);
+        assert_eq!(found.flow.state().get(), before);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn same_server_does_nothing() {
+        let found = found_flow().await;
+        let before = found.flow.state().get();
+        found.flow.username_changed("@a:loaf.moe");
+        advance_ms(1000).await;
+        assert!(no_probe_queued(&found.fake).await);
+        assert_eq!(found.flow.state().get(), before);
+
+        // Nothing is pending, so a password goes straight to loaf.moe.
+        found.flow.username_changed("@a:loaf.moe");
+        found.flow.sign_in_with_password("@a:loaf.moe", "pw");
+        assert_eq!(next_password(&found.fake).await.attempt, 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn password_inside_debounce_goes_to_new_server() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        advance_ms(100).await;
+        found.flow.sign_in_with_password("@a:other.org", "pw");
+        assert_eq!(found.flow.state().get().activity, Activity::CheckingPassword);
+        assert!(!password_called(&found.fake).await);
+
+        let probe = next_probe(&found.fake).await;
+        assert_eq!(probe.server, "other.org");
+        probe.reply(Ok(FakeProbe::new(offer())));
+        let call = next_password(&found.fake).await;
+        assert_eq!(call.attempt, 1);
+        assert_eq!((call.user.as_str(), call.password.as_str()), ("@a:other.org", "pw"));
+        let state = found.flow.state().get();
+        assert_eq!((state.server.as_str(), state.repointing), ("other.org", None));
+        assert_eq!(state.activity, Activity::CheckingPassword);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn password_held_for_server_without_passwords_is_dropped() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        found.flow.sign_in_with_password("@a:other.org", "pw");
+        next_probe(&found.fake).await.reply(Ok(FakeProbe::new(browser_only())));
+        until(|| found.flow.state().get().repointing.is_none()).await;
+        let state = found.flow.state().get();
+        assert_eq!(state.activity, Activity::Idle);
+        assert_eq!(state.check, ServerCheck::Found(auth_methods(&browser_only())));
+        assert!(!password_called(&found.fake).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn password_during_repoint_probe_is_held() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        let probe = next_probe(&found.fake).await;
+        found.flow.sign_in_with_password("@a:other.org", "pw");
+        assert_eq!(found.flow.state().get().activity, Activity::CheckingPassword);
+        assert!(!password_called(&found.fake).await);
+
+        probe.reply(Ok(FakeProbe::new(offer())));
+        assert_eq!(next_password(&found.fake).await.attempt, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unreachable_repoint_moves_the_server_and_drops_the_password() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        found.flow.sign_in_with_password("@a:other.org", "pw");
+        next_probe(&found.fake).await.reply(Err(Unreachable));
+        until(|| found.flow.state().get().repointing.is_none()).await;
+        let state = found.flow.state().get();
+        assert_eq!(state.server, "other.org");
+        assert_eq!(
+            (state.check, state.activity),
+            (ServerCheck::CouldntReach, Activity::Idle)
+        );
+        assert!(!password_called(&found.fake).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn set_server_cancels_a_pending_repoint_and_held_password() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        found.flow.sign_in_with_password("@a:other.org", "pw");
+        found.flow.set_server("example.org");
+        assert_eq!(found.flow.state().get(), probing("example.org"));
+        let probe = next_probe(&found.fake).await;
+        assert_eq!(probe.server, "example.org");
+        advance_ms(1000).await;
+        assert!(no_probe_queued(&found.fake).await);
+
+        probe.reply(Ok(FakeProbe::new(offer())));
+        until(|| matches!(found.flow.state().get().check, ServerCheck::Found(_))).await;
+        assert_eq!(found.flow.state().get().activity, Activity::Idle);
+        assert!(!password_called(&found.fake).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_cancels_a_repoint_in_flight() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        let repoint = next_probe(&found.fake).await;
+        found.flow.sign_in_with_password("@a:other.org", "pw");
+        found.flow.retry();
+        assert_eq!(found.flow.state().get(), probing("loaf.moe"));
+        // Held unanswered, so the retry stays in flight.
+        let again = next_probe(&found.fake).await;
+        assert_eq!(again.server, "loaf.moe");
+
+        repoint.reply(Ok(FakeProbe::new(offer())));
+        until(|| found.fake.discarded() == 2).await;
+        assert_eq!(found.flow.state().get(), probing("loaf.moe"));
+        assert!(!password_called(&found.fake).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn repoint_clears_the_countdown() {
+        let found = found_flow().await;
+        answer_password(&found, Err(PasswordError::RateLimited { retry_after: None })).await;
+        until(|| found.flow.state().get().retry_in.is_some()).await;
+        found.flow.username_changed("@a:other.org");
+        let probe = next_probe(&found.fake).await;
+        assert_eq!(found.flow.state().get().retry_in, None);
+        advance_ms(2000).await;
+        assert_eq!(found.flow.state().get().retry_in, None);
+
+        probe.reply(Ok(FakeProbe::new(offer())));
+        until(|| found.flow.state().get().repointing.is_none()).await;
+        found.flow.sign_in_with_password("@a:other.org", "pw");
+        assert_eq!(next_password(&found.fake).await.attempt, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn held_password_waits_for_the_server_typed_last() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        let other = next_probe(&found.fake).await;
+        found.flow.username_changed("@a:third.org");
+        found.flow.sign_in_with_password("@a:third.org", "pw");
+
+        // other.org lands while third.org is still waiting out its quiet period.
+        other.reply(Ok(FakeProbe::new(offer())));
+        until(|| found.flow.state().get().repointing.is_none()).await;
+        assert_eq!(found.flow.state().get().activity, Activity::CheckingPassword);
+        assert!(!password_called(&found.fake).await);
+
+        let third = next_probe(&found.fake).await;
+        assert_eq!(third.server, "third.org");
+        third.reply(Ok(FakeProbe::new(offer())));
+        let call = next_password(&found.fake).await;
+        assert_eq!((call.attempt, call.user.as_str()), (2, "@a:third.org"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn editing_the_username_lets_a_held_password_go() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        found.flow.sign_in_with_password("@a:other.org", "pw");
+        found.flow.username_changed("@ab:other.org");
+        assert_eq!(found.flow.state().get().activity, Activity::Idle);
+
+        next_probe(&found.fake).await.reply(Ok(FakeProbe::new(offer())));
+        until(|| found.flow.state().get().repointing.is_none()).await;
+        assert!(!password_called(&found.fake).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn busy_flow_is_not_repointed() {
+        let found = found_flow().await;
+        found.flow.sign_in_with_password("bob", "pw");
+        let _call = next_password(&found.fake).await;
+        found.flow.username_changed("@a:other.org");
+        advance_ms(1000).await;
+        assert!(no_probe_queued(&found.fake).await);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dropped_flow_cancels_a_pending_repoint() {
+        let found = found_flow().await;
+        found.flow.username_changed("@a:other.org");
+        let Found {
+            core: _core,
+            fake,
+            secrets: _,
+            flow,
+            passphrase: _,
+        } = found;
+        drop(flow);
+        advance_ms(1000).await;
+        assert!(no_probe_queued(&fake).await);
     }
 }
