@@ -59,10 +59,22 @@ fn host_with_port(text: &str) -> Option<String> {
     if !(host.contains('.') || host == "localhost") {
         return None;
     }
-    Some(match url.port() {
+    // `Url::port` is `None` for a scheme's default port, and `http://host:80`
+    // would then be resolved as https on 443; the typed port is read from the
+    // text instead.
+    Some(match typed_port(candidate) {
         Some(port) => format!("{host}:{port}"),
         None => host,
     })
+}
+
+/// The port written in the authority of an already validated URL.
+fn typed_port(url_text: &str) -> Option<&str> {
+    let after_scheme = url_text.split_once("://").map_or(url_text, |(_, rest)| rest);
+    let authority = after_scheme.split(['/', '?', '#']).next().unwrap_or(after_scheme);
+    let host_and_port = authority.rsplit_once('@').map_or(authority, |(_, rest)| rest);
+    let (_, port) = host_and_port.rsplit_once(':')?;
+    (!port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit())).then_some(port)
 }
 
 /// OAuth is the one browser method when published; otherwise SSO, one per
@@ -107,6 +119,10 @@ mod tests {
             ("@alice:Loaf.Moe", "loaf.moe"),
             ("  LOAF.moe ", "loaf.moe"),
             ("localhost:8008", "localhost:8008"),
+            ("https://loaf.moe:443", "loaf.moe:443"),
+            ("loaf.moe:443", "loaf.moe:443"),
+            ("http://loaf.moe:80", "loaf.moe:80"),
+            ("@a:loaf.moe:443", "loaf.moe:443"),
         ] {
             assert_eq!(parse_server(input).as_deref(), Some(host), "{input:?}");
         }
