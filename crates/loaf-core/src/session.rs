@@ -72,7 +72,8 @@ impl Session {
         Self { keeping }
     }
 
-    /// The current state, and every change after it.
+    /// A subscriber whose first `next()` yields the current state at once;
+    /// each later `next()` waits for a change.
     pub fn state(&self) -> Subscriber<SessionState> {
         self.keeping.state()
     }

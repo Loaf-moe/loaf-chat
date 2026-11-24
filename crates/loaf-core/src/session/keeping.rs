@@ -44,9 +44,9 @@ impl Keeping {
         }
     }
 
-    /// A subscriber that starts at the current state.
+    /// A subscriber whose first `next()` yields the current state; later ones wait for a change.
     pub(crate) fn state(&self) -> Subscriber<SessionState> {
-        self.state.subscribe()
+        self.state.subscribe_reset()
     }
 
     /// Signs in from the stored session with no network. A missing or
@@ -107,8 +107,10 @@ mod tests {
     use crate::ports::matrix::WontRestore;
     use crate::session::stored::{PASSPHRASE_KEY, SESSION_KEY, StoredAuth};
     use crate::session::{DeviceId, StoredSession, UserId};
+    use core::time::Duration;
     use std::path::PathBuf;
     use tokio::task::{JoinHandle, yield_now};
+    use tokio::time::timeout;
     use url::Url;
 
     fn stored() -> StoredSession {
@@ -219,5 +221,27 @@ mod tests {
         assert_eq!(start.await.unwrap(), SessionState::SignedOut);
         assert_eq!(fake.wipes(), 1);
         assert!(both_deleted(&secrets));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn state_subscriber_yields_current_state_first() {
+        let secrets = secrets_with(Some(&stored().to_secret()), Some("pass")).await;
+        let fake = FakeMatrix::new();
+        let start = tokio::spawn({
+            let secrets_for_task = Arc::clone(&secrets);
+            let fake_for_task = Arc::clone(&fake);
+            async move { Core::start_with(config(&secrets_for_task), fake_for_task).await }
+        });
+        fake.next_restore().await.reply(Ok(FakeAccount::new(&fake)));
+        let core = start.await.unwrap();
+        let mut state = core.session().state();
+        let first = timeout(Duration::from_secs(1), state.next()).await.unwrap();
+        assert_eq!(
+            first,
+            Some(SessionState::SignedIn {
+                user: stored().user,
+                device: stored().device,
+            })
+        );
     }
 }
