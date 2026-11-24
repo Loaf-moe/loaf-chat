@@ -221,9 +221,11 @@ impl Shared {
     }
 
     /// Probes the server `choose` picks from the current state, if it picks
-    /// one, in a new epoch that replaces the attempt held so far.
+    /// one, in a new epoch that replaces the attempt held so far. Probing the
+    /// same server again keeps a running rate-limit countdown; only a server
+    /// change clears it.
     fn start_probe(self: &Arc<Self>, choose: impl FnOnce(&SignInState) -> Option<String>) {
-        let (server, epoch, replaced) = {
+        let (server, epoch, replaced, counting) = {
             let mut inner = self.lock();
             let current = self.state.get();
             // Past the point of no return, the session is being kept.
@@ -233,11 +235,31 @@ impl Shared {
             let Some(server) = choose(&current) else {
                 return;
             };
-            inner.epoch = inner.epoch.wrapping_add(1);
-            self.state.update(|state| *state = SignInState::probing(server.clone()));
-            (server, inner.epoch, inner.probe.take())
+            let retry_in = current.retry_in.filter(|_| current.server == server);
+            let next = SignInState {
+                retry_in,
+                ..SignInState::probing(server.clone())
+            };
+            let (epoch, replaced) = self.enter_probe(&mut inner, next);
+            (server, epoch, replaced, retry_in.is_some())
         };
         self.discard_later(replaced);
+        if counting {
+            self.start_countdown(epoch);
+        }
+        self.spawn_probe(server, epoch);
+    }
+
+    /// Starts a new epoch showing `next`, which is probing its server, and
+    /// hands back the epoch and the attempt it replaces. Call with the lock held.
+    fn enter_probe(&self, inner: &mut Inner, next: SignInState) -> (u64, Option<Pending>) {
+        inner.epoch = inner.epoch.wrapping_add(1);
+        self.state.update(|state| *state = next);
+        (inner.epoch, inner.probe.take())
+    }
+
+    /// Probes `server` for work started at `epoch`, with a fresh passphrase.
+    fn spawn_probe(self: &Arc<Self>, server: String, epoch: u64) {
         let passphrase = new_passphrase();
         let shared = Arc::clone(self);
         self.runtime.spawn(async move {
@@ -353,14 +375,32 @@ impl Shared {
             AfterPassword::Commit(claim, kept, session) => {
                 let committed = self.keeping.commit(claim, kept.attempt, session, kept.passphrase).await;
                 if committed.is_err() {
-                    let _inner = self.lock();
-                    self.state.update(|state| {
-                        state.failure = Some(SignInFailure::CouldntFinish);
-                        state.activity = Activity::Idle;
-                    });
+                    self.reprobe_after_failed_commit(epoch);
                 }
             }
         }
+    }
+
+    /// Brings the controls back after keeping the session failed: shows
+    /// `CouldntFinish` and probes the current server again, since the failed
+    /// commit used up the attempt. Only a drop moves the epoch past `epoch`
+    /// while signed in, and a dropped flow needs neither.
+    fn reprobe_after_failed_commit(self: &Arc<Self>, epoch: u64) {
+        let (server, probe_epoch, replaced) = {
+            let mut inner = self.lock();
+            if !self.is_current(&inner, epoch) {
+                return;
+            }
+            let server = self.state.get().server;
+            let next = SignInState {
+                failure: Some(SignInFailure::CouldntFinish),
+                ..SignInState::probing(server.clone())
+            };
+            let (probe_epoch, replaced) = self.enter_probe(&mut inner, next);
+            (server, probe_epoch, replaced)
+        };
+        self.discard_later(replaced);
+        self.spawn_probe(server, probe_epoch);
     }
 
     /// Shows why the server refused a password sign-in and returns to idle.
@@ -953,8 +993,7 @@ mod tests {
         assert_eq!(found.core.session().state().get(), SessionState::SignedOut);
         assert!(no_secrets(&found.secrets));
 
-        // The controls are back: a new probe starts a fresh attempt.
-        found.flow.retry();
+        // The controls are back: the current server is probed for a fresh attempt.
         assert_eq!(next_probe(&found.fake).await.server, "loaf.moe");
     }
 
@@ -1038,5 +1077,53 @@ mod tests {
         commit.reply(Err(CommitError));
         until(|| found.flow.state().get().failure.is_some()).await;
         found.core.session().begin_sign_in().unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn sign_in_after_failed_commit_reaches_a_password_call() {
+        let found = found_flow().await;
+        answer_password(&found, Ok(bob())).await;
+        next_commit(&found.fake).await.reply(Err(CommitError));
+
+        let reprobe = next_probe(&found.fake).await;
+        assert_eq!(reprobe.server, "loaf.moe");
+        let state = found.flow.state().get();
+        assert_eq!(
+            (state.failure, state.activity, state.check),
+            (Some(SignInFailure::CouldntFinish), Activity::Idle, ServerCheck::Probing)
+        );
+        reprobe.reply(Ok(FakeProbe::new(offer())));
+        until(|| matches!(found.flow.state().get().check, ServerCheck::Found(_))).await;
+        assert_eq!(found.flow.state().get().failure, Some(SignInFailure::CouldntFinish));
+
+        found.flow.sign_in_with_password("bob", "pw");
+        assert_eq!(next_password(&found.fake).await.attempt, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_keeps_the_countdown() {
+        let found = found_flow().await;
+        answer_password(&found, Err(PasswordError::RateLimited { retry_after: None })).await;
+        until(|| found.flow.state().get().retry_in.is_some()).await;
+        assert_eq!(found.flow.state().get().retry_in, Some(Duration::from_secs(30)));
+
+        found.flow.retry();
+        assert_eq!(found.flow.state().get().retry_in, Some(Duration::from_secs(30)));
+        let probe = next_probe(&found.fake).await;
+        assert_eq!(probe.server, "loaf.moe");
+        // One countdown runs, in the new epoch: a second moves it by one.
+        advance(Duration::from_secs(1)).await;
+        settle().await;
+        assert_eq!(found.flow.state().get().retry_in, Some(Duration::from_secs(29)));
+
+        probe.reply(Ok(FakeProbe::new(offer())));
+        until(|| matches!(found.flow.state().get().check, ServerCheck::Found(_))).await;
+        assert!(found.flow.state().get().retry_in.is_some());
+        found.flow.sign_in_with_password("bob", "pw");
+        assert!(!password_called(&found.fake).await);
+
+        advance(Duration::from_secs(30)).await;
+        settle().await;
+        assert_eq!(found.flow.state().get().retry_in, None);
     }
 }
