@@ -6,10 +6,8 @@ use url::Url;
 use super::{DeviceId, UserId};
 
 /// Keychain entry holding the serialised [`StoredSession`].
-#[expect(dead_code, reason = "used from Task 9")]
 pub(crate) const SESSION_KEY: &str = "session";
 /// Keychain entry holding the passphrase that encrypts the SDK store.
-#[expect(dead_code, reason = "used from Task 9")]
 pub(crate) const PASSPHRASE_KEY: &str = "store-passphrase";
 
 /// Everything needed to restore a signed-in account without the network.

@@ -2,6 +2,7 @@
 
 extern crate alloc;
 
+pub mod core;
 pub mod ports;
 pub mod session;
 

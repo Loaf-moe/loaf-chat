@@ -37,7 +37,6 @@ impl FakeSecretStore {
     }
 
     /// Every `get` fails from now on.
-    #[expect(dead_code, reason = "used from Task 9")]
     pub fn fail_gets(&self) {
         self.fail_gets.store(true, Ordering::SeqCst);
     }
