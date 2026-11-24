@@ -1,8 +1,11 @@
 //! Signing in, keeping the session across launches and signing out.
 
+/// Server input and the sign-in methods a server offers.
+mod server;
 /// The session as the secret store keeps it.
 mod stored;
 
+pub use server::{AuthMethods, BrowserMethod};
 pub use stored::{CorruptSession, StoredAuth, StoredSession};
 
 use serde::{Deserialize, Serialize};

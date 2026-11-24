@@ -63,3 +63,5 @@ module_name_repetitions = "allow"
 pattern_type_mismatch = "allow"
 # One side of a contradicting pair; naming the ignored fields (rest_pattern_accessible_field) keeps new fields from slipping past a match.
 unneeded_field_pattern = "allow"
+# `?` is how Rust propagates None and Err; the alternative is a match per call.
+question_mark_used = "allow"
