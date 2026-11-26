@@ -648,4 +648,104 @@ void main() {
       }
     });
   });
+
+  group('pins', () {
+    Message sent({
+      MessageStatus status = MessageStatus.sent,
+      bool locked = false,
+      CallLine? callLine,
+      PinLine? pinLine,
+    }) => Message(
+      id: 'p',
+      author: _them,
+      sentAt: DateTime(2026, 9, 24, 10),
+      body: locked ? '' : 'hold on to this',
+      status: status,
+      locked: locked,
+      callLine: callLine,
+      pinLine: pinLine,
+    );
+
+    test('pin is offered after reply when you may pin', () {
+      expect(actionsFor(sent(), _you, canPin: true), [
+        MessageAction.reply,
+        MessageAction.pin,
+        MessageAction.copy,
+      ]);
+    });
+
+    test('a pinned message offers unpin instead', () {
+      expect(actionsFor(sent(), _you, canPin: true, pinned: true), [
+        MessageAction.reply,
+        MessageAction.unpin,
+        MessageAction.copy,
+      ]);
+    });
+
+    test('neither is offered without the power to pin', () {
+      expect(
+        actionsFor(sent(), _you, pinned: true),
+        isNot(
+          anyOf(contains(MessageAction.pin), contains(MessageAction.unpin)),
+        ),
+      );
+    });
+
+    test('a message the server does not have yet cannot be pinned', () {
+      for (final status in [MessageStatus.sending, MessageStatus.failed]) {
+        expect(
+          actionsFor(sent(status: status), _you, canPin: true),
+          isNot(contains(MessageAction.pin)),
+          reason: '$status',
+        );
+      }
+    });
+
+    test('a locked message cannot be pinned: you cannot read it', () {
+      expect(
+        actionsFor(sent(locked: true), _you, canPin: true),
+        isNot(contains(MessageAction.pin)),
+      );
+    });
+
+    test('a call line and a pin line cannot be pinned', () {
+      expect(
+        actionsFor(sent(callLine: CallLine.ended), _you, canPin: true),
+        isNot(contains(MessageAction.pin)),
+      );
+      expect(
+        actionsFor(sent(pinLine: const PinLine(['x'])), _you, canPin: true),
+        isNot(contains(MessageAction.pin)),
+      );
+    });
+
+    test(
+      'an unwritable timeline still pins: a pin is state, not a message',
+      () {
+        expect(actionsFor(sent(), _you, writable: false, canPin: true), [
+          MessageAction.pin,
+          MessageAction.copy,
+        ]);
+      },
+    );
+
+    testWidgets('picking pin pins the message, and unpin takes it back', (
+      tester,
+    ) async {
+      final controller = await _pump(tester, _them);
+
+      await tester.longPress(_body);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Pin message'));
+      await tester.pumpAndSettle();
+      expect(controller.pinnedIds, ['1']);
+
+      await tester.longPress(_body);
+      await tester.pumpAndSettle();
+      expect(find.text('Pin message'), findsNothing);
+      await tester.tap(find.text('Unpin message'));
+      await tester.pumpAndSettle();
+      expect(controller.pinnedIds, isEmpty);
+    }, variant: _mobile);
+  });
 }

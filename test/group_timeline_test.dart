@@ -126,4 +126,24 @@ void main() {
     expect((entries[2] as CallEntry).message, call);
     expect((entries[3] as MessageGroup).messages, hasLength(1));
   });
+
+  test('a pin line stands alone, splitting the messages around it', () {
+    final pin = Message(
+      id: 'pin',
+      author: _a,
+      sentAt: _at(24, 10, 1),
+      body: 'Ada Crumb pinned a message',
+      pinLine: const PinLine(['x']),
+    );
+    final entries = groupTimeline([
+      _msg(_a, _at(24, 10, 0)),
+      pin,
+      _msg(_a, _at(24, 10, 2)),
+    ]);
+
+    expect(entries, hasLength(4));
+    expect(entries[2], isA<PinEntry>());
+    expect((entries[2] as PinEntry).message, pin);
+    expect((entries[3] as MessageGroup).messages, hasLength(1));
+  });
 }

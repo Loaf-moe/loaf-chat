@@ -47,8 +47,12 @@ class MatrixTimeline extends ChangeNotifier
     this.externalMedia,
   }) {
     externalMedia?.addListener(_changed);
-    unawaited(_open());
+    _ready = _open();
   }
+
+  /// The first opening; [fetch] waits for it, since nothing can be mapped
+  /// before there is a timeline to map against.
+  late final Future<void> _ready;
 
   final Room room;
 
@@ -279,6 +283,21 @@ class MatrixTimeline extends ChangeNotifier
         status: status,
       );
     }
+    if (event.type == EventTypes.RoomPinnedEvents && event.stateKey == '') {
+      // The line a pin leaves. An unpin leaves none, as on Discord.
+      final added = _added(event);
+      if (added.isEmpty) return null;
+      return ui.Message(
+        id: event.eventId,
+        author: author,
+        sentAt: event.originServerTs,
+        body: added.length == 1
+            ? '${author.name} pinned a message'
+            : '${author.name} pinned ${added.length} messages',
+        pinLine: ui.PinLine(added),
+        status: status,
+      );
+    }
     if (!const {EventTypes.Message, EventTypes.Sticker}.contains(event.type) ||
         event.relationshipType == RelationshipTypes.edit) {
       return null;
@@ -339,6 +358,28 @@ class MatrixTimeline extends ChangeNotifier
     MessageTypes.Notice,
     MessageTypes.Emote,
   };
+
+  /// The ids a pinned-events [event] added. A server that sends no
+  /// previous content leaves every id counting as new.
+  static List<String> _added(Event event) {
+    final previous = event.prevContent;
+    final before = previous == null
+        ? const <String>{}
+        : _pinnedIn(previous).toSet();
+    return [
+      for (final id in _pinnedIn(event.content))
+        if (!before.contains(id)) id,
+    ];
+  }
+
+  static List<String> _pinnedIn(Map<String, Object?> content) =>
+      switch (content['pinned']) {
+        final Iterable<Object?> ids => [
+          for (final id in ids)
+            if (id is String) id,
+        ],
+        _ => const [],
+      };
 
   /// Each message's first web link, with the event it was read from: every
   /// row is mapped afresh on each change, and finding a link means parsing
@@ -479,6 +520,64 @@ class MatrixTimeline extends ChangeNotifier
 
   Event? _event(String id) =>
       _timeline?.events.where((e) => e.eventId == id).firstOrNull;
+
+  // ── Pins ───────────────────────────────────────────────────────────────
+
+  /// Read live from room state, which `openClient` keeps in memory for
+  /// every room.
+  @override
+  List<String> get pinnedIds => room.pinnedEventIds;
+
+  @override
+  bool get canPin => room.canChangeStateEvent(EventTypes.RoomPinnedEvents);
+
+  /// Nothing changes here: the state comes back by sync, and that redraws.
+  @override
+  void pin(String messageId) {
+    final ids = room.pinnedEventIds;
+    if (ids.contains(messageId)) return;
+    _attempt(
+      () => room.setPinnedEvents([...ids, messageId]),
+      "couldn't pin that",
+    );
+  }
+
+  @override
+  void unpin(String messageId) {
+    final ids = room.pinnedEventIds;
+    if (!ids.contains(messageId)) return;
+    _attempt(
+      () => room.setPinnedEvents([
+        for (final id in ids)
+          if (id != messageId) id,
+      ]),
+      "couldn't unpin that",
+    );
+  }
+
+  /// A fetched event is mapped as a quote is: its own words, with no
+  /// reactions or reply, and no edits, which live in the conversation.
+  @override
+  Future<ui.Message?> fetch(String id) async {
+    await _ready;
+    if (_disposed) return null;
+    final timeline = _timeline;
+    if (timeline == null) {
+      throw StateError('the conversation could not be opened');
+    }
+    final loaded = messages.where((m) => m.id == id).firstOrNull;
+    if (loaded != null) return loaded;
+    final Event? event;
+    try {
+      event = await room.getEventById(id);
+    } on MatrixException catch (e) {
+      // Never yours to see, as with history from before you joined.
+      if (e.errcode == 'M_FORBIDDEN') return null;
+      rethrow;
+    }
+    if (event == null || event.redacted || _disposed) return null;
+    return _message(event, timeline, quoting: true);
+  }
 
   /// Runs [action], and on failure says [failure] as a toast.
   void _attempt(Future<Object?> Function() action, String failure) {

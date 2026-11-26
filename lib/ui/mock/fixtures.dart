@@ -519,6 +519,13 @@ List<Message> mockTimeline() {
       body: 'incredible name. what flour did you settle on in the end?',
     ),
     Message(
+      id: 'm3-pin',
+      author: _mika,
+      sentAt: at(1, 19, 12),
+      body: 'Mika Rye pinned a message',
+      pinLine: const PinLine(['m1']),
+    ),
+    Message(
       id: 'm4',
       author: _mika,
       sentAt: at(1, 19, 14),

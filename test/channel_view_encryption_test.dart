@@ -72,6 +72,17 @@ class _Timeline extends ChangeNotifier with ComposerAiming implements Timeline {
   void retry(String messageId) {}
   @override
   void discard(String messageId) {}
+  @override
+  List<String> get pinnedIds => const [];
+  @override
+  bool get canPin => false;
+  @override
+  void pin(String messageId) {}
+  @override
+  void unpin(String messageId) {}
+  @override
+  Future<Message?> fetch(String id) async =>
+      messages.where((m) => m.id == id).firstOrNull;
 
   void verified() {
     writable = true;

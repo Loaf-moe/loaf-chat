@@ -310,4 +310,105 @@ void main() {
       t.showNewest(); // Nothing to do, and nothing breaks.
     });
   });
+
+  group('pins', () {
+    TimelineController timeline({List<String> pinned = const []}) =>
+        TimelineController(
+          [_msg('1', _them), _msg('2', _you), _msg('3', _them)],
+          you: _you,
+          pinned: pinned,
+        );
+
+    test('anyone may pin on the mock', () {
+      final t = timeline();
+      addTearDown(t.dispose);
+      expect(t.canPin, isTrue);
+    });
+
+    test('pinning adds the id and lands a pin line from you', () {
+      final t = timeline();
+      addTearDown(t.dispose);
+      var heard = 0;
+      t.addListener(() => heard++);
+
+      t.pin('1');
+
+      expect(t.pinnedIds, ['1']);
+      expect(t.messages.last.pinLine?.pinned, ['1']);
+      expect(t.messages.last.author, _you);
+      expect(t.messages.last.body, 'you pinned a message');
+      expect(heard, 1);
+    });
+
+    test('pinning keeps the room\'s order: oldest pin first', () {
+      final t = timeline(pinned: ['2']);
+      addTearDown(t.dispose);
+      t.pin('1');
+      expect(t.pinnedIds, ['2', '1']);
+    });
+
+    test('pinning a pinned message changes nothing', () {
+      final t = timeline(pinned: ['1']);
+      addTearDown(t.dispose);
+      final before = t.messages.length;
+      var heard = 0;
+      t.addListener(() => heard++);
+
+      t.pin('1');
+
+      expect(t.pinnedIds, ['1']);
+      expect(t.messages, hasLength(before));
+      expect(heard, 0);
+    });
+
+    test('pinning a message it does not have changes nothing', () {
+      final t = timeline();
+      addTearDown(t.dispose);
+      t.pin('nope');
+      expect(t.pinnedIds, isEmpty);
+    });
+
+    test('unpinning removes the id and leaves no line', () {
+      final t = timeline(pinned: ['1', '2']);
+      addTearDown(t.dispose);
+      final before = t.messages.length;
+      var heard = 0;
+      t.addListener(() => heard++);
+
+      t.unpin('1');
+
+      expect(t.pinnedIds, ['2']);
+      expect(t.messages, hasLength(before));
+      expect(heard, 1);
+    });
+
+    test('unpinning an unpinned message changes nothing', () {
+      final t = timeline(pinned: ['2']);
+      addTearDown(t.dispose);
+      var heard = 0;
+      t.addListener(() => heard++);
+      t.unpin('1');
+      expect(t.pinnedIds, ['2']);
+      expect(heard, 0);
+    });
+
+    test('fetch finds a loaded message', () async {
+      final t = timeline();
+      addTearDown(t.dispose);
+      expect((await t.fetch('2'))?.id, '2');
+    });
+
+    test('fetch answers null for a message it does not have', () async {
+      final t = timeline();
+      addTearDown(t.dispose);
+      expect(await t.fetch('nope'), isNull);
+    });
+
+    test('a pinned message that is deleted stays pinned', () {
+      final t = timeline(pinned: ['1']);
+      addTearDown(t.dispose);
+      t.delete('1');
+      expect(t.pinnedIds, ['1']);
+    });
+  });
 }

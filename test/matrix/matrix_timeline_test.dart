@@ -57,6 +57,17 @@ class _Api extends FakeMatrixApi {
   /// What each history request answers with, in turn.
   final history = <Map<String, Object?>>[];
 
+  /// Every pinned-events state the client put, in turn.
+  final pinnedPut = <Map<String, Object?>>[];
+  var refuseState = false;
+  Completer<void>? holdState;
+
+  /// What `/event/{id}` answers for each id. One not here is a 404.
+  final events = <String, Map<String, Object?>>{};
+  final eventsAsked = <String>[];
+  var failEvent = false;
+  var forbidEvent = false;
+
   var _ids = 0;
 
   static http.Response _json(Object body, [int status = 200]) =>
@@ -137,6 +148,24 @@ class _Api extends FakeMatrixApi {
       if (refuseHistory) return _forbidden;
       return _json(history.removeAt(0));
     }
+    if (request.method == 'PUT' &&
+        path.contains('/state/m.room.pinned_events')) {
+      await holdState?.future;
+      if (refuseState) return _forbidden;
+      pinnedPut.add(jsonDecode(request.body) as Map<String, Object?>);
+      return _json({'event_id': '\$pinned${_ids++}'});
+    }
+    if (request.method == 'GET' && path.contains('/event/')) {
+      final id = path.split('/event/').last;
+      eventsAsked.add(id);
+      if (failEvent) return _serverError;
+      if (forbidEvent) return _forbidden;
+      final event = events[id];
+      if (event == null) {
+        return _json({'errcode': 'M_NOT_FOUND', 'error': 'gone'}, 404);
+      }
+      return _json(event);
+    }
     return super.mockIntercept(request);
   }
 }
@@ -182,6 +211,7 @@ Map<String, Object?> _event(
   String sender = _ada,
   String? id,
   String? stateKey,
+  Map<String, Object?>? unsigned,
 }) => {
   'type': type,
   'sender': sender,
@@ -189,7 +219,29 @@ Map<String, Object?> _event(
   'event_id': id ?? '\$e${_n++}',
   'origin_server_ts': _clock += 1000,
   'state_key': ?stateKey,
+  'unsigned': ?unsigned,
 };
+
+/// The room's pinned list becoming [ids], with [prev] as what it was. No
+/// [prev] is an event the server sent without its previous content.
+Map<String, Object?> _pinned(
+  List<String> ids, {
+  List<String>? prev,
+  String sender = _ada,
+}) => _event(
+  'm.room.pinned_events',
+  {'pinned': ids},
+  sender: sender,
+  stateKey: '',
+  unsigned: prev == null
+      ? null
+      : {
+          'prev_content': {'pinned': prev},
+        },
+);
+
+Map<String, Object?> _powerLevels(Map<String, Object?> content) =>
+    _event('m.room.power_levels', content, sender: _me, stateKey: '');
 
 Map<String, Object?> _text(
   String body, {
@@ -241,13 +293,15 @@ Map<String, Object?> _member(String user, String name) => _event(
 );
 
 /// Joins [_roomId], with Ada in it, and delivers [events] on its timeline.
-/// [prevBatch] leaves history further back; [encrypted] turns encryption on.
+/// [prevBatch] leaves history further back; [encrypted] turns encryption on;
+/// [state] is further room state, such as power levels or pins.
 Future<void> _sync(
   Client client,
   List<Map<String, Object?>> events, {
   String? prevBatch,
   bool encrypted = false,
   int notifications = 0,
+  List<Map<String, Object?>> state = const [],
 }) => client.handleSync(
   SyncUpdate.fromJson({
     'next_batch': 'b${_n++}',
@@ -263,6 +317,7 @@ Future<void> _sync(
                 _event('m.room.encryption', {
                   'algorithm': 'm.megolm.v1.aes-sha2',
                 }, stateKey: ''),
+              ...state,
             ],
           },
           'timeline': {
@@ -298,11 +353,18 @@ Future<_Harness> _open(
   String? prevBatch,
   bool encrypted = false,
   ValueListenable<bool>? externalMedia,
+  List<Map<String, Object?>> state = const [],
 }) async {
   final api = _Api();
   final client = await _client(api);
   addTearDown(client.dispose);
-  await _sync(client, events, prevBatch: prevBatch, encrypted: encrypted);
+  await _sync(
+    client,
+    events,
+    prevBatch: prevBatch,
+    encrypted: encrypted,
+    state: state,
+  );
   final rooms = MatrixRooms(client, externalMedia: externalMedia);
   addTearDown(rooms.dispose);
   final h = _Harness(api, client, rooms);
@@ -1549,5 +1611,260 @@ void main() {
     await _until(() => timeline.messages.last.status == MessageStatus.sent);
     expect(timeline.messages.last.status, MessageStatus.sent);
     expect(api.sent.single.$2['body'], 'in flight');
+  });
+
+  group('pins', () {
+    group('the line', () {
+      test('a pin draws a line naming its message', () async {
+        final h = await _open([
+          _text('keep this', id: r'$keep'),
+          _pinned([r'$keep'], prev: []),
+        ]);
+        final line = h.messages.last;
+        expect(line.body, 'Ada pinned a message');
+        expect(line.pinLine?.pinned, [r'$keep']);
+        expect(line.author.id, _ada);
+        expect(line.status, MessageStatus.sent);
+      });
+
+      test('several pins at once are one line counting them', () async {
+        final h = await _open([
+          _pinned([r'$a', r'$b', r'$c'], prev: [r'$a']),
+        ]);
+        expect(h.messages.single.body, 'Ada pinned 2 messages');
+        expect(h.messages.single.pinLine?.pinned, [r'$b', r'$c']);
+      });
+
+      test('an unpin draws nothing', () async {
+        final h = await _open([
+          _pinned([], prev: [r'$a']),
+          _text('after'),
+        ]);
+        expect(h.messages.map((m) => m.body), ['after']);
+      });
+
+      test('without its previous content, every id counts as new', () async {
+        final h = await _open([
+          _pinned([r'$a', r'$b']),
+        ]);
+        expect(h.messages.single.body, 'Ada pinned 2 messages');
+      });
+    });
+
+    group('what is pinned', () {
+      test('reads the room state, oldest pin first', () async {
+        final h = await _open(
+          [_text('hi')],
+          state: [
+            _pinned([r'$a', r'$b']),
+          ],
+        );
+        expect(h.timeline.pinnedIds, [r'$a', r'$b']);
+      });
+
+      test('a room with no pins has none', () async {
+        final h = await _open([_text('hi')]);
+        expect(h.timeline.pinnedIds, isEmpty);
+      });
+
+      test('a pin arriving by sync shows, and is heard', () async {
+        final h = await _open([_text('hi', id: r'$hi')]);
+        var heard = 0;
+        h.timeline.addListener(() => heard++);
+        await _sync(h.client, [
+          _pinned([r'$hi'], prev: []),
+        ]);
+        await _until(() => h.timeline.pinnedIds.isNotEmpty);
+        expect(h.timeline.pinnedIds, [r'$hi']);
+        expect(heard, greaterThan(0));
+      });
+    });
+
+    group('who may pin', () {
+      test('a room without power levels lets anyone', () async {
+        final h = await _open([_text('hi')]);
+        expect(h.timeline.canPin, isTrue);
+      });
+
+      test('a plain member may not where state needs a moderator', () async {
+        final h = await _open(
+          [_text('hi')],
+          state: [
+            _powerLevels({'users_default': 0, 'state_default': 50}),
+          ],
+        );
+        expect(h.timeline.canPin, isFalse);
+      });
+
+      test('a level named for pinned events wins over the default', () async {
+        final h = await _open(
+          [_text('hi')],
+          state: [
+            _powerLevels({
+              'users_default': 0,
+              'state_default': 100,
+              'events': {'m.room.pinned_events': 0},
+            }),
+          ],
+        );
+        expect(h.timeline.canPin, isTrue);
+      });
+
+      test('a change of power by sync is read at once', () async {
+        final h = await _open([_text('hi')]);
+        expect(h.timeline.canPin, isTrue);
+        await _sync(h.client, [
+          _powerLevels({'users_default': 0, 'state_default': 50}),
+        ]);
+        await _until(() => !h.timeline.canPin);
+        expect(h.timeline.canPin, isFalse);
+      });
+    });
+
+    group('pinning', () {
+      test('puts the whole list with the new id last', () async {
+        final h = await _open(
+          [_text('hi', id: r'$hi')],
+          state: [
+            _pinned([r'$a']),
+          ],
+        );
+        h.timeline.pin(r'$hi');
+        await _until(() => h.api.pinnedPut.isNotEmpty);
+        expect(h.api.pinnedPut.single, {
+          'pinned': [r'$a', r'$hi'],
+        });
+      });
+
+      test('a message already pinned sends nothing', () async {
+        final h = await _open(
+          [_text('hi', id: r'$hi')],
+          state: [
+            _pinned([r'$hi']),
+          ],
+        );
+        h.timeline.pin(r'$hi');
+        await _settle();
+        expect(h.api.pinnedPut, isEmpty);
+      });
+
+      test('unpinning puts the list without the id', () async {
+        final h = await _open(
+          [_text('hi')],
+          state: [
+            _pinned([r'$a', r'$b', r'$c']),
+          ],
+        );
+        h.timeline.unpin(r'$b');
+        await _until(() => h.api.pinnedPut.isNotEmpty);
+        expect(h.api.pinnedPut.single, {
+          'pinned': [r'$a', r'$c'],
+        });
+      });
+
+      test('unpinning a message not pinned sends nothing', () async {
+        final h = await _open(
+          [_text('hi')],
+          state: [
+            _pinned([r'$a']),
+          ],
+        );
+        h.timeline.unpin(r'$b');
+        await _settle();
+        expect(h.api.pinnedPut, isEmpty);
+      });
+
+      test('a refused pin says so', () async {
+        final h = await _open([_text('hi', id: r'$hi')]);
+        final failures = <String>[];
+        h.timeline.failures.listen(failures.add);
+        h.api.refuseState = true;
+        h.timeline.pin(r'$hi');
+        await _until(() => failures.isNotEmpty);
+        expect(failures, ["couldn't pin that"]);
+        expect(h.timeline.pinnedIds, isEmpty);
+      });
+
+      test('a refused unpin says so', () async {
+        final h = await _open(
+          [_text('hi')],
+          state: [
+            _pinned([r'$a']),
+          ],
+        );
+        final failures = <String>[];
+        h.timeline.failures.listen(failures.add);
+        h.api.refuseState = true;
+        h.timeline.unpin(r'$a');
+        await _until(() => failures.isNotEmpty);
+        expect(failures, ["couldn't unpin that"]);
+      });
+
+      test('signing out with a pin on its way throws nothing', () async {
+        final api = _Api()..holdState = Completer<void>();
+        final client = await _client(api);
+        addTearDown(client.dispose);
+        await _sync(client, [_text('hi', id: r'$hi')]);
+        final rooms = MatrixRooms(client);
+        final timeline = rooms.timeline(_roomId)!;
+        await _until(() => !timeline.loadingOlder);
+        timeline.pin(r'$hi');
+        rooms.dispose();
+        api.refuseState = true;
+        api.holdState!.complete();
+        await _settle();
+      });
+    });
+
+    group('fetch', () {
+      test('a loaded message is answered without asking', () async {
+        final h = await _open([_text('hi', id: r'$hi')]);
+        final m = await h.timeline.fetch(r'$hi');
+        expect(m?.body, 'hi');
+        expect(h.api.eventsAsked, isEmpty);
+      });
+
+      test('a message not loaded is fetched and mapped', () async {
+        final h = await _open([_text('now')]);
+        h.api.events[r'$old'] = _text('from long ago', id: r'$old');
+        final m = await h.timeline.fetch(r'$old');
+        expect(m?.id, r'$old');
+        expect(m?.body, 'from long ago');
+        expect(m?.author.id, _ada);
+        expect(h.api.eventsAsked, [r'$old']);
+      });
+
+      test('a message the server has not got is null', () async {
+        final h = await _open([_text('now')]);
+        expect(await h.timeline.fetch(r'$gone'), isNull);
+      });
+
+      test('a deleted message is null', () async {
+        final h = await _open([_text('now')]);
+        h.api.events[r'$del'] = _event(
+          'm.room.message',
+          {},
+          id: r'$del',
+          unsigned: {
+            'redacted_because': _event('m.room.redaction', {
+              'redacts': r'$del',
+            }),
+          },
+        );
+        expect(await h.timeline.fetch(r'$del'), isNull);
+      });
+
+      test('a message never yours to see is null', () async {
+        final h = await _open([_text('now')]);
+        h.api.forbidEvent = true;
+        expect(await h.timeline.fetch(r'$before'), isNull);
+      });
+
+      test('a server that cannot answer throws', () async {
+        final h = await _open([_text('now')]);
+        h.api.failEvent = true;
+        await expectLater(h.timeline.fetch(r'$x'), throwsA(anything));
+      });
+    });
   });
 }
