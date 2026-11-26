@@ -1,0 +1,8 @@
+[Flatpak Ref]
+Name=moe.loaf.chat
+Branch=stable
+Title=Loaf Chat
+Url=https://get.loaf.moe/repo/
+IsRuntime=false
+RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+GPGKey=mDMEar1cnhYJKwYBBAHaRw8BAQdAaffOfimFjepAXT92lAslMe0EGLpeDQCNd0jNMXNUrSC0JkxvYWYgQ2hhdCByZWxlYXNlcyA8cmVsZWFzZXNAbG9hZi5tb2U+iJAEExYIADgWIQRYdmQ83g4F2jfBB56XjBmt7M3Q+gUCar1cngIbAwULCQgHAgYVCgkICwIEFgIDAQIeAQIXgAAKCRCXjBmt7M3Q+qNxAP9EnEU2mFvyQvro/8kvZKgcBuXj36J4sx+sUh13Xd49wQD/R3csO6jXZAvM1dW29bWqidlFPepSQzk0EDSxejNpGgU=
