@@ -20,7 +20,18 @@ import '../widgets/action_menu.dart';
 import 'media_open.dart';
 import 'timeline.dart';
 
-enum MessageAction { open, openWith, saveAs, share, reply, copy, edit, delete }
+enum MessageAction {
+  open,
+  openWith,
+  saveAs,
+  share,
+  reply,
+  pin,
+  unpin,
+  copy,
+  edit,
+  delete,
+}
 
 /// The reactions offered without opening a picker. Bread earns its place.
 const quickReactions = ['👍', '❤️', '😂', '😮', '🔥', '🥖'];
@@ -32,25 +43,45 @@ const quickReactions = ['👍', '❤️', '😂', '😮', '🔥', '🥖'];
 /// message in a timeline that is not [writable]: a reply or an edit would
 /// have nowhere to be written. Its file still opens and saves, as reading
 /// it writes nothing to the room.
+///
+/// Pin, or Unpin when [pinned], is offered where [canPin] and the server
+/// has the message; [writable] does not gate it, since a pin is room state
+/// rather than a message. A locked message cannot be pinned: you cannot
+/// read what you would be pinning. Nor can the lines a call or a pin left.
 List<MessageAction> actionsFor(
   Message message,
   Member you, {
   bool writable = true,
-}) => [
-  if (!writable || message.status != MessageStatus.sent) ...[
-    if (message.status == MessageStatus.sent && message.media != null)
-      ..._mediaActions(message.media!),
-    if (message.body.isNotEmpty) MessageAction.copy,
-  ] else ...[
-    if (message.media != null) ..._mediaActions(message.media!),
-    MessageAction.reply,
-    if (message.body.isNotEmpty) MessageAction.copy,
-    if (message.author.id == you.id) ...[
-      if (message.media == null && message.callLine == null) MessageAction.edit,
-      MessageAction.delete,
+  bool canPin = false,
+  bool pinned = false,
+}) {
+  final pinAction =
+      canPin &&
+          message.status == MessageStatus.sent &&
+          !message.locked &&
+          message.callLine == null &&
+          message.pinLine == null
+      ? (pinned ? MessageAction.unpin : MessageAction.pin)
+      : null;
+  return [
+    if (!writable || message.status != MessageStatus.sent) ...[
+      if (message.status == MessageStatus.sent && message.media != null)
+        ..._mediaActions(message.media!),
+      ?pinAction,
+      if (message.body.isNotEmpty) MessageAction.copy,
+    ] else ...[
+      if (message.media != null) ..._mediaActions(message.media!),
+      MessageAction.reply,
+      ?pinAction,
+      if (message.body.isNotEmpty) MessageAction.copy,
+      if (message.author.id == you.id) ...[
+        if (message.media == null && message.callLine == null)
+          MessageAction.edit,
+        MessageAction.delete,
+      ],
     ],
-  ],
-];
+  ];
+}
 
 /// A file's own actions, ahead of the rest. A computer opens and saves
 /// (and names the app it would open in: on a Mac, always; on Windows, for
@@ -81,6 +112,8 @@ extension on MessageAction {
     MessageAction.saveAs => 'Save as…',
     MessageAction.share => 'Share',
     MessageAction.reply => 'Reply',
+    MessageAction.pin => 'Pin message',
+    MessageAction.unpin => 'Unpin message',
     MessageAction.copy => 'Copy text',
     MessageAction.edit => 'Edit',
     MessageAction.delete => 'Delete',
@@ -92,6 +125,8 @@ extension on MessageAction {
     MessageAction.saveAs => LucideIcons.download,
     MessageAction.share => LucideIcons.share,
     MessageAction.reply => LucideIcons.reply,
+    MessageAction.pin => LucideIcons.pin,
+    MessageAction.unpin => LucideIcons.pinOff,
     MessageAction.copy => LucideIcons.copy,
     MessageAction.edit => LucideIcons.pencil,
     MessageAction.delete => LucideIcons.trash2,
@@ -131,6 +166,8 @@ List<ActionItem<_Pick>> _items(Message message, Timeline controller) {
     message,
     controller.you,
     writable: controller.writable,
+    canPin: controller.canPin,
+    pinned: controller.pinnedIds.contains(message.id),
   );
   final media = message.media;
   String? app;
@@ -236,6 +273,10 @@ Future<void> _perform(
       controller.startReply(message);
     case _Act(action: MessageAction.edit):
       controller.startEdit(message);
+    case _Act(action: MessageAction.pin):
+      controller.pin(message.id);
+    case _Act(action: MessageAction.unpin):
+      controller.unpin(message.id);
     case _Act(action: MessageAction.copy):
       await Clipboard.setData(ClipboardData(text: message.body));
       if (context.mounted) showToast(context, 'copied');

@@ -25,8 +25,10 @@ class TimelineController extends ChangeNotifier
   TimelineController(
     List<Message> messages, {
     required this.you,
+    List<String> pinned = const [],
     this._uploadLimit,
-  }) : _messages = [
+  }) : _pinned = [...pinned],
+       _messages = [
          for (final m in messages)
            // Text only, as on a real server: a file's caption and a call's
            // line offer no link.
@@ -107,6 +109,45 @@ class TimelineController extends ChangeNotifier
   void retry(String messageId) {}
   @override
   void discard(String messageId) {}
+
+  final List<String> _pinned;
+
+  @override
+  List<String> get pinnedIds => List.unmodifiable(_pinned);
+
+  @override
+  bool get canPin => true;
+
+  /// Pins at once, and lands the line the server's state event would.
+  @override
+  void pin(String messageId) {
+    if (_pinned.contains(messageId) ||
+        !_messages.any((m) => m.id == messageId)) {
+      return;
+    }
+    _pinned.add(messageId);
+    _messages.add(
+      Message(
+        id: 'local-${_sent++}',
+        author: you,
+        sentAt: DateTime.now(),
+        body: '${you.name} pinned a message',
+        pinLine: PinLine([messageId]),
+      ),
+    );
+    notifyListeners();
+  }
+
+  @override
+  void unpin(String messageId) {
+    if (!_pinned.remove(messageId)) return;
+    notifyListeners();
+  }
+
+  /// Everything the mock has is loaded, so a message it lacks never was.
+  @override
+  Future<Message?> fetch(String id) async =>
+      _messages.where((m) => m.id == id).firstOrNull;
 
   /// Adds your [emoji] to the message, or takes it back if it is already
   /// yours. A pill nobody is left holding disappears.

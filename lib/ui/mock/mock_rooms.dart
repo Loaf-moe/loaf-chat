@@ -68,6 +68,7 @@ class MockRooms extends ChangeNotifier implements Rooms {
   late final _shared = TimelineController(
     mockTimeline(),
     you: currentUser,
+    pinned: const ['m1', 'm4'],
     uploadLimit: _uploadLimit,
   );
   final _timelines = <String, TimelineController>{};

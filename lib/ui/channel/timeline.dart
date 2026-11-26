@@ -151,6 +151,28 @@ abstract interface class Timeline implements Listenable {
 
   /// Gives up on a message that failed to send, and removes it.
   void discard(String messageId);
+
+  /// Pinned messages, in the room's order: oldest pin first.
+  List<String> get pinnedIds;
+
+  /// Whether you may pin and unpin here. Read live, like [writable].
+  bool get canPin;
+
+  /// Pins [messageId]. Nothing changes until the room says so; one already
+  /// pinned is left alone. A refusal is said in [failures].
+  void pin(String messageId);
+
+  /// Takes [messageId] off the pinned list. One not pinned is left alone.
+  /// A refusal is said in [failures].
+  void unpin(String messageId);
+
+  /// The message with [id]: the loaded one, else fetched from the server.
+  /// Null for a message that cannot be had: deleted, never yours to see,
+  /// or gone.
+  ///
+  /// Raises:
+  ///   Anything the backend throws when the server could not be asked.
+  Future<Message?> fetch(String id);
 }
 
 /// Someone to put into the composer as `@Name`.

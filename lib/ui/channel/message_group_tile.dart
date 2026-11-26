@@ -22,7 +22,8 @@ import 'message_markup.dart';
 import 'message_text.dart';
 import 'timeline.dart';
 
-String _formatTime(DateTime time) {
+/// The hour and minute a message header shows.
+String formatMessageTime(DateTime time) {
   String two(int n) => n.toString().padLeft(2, '0');
   return '${two(time.hour)}:${two(time.minute)}';
 }
@@ -104,7 +105,7 @@ class MessageGroupTile extends StatelessWidget {
                     ),
                   const SizedBox(width: LoafSpace.x2),
                   Text(
-                    _formatTime(group.sentAt),
+                    formatMessageTime(group.sentAt),
                     style: loafBody(11, 400).copyWith(color: tokens.textMuted),
                   ),
                 ],

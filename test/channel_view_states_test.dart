@@ -58,7 +58,7 @@ class _FakeTimeline extends ChangeNotifier
   @override
   void jumpShown() {}
   @override
-  void jumpTo(String messageId) {}
+  void jumpTo(String messageId) => calls.add('jumpTo $messageId');
   @override
   void showNewest() {}
   @override
@@ -86,6 +86,18 @@ class _FakeTimeline extends ChangeNotifier
   void retry(String messageId) => calls.add('retry $messageId');
   @override
   void discard(String messageId) => calls.add('discard $messageId');
+
+  @override
+  List<String> pinnedIds = [];
+  @override
+  bool canPin = false;
+  @override
+  void pin(String messageId) => calls.add('pin $messageId');
+  @override
+  void unpin(String messageId) => calls.add('unpin $messageId');
+  @override
+  Future<Message?> fetch(String id) async =>
+      messages.where((m) => m.id == id).firstOrNull;
 
   @override
   void dispose() {
@@ -119,6 +131,7 @@ Future<_FakeTimeline> _pump(
   List<Message> messages, {
   VoidCallback? onRead,
   void Function(_FakeTimeline)? setUp,
+  Channel channel = _channel,
 }) async {
   tester.view.physicalSize = const Size(800, 900);
   tester.view.devicePixelRatio = 1.0;
@@ -130,11 +143,7 @@ Future<_FakeTimeline> _pump(
     MaterialApp(
       theme: loafDarkTheme(),
       home: Scaffold(
-        body: ChannelView(
-          channel: _channel,
-          timeline: timeline,
-          onRead: onRead,
-        ),
+        body: ChannelView(channel: channel, timeline: timeline, onRead: onRead),
       ),
     ),
   );
@@ -465,5 +474,101 @@ void main() {
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
       'my words',
     );
+  });
+
+  group('pins', () {
+    const pinButton = 'Pinned messages';
+
+    testWidgets('the header offers the pinned list in every kind of room', (
+      tester,
+    ) async {
+      for (final kind in [
+        ChannelKind.text,
+        ChannelKind.room,
+        ChannelKind.direct,
+      ]) {
+        await _pump(tester, [
+          _msg('1', body: 'hi'),
+        ], channel: Channel(id: '!r', name: 'r', kind: kind, members: [_them]));
+        expect(find.byTooltip(pinButton), findsOneWidget, reason: '$kind');
+      }
+    });
+
+    testWidgets('no pinned list without a conversation', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: loafDarkTheme(),
+          home: const Scaffold(
+            body: ChannelView(channel: _channel, timeline: null),
+          ),
+        ),
+      );
+      expect(find.byTooltip(pinButton), findsNothing);
+    });
+
+    testWidgets('the button opens the list', variant: _mobile, (tester) async {
+      await _pump(tester, [_msg('1', body: 'hi')]);
+      await tester.tap(find.byTooltip(pinButton));
+      await tester.pumpAndSettle();
+      expect(find.text('pinned messages'), findsOneWidget);
+    });
+
+    testWidgets('a pin line stands on its own, with its label and time', (
+      tester,
+    ) async {
+      await _pump(tester, [
+        _msg('1', body: 'hold this'),
+        Message(
+          id: 'p',
+          author: _them,
+          sentAt: DateTime(2026, 9, 24, 10, 5),
+          body: 'them pinned a message',
+          pinLine: const PinLine(['1']),
+        ),
+      ]);
+      final label = find.text('them pinned a message');
+      expect(label, findsOneWidget);
+      expect(find.text('10:05'), findsOneWidget);
+      // Centred, not in a message group under an author.
+      final box = tester.getRect(label);
+      final screen = tester.getRect(find.byType(ChannelView));
+      expect((box.center.dx - screen.center.dx).abs(), lessThan(40));
+    });
+
+    testWidgets('a line that pinned one message jumps to it', (tester) async {
+      final timeline = await _pump(tester, [
+        _msg('1', body: 'hold this'),
+        Message(
+          id: 'p',
+          author: _them,
+          sentAt: DateTime(2026, 9, 24, 10, 5),
+          body: 'them pinned a message',
+          pinLine: const PinLine(['1']),
+        ),
+      ]);
+      await tester.tap(find.text('them pinned a message'));
+      await tester.pumpAndSettle();
+      expect(timeline.calls, contains('jumpTo 1'));
+    });
+
+    testWidgets('a line that pinned several opens the list', variant: _mobile, (
+      tester,
+    ) async {
+      final timeline = await _pump(tester, [
+        _msg('1', body: 'hold this'),
+        _msg('2', body: 'and this'),
+        Message(
+          id: 'p',
+          author: _them,
+          sentAt: DateTime(2026, 9, 24, 10, 5),
+          body: 'them pinned 2 messages',
+          pinLine: const PinLine(['1', '2']),
+        ),
+      ]);
+      await tester.tap(find.text('them pinned 2 messages'));
+      await tester.pumpAndSettle();
+      expect(find.text('pinned messages'), findsOneWidget);
+      expect(timeline.calls.where((c) => c.startsWith('jumpTo')), isEmpty);
+    });
   });
 }

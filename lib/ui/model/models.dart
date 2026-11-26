@@ -124,6 +124,13 @@ class Reaction {
 /// The two looks a call's system line takes in a DM timeline.
 enum CallLine { ended, missed }
 
+/// A line saying someone pinned. [pinned] are the ids that pin added.
+class PinLine {
+  const PinLine(this.pinned);
+
+  final List<String> pinned;
+}
+
 /// Where a message you wrote is on its way to the server. Everyone else's
 /// messages, and yours once the server has them, are [sent].
 enum MessageStatus { sent, sending, failed }
@@ -171,6 +178,7 @@ class Message {
     this.previewLink,
     this.uploaded,
     this.callLine,
+    this.pinLine,
     this.status = MessageStatus.sent,
     this.locked = false,
     this.stub = false,
@@ -189,6 +197,7 @@ class Message {
       previewLink = null,
       uploaded = null,
       callLine = null,
+      pinLine = null,
       status = MessageStatus.sent,
       locked = false,
       stub = true;
@@ -224,6 +233,10 @@ class Message {
   /// anyone said; [body] is then its label, such as "call · 12m".
   final CallLine? callLine;
 
+  /// Set when this is the line a pin left behind; [body] is then its
+  /// label, such as "mika pinned a message".
+  final PinLine? pinLine;
+
   final MessageStatus status;
 
   /// Encrypted, and this device cannot read it yet. [body] is empty.
@@ -254,6 +267,7 @@ class Message {
     previewLink: body == null ? this.previewLink : previewLink,
     uploaded: uploaded,
     callLine: callLine,
+    pinLine: pinLine,
     status: status,
     locked: locked,
     stub: stub,
@@ -537,6 +551,13 @@ class CallEntry extends TimelineEntry {
   final Message message;
 }
 
+/// The line a pin left behind. Its own entry, like a call's.
+class PinEntry extends TimelineEntry {
+  const PinEntry(this.message);
+
+  final Message message;
+}
+
 /// How long a gap breaks a run of messages from the same author.
 const groupingWindow = Duration(minutes: 5);
 
@@ -565,6 +586,11 @@ List<TimelineEntry> groupTimeline(List<Message> messages) {
     if (message.callLine != null) {
       flush();
       entries.add(CallEntry(message));
+      continue;
+    }
+    if (message.pinLine != null) {
+      flush();
+      entries.add(PinEntry(message));
       continue;
     }
     if (group.isNotEmpty) {

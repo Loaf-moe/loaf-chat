@@ -83,11 +83,14 @@ Future<Client> openClient({
     // The SDK keeps only a room list's state in memory for rooms not open.
     // These are what the channel list and member list read on top of that:
     // a channel's topic and lock, who is an admin or moderator, and who is
-    // in a voice channel.
+    // in a voice channel. Pins too: the sync that first brings a room does
+    // not store its other state at all, so pins made before you joined
+    // would be lost until the next pin.
     importantStateEvents: {
       EventTypes.RoomTopic,
       EventTypes.RoomJoinRules,
       EventTypes.RoomPowerLevels,
+      EventTypes.RoomPinnedEvents,
       callMemberType,
       callSilenceType,
     },

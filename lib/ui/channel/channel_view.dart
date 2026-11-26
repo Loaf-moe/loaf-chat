@@ -15,6 +15,7 @@ import '../widgets/toast.dart';
 import '../window/window_chrome.dart';
 import 'composer.dart';
 import 'message_group_tile.dart';
+import 'pinned_panel.dart';
 import 'timeline.dart';
 
 const _narrowTopicWidth = 480.0;
@@ -130,6 +131,14 @@ class ChannelView extends StatelessWidget {
               onToggleMembers: onToggleMembers,
               navigationAttention: navigationAttention,
               onStartCall: onStartCall,
+              onOpenPins: switch (timeline) {
+                null => null,
+                final pinsIn => (anchor) => showPinnedPanel(
+                  context,
+                  pinsIn,
+                  anchor: anchor,
+                ),
+              },
             ),
             if (timeline == null)
               Expanded(
@@ -213,6 +222,7 @@ class _ChannelHeader extends StatelessWidget {
     required this.onToggleMembers,
     required this.navigationAttention,
     this.onStartCall,
+    this.onOpenPins,
   });
 
   final Channel channel;
@@ -220,6 +230,10 @@ class _ChannelHeader extends StatelessWidget {
   final VoidCallback? onToggleMembers;
   final bool navigationAttention;
   final void Function({required bool video})? onStartCall;
+
+  /// Opens the pinned list beside the pin button, whose rect (global
+  /// coordinates) is passed. Null while there is no conversation to pin in.
+  final void Function(Rect anchor)? onOpenPins;
 
   @override
   Widget build(BuildContext context) {
@@ -319,6 +333,18 @@ class _ChannelHeader extends StatelessWidget {
                   ),
                 ] else
                   const Spacer(),
+                if (onOpenPins != null)
+                  // Its own context: the list opens beside this button.
+                  Builder(
+                    builder: (context) => _HeaderIconButton(
+                      icon: LucideIcons.pin,
+                      tooltip: 'Pinned messages',
+                      onTap: () {
+                        final box = context.findRenderObject()! as RenderBox;
+                        onOpenPins!(box.localToGlobal(Offset.zero) & box.size);
+                      },
+                    ),
+                  ),
                 if (direct && onStartCall != null) ...[
                   _HeaderIconButton(
                     icon: LucideIcons.phone,
@@ -406,6 +432,7 @@ const _litFor = Duration(milliseconds: 1600);
 Key _keyOf(TimelineEntry entry) => switch (entry) {
   DaySeparator() => ValueKey(('day', entry.day)),
   CallEntry() => ValueKey(('call', entry.message.id)),
+  PinEntry() => ValueKey(('pin', entry.message.id)),
   MessageGroup() => ValueKey(('group', entry.messages.first.id)),
 };
 
@@ -708,6 +735,10 @@ class _TimelineState extends State<_Timeline> {
       child: switch (entry) {
         DaySeparator() => _DaySeparatorTile(entry: entry),
         CallEntry() => _CallLineTile(message: entry.message),
+        PinEntry() => _PinLineTile(
+          message: entry.message,
+          controller: widget.controller,
+        ),
         MessageGroup() => Padding(
           padding: const EdgeInsets.only(bottom: LoafSpace.x4),
           child: MessageGroupTile(
@@ -833,6 +864,59 @@ class _CallLineTile extends StatelessWidget {
             style: loafBody(11, 400).copyWith(color: tokens.textMuted),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The line a pin left, drawn as a call's is. A tap on a line that pinned
+/// one message jumps to it; one that pinned several opens the pinned list.
+class _PinLineTile extends StatelessWidget {
+  const _PinLineTile({required this.message, required this.controller});
+
+  final Message message;
+  final Timeline controller;
+
+  void _open(BuildContext context) {
+    final pinned = message.pinLine!.pinned;
+    if (pinned.length == 1) {
+      controller.jumpTo(pinned.single);
+      return;
+    }
+    final box = context.findRenderObject()! as RenderBox;
+    showPinnedPanel(
+      context,
+      controller,
+      anchor: box.localToGlobal(Offset.zero) & box.size,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = LoafTokens.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: LoafSpace.x4),
+      child: InkWell(
+        onTap: () => _open(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: LoafSpace.x1),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(LucideIcons.pin, size: 14, color: tokens.textMuted),
+              const SizedBox(width: LoafSpace.x2),
+              Text(
+                message.body,
+                style: loafBody(13, 500).copyWith(color: tokens.textBody),
+              ),
+              const SizedBox(width: LoafSpace.x2),
+              Text(
+                formatMessageTime(message.sentAt),
+                style: loafBody(11, 400).copyWith(color: tokens.textMuted),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
