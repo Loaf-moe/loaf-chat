@@ -113,7 +113,7 @@ mod tests {
     fn session(auth: StoredAuth) -> StoredSession {
         StoredSession {
             homeserver: Url::parse("https://matrix.example.org").unwrap(),
-            user: UserId::from("@alice:example.org".to_owned()),
+            user: UserId::try_from("@alice:example.org").unwrap(),
             device: DeviceId::from("DEVICE1".to_owned()),
             auth,
         }

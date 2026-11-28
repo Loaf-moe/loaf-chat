@@ -34,63 +34,42 @@ const REDIRECT: &str = "http://127.0.0.1:4567/callback";
 /// A rate limit that doesn't fall on a whole second.
 const RETRY_AFTER_MS: u32 = 1500;
 
-/// A mock homeserver, a data dir and the two port doubles.
-struct Env {
-    server: MatrixMockServer,
-    dir: TempDir,
-    secrets: Arc<FakeSecretStore>,
-    browser: Arc<ScriptedAuthBrowser>,
+/// A homeserver on a local port that answers only what a test mounts on it.
+/// Discovery needs `/versions`, so that is always mounted.
+struct MockHomeserver {
+    /// The wiremock server, for mounting answers a test writes itself.
+    mock: MatrixMockServer,
 }
 
-impl Env {
+impl MockHomeserver {
     async fn new() -> Self {
-        let server = MatrixMockServer::new().await;
-        server.mock_versions().ok().mount().await;
-        Self {
-            server,
-            dir: TempDir::new().unwrap(),
-            secrets: Arc::new(FakeSecretStore::new()),
-            browser: ScriptedAuthBrowser::new(REDIRECT),
-        }
+        let mock = MatrixMockServer::new().await;
+        mock.mock_versions().ok().mount().await;
+        Self { mock }
     }
 
-    /// What the person types to reach the mock server.
+    /// What the person types to reach this server.
     fn address(&self) -> String {
-        self.server.uri()
+        self.mock.uri()
     }
 
     /// The host `discover` keeps from [`Self::address`].
     fn host(&self) -> String {
-        self.server.uri().trim_start_matches("http://").to_owned()
+        self.mock.uri().trim_start_matches("http://").to_owned()
     }
 
-    fn store_dir(&self) -> PathBuf {
-        self.dir.path().join("matrix")
-    }
-
-    async fn start(&self) -> Arc<Core> {
-        Core::start(CoreConfig {
-            data_dir: self.dir.path().to_owned(),
-            device_name: "Loaf test".into(),
-            platform: Platform {
-                secrets: Arc::<FakeSecretStore>::clone(&self.secrets),
-                auth_browser: Arc::<ScriptedAuthBrowser>::clone(&self.browser),
-            },
-        })
-        .await
-        .unwrap()
-    }
-
-    async fn login_types(&self, flows: Value) {
+    /// Answers `GET /login` with these `flows`.
+    async fn offers_logins(&self, flows: Value) {
         Mock::given(method("GET"))
             .and(path("/_matrix/client/v3/login"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "flows": flows })))
-            .mount(&self.server)
+            .mount(&self.mock)
             .await;
     }
 
-    async fn no_oauth(&self) {
-        self.server
+    /// Answers the OAuth metadata with `M_UNRECOGNIZED`.
+    async fn offers_no_oauth(&self) {
+        self.mock
             .oauth()
             .mock_server_metadata()
             .error_unrecognized()
@@ -98,22 +77,13 @@ impl Env {
             .await;
     }
 
-    async fn oauth(&self) {
-        self.server.oauth().mock_server_metadata().ok().mount().await;
-    }
-
-    /// A server offering only a password, and the handle for it.
-    async fn password_server(&self) -> (Arc<Core>, PasswordSignIn) {
-        self.login_types(json!([{ "type": "m.login.password" }])).await;
-        self.no_oauth().await;
-        let core = self.start().await;
-        let server = core.session().discover(&self.address()).await.unwrap();
-        let password = server.password_sign_in().unwrap();
-        (core, password)
+    /// Publishes OAuth metadata with dynamic registration.
+    async fn offers_oauth(&self) {
+        self.mock.oauth().mock_server_metadata().ok().mount().await;
     }
 
     /// Accepts `alice` with [`PASSWORD`], handing out [`ACCESS`] and [`REFRESH`].
-    async fn accept_password(&self) {
+    async fn accepts_password(&self) {
         Mock::given(method("POST"))
             .and(path("/_matrix/client/v3/login"))
             .and(body_partial_json(json!({
@@ -124,30 +94,137 @@ impl Env {
                 "initial_device_display_name": "Loaf test",
             })))
             .respond_with(login_ok())
-            .mount(&self.server)
+            .mount(&self.mock)
             .await;
     }
 
-    /// Signed in as alice by password.
-    async fn signed_in(&self) -> Arc<Core> {
-        self.accept_password().await;
-        let (core, password) = self.password_server().await;
-        password.sign_in("alice", PASSWORD).await.unwrap();
-        core
+    /// Answers the token exchange and whoami an OAuth sign-in makes after
+    /// the authorization page.
+    async fn accepts_oauth_code(&self) {
+        self.mock.oauth().mock_token().ok().mount().await;
+        self.mock.mock_who_am_i().ok().mount().await;
     }
 
-    fn stored(&self) -> Option<StoredSession> {
+    /// Answers `/logout` with `response`, expecting it `times` times.
+    async fn answers_logout(&self, response: ResponseTemplate, times: u64) {
+        Mock::given(method("POST"))
+            .and(path("/_matrix/client/v3/logout"))
+            .respond_with(response)
+            .expect(times)
+            .mount(&self.mock)
+            .await;
+    }
+
+    /// Answers whoami with an unknown token for [`ACCESS`], so the client
+    /// refreshes with `refresh`, and with alice for any other token.
+    async fn expires_first_token(&self, refresh: ResponseTemplate) {
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/account/whoami"))
+            .and(header("authorization", format!("Bearer {ACCESS}").as_str()))
+            .respond_with(matrix_error(401, "M_UNKNOWN_TOKEN", "Token expired"))
+            .mount(&self.mock)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/account/whoami"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "user_id": "@alice:example.org", "device_id": "DEVICE1" })),
+            )
+            .mount(&self.mock)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/_matrix/client/v3/refresh"))
+            .respond_with(refresh)
+            .mount(&self.mock)
+            .await;
+    }
+}
+
+/// The device the app runs on: its data dir, keychain and system browser.
+/// Launching it twice is quitting the app and opening it again.
+struct TestDevice {
+    data_dir: TempDir,
+    secrets: Arc<FakeSecretStore>,
+    browser: Arc<ScriptedAuthBrowser>,
+}
+
+impl TestDevice {
+    fn new() -> Self {
+        Self {
+            data_dir: TempDir::new().unwrap(),
+            secrets: Arc::new(FakeSecretStore::new()),
+            browser: ScriptedAuthBrowser::new(REDIRECT),
+        }
+    }
+
+    /// Starts Core on this device; any stored session is restored.
+    async fn launch(&self) -> Arc<Core> {
+        Core::start(CoreConfig {
+            data_dir: self.data_dir.path().to_owned(),
+            device_name: "Loaf test".into(),
+            platform: Platform {
+                secrets: Arc::<FakeSecretStore>::clone(&self.secrets),
+                auth_browser: Arc::<ScriptedAuthBrowser>::clone(&self.browser),
+            },
+        })
+        .await
+        .unwrap()
+    }
+
+    fn store_dir(&self) -> PathBuf {
+        self.data_dir.path().join("matrix")
+    }
+
+    /// The session in the keychain, if any.
+    fn stored_session(&self) -> Option<StoredSession> {
         self.secrets
             .value(SESSION_KEY)
             .map(|secret| StoredSession::from_secret(&secret).unwrap())
     }
 
     /// Nothing of a session is left on this device.
-    fn wiped(&self) -> bool {
+    fn is_wiped(&self) -> bool {
         !self.store_dir().exists()
             && self.secrets.value(SESSION_KEY).is_none()
             && self.secrets.value(PASSPHRASE_KEY).is_none()
     }
+}
+
+/// `homeserver` offers only a password; `device` launches and discovers it.
+async fn launch_and_discover_password(homeserver: &MockHomeserver, device: &TestDevice) -> (Arc<Core>, PasswordSignIn) {
+    homeserver.offers_logins(json!([{ "type": "m.login.password" }])).await;
+    homeserver.offers_no_oauth().await;
+    let core = device.launch().await;
+    let server = core.session().discover(&homeserver.address()).await.unwrap();
+    (core, server.password_sign_in().unwrap())
+}
+
+/// `homeserver` offers SSO through GitHub; `device` launches and discovers it.
+async fn launch_and_discover_sso(homeserver: &MockHomeserver, device: &TestDevice) -> (Arc<Core>, BrowserSignIn) {
+    homeserver
+        .offers_logins(json!([{ "type": "m.login.sso", "identity_providers": [{ "id": "gh", "name": "GitHub" }] }]))
+        .await;
+    homeserver.offers_no_oauth().await;
+    let core = device.launch().await;
+    let server = core.session().discover(&homeserver.address()).await.unwrap();
+    (core, server.browser_sign_ins().remove(0))
+}
+
+/// `homeserver` offers OAuth; `device` launches and discovers it.
+async fn launch_and_discover_oauth(homeserver: &MockHomeserver, device: &TestDevice) -> (Arc<Core>, BrowserSignIn) {
+    homeserver.offers_logins(json!([{ "type": "m.login.sso" }])).await;
+    homeserver.offers_oauth().await;
+    let core = device.launch().await;
+    let server = core.session().discover(&homeserver.address()).await.unwrap();
+    (core, server.browser_sign_ins().remove(0))
+}
+
+/// `device` launched and signed in as alice by password on `homeserver`.
+async fn launch_signed_in(homeserver: &MockHomeserver, device: &TestDevice) -> Arc<Core> {
+    homeserver.accepts_password().await;
+    let (core, password) = launch_and_discover_password(homeserver, device).await;
+    password.sign_in("alice", PASSWORD).await.unwrap();
+    core
 }
 
 /// Ends `core` as quitting the app does: its stores released, then dropped.
@@ -173,7 +250,7 @@ fn matrix_error(status: u16, errcode: &str, message: &str) -> ResponseTemplate {
 
 fn alice() -> SessionState {
     SessionState::SignedIn {
-        user: UserId::from("@alice:example.org".to_owned()),
+        user: UserId::try_from("@alice:example.org").unwrap(),
         device: DeviceId::from("DEVICE1".to_owned()),
     }
 }
@@ -182,7 +259,7 @@ fn state(core: &Core) -> SessionState {
     core.session().state().get()
 }
 
-fn signed_in(core: &Core) -> bool {
+fn is_signed_in(core: &Core) -> bool {
     matches!(state(core), SessionState::SignedIn { user: _, device: _ })
 }
 
@@ -210,59 +287,47 @@ fn callback_from(page: &Url, query: &[(&str, &str)]) -> Url {
     callback
 }
 
-/// Answers `/logout` with `response`, expecting it `times` times.
-async fn logout(env: &Env, response: ResponseTemplate, times: u64) {
-    Mock::given(method("POST"))
-        .and(path("/_matrix/client/v3/logout"))
-        .respond_with(response)
-        .expect(times)
-        .mount(&env.server)
-        .await;
-}
-
 fn empty_ok() -> ResponseTemplate {
     ResponseTemplate::new(200).set_body_json(json!({}))
-}
-
-/// Mounts the OAuth endpoints a sign-in uses after the authorization page.
-async fn accept_oauth(env: &Env) {
-    env.server.oauth().mock_token().ok().mount().await;
-    env.server.mock_who_am_i().ok().mount().await;
 }
 
 // ---- Discovery and methods ----
 
 #[tokio::test]
 async fn found_server_reports_oauth_and_password_and_oauth_hides_sso() {
-    let env = Env::new().await;
-    env.login_types(json!([
-        { "type": "m.login.password" },
-        { "type": "m.login.sso", "identity_providers": [{ "id": "gh", "name": "GitHub" }] },
-    ]))
-    .await;
-    env.oauth().await;
-    let core = env.start().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    homeserver
+        .offers_logins(json!([
+            { "type": "m.login.password" },
+            { "type": "m.login.sso", "identity_providers": [{ "id": "gh", "name": "GitHub" }] },
+        ]))
+        .await;
+    homeserver.offers_oauth().await;
+    let core = device.launch().await;
 
-    let server = core.session().discover(&env.address()).await.unwrap();
-    assert_eq!(server.name(), env.host());
+    let server = core.session().discover(&homeserver.address()).await.unwrap();
+    assert_eq!(server.name(), homeserver.host());
     assert!(server.password_sign_in().is_some());
     let browser = server.browser_sign_ins();
     assert_eq!(browser.len(), 1);
-    assert_eq!(browser[0].name(), env.host());
+    assert_eq!(browser[0].name(), homeserver.host());
 }
 
 #[tokio::test]
 async fn sso_keeps_order_and_falls_back_to_the_id() {
-    let env = Env::new().await;
-    env.login_types(json!([{ "type": "m.login.sso", "identity_providers": [
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    homeserver
+        .offers_logins(json!([{ "type": "m.login.sso", "identity_providers": [
         { "id": "gh", "name": "GitHub" },
         { "id": "kanidm", "name": "" },
     ] }]))
-    .await;
-    env.no_oauth().await;
-    let core = env.start().await;
+        .await;
+    homeserver.offers_no_oauth().await;
+    let core = device.launch().await;
 
-    let server = core.session().discover(&env.address()).await.unwrap();
+    let server = core.session().discover(&homeserver.address()).await.unwrap();
     let names: Vec<_> = server
         .browser_sign_ins()
         .iter()
@@ -274,33 +339,35 @@ async fn sso_keeps_order_and_falls_back_to_the_id() {
 
 #[tokio::test]
 async fn sso_with_no_providers_is_one_method_named_after_the_server() {
-    let env = Env::new().await;
-    env.login_types(json!([{ "type": "m.login.sso" }])).await;
-    let core = env.start().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    homeserver.offers_logins(json!([{ "type": "m.login.sso" }])).await;
+    let core = device.launch().await;
 
     // Wiremock's bare 404 for the OAuth metadata, as a proxy would send.
-    let server = core.session().discover(&env.address()).await.unwrap();
+    let server = core.session().discover(&homeserver.address()).await.unwrap();
     let browser = server.browser_sign_ins();
     assert_eq!(browser.len(), 1);
-    assert_eq!(browser[0].name(), env.host());
+    assert_eq!(browser[0].name(), homeserver.host());
 }
 
 #[tokio::test]
 async fn nothing_usable_is_a_server_with_no_methods() {
-    let env = Env::new().await;
-    env.login_types(json!([{ "type": "m.login.token" }])).await;
-    env.no_oauth().await;
-    let core = env.start().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    homeserver.offers_logins(json!([{ "type": "m.login.token" }])).await;
+    homeserver.offers_no_oauth().await;
+    let core = device.launch().await;
 
-    let server = core.session().discover(&env.address()).await.unwrap();
+    let server = core.session().discover(&homeserver.address()).await.unwrap();
     assert!(server.password_sign_in().is_none());
     assert!(server.browser_sign_ins().is_empty());
 }
 
 #[tokio::test]
 async fn implausible_input_is_not_a_server_and_unreachable_is_couldnt_reach() {
-    let env = Env::new().await;
-    let core = env.start().await;
+    let device = TestDevice::new();
+    let core = device.launch().await;
     assert_eq!(
         core.session().discover("not a server").await.unwrap_err(),
         DiscoverError::NotAServer
@@ -314,40 +381,70 @@ async fn implausible_input_is_not_a_server_and_unreachable_is_couldnt_reach() {
 #[tokio::test]
 async fn a_web_server_that_isnt_matrix_is_not_matrix() {
     // No `/versions`, no well-known: a plain web server answering 404s.
-    let server = MatrixMockServer::new().await;
-    let env = Env::new().await;
-    let core = env.start().await;
+    let web_server = MatrixMockServer::new().await;
+    let device = TestDevice::new();
+    let core = device.launch().await;
     assert_eq!(
-        core.session().discover(&server.uri()).await.unwrap_err(),
+        core.session().discover(&web_server.uri()).await.unwrap_err(),
         DiscoverError::CouldntReach(Unreachable::NotMatrix)
     );
 }
 
 #[tokio::test]
 async fn discover_while_signed_in_is_not_signed_out() {
-    let env = Env::new().await;
-    let core = env.signed_in().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let core = launch_signed_in(&homeserver, &device).await;
     assert_eq!(
-        core.session().discover(&env.address()).await.unwrap_err(),
+        core.session().discover(&homeserver.address()).await.unwrap_err(),
         DiscoverError::NotSignedOut
     );
 }
 
 #[test]
-fn server_in_user_id_names_the_server() {
-    assert_eq!(server_in_user_id("@alice:Loaf.moe").as_deref(), Some("loaf.moe"));
-    assert_eq!(server_in_user_id("alice"), None);
+fn a_user_id_names_its_server() {
+    let user = UserId::try_from(" @alice:loaf.moe:8448 ").unwrap();
+    assert_eq!(user.as_str(), "@alice:loaf.moe:8448");
+    assert_eq!(user.server_name(), "loaf.moe:8448");
+}
+
+#[test]
+fn text_that_isnt_a_user_id_says_why() {
+    for (text, why) in [
+        ("alice", InvalidUserId::MissingAt),
+        ("@alice", InvalidUserId::MissingServer),
+        ("@alice:", InvalidUserId::MissingServer),
+        ("@:loaf.moe", InvalidUserId::EmptyUsername),
+        ("@al ice:loaf.moe", InvalidUserId::HasSpaces),
+    ] {
+        assert_eq!(UserId::try_from(text), Err(why), "{text:?}");
+    }
+}
+
+#[test]
+fn a_stored_user_id_that_isnt_one_is_corrupt() {
+    let stored: Result<UserId, _> = serde_json::from_str("\"alice\"");
+    stored.unwrap_err();
+}
+
+#[test]
+fn a_typed_user_id_discovers_its_server() {
+    assert_eq!(
+        server::parse_server_name("@alice:Loaf.moe").as_deref(),
+        Some("loaf.moe")
+    );
 }
 
 // ---- Password ----
 
 #[tokio::test]
 async fn right_credentials_sign_in_and_keep_the_session() {
-    let env = Env::new().await;
-    let core = env.signed_in().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let core = launch_signed_in(&homeserver, &device).await;
 
     assert_eq!(state(&core), alice());
-    let stored = env.stored().unwrap();
+    let stored = device.stored_session().unwrap();
     assert_eq!(
         stored.auth,
         StoredAuth::Matrix {
@@ -355,34 +452,37 @@ async fn right_credentials_sign_in_and_keep_the_session() {
             refresh_token: Some(REFRESH.into()),
         }
     );
-    assert_eq!(stored.homeserver.as_str().trim_end_matches('/'), env.address());
+    assert_eq!(stored.homeserver.as_str().trim_end_matches('/'), homeserver.address());
     assert!(
-        env.secrets
+        device
+            .secrets
             .value(PASSPHRASE_KEY)
             .is_some_and(|passphrase| passphrase.len() >= 32)
     );
-    assert!(env.store_dir().exists());
+    assert!(device.store_dir().exists());
 }
 
 #[tokio::test]
 async fn username_is_trimmed() {
-    let env = Env::new().await;
-    env.accept_password().await;
-    let (core, password) = env.password_server().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    homeserver.accepts_password().await;
+    let (core, password) = launch_and_discover_password(&homeserver, &device).await;
     password.sign_in("  alice ", PASSWORD).await.unwrap();
     assert_eq!(state(&core), alice());
 }
 
 #[tokio::test]
 async fn empty_fields_are_refused_without_a_request() {
-    let env = Env::new().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
     Mock::given(method("POST"))
         .and(path("/_matrix/client/v3/login"))
         .respond_with(login_ok())
         .expect(0)
-        .mount(&env.server)
+        .mount(&homeserver.mock)
         .await;
-    let (_core, password) = env.password_server().await;
+    let (_core, password) = launch_and_discover_password(&homeserver, &device).await;
 
     let no_user = password.sign_in("   ", PASSWORD).await.unwrap_err();
     assert_eq!(no_user.error, PasswordError::Empty(EmptyFields::Username));
@@ -394,20 +494,21 @@ async fn empty_fields_are_refused_without_a_request() {
 
 #[tokio::test]
 async fn wrong_password_hands_the_handle_back() {
-    let env = Env::new().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
     Mock::given(method("POST"))
         .and(path("/_matrix/client/v3/login"))
         .and(body_partial_json(json!({ "password": "wrong" })))
         .respond_with(matrix_error(403, "M_FORBIDDEN", "Invalid password"))
-        .mount(&env.server)
+        .mount(&homeserver.mock)
         .await;
-    env.accept_password().await;
-    let (core, password) = env.password_server().await;
+    homeserver.accepts_password().await;
+    let (core, password) = launch_and_discover_password(&homeserver, &device).await;
 
     let failed = password.sign_in("alice", "wrong").await.unwrap_err();
     assert_eq!(failed.error, PasswordError::WrongPassword);
     assert_eq!(state(&core), SessionState::SignedOut);
-    assert!(env.wiped());
+    assert!(device.is_wiped());
 
     failed.handle.sign_in("alice", PASSWORD).await.unwrap();
     assert_eq!(state(&core), alice());
@@ -415,7 +516,8 @@ async fn wrong_password_hands_the_handle_back() {
 
 #[tokio::test]
 async fn rate_limit_is_rounded_up_and_requested_once() {
-    let env = Env::new().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
     Mock::given(method("POST"))
         .and(path("/_matrix/client/v3/login"))
         .respond_with(ResponseTemplate::new(429).set_body_json(json!({
@@ -424,9 +526,9 @@ async fn rate_limit_is_rounded_up_and_requested_once() {
             "retry_after_ms": RETRY_AFTER_MS,
         })))
         .expect(1)
-        .mount(&env.server)
+        .mount(&homeserver.mock)
         .await;
-    let (_core, password) = env.password_server().await;
+    let (_core, password) = launch_and_discover_password(&homeserver, &device).await;
 
     let failed = password.sign_in("alice", PASSWORD).await.unwrap_err();
     assert_eq!(
@@ -439,13 +541,14 @@ async fn rate_limit_is_rounded_up_and_requested_once() {
 
 #[tokio::test]
 async fn rate_limit_reads_the_retry_after_header() {
-    let env = Env::new().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
     Mock::given(method("POST"))
         .and(path("/_matrix/client/v3/login"))
         .respond_with(matrix_error(429, "M_LIMIT_EXCEEDED", "Too many requests").insert_header("Retry-After", "5"))
-        .mount(&env.server)
+        .mount(&homeserver.mock)
         .await;
-    let (_core, password) = env.password_server().await;
+    let (_core, password) = launch_and_discover_password(&homeserver, &device).await;
 
     let failed = password.sign_in("alice", PASSWORD).await.unwrap_err();
     assert_eq!(
@@ -480,13 +583,14 @@ fn retry_after_rounds_up_to_at_least_a_second_and_defaults_to_thirty() {
 
 /// What a password sign-in fails with when `/login` answers `response`.
 async fn password_error_for(response: ResponseTemplate) -> PasswordError {
-    let env = Env::new().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
     Mock::given(method("POST"))
         .and(path("/_matrix/client/v3/login"))
         .respond_with(response)
-        .mount(&env.server)
+        .mount(&homeserver.mock)
         .await;
-    let (_core, password) = env.password_server().await;
+    let (_core, password) = launch_and_discover_password(&homeserver, &device).await;
     password.sign_in("alice", PASSWORD).await.unwrap_err().error
 }
 
@@ -551,19 +655,10 @@ async fn other_server_errors_keep_the_code_and_the_servers_text() {
 
 // ---- Browser ----
 
-async fn sso_server(env: &Env) -> (Arc<Core>, BrowserSignIn) {
-    env.login_types(json!([{ "type": "m.login.sso", "identity_providers": [{ "id": "gh", "name": "GitHub" }] }]))
-        .await;
-    env.no_oauth().await;
-    let core = env.start().await;
-    let server = core.session().discover(&env.address()).await.unwrap();
-    let browser = server.browser_sign_ins().remove(0);
-    (core, browser)
-}
-
 #[tokio::test]
 async fn sso_signs_in_with_the_login_token() {
-    let env = Env::new().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
     Mock::given(method("POST"))
         .and(path("/_matrix/client/v3/login"))
         .and(body_partial_json(json!({
@@ -573,16 +668,17 @@ async fn sso_signs_in_with_the_login_token() {
         })))
         .respond_with(login_ok())
         .expect(1)
-        .mount(&env.server)
+        .mount(&homeserver.mock)
         .await;
-    let (core, browser) = sso_server(&env).await;
-    env.browser
+    let (core, browser) = launch_and_discover_sso(&homeserver, &device).await;
+    device
+        .browser
         .then(|page| Ok(callback_from(page, &[("loginToken", "login-token")])));
 
     browser.sign_in().await.unwrap();
 
     assert_eq!(state(&core), alice());
-    let page = &env.browser.opened()[0];
+    let page = &device.browser.opened()[0];
     assert!(page.path().ends_with("/login/sso/redirect/gh"), "{page}");
     assert!(
         page.query_pairs()
@@ -592,64 +688,61 @@ async fn sso_signs_in_with_the_login_token() {
 
 #[tokio::test]
 async fn refused_login_token_is_provider_didnt_finish() {
-    let env = Env::new().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
     Mock::given(method("POST"))
         .and(path("/_matrix/client/v3/login"))
         .respond_with(matrix_error(403, "M_FORBIDDEN", "Invalid token"))
-        .mount(&env.server)
+        .mount(&homeserver.mock)
         .await;
-    let (core, browser) = sso_server(&env).await;
-    env.browser
+    let (core, browser) = launch_and_discover_sso(&homeserver, &device).await;
+    device
+        .browser
         .then(|page| Ok(callback_from(page, &[("loginToken", "stale")])));
 
     let failed = browser.sign_in().await.unwrap_err();
     assert_eq!(failed.error, BrowserError::ProviderDidntFinish);
     assert_eq!(state(&core), SessionState::SignedOut);
-    assert!(env.wiped());
+    assert!(device.is_wiped());
 }
 
 #[tokio::test]
 async fn sso_account_problems_are_account_errors() {
-    let env = Env::new().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
     Mock::given(method("POST"))
         .and(path("/_matrix/client/v3/login"))
         .respond_with(matrix_error(403, "M_USER_DEACTIVATED", "This account is gone"))
-        .mount(&env.server)
+        .mount(&homeserver.mock)
         .await;
-    let (_core, browser) = sso_server(&env).await;
-    env.browser
+    let (_core, browser) = launch_and_discover_sso(&homeserver, &device).await;
+    device
+        .browser
         .then(|page| Ok(callback_from(page, &[("loginToken", "login-token")])));
 
     let failed = browser.sign_in().await.unwrap_err();
     assert_eq!(failed.error, BrowserError::Account(AccountError::Deactivated));
-    assert!(env.wiped());
+    assert!(device.is_wiped());
 }
 
 #[tokio::test]
 async fn closed_browser_is_cancelled_and_one_that_wont_open_is_browser_didnt_open() {
-    let env = Env::new().await;
-    let (_core, browser) = sso_server(&env).await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let (_core, browser) = launch_and_discover_sso(&homeserver, &device).await;
 
     let closed = browser.sign_in().await.unwrap_err();
     assert_eq!(closed.error, BrowserError::Cancelled);
 
-    env.browser.then(|_page| Err(AuthBrowserError::CouldntOpen));
+    device.browser.then(|_page| Err(AuthBrowserError::CouldntOpen));
     let didnt_open = closed.handle.sign_in().await.unwrap_err();
     assert_eq!(didnt_open.error, BrowserError::BrowserDidntOpen);
 }
 
-async fn oauth_server(env: &Env) -> (Arc<Core>, BrowserSignIn) {
-    env.login_types(json!([{ "type": "m.login.sso" }])).await;
-    env.oauth().await;
-    let core = env.start().await;
-    let server = core.session().discover(&env.address()).await.unwrap();
-    let browser = server.browser_sign_ins().remove(0);
-    (core, browser)
-}
-
 #[tokio::test]
 async fn oauth_registers_without_the_loopback_port_and_signs_in() {
-    let env = Env::new().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
     Mock::given(method("POST"))
         .and(path("/oauth2/registration"))
         .and(body_partial_json(json!({
@@ -661,33 +754,36 @@ async fn oauth_registers_without_the_loopback_port_and_signs_in() {
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "client_id": "loaf-client" })))
         .expect(1)
-        .mount(&env.server)
+        .mount(&homeserver.mock)
         .await;
-    accept_oauth(&env).await;
-    let (core, browser) = oauth_server(&env).await;
-    env.browser
+    homeserver.accepts_oauth_code().await;
+    let (core, browser) = launch_and_discover_oauth(&homeserver, &device).await;
+    device
+        .browser
         .then(|page| Ok(callback_from(page, &[("code", "authorization-code")])));
 
     browser.sign_in().await.unwrap();
 
-    assert!(signed_in(&core));
-    let page = &env.browser.opened()[0];
+    assert!(is_signed_in(&core));
+    let page = &device.browser.opened()[0];
     assert!(
         page.query_pairs()
             .any(|(key, value)| key == "redirect_uri" && value == REDIRECT)
     );
     assert!(matches!(
-        env.stored().unwrap().auth,
+        device.stored_session().unwrap().auth,
         StoredAuth::OAuth { client_id, access_token: _, refresh_token: _ } if client_id == "loaf-client"
     ));
 }
 
 #[tokio::test]
 async fn oauth_declined_on_the_providers_page_is_declined() {
-    let env = Env::new().await;
-    env.server.oauth().mock_registration().ok().mount().await;
-    let (core, browser) = oauth_server(&env).await;
-    env.browser
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    homeserver.mock.oauth().mock_registration().ok().mount().await;
+    let (core, browser) = launch_and_discover_oauth(&homeserver, &device).await;
+    device
+        .browser
         .then(|page| Ok(callback_from(page, &[("error", "access_denied")])));
 
     let failed = browser.sign_in().await.unwrap_err();
@@ -697,18 +793,20 @@ async fn oauth_declined_on_the_providers_page_is_declined() {
 
 #[tokio::test]
 async fn a_server_without_dynamic_registration_refuses_registration() {
-    let env = Env::new().await;
-    env.login_types(json!([{ "type": "m.login.sso" }])).await;
-    env.server
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    homeserver.offers_logins(json!([{ "type": "m.login.sso" }])).await;
+    homeserver
+        .mock
         .oauth()
         .mock_server_metadata()
         .ok_without_registration()
         .mount()
         .await;
-    let core = env.start().await;
+    let core = device.launch().await;
     let browser = core
         .session()
-        .discover(&env.address())
+        .discover(&homeserver.address())
         .await
         .unwrap()
         .browser_sign_ins()
@@ -716,7 +814,7 @@ async fn a_server_without_dynamic_registration_refuses_registration() {
 
     let failed = browser.sign_in().await.unwrap_err();
     assert_eq!(failed.error, BrowserError::RegistrationRefused);
-    assert_eq!(env.browser.opened(), Vec::<Url>::new());
+    assert_eq!(device.browser.opened(), Vec::<Url>::new());
 }
 
 #[test]
@@ -729,18 +827,20 @@ fn empty_fields_name_what_was_empty() {
 
 #[tokio::test]
 async fn oauth_retried_after_a_cancel_signs_in() {
-    let env = Env::new().await;
-    env.server.oauth().mock_registration().ok().mount().await;
-    accept_oauth(&env).await;
-    let (core, browser) = oauth_server(&env).await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    homeserver.mock.oauth().mock_registration().ok().mount().await;
+    homeserver.accepts_oauth_code().await;
+    let (core, browser) = launch_and_discover_oauth(&homeserver, &device).await;
 
     let failed = browser.sign_in().await.unwrap_err();
     assert_eq!(failed.error, BrowserError::Cancelled);
 
-    env.browser
+    device
+        .browser
         .then(|page| Ok(callback_from(page, &[("code", "authorization-code")])));
     failed.handle.sign_in().await.unwrap();
-    assert!(signed_in(&core));
+    assert!(is_signed_in(&core));
 }
 
 #[test]
@@ -760,13 +860,14 @@ fn only_loopback_redirects_lose_their_port() {
 
 #[tokio::test]
 async fn sign_in_during_another_is_busy() {
-    let env = Env::new().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
     Mock::given(method("POST"))
         .and(path("/_matrix/client/v3/login"))
         .respond_with(login_ok().set_delay(Duration::from_millis(500)))
-        .mount(&env.server)
+        .mount(&homeserver.mock)
         .await;
-    let (core, first) = env.password_server().await;
+    let (core, first) = launch_and_discover_password(&homeserver, &device).await;
     let second = first.clone();
 
     let (first_result, second_result) = tokio::join!(first.sign_in("alice", PASSWORD), async {
@@ -780,9 +881,10 @@ async fn sign_in_during_another_is_busy() {
 
 #[tokio::test]
 async fn sign_in_after_success_with_another_handle_is_not_signed_out() {
-    let env = Env::new().await;
-    env.accept_password().await;
-    let (_core, first) = env.password_server().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    homeserver.accepts_password().await;
+    let (_core, first) = launch_and_discover_password(&homeserver, &device).await;
     let second = first.clone();
 
     first.sign_in("alice", PASSWORD).await.unwrap();
@@ -796,26 +898,27 @@ async fn sign_in_after_success_with_another_handle_is_not_signed_out() {
 
 #[tokio::test]
 async fn nothing_stored_starts_signed_out() {
-    let env = Env::new().await;
-    let core = env.start().await;
+    let device = TestDevice::new();
+    let core = device.launch().await;
     assert_eq!(state(&core), SessionState::SignedOut);
 }
 
 #[tokio::test]
 async fn stored_session_restores_offline_with_the_keys_made_at_sign_in() {
-    let env = Env::new().await;
-    let first_core = env.signed_in().await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let first_core = launch_signed_in(&homeserver, &device).await;
     let first_client = first_core.session().client().unwrap();
     let key = first_client.encryption().ed25519_key().await.unwrap();
     drop(first_client);
     quit(first_core).await;
 
     // Point the stored session at a port nothing listens on.
-    let mut stored = env.stored().unwrap();
+    let mut stored = device.stored_session().unwrap();
     stored.homeserver = Url::parse("http://127.0.0.1:1").unwrap();
-    env.secrets.set(SESSION_KEY, &stored.to_secret()).await.unwrap();
+    device.secrets.set(SESSION_KEY, &stored.to_secret()).await.unwrap();
 
-    let core = env.start().await;
+    let core = device.launch().await;
     assert_eq!(state(&core), alice());
     let client = core.session().client().unwrap();
     assert_eq!(client.encryption().ed25519_key().await.unwrap(), key);
@@ -824,11 +927,12 @@ async fn stored_session_restores_offline_with_the_keys_made_at_sign_in() {
 #[tokio::test]
 async fn failed_secret_write_fails_sign_in_logs_out_and_wipes() {
     for failing_key in [SESSION_KEY, PASSPHRASE_KEY] {
-        let env = Env::new().await;
-        env.accept_password().await;
-        logout(&env, empty_ok(), 1).await;
-        let (core, password) = env.password_server().await;
-        env.secrets.fail_next_set_of(failing_key);
+        let homeserver = MockHomeserver::new().await;
+        let device = TestDevice::new();
+        homeserver.accepts_password().await;
+        homeserver.answers_logout(empty_ok(), 1).await;
+        let (core, password) = launch_and_discover_password(&homeserver, &device).await;
+        device.secrets.fail_next_set_of(failing_key);
 
         let failed = password.sign_in("alice", PASSWORD).await.unwrap_err();
         assert_eq!(
@@ -837,67 +941,46 @@ async fn failed_secret_write_fails_sign_in_logs_out_and_wipes() {
             "{failing_key}"
         );
         assert_eq!(state(&core), SessionState::SignedOut);
-        assert!(env.wiped(), "{failing_key}");
+        assert!(device.is_wiped(), "{failing_key}");
     }
 }
 
 #[tokio::test]
 async fn secret_store_error_at_start_signs_out_without_wiping() {
-    let env = Env::new().await;
-    quit(env.signed_in().await).await;
-    env.secrets.fail_gets();
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    quit(launch_signed_in(&homeserver, &device).await).await;
+    device.secrets.fail_gets();
 
-    let core = env.start().await;
+    let core = device.launch().await;
     assert_eq!(state(&core), SessionState::SignedOut);
-    assert!(env.store_dir().exists());
-    assert!(env.secrets.value(SESSION_KEY).is_some());
-    assert!(env.secrets.value(PASSPHRASE_KEY).is_some());
+    assert!(device.store_dir().exists());
+    assert!(device.secrets.value(SESSION_KEY).is_some());
+    assert!(device.secrets.value(PASSPHRASE_KEY).is_some());
 }
 
 #[tokio::test]
 async fn corrupt_session_wipes() {
-    let env = Env::new().await;
-    quit(env.signed_in().await).await;
-    env.secrets.set(SESSION_KEY, "{").await.unwrap();
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    quit(launch_signed_in(&homeserver, &device).await).await;
+    device.secrets.set(SESSION_KEY, "{").await.unwrap();
 
-    let core = env.start().await;
+    let core = device.launch().await;
     assert_eq!(state(&core), SessionState::SignedOut);
-    assert!(env.wiped());
+    assert!(device.is_wiped());
 }
 
 #[tokio::test]
 async fn store_that_wont_restore_wipes() {
-    let env = Env::new().await;
-    quit(env.signed_in().await).await;
-    env.secrets.set(PASSPHRASE_KEY, "not-the-passphrase").await.unwrap();
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    quit(launch_signed_in(&homeserver, &device).await).await;
+    device.secrets.set(PASSPHRASE_KEY, "not-the-passphrase").await.unwrap();
 
-    let core = env.start().await;
+    let core = device.launch().await;
     assert_eq!(state(&core), SessionState::SignedOut);
-    assert!(env.wiped());
-}
-
-/// Answers whoami with an unknown token for the first access token, so the
-/// client refreshes, and with alice for `refreshed`.
-async fn expire_first_token(env: &Env, refresh: ResponseTemplate) {
-    Mock::given(method("GET"))
-        .and(path("/_matrix/client/v3/account/whoami"))
-        .and(header("authorization", format!("Bearer {ACCESS}").as_str()))
-        .respond_with(matrix_error(401, "M_UNKNOWN_TOKEN", "Token expired"))
-        .mount(&env.server)
-        .await;
-    Mock::given(method("GET"))
-        .and(path("/_matrix/client/v3/account/whoami"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(json!({ "user_id": "@alice:example.org", "device_id": "DEVICE1" })),
-        )
-        .mount(&env.server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/_matrix/client/v3/refresh"))
-        .respond_with(refresh)
-        .mount(&env.server)
-        .await;
+    assert!(device.is_wiped());
 }
 
 fn refreshed_tokens() -> ResponseTemplate {
@@ -909,15 +992,16 @@ fn refreshed_tokens() -> ResponseTemplate {
 
 #[tokio::test]
 async fn refreshed_tokens_reach_the_secret_store() {
-    let env = Env::new().await;
-    let core = env.signed_in().await;
-    expire_first_token(&env, refreshed_tokens()).await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let core = launch_signed_in(&homeserver, &device).await;
+    homeserver.expires_first_token(refreshed_tokens()).await;
 
     let client = core.session().client().unwrap();
     client.whoami().await.unwrap();
 
     eventually(|| {
-        env.stored().is_some_and(|stored| {
+        device.stored_session().is_some_and(|stored| {
             stored.auth
                 == StoredAuth::Matrix {
                     access_token: "syt_refreshed_secret".into(),
@@ -931,48 +1015,56 @@ async fn refreshed_tokens_reach_the_secret_store() {
 
 #[tokio::test]
 async fn unrefreshable_token_signs_out_and_wipes() {
-    let env = Env::new().await;
-    let core = env.signed_in().await;
-    expire_first_token(&env, matrix_error(401, "M_UNKNOWN_TOKEN", "Refresh token revoked")).await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let core = launch_signed_in(&homeserver, &device).await;
+    homeserver
+        .expires_first_token(matrix_error(401, "M_UNKNOWN_TOKEN", "Refresh token revoked"))
+        .await;
 
     let client = core.session().client().unwrap();
     client.whoami().await.unwrap_err();
     drop(client);
 
     eventually(|| state(&core) == SessionState::SignedOut).await;
-    eventually(|| env.wiped()).await;
+    eventually(|| device.is_wiped()).await;
 }
 
 #[tokio::test]
 async fn sign_out_wipes_even_when_server_logout_fails() {
-    let env = Env::new().await;
-    let core = env.signed_in().await;
-    logout(&env, ResponseTemplate::new(500), 1).await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let core = launch_signed_in(&homeserver, &device).await;
+    homeserver.answers_logout(ResponseTemplate::new(500), 1).await;
 
     core.session().sign_out().await;
     assert_eq!(state(&core), SessionState::SignedOut);
-    assert!(env.wiped());
+    assert!(device.is_wiped());
 }
 
 #[tokio::test]
 async fn second_sign_out_in_flight_does_nothing() {
-    let env = Env::new().await;
-    let core = env.signed_in().await;
-    logout(&env, empty_ok().set_delay(Duration::from_millis(300)), 1).await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let core = launch_signed_in(&homeserver, &device).await;
+    homeserver
+        .answers_logout(empty_ok().set_delay(Duration::from_millis(300)), 1)
+        .await;
 
     tokio::join!(core.session().sign_out(), core.session().sign_out());
     eventually(|| state(&core) == SessionState::SignedOut).await;
-    assert!(env.wiped());
+    assert!(device.is_wiped());
 }
 
 #[tokio::test]
 async fn signing_in_again_after_signing_out_works() {
-    let env = Env::new().await;
-    let core = env.signed_in().await;
-    logout(&env, empty_ok(), 1).await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let core = launch_signed_in(&homeserver, &device).await;
+    homeserver.answers_logout(empty_ok(), 1).await;
     core.session().sign_out().await;
 
-    let server = core.session().discover(&env.address()).await.unwrap();
+    let server = core.session().discover(&homeserver.address()).await.unwrap();
     server
         .password_sign_in()
         .unwrap()
@@ -989,9 +1081,11 @@ async fn sign_in_futures_are_send() {
         T: Send,
     {
     }
-    let env = Env::new().await;
-    let (core, password) = env.password_server().await;
-    let browser = sso_server(&Env::new().await).await.1;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let (core, password) = launch_and_discover_password(&homeserver, &device).await;
+    let other_homeserver = MockHomeserver::new().await;
+    let browser = launch_and_discover_sso(&other_homeserver, &TestDevice::new()).await.1;
     let discover = core.session().discover("loaf.moe");
     assert_send(&discover);
     assert_send(&password.sign_in("alice", PASSWORD));
@@ -1011,18 +1105,19 @@ async fn logs_of_sign_in_refresh_and_sign_out_carry_no_secrets() {
         .finish();
     let _default = set_default(subscriber);
 
-    let env = Env::new().await;
-    let core = env.signed_in().await;
-    let passphrase = env.secrets.value(PASSPHRASE_KEY).unwrap();
-    expire_first_token(&env, refreshed_tokens()).await;
+    let homeserver = MockHomeserver::new().await;
+    let device = TestDevice::new();
+    let core = launch_signed_in(&homeserver, &device).await;
+    let passphrase = device.secrets.value(PASSPHRASE_KEY).unwrap();
+    homeserver.expires_first_token(refreshed_tokens()).await;
     core.session().client().unwrap().whoami().await.unwrap();
     eventually(|| {
-        env.stored().is_some_and(|stored| {
+        device.stored_session().is_some_and(|stored| {
             matches!(&stored.auth, StoredAuth::Matrix { access_token, refresh_token: _ } if access_token == "syt_refreshed_secret")
         })
     })
     .await;
-    logout(&env, empty_ok(), 1).await;
+    homeserver.answers_logout(empty_ok(), 1).await;
     core.session().sign_out().await;
 
     let logs = read_to_string(&log_path).unwrap();

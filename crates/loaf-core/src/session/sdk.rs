@@ -22,11 +22,12 @@ use matrix_sdk::ruma::api::client::session::login::{
 use matrix_sdk::ruma::api::client::uiaa::{MatrixUserIdentifier, UserIdentifier};
 use matrix_sdk::ruma::api::error::{ErrorBody, ErrorKind, RetryAfter};
 use matrix_sdk::ruma::serde::Raw;
-use matrix_sdk::ruma::{OwnedDeviceId, OwnedUserId};
+use matrix_sdk::ruma::{OwnedDeviceId, OwnedUserId, UserId as SdkUserId};
 use matrix_sdk::store::RoomLoadSettings;
 use matrix_sdk::{AuthSession, Client, ClientBuildError, HttpError, SessionMeta, SessionTokens};
 use url::{Host, Url};
 
+use super::UserId;
 use super::error::{AccountError, BrowserError, FinishError, PasswordError, Unreachable};
 use super::server::{IdentityProvider, ServerOffer};
 use super::stored::{CorruptSession, StoredAuth, StoredSession};
@@ -545,7 +546,7 @@ impl TryFrom<&Client> for StoredSession {
         };
         Ok(Self {
             homeserver: client.homeserver(),
-            user: meta.user_id.to_string().into(),
+            user: UserId::from(&*meta.user_id),
             device: meta.device_id.to_string().into(),
             auth,
         })
@@ -587,5 +588,15 @@ impl TryFrom<&StoredSession> for AuthSession {
                 },
             })),
         })
+    }
+}
+
+impl From<&SdkUserId> for UserId {
+    /// An id the server sent, which matrix-sdk has already checked.
+    fn from(id: &SdkUserId) -> Self {
+        Self {
+            id: id.as_str().to_owned(),
+            server_name: id.server_name().as_str().to_owned(),
+        }
     }
 }

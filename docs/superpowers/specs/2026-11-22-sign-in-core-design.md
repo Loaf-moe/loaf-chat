@@ -74,8 +74,15 @@ password.sign_in(user, password).await   // Result<(), Failed<PasswordSignIn, Pa
 browser.name()                            // provider name, or the server's for OAuth
 browser.sign_in().await                   // Result<(), Failed<BrowserSignIn, BrowserError>>
 
-server_in_user_id(text)      // Option<String>: the server a full user id names
+UserId::try_from(text)       // Result<UserId, InvalidUserId>; whitespace around it ignored
+user_id.server_name()        // "example.org", with any port: what the UI prefills
 ```
+
+`UserId` is always a well-formed id: built from typed text through
+`TryFrom<&str>`, from the server through matrix-sdk's checked id, and from
+the secret store through the same `TryFrom` (one that fails is a corrupt
+session). A plain username is `Err(MissingAt)`, so a UI prefilling the server
+uses `.ok()`.
 
 ```rust
 enum SessionState {
@@ -93,6 +100,8 @@ shared between operations are shared types, converted with `From`.
 
 ```rust
 enum DiscoverError { NotAServer, CouldntReach(Unreachable), NotSignedOut }
+
+enum InvalidUserId { MissingAt, EmptyUsername, MissingServer, HasSpaces }
 
 enum PasswordError {
     Busy, NotSignedOut,

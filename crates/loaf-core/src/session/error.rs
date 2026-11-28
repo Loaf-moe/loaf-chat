@@ -114,6 +114,22 @@ impl EmptyFields {
     }
 }
 
+/// Why text isn't a user id like `@alice:example.org`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidUserId {
+    /// It doesn't start with `@`, as a plain username doesn't.
+    #[error("a user id starts with @")]
+    MissingAt,
+    /// Nothing between the `@` and the colon.
+    #[error("a user id has a username before the colon")]
+    EmptyUsername,
+    /// No colon, or nothing after it.
+    #[error("a user id ends with a colon and the server's name")]
+    MissingServer,
+    #[error("a user id has no spaces")]
+    HasSpaces,
+}
+
 /// What the server said about the account itself, the same for every way of
 /// signing in.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

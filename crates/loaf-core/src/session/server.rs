@@ -1,5 +1,7 @@
 use url::Url;
 
+use super::UserId;
+
 /// What a homeserver's login endpoint and OAuth metadata offered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ServerOffer {
@@ -49,7 +51,8 @@ pub(crate) enum BrowserMethod {
 pub(crate) fn parse_server_name(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if trimmed.starts_with('@') {
-        return user_id_server(trimmed);
+        let user = UserId::try_from(trimmed).ok()?;
+        return host_with_port(user.server_name());
     }
     host_with_port(trimmed)
 }
@@ -63,14 +66,6 @@ pub(crate) fn typed_http(input: &str) -> bool {
             .trim()
             .get(..7)
             .is_some_and(|scheme| scheme.eq_ignore_ascii_case("http://"))
-}
-
-/// The server named by a full user id typed into the username field, so a
-/// plain username leaves the server alone.
-pub(crate) fn user_id_server(text: &str) -> Option<String> {
-    let rest = text.trim().strip_prefix('@')?;
-    let (_localpart, server) = rest.split_once(':')?;
-    host_with_port(server)
 }
 
 /// Goes through `Url` so half-typed input can't become an error: whatever it
@@ -187,14 +182,6 @@ mod tests {
         assert_eq!(typed_http(" HTTP://localhost:8008"), cfg!(debug_assertions));
         for input in ["https://loaf.moe", "loaf.moe", "http:/x", ""] {
             assert!(!typed_http(input), "{input:?}");
-        }
-    }
-
-    #[test]
-    fn user_id_server_only_for_full_ids() {
-        assert_eq!(user_id_server("@bob:example.org").as_deref(), Some("example.org"));
-        for text in ["bob", "@bob", "@bob:"] {
-            assert_eq!(user_id_server(text), None, "{text:?}");
         }
     }
 
