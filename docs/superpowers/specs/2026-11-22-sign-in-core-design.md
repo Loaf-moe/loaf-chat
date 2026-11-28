@@ -67,8 +67,8 @@ session.discover(input).await        // Result<Server, DiscoverError>
 session.sign_out().await             // never fails visibly
 
 server.name()                // the host as typed, never the delegated base URL
-server.password()            // Option<PasswordSignIn>, a clone
-server.browser()             // Vec<BrowserSignIn>, clones
+server.password_sign_in()    // Option<PasswordSignIn>, a clone
+server.browser_sign_ins()    // Vec<BrowserSignIn>, clones
 
 password.sign_in(user, password).await   // Result<(), Failed<PasswordSignIn, PasswordError>>
 browser.name()                            // provider name, or the server's for OAuth

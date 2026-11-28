@@ -51,7 +51,7 @@ impl Core {
             config.device_name,
             config.data_dir.join("matrix"),
         ));
-        session.restore().await;
+        session.restore_stored_session().await;
         Ok(Arc::new(Self { session }))
     }
 

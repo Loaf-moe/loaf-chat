@@ -8,7 +8,7 @@ use url::Url;
 
 use super::Session;
 use super::error::{BrowserError, EmptyFields, PasswordError};
-use super::sdk::{self, Probe};
+use super::sdk::{self, DiscoveredServer};
 use super::server::{BrowserMethod, auth_methods};
 
 /// A server that answered discovery, and the ways it offers to sign in.
@@ -23,15 +23,15 @@ pub struct Server {
 }
 
 impl Server {
-    /// The sign-ins `probe` found on the server typed as `name`.
-    pub(crate) fn new(session: &Arc<Session>, name: String, probe: Probe) -> Self {
-        let methods = auth_methods(&probe.offer);
+    /// The sign-ins `discovered` found on the server typed as `name`.
+    pub(crate) fn new(session: &Arc<Session>, name: String, discovered: DiscoveredServer) -> Self {
+        let methods = auth_methods(&discovered.offer);
         let browser = methods
             .browser
             .into_iter()
             .map(|method| BrowserSignIn {
                 session: Arc::clone(session),
-                homeserver: probe.homeserver.clone(),
+                homeserver: discovered.homeserver.clone(),
                 name: match &method {
                     BrowserMethod::Sso {
                         name: Some(provider_name),
@@ -48,7 +48,7 @@ impl Server {
             .collect();
         let password = methods.password.then(|| PasswordSignIn {
             session: Arc::clone(session),
-            homeserver: probe.homeserver,
+            homeserver: discovered.homeserver,
         });
         Self {
             name,
@@ -65,13 +65,13 @@ impl Server {
 
     /// Signing in with a password, where the server takes one.
     #[must_use]
-    pub fn password(&self) -> Option<PasswordSignIn> {
+    pub fn password_sign_in(&self) -> Option<PasswordSignIn> {
         self.password.clone()
     }
 
     /// Signing in in the system browser: OAuth alone, or one per SSO provider.
     #[must_use]
-    pub fn browser(&self) -> Vec<BrowserSignIn> {
+    pub fn browser_sign_ins(&self) -> Vec<BrowserSignIn> {
         self.browser.clone()
     }
 }
@@ -115,7 +115,7 @@ impl PasswordSignIn {
         let trimmed = user.trim();
         let signed_in = self
             .session
-            .sign_in(&self.homeserver, async |client, device_name| {
+            .sign_in_on_fresh_store(&self.homeserver, async |client, device_name| {
                 sdk::password_sign_in(client, trimmed, password, device_name).await
             })
             .await;
@@ -168,7 +168,7 @@ impl BrowserSignIn {
         let browser = self.session.auth_browser();
         let signed_in = self
             .session
-            .sign_in(&self.homeserver, async |client, device_name| match &self.method {
+            .sign_in_on_fresh_store(&self.homeserver, async |client, device_name| match &self.method {
                 BrowserMethod::OAuth => sdk::oauth_sign_in(client, browser.as_ref()).await,
                 BrowserMethod::Sso { provider, name: _ } => {
                     sdk::sso_sign_in(client, browser.as_ref(), provider.as_deref(), device_name).await

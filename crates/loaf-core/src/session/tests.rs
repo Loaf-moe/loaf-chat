@@ -108,7 +108,7 @@ impl Env {
         self.no_oauth().await;
         let core = self.start().await;
         let server = core.session().discover(&self.address()).await.unwrap();
-        let password = server.password().unwrap();
+        let password = server.password_sign_in().unwrap();
         (core, password)
     }
 
@@ -245,8 +245,8 @@ async fn found_server_reports_oauth_and_password_and_oauth_hides_sso() {
 
     let server = core.session().discover(&env.address()).await.unwrap();
     assert_eq!(server.name(), env.host());
-    assert!(server.password().is_some());
-    let browser = server.browser();
+    assert!(server.password_sign_in().is_some());
+    let browser = server.browser_sign_ins();
     assert_eq!(browser.len(), 1);
     assert_eq!(browser[0].name(), env.host());
 }
@@ -264,12 +264,12 @@ async fn sso_keeps_order_and_falls_back_to_the_id() {
 
     let server = core.session().discover(&env.address()).await.unwrap();
     let names: Vec<_> = server
-        .browser()
+        .browser_sign_ins()
         .iter()
         .map(|browser| browser.name().to_owned())
         .collect();
     assert_eq!(names, ["GitHub", "kanidm"]);
-    assert!(server.password().is_none());
+    assert!(server.password_sign_in().is_none());
 }
 
 #[tokio::test]
@@ -280,7 +280,7 @@ async fn sso_with_no_providers_is_one_method_named_after_the_server() {
 
     // Wiremock's bare 404 for the OAuth metadata, as a proxy would send.
     let server = core.session().discover(&env.address()).await.unwrap();
-    let browser = server.browser();
+    let browser = server.browser_sign_ins();
     assert_eq!(browser.len(), 1);
     assert_eq!(browser[0].name(), env.host());
 }
@@ -293,8 +293,8 @@ async fn nothing_usable_is_a_server_with_no_methods() {
     let core = env.start().await;
 
     let server = core.session().discover(&env.address()).await.unwrap();
-    assert!(server.password().is_none());
-    assert!(server.browser().is_empty());
+    assert!(server.password_sign_in().is_none());
+    assert!(server.browser_sign_ins().is_empty());
 }
 
 #[tokio::test]
@@ -557,7 +557,7 @@ async fn sso_server(env: &Env) -> (Arc<Core>, BrowserSignIn) {
     env.no_oauth().await;
     let core = env.start().await;
     let server = core.session().discover(&env.address()).await.unwrap();
-    let browser = server.browser().remove(0);
+    let browser = server.browser_sign_ins().remove(0);
     (core, browser)
 }
 
@@ -643,7 +643,7 @@ async fn oauth_server(env: &Env) -> (Arc<Core>, BrowserSignIn) {
     env.oauth().await;
     let core = env.start().await;
     let server = core.session().discover(&env.address()).await.unwrap();
-    let browser = server.browser().remove(0);
+    let browser = server.browser_sign_ins().remove(0);
     (core, browser)
 }
 
@@ -711,7 +711,7 @@ async fn a_server_without_dynamic_registration_refuses_registration() {
         .discover(&env.address())
         .await
         .unwrap()
-        .browser()
+        .browser_sign_ins()
         .remove(0);
 
     let failed = browser.sign_in().await.unwrap_err();
@@ -973,7 +973,12 @@ async fn signing_in_again_after_signing_out_works() {
     core.session().sign_out().await;
 
     let server = core.session().discover(&env.address()).await.unwrap();
-    server.password().unwrap().sign_in("alice", PASSWORD).await.unwrap();
+    server
+        .password_sign_in()
+        .unwrap()
+        .sign_in("alice", PASSWORD)
+        .await
+        .unwrap();
     assert_eq!(state(&core), alice());
 }
 

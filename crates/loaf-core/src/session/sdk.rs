@@ -40,12 +40,12 @@ const LOGIN_TOKEN_PARAM: &str = "loginToken";
 
 /// Sign-in requests fail at once, so a rate limit reaches the UI instead of
 /// being waited out by the SDK.
-fn sign_in_requests() -> RequestConfig {
+fn no_retry_requests() -> RequestConfig {
     RequestConfig::new().disable_retry()
 }
 
 /// A server that answered discovery.
-pub(crate) struct Probe {
+pub(crate) struct DiscoveredServer {
     /// The base URL the server delegates to.
     pub homeserver: Url,
     /// The ways to sign in it offers.
@@ -54,10 +54,10 @@ pub(crate) struct Probe {
 
 /// Resolves `address` (a host, or `http://` and a host) and reads what it
 /// offers, on a client with no store.
-pub(crate) async fn probe(address: &str) -> Result<Probe, Unreachable> {
+pub(crate) async fn discover_server(address: &str) -> Result<DiscoveredServer, Unreachable> {
     let client = Client::builder()
         .server_name_or_homeserver_url(address)
-        .request_config(sign_in_requests())
+        .request_config(no_retry_requests())
         .build()
         .await
         .map_err(|error| {
@@ -105,7 +105,7 @@ pub(crate) async fn probe(address: &str) -> Result<Probe, Unreachable> {
             return Err(Unreachable::from(&error));
         }
     };
-    Ok(Probe {
+    Ok(DiscoveredServer {
         homeserver: client.homeserver(),
         offer: ServerOffer { oauth, sso, password },
     })
@@ -113,11 +113,15 @@ pub(crate) async fn probe(address: &str) -> Result<Probe, Unreachable> {
 
 /// A client for signing in to `homeserver`, on a new store at `store`
 /// encrypted with `passphrase`, refreshing its own tokens once signed in.
-pub(crate) async fn sign_in_client(homeserver: &Url, store: &Path, passphrase: &str) -> Result<Client, FinishError> {
+pub(crate) async fn build_sign_in_client(
+    homeserver: &Url,
+    store: &Path,
+    passphrase: &str,
+) -> Result<Client, FinishError> {
     Ok(Client::builder()
         .homeserver_url(homeserver.as_str())
         .sqlite_store(store, Some(passphrase))
-        .request_config(sign_in_requests())
+        .request_config(no_retry_requests())
         .handle_refresh_tokens()
         .build()
         .await?)
@@ -125,7 +129,7 @@ pub(crate) async fn sign_in_client(homeserver: &Url, store: &Path, passphrase: &
 
 /// Why a stored session didn't come back.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum WontRestore {
+pub(crate) enum RestoreError {
     /// Its ids don't parse.
     #[error(transparent)]
     Session(#[from] CorruptSession),
@@ -138,7 +142,11 @@ pub(crate) enum WontRestore {
 }
 
 /// Brings `session` back on its store, with no network.
-pub(crate) async fn restore(session: &StoredSession, store: &Path, passphrase: &str) -> Result<Client, WontRestore> {
+pub(crate) async fn restore_client(
+    session: &StoredSession,
+    store: &Path,
+    passphrase: &str,
+) -> Result<Client, RestoreError> {
     let auth = AuthSession::try_from(session)?;
     let client = Client::builder()
         .homeserver_url(session.homeserver.as_str())
@@ -148,7 +156,7 @@ pub(crate) async fn restore(session: &StoredSession, store: &Path, passphrase: &
         .await?;
     if let Err(error) = client.restore_session(auth).await {
         // Closed before the caller wipes the store it opened.
-        if let Err(close_error) = close(&client).await {
+        if let Err(close_error) = close_stores(&client).await {
             tracing::warn!(error = %close_error, "couldn't close the Matrix store");
         }
         return Err(error.into());
@@ -157,23 +165,23 @@ pub(crate) async fn restore(session: &StoredSession, store: &Path, passphrase: &
 }
 
 /// Closes every store `client` holds, waiting for operations in flight.
-pub(crate) async fn close(client: &Client) -> Result<(), matrix_sdk::Error> {
+pub(crate) async fn close_stores(client: &Client) -> Result<(), matrix_sdk::Error> {
     client.pause().await
 }
 
 /// Logs out on the server; the caller bounds how long it may take.
-pub(crate) async fn log_out(client: &Client) -> Result<(), matrix_sdk::Error> {
+pub(crate) async fn log_out_on_server(client: &Client) -> Result<(), matrix_sdk::Error> {
     client.logout().await
 }
 
 /// Sends one `/login` with `info`, asking for a refresh token, and signs
 /// `client` in with the answer. The SDK's own login builder retries on its
 /// own, which would hide a rate limit from the UI.
-async fn log_in(client: &Client, info: LoginInfo, device_name: &str) -> Result<(), matrix_sdk::Error> {
+async fn send_login(client: &Client, info: LoginInfo, device_name: &str) -> Result<(), matrix_sdk::Error> {
     let mut request = login::v3::Request::new(info);
     request.initial_device_display_name = Some(device_name.to_owned());
     request.refresh_token = true;
-    let response = client.send(request).with_request_config(sign_in_requests()).await?;
+    let response = client.send(request).with_request_config(no_retry_requests()).await?;
     let session = MatrixSession {
         meta: SessionMeta {
             user_id: response.user_id,
@@ -199,7 +207,7 @@ pub(crate) async fn password_sign_in(
 ) -> Result<(), PasswordError> {
     let identifier = UserIdentifier::Matrix(MatrixUserIdentifier::new(user.to_owned()));
     let info = LoginInfo::Password(Password::new(identifier, password.to_owned()));
-    log_in(client, info, device_name)
+    send_login(client, info, device_name)
         .await
         .map_err(|error| PasswordError::from_login(&error, SystemTime::now()))
 }
@@ -217,7 +225,7 @@ pub(crate) async fn sso_sign_in(
         .matrix_auth()
         .get_sso_login_url(redirect.as_str(), provider)
         .await
-        .map_err(|error| BrowserError::from_sdk(&error))?;
+        .map_err(|error| BrowserError::from_browser_login(&error))?;
     let page = Url::parse(&page_text).map_err(|error| FinishError::Sdk {
         message: error.to_string(),
     })?;
@@ -226,11 +234,11 @@ pub(crate) async fn sso_sign_in(
         .query_pairs()
         .find_map(|(key, value)| (key == LOGIN_TOKEN_PARAM).then(|| value.into_owned()))
         .ok_or(BrowserError::ProviderDidntFinish)?;
-    log_in(client, LoginInfo::Token(Token::new(token)), device_name)
+    send_login(client, LoginInfo::Token(Token::new(token)), device_name)
         .await
         .map_err(|error| {
             tracing::debug!(%error, "server refused the login token");
-            BrowserError::from_sdk(&error)
+            BrowserError::from_browser_login(&error)
         })
 }
 
@@ -238,7 +246,7 @@ pub(crate) async fn sso_sign_in(
 /// finishes from the authorization code the browser comes back with.
 pub(crate) async fn oauth_sign_in(client: &Client, browser: &dyn AuthBrowser) -> Result<(), BrowserError> {
     let redirect = browser.redirect_uri().await?;
-    let registration = client_registration(&redirect)?;
+    let registration = oauth_registration_data(&redirect)?;
     let oauth = client.oauth();
     let authorization = oauth
         .login(redirect, None, Some(registration), None)
@@ -251,13 +259,13 @@ pub(crate) async fn oauth_sign_in(client: &Client, browser: &dyn AuthBrowser) ->
     let callback = browser.authenticate(authorization.url).await?;
     oauth.finish_login(callback.into()).await.map_err(|error| {
         tracing::debug!(%error, "OAuth authorization didn't finish");
-        BrowserError::from_sdk(&error)
+        BrowserError::from_browser_login(&error)
     })
 }
 
 /// What dynamic registration sends for loaf: a native public client using
 /// the authorization-code grant with `redirect`.
-fn client_registration(redirect: &Url) -> Result<ClientRegistrationData, FinishError> {
+fn oauth_registration_data(redirect: &Url) -> Result<ClientRegistrationData, FinishError> {
     let sdk_error = |error: &dyn Error| FinishError::Sdk {
         message: error.to_string(),
     };
@@ -295,7 +303,7 @@ pub(crate) fn registered_redirect(redirect: &Url) -> Url {
 /// The network failure somewhere in `error`'s chain of causes, if any. An
 /// error wrapped transparently is skipped by `source()`, so callers holding
 /// one match it directly.
-fn network_failure(error: &(dyn Error + 'static)) -> Option<Unreachable> {
+fn find_unreachable(error: &(dyn Error + 'static)) -> Option<Unreachable> {
     successors(Some(error), |&cause| cause.source())
         .find_map(|cause| {
             cause
@@ -343,7 +351,7 @@ impl From<&ClientBuildError> for Unreachable {
         } else {
             // Discovery found no homeserver: the name's well-known and its
             // `/versions` didn't answer as Matrix.
-            network_failure(error).unwrap_or(Self::NotMatrix)
+            find_unreachable(error).unwrap_or(Self::NotMatrix)
         }
     }
 }
@@ -443,7 +451,7 @@ impl PasswordError {
 impl BrowserError {
     /// A failed request while signing in through the browser: building the
     /// SSO page, the login token, or finishing OAuth.
-    fn from_sdk(error: &matrix_sdk::Error) -> Self {
+    fn from_browser_login(error: &matrix_sdk::Error) -> Self {
         if let matrix_sdk::Error::OAuth(oauth) = error {
             return if matches!(
                 oauth.as_ref(),
@@ -451,7 +459,7 @@ impl BrowserError {
             ) {
                 Self::Declined
             } else {
-                network_failure(oauth.as_ref()).map_or(Self::ProviderDidntFinish, Self::from)
+                find_unreachable(oauth.as_ref()).map_or(Self::ProviderDidntFinish, Self::from)
             };
         }
         if let Some(unreachable) = Unreachable::from_login(error) {
@@ -465,7 +473,7 @@ impl BrowserError {
 
     /// A failure before the authorization page opens: discovery or registration.
     fn from_oauth_start(error: &OAuthError) -> Self {
-        if let Some(unreachable) = network_failure(error) {
+        if let Some(unreachable) = find_unreachable(error) {
             return unreachable.into();
         }
         if let OAuthError::Discovery(discovery) = error {

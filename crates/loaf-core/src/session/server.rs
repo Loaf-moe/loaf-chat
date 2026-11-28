@@ -46,7 +46,7 @@ pub(crate) enum BrowserMethod {
 
 /// The host (with any port, lowercased) in a server name, URL or full user id,
 /// or `None` while the input isn't a plausible host yet.
-pub(crate) fn parse_server(input: &str) -> Option<String> {
+pub(crate) fn parse_server_name(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if trimmed.starts_with('@') {
         return user_id_server(trimmed);
@@ -154,14 +154,14 @@ mod tests {
             ("http://loaf.moe:80", "loaf.moe:80"),
             ("@a:loaf.moe:443", "loaf.moe:443"),
         ] {
-            assert_eq!(parse_server(input).as_deref(), Some(host), "{input:?}");
+            assert_eq!(parse_server_name(input).as_deref(), Some(host), "{input:?}");
         }
     }
 
     #[test]
     fn implausible_input_gives_nothing() {
         for input in ["", "loaf", "loaf moe", "@alice", "https://"] {
-            assert_eq!(parse_server(input), None, "{input:?}");
+            assert_eq!(parse_server_name(input), None, "{input:?}");
         }
     }
 
@@ -172,7 +172,7 @@ mod tests {
                 let Some(prefix) = full.get(..end) else {
                     continue;
                 };
-                if let Some(host) = parse_server(prefix) {
+                if let Some(host) = parse_server_name(prefix) {
                     assert!(
                         host.contains('.') || host.starts_with("localhost"),
                         "{prefix:?} gave {host:?}"
