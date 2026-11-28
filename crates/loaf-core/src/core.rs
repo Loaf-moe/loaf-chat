@@ -1,19 +1,19 @@
 //! The handle a shell holds for the whole app.
 
 use alloc::sync::Arc;
+use std::io;
 use std::path::PathBuf;
 
-use tokio::runtime::Handle;
+use tokio::fs::create_dir_all;
 
 use crate::ports::auth_browser::AuthBrowser;
-use crate::ports::matrix::Matrix;
 use crate::ports::secret_store::SecretStore;
 use crate::session::Session;
 use crate::session::keeping::Keeping;
 
 /// What the core needs from the shell to start.
 pub struct CoreConfig {
-    /// The directory the Matrix store lives under.
+    /// The directory the Matrix store lives under, in `data_dir/matrix`.
     pub data_dir: PathBuf,
     /// Shown to the user's other sessions; the shell builds it.
     pub device_name: String,
@@ -32,16 +32,30 @@ pub struct Core {
     session: Session,
 }
 
+/// The core couldn't start.
+#[derive(Debug, thiserror::Error)]
+pub enum StartError {
+    #[error("couldn't create the data directory: {0}")]
+    DataDir(#[source] io::Error),
+}
+
 impl Core {
-    /// Starts over `matrix` and returns once the stored session, if any, is restored.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 12"))]
-    pub(crate) async fn start_with(config: CoreConfig, matrix: Arc<dyn Matrix>) -> Arc<Self> {
-        let keeping = Arc::new(Keeping::new(config.platform, config.device_name, matrix));
+    /// Starts the core and returns once the stored session, if any, is restored.
+    ///
+    /// # Errors
+    ///
+    /// [`StartError::DataDir`] when `data_dir` can't be created.
+    pub async fn start(config: CoreConfig) -> Result<Arc<Self>, StartError> {
+        create_dir_all(&config.data_dir).await.map_err(StartError::DataDir)?;
+        let keeping = Arc::new(Keeping::new(
+            config.platform,
+            config.device_name,
+            config.data_dir.join("matrix"),
+        ));
         keeping.restore().await;
-        Arc::new(Self {
-            // `start_with` is async, so it runs inside the caller's runtime.
-            session: Session::new(keeping, Handle::current()),
-        })
+        Ok(Arc::new(Self {
+            session: Session::new(keeping),
+        }))
     }
 
     #[must_use]

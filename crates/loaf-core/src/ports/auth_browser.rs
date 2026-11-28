@@ -9,11 +9,8 @@ pub trait AuthBrowser: Send + Sync {
     /// callback scheme.
     async fn redirect_uri(&self) -> Result<Url, AuthBrowserError>;
     /// Opens `url` and resolves with the URL the browser came back to.
+    /// Dropping the future closes the pending page.
     async fn authenticate(&self, url: Url) -> Result<Url, AuthBrowserError>;
-    /// Opens the pending page again, where that means anything.
-    fn reopen(&self);
-    /// Gives up on a pending `authenticate`, which resolves `Cancelled`.
-    fn cancel(&self);
 }
 
 /// Why a browser sign-in came back without a callback.

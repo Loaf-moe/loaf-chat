@@ -1,182 +1,119 @@
-//! Keeping the session across launches: committing a sign-in and restoring it at start.
+//! Keeping the session: signing in on a fresh store, restoring at start,
+//! persisting refreshed tokens and signing out.
 
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
+use core::sync::atomic::{AtomicBool, Ordering};
+use core::time::Duration;
+use std::io::ErrorKind;
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use eyeball::{SharedObservable, Subscriber};
+use matrix_sdk::{Client, SessionChange};
+use rand::distr::{Alphanumeric, SampleString as _};
+use tokio::fs::remove_dir_all;
+use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::broadcast::Receiver;
+use tokio::sync::broadcast::error::RecvError;
+use tokio::task::JoinHandle;
+use tokio::time::timeout;
+use url::Url;
 
+use super::error::{BrowserError, FinishError, PasswordError};
+use super::sdk;
+use super::stored::{PASSPHRASE_KEY, SESSION_KEY, StoredSession};
+use super::{DeviceId, SessionState, UserId};
 use crate::core::Platform;
 use crate::ports::auth_browser::AuthBrowser;
-use crate::ports::matrix::{Account, Attempt, Matrix};
 use crate::ports::secret_store::{SecretStore, SecretStoreError};
-use crate::session::stored::{PASSPHRASE_KEY, SESSION_KEY};
-use crate::session::{NotSignedOut, SessionState, StoredSession};
 
-/// Owns the session state and the stored secrets behind it.
+/// How long a server logout may take before local data is wiped anyway.
+const LOGOUT_TIMEOUT: Duration = Duration::from_secs(15);
+/// Characters in the passphrase that encrypts the SDK store.
+const PASSPHRASE_LENGTH: usize = 32;
+
+/// Owns the session state, the signed-in client and the secrets behind them.
 pub(crate) struct Keeping {
     /// What the shell observes.
     state: SharedObservable<SessionState>,
     /// Where the session and the store passphrase are kept.
     secrets: Arc<dyn SecretStore>,
-    /// The homeserver side: restoring and wiping the SDK store.
-    matrix: Arc<dyn Matrix>,
     /// The system browser for browser sign-ins.
-    #[expect(dead_code, reason = "used from Task 8")]
     auth_browser: Arc<dyn AuthBrowser>,
     /// The name other sessions see for this device.
     device_name: String,
-    /// The signed-in account, restored or committed.
-    account: Mutex<Option<Arc<dyn Account>>>,
-    /// Which flow may sign in, and whether one is being kept. Beginning a
-    /// flow and claiming a commit both decide under this one lock, so two
-    /// flows can never both commit.
-    flows: Mutex<Flows>,
+    /// matrix-sdk's store: `data_dir/matrix`.
+    store_dir: PathBuf,
+    /// Held for the whole of a sign-in, so a second one finds it taken.
+    signing_in: AsyncMutex<()>,
+    /// A sign-out is under way; another call does nothing.
+    signing_out: AtomicBool,
+    /// The signed-in client and the task keeping its tokens.
+    signed_in: Mutex<Option<SignedIn>>,
 }
 
-/// The sign-in flows' share of [`Keeping`], behind `Keeping::flows`.
-struct Flows {
-    /// Bumped by each new flow; only the flow holding the latest may commit.
-    generation: u64,
-    /// A claimed commit is under way; no flow begins or commits until it ends.
-    committing: bool,
+/// A signed-in client and the task writing its refreshed tokens.
+struct SignedIn {
+    /// Signed in and refreshing its own tokens.
+    client: Client,
+    /// Runs [`keep_tokens`] for `client`.
+    listener: JoinHandle<()>,
 }
 
-/// The right to commit one sign-in, from [`Keeping::claim_commit`]. Dropping
-/// it, after the commit has published its outcome, lets flows begin again.
-pub(crate) struct CommitClaim<'keeping> {
-    /// Released on drop.
-    keeping: &'keeping Keeping,
+/// Why `Keeping::sign_in` didn't sign in.
+#[derive(Debug)]
+pub(crate) enum KeepError<E> {
+    /// Another sign-in holds the guard.
+    Busy,
+    /// An account is signed in.
+    NotSignedOut,
+    /// The server accepted, but the session couldn't be kept.
+    CouldntFinish(FinishError),
+    /// The sign-in itself failed.
+    SignIn(E),
 }
 
-impl Drop for CommitClaim<'_> {
-    fn drop(&mut self) {
-        self.keeping.flows().committing = false;
+impl From<KeepError<PasswordError>> for PasswordError {
+    fn from(error: KeepError<Self>) -> Self {
+        match error {
+            KeepError::Busy => Self::Busy,
+            KeepError::NotSignedOut => Self::NotSignedOut,
+            KeepError::CouldntFinish(finish) => finish.into(),
+            KeepError::SignIn(sign_in) => sign_in,
+        }
     }
 }
 
-/// Keeping a signed-in session failed; nothing of it was kept.
-#[derive(Debug)]
-pub(crate) struct CommitFailed;
+impl From<KeepError<BrowserError>> for BrowserError {
+    fn from(error: KeepError<Self>) -> Self {
+        match error {
+            KeepError::Busy => Self::Busy,
+            KeepError::NotSignedOut => Self::NotSignedOut,
+            KeepError::CouldntFinish(finish) => finish.into(),
+            KeepError::SignIn(sign_in) => sign_in,
+        }
+    }
+}
 
 impl Keeping {
     /// A keeper that starts signed out, before [`Self::restore`] has run.
-    pub(crate) fn new(platform: Platform, device_name: String, matrix: Arc<dyn Matrix>) -> Self {
+    pub(crate) fn new(platform: Platform, device_name: String, store_dir: PathBuf) -> Self {
         Self {
             state: SharedObservable::new(SessionState::SignedOut),
             secrets: platform.secrets,
-            matrix,
             auth_browser: platform.auth_browser,
             device_name,
-            account: Mutex::new(None),
-            flows: Mutex::new(Flows {
-                generation: 0,
-                committing: false,
-            }),
+            store_dir,
+            signing_in: AsyncMutex::new(()),
+            signing_out: AtomicBool::new(false),
+            signed_in: Mutex::new(None),
         }
     }
 
-    /// A poisoned lock only means a panic elsewhere; its fields are plain
-    /// values assigned whole, so they stay consistent.
-    fn flows(&self) -> MutexGuard<'_, Flows> {
-        self.flows.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Starts a new flow generation, making every earlier flow inert.
-    ///
-    /// # Errors
-    ///
-    /// [`NotSignedOut`] while an account is signed in or a sign-in is being kept.
-    pub(crate) fn begin_flow(&self) -> Result<u64, NotSignedOut> {
-        let mut flows = self.flows();
-        if flows.committing || self.state.get() != SessionState::SignedOut {
-            return Err(NotSignedOut);
-        }
-        flows.generation = flows.generation.wrapping_add(1);
-        Ok(flows.generation)
-    }
-
-    /// Whether no flow has begun since the one in `generation`.
-    pub(crate) fn is_current_flow(&self, generation: u64) -> bool {
-        self.flows().generation == generation
-    }
-
-    /// The right to commit, for the flow in `generation` if it is still the
-    /// newest, nothing is signed in and no other commit is under way.
-    pub(crate) fn claim_commit(&self, generation: u64) -> Option<CommitClaim<'_>> {
-        let mut flows = self.flows();
-        if flows.generation != generation || flows.committing || self.state.get() != SessionState::SignedOut {
-            return None;
-        }
-        flows.committing = true;
-        Some(CommitClaim { keeping: self })
-    }
-
-    /// The name other sessions see for this device.
-    pub(crate) fn device_name(&self) -> &str {
-        &self.device_name
-    }
-
-    /// Keeps a signed-in `session`: writes it and the store passphrase to the
-    /// secret store, commits `attempt`'s store as the account's own, then
-    /// publishes `SignedIn`. A failure deletes the secrets written so far,
-    /// and an attempt not yet committed is discarded, logging its token out.
-    pub(crate) async fn commit(
-        &self,
-        claim: CommitClaim<'_>,
-        attempt: Box<dyn Attempt>,
-        session: StoredSession,
-        passphrase: String,
-    ) -> Result<(), CommitFailed> {
-        if let Err(error) = self.secrets.set(SESSION_KEY, &session.to_secret()).await {
-            return self.abandon(attempt, &[], &error).await;
-        }
-        if let Err(error) = self.secrets.set(PASSPHRASE_KEY, &passphrase).await {
-            return self.abandon(attempt, &[SESSION_KEY], &error).await;
-        }
-        match attempt.commit(&session).await {
-            Ok(account) => {
-                *self.account.lock().unwrap_or_else(PoisonError::into_inner) = Some(account);
-                self.state.set(SessionState::SignedIn {
-                    user: session.user,
-                    device: session.device,
-                });
-                drop(claim);
-                Ok(())
-            }
-            Err(error) => {
-                tracing::warn!(%error, "couldn't keep the signed-in account");
-                self.delete_secrets(&[SESSION_KEY, PASSPHRASE_KEY]).await;
-                Err(CommitFailed)
-            }
-        }
-    }
-
-    /// Gives up on a commit whose secret write failed: discards `attempt`,
-    /// logging its token out, and deletes the secrets already `written`.
-    async fn abandon(
-        &self,
-        attempt: Box<dyn Attempt>,
-        written: &[&str],
-        error: &SecretStoreError,
-    ) -> Result<(), CommitFailed> {
-        tracing::warn!(%error, "couldn't store the signed-in session");
-        attempt.discard().await;
-        self.delete_secrets(written).await;
-        Err(CommitFailed)
-    }
-
-    /// Deletes `keys` from the secret store, logging any that fail.
-    async fn delete_secrets(&self, keys: &[&str]) {
-        for &key in keys {
-            if let Err(error) = self.secrets.delete(key).await {
-                tracing::warn!(%error, key, "couldn't delete a stored secret");
-            }
-        }
-    }
-
-    /// The homeserver side, for probing during sign-in.
-    pub(crate) fn matrix(&self) -> &Arc<dyn Matrix> {
-        &self.matrix
+    /// A poisoned lock only means a panic elsewhere; the slot is assigned
+    /// whole, so it stays consistent.
+    fn signed_in(&self) -> MutexGuard<'_, Option<SignedIn>> {
+        self.signed_in.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// A subscriber whose first `next()` yields the current state; later ones wait for a change.
@@ -184,10 +121,85 @@ impl Keeping {
         self.state.subscribe_reset()
     }
 
+    /// No account is signed in.
+    pub(crate) fn is_signed_out(&self) -> bool {
+        self.state.get() == SessionState::SignedOut
+    }
+
+    /// The system browser browser sign-ins open their pages in.
+    pub(crate) fn auth_browser(&self) -> Arc<dyn AuthBrowser> {
+        Arc::clone(&self.auth_browser)
+    }
+
+    /// The signed-in client.
+    #[cfg(test)]
+    pub(crate) fn client(&self) -> Option<Client> {
+        self.signed_in().as_ref().map(|signed_in| signed_in.client.clone())
+    }
+
+    /// Signs in to `homeserver` with `sign_in` on a fresh store, then keeps
+    /// the session: its secrets written, then `SignedIn` published.
+    pub(crate) async fn sign_in<E>(
+        self: &Arc<Self>,
+        homeserver: &Url,
+        sign_in: impl AsyncFnOnce(&Client, &str) -> Result<(), E>,
+    ) -> Result<(), KeepError<E>> {
+        let Ok(_guard) = self.signing_in.try_lock() else {
+            return Err(KeepError::Busy);
+        };
+        if !self.is_signed_out() {
+            return Err(KeepError::NotSignedOut);
+        }
+        // Signed out, so nothing in the store is worth keeping; a sign-in
+        // dropped earlier may have left one behind.
+        self.wipe_store().await;
+        let passphrase = Alphanumeric.sample_string(&mut rand::rng(), PASSPHRASE_LENGTH);
+        let client = match sdk::sign_in_client(homeserver, &self.store_dir, &passphrase).await {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::warn!(%error, "couldn't open a store to sign in on");
+                self.wipe_store().await;
+                return Err(KeepError::CouldntFinish(error));
+            }
+        };
+        if let Err(error) = sign_in(&client, &self.device_name).await {
+            close(client).await;
+            self.wipe_store().await;
+            return Err(KeepError::SignIn(error));
+        }
+        let written = match StoredSession::try_from(&client) {
+            Ok(session) => self
+                .write_secrets(&session, &passphrase)
+                .await
+                .map(|()| session)
+                .map_err(FinishError::from),
+            Err(no_session) => Err(no_session.into()),
+        };
+        match written {
+            Ok(session) => {
+                self.keep(client, session.user, session.device);
+                Ok(())
+            }
+            Err(error) => {
+                tracing::warn!(%error, "couldn't store the signed-in session; logging it out");
+                log_out(&client).await;
+                close(client).await;
+                self.wipe_local().await;
+                Err(KeepError::CouldntFinish(error))
+            }
+        }
+    }
+
+    /// Writes `session`, then the passphrase its store is encrypted with.
+    async fn write_secrets(&self, session: &StoredSession, passphrase: &str) -> Result<(), SecretStoreError> {
+        self.secrets.set(SESSION_KEY, &session.to_secret()).await?;
+        self.secrets.set(PASSPHRASE_KEY, passphrase).await
+    }
+
     /// Signs in from the stored session with no network. A missing or
     /// unreadable session, or a store that won't restore, wipes local data;
     /// a secret store that errors leaves it alone so the next launch can retry.
-    pub(crate) async fn restore(&self) {
+    pub(crate) async fn restore(self: &Arc<Self>) {
         let secret = match self.secrets.get(SESSION_KEY).await {
             Ok(Some(secret)) => secret,
             Ok(None) => return self.wipe_local().await,
@@ -205,189 +217,127 @@ impl Keeping {
             }
             Err(error) => return tracing::warn!(%error, "secret store unavailable at start; staying signed out"),
         };
-        match self.matrix.restore(&session, &passphrase).await {
-            Ok(account) => {
-                *self.account.lock().unwrap_or_else(PoisonError::into_inner) = Some(account);
-                self.state.set(SessionState::SignedIn {
-                    user: session.user,
-                    device: session.device,
-                });
-            }
+        match sdk::restore(&session, &self.store_dir, &passphrase).await {
+            Ok(client) => self.keep(client, session.user, session.device),
             Err(error) => {
-                tracing::warn!(%error, "stored session won't restore; wiping local data");
+                tracing::warn!(%error, "wiping local data");
                 self.wipe_local().await;
             }
         }
     }
 
+    /// Holds `client` as the signed-in one, starts writing its refreshed
+    /// tokens, and publishes `SignedIn`.
+    fn keep(self: &Arc<Self>, client: Client, user: UserId, device: DeviceId) {
+        // Subscribed before the task starts, so no change is missed.
+        let changes = client.subscribe_to_session_changes();
+        let listener = tokio::spawn(keep_tokens(Arc::downgrade(self), changes));
+        *self.signed_in() = Some(SignedIn { client, listener });
+        self.state.set(SessionState::SignedIn { user, device });
+    }
+
+    /// Writes the session as the client now holds it, after a token refresh.
+    async fn store_refreshed(&self) {
+        let current = self
+            .signed_in()
+            .as_ref()
+            .and_then(|signed_in| StoredSession::try_from(&signed_in.client).ok());
+        let Some(session) = current else { return };
+        if let Err(error) = self.secrets.set(SESSION_KEY, &session.to_secret()).await {
+            tracing::warn!(%error, "couldn't store refreshed tokens");
+        }
+    }
+
+    /// The token couldn't be refreshed: wipes local data and publishes `SignedOut`.
+    async fn lose_session(&self) {
+        if self.signing_out.load(Ordering::SeqCst) {
+            return;
+        }
+        tracing::warn!("session token couldn't be refreshed; signing out");
+        // Detaches the listener, which is the task running this.
+        let signed_in = self.signed_in().take();
+        if let Some(SignedIn { client, listener: _ }) = signed_in {
+            close(client).await;
+        }
+        self.wipe_local().await;
+        self.state.set(SessionState::SignedOut);
+    }
+
+    /// Logs out on the server (best effort), then wipes local data and
+    /// publishes `SignedOut`. Runs to the end even if the caller stops
+    /// waiting; a call while one is under way does nothing.
+    pub(crate) async fn sign_out(self: &Arc<Self>) {
+        if self.signing_out.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let keeping = Arc::clone(self);
+        let signing_out = tokio::spawn(async move {
+            let signed_in = keeping.signed_in().take();
+            if let Some(SignedIn { client, listener }) = signed_in {
+                listener.abort();
+                log_out(&client).await;
+                close(client).await;
+                keeping.wipe_local().await;
+                keeping.state.set(SessionState::SignedOut);
+            }
+            keeping.signing_out.store(false, Ordering::SeqCst);
+        });
+        if let Err(error) = signing_out.await {
+            tracing::warn!(%error, "sign-out stopped early");
+        }
+    }
+
     /// Deletes the Matrix store and both secrets. A failing step is logged
     /// and the rest still run; the next launch wipes whichever half is left.
-    pub(crate) async fn wipe_local(&self) {
-        if let Err(error) = self.matrix.wipe().await {
-            tracing::warn!(%error, "couldn't delete the Matrix store");
+    async fn wipe_local(&self) {
+        self.wipe_store().await;
+        for key in [SESSION_KEY, PASSPHRASE_KEY] {
+            if let Err(error) = self.secrets.delete(key).await {
+                tracing::warn!(%error, key, "couldn't delete a stored secret");
+            }
         }
-        self.delete_secrets(&[SESSION_KEY, PASSPHRASE_KEY]).await;
+    }
+
+    /// Deletes matrix-sdk's store; one that isn't there is already deleted.
+    async fn wipe_store(&self) {
+        match remove_dir_all(&self.store_dir).await {
+            Err(error) if error.kind() != ErrorKind::NotFound => {
+                tracing::warn!(%error, "couldn't delete the Matrix store");
+            }
+            Ok(()) | Err(_) => {}
+        }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::{Core, CoreConfig};
-    use crate::fakes::{FakeAccount, FakeAuthBrowser, FakeMatrix, FakeSecretStore};
-    use crate::ports::matrix::WontRestore;
-    use crate::session::stored::{PASSPHRASE_KEY, SESSION_KEY, StoredAuth};
-    use crate::session::{DeviceId, StoredSession, UserId};
-    use core::time::Duration;
-    use std::path::PathBuf;
-    use tokio::task::{JoinHandle, yield_now};
-    use tokio::time::timeout;
-    use url::Url;
+/// Closes `client`'s stores, waiting for anything in flight, so nothing it
+/// still holds writes into the store after it is wiped.
+async fn close(client: Client) {
+    if let Err(error) = sdk::close(&client).await {
+        tracing::warn!(%error, "couldn't close the Matrix store");
+    }
+}
 
-    fn stored() -> StoredSession {
-        StoredSession {
-            homeserver: Url::parse("https://matrix.example.org").unwrap(),
-            user: UserId::from("@alice:example.org".to_owned()),
-            device: DeviceId::from("DEVICE1".to_owned()),
-            auth: StoredAuth::Matrix {
-                access_token: "syt_access_secret".into(),
-                refresh_token: None,
-            },
+/// Logs `client` out on the server, giving up after [`LOGOUT_TIMEOUT`].
+async fn log_out(client: &Client) {
+    match timeout(LOGOUT_TIMEOUT, sdk::log_out(client)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => tracing::warn!(%error, "server logout failed"),
+        Err(_elapsed) => tracing::warn!("server logout timed out"),
+    }
+}
+
+/// Follows the client's session changes for as long as it is kept: writes
+/// refreshed tokens, and signs out when the token is lost.
+async fn keep_tokens(weak: Weak<Keeping>, mut changes: Receiver<SessionChange>) {
+    loop {
+        let change = changes.recv().await;
+        let Some(keeping) = weak.upgrade() else { return };
+        match change {
+            // A missed change may have been a refresh; the client's current
+            // tokens are what to keep either way.
+            Ok(SessionChange::TokensRefreshed) | Err(RecvError::Lagged(_)) => keeping.store_refreshed().await,
+            Ok(SessionChange::UnknownToken(_)) => return keeping.lose_session().await,
+            Err(RecvError::Closed) => return,
         }
-    }
-
-    fn config(secrets: &Arc<FakeSecretStore>) -> CoreConfig {
-        CoreConfig {
-            data_dir: PathBuf::from("data"),
-            device_name: "Test".into(),
-            platform: Platform {
-                secrets: Arc::<FakeSecretStore>::clone(secrets),
-                auth_browser: FakeAuthBrowser::new(Url::parse("http://127.0.0.1:1/").unwrap()),
-            },
-        }
-    }
-
-    async fn state_after_start(secrets: &Arc<FakeSecretStore>, fake: &Arc<FakeMatrix>) -> SessionState {
-        let core = Core::start_with(config(secrets), Arc::<FakeMatrix>::clone(fake)).await;
-        core.session().state().get()
-    }
-
-    fn spawn_start(secrets: &Arc<FakeSecretStore>, fake: &Arc<FakeMatrix>) -> JoinHandle<SessionState> {
-        let secrets_for_task = Arc::clone(secrets);
-        let fake_for_task = Arc::clone(fake);
-        tokio::spawn(async move { state_after_start(&secrets_for_task, &fake_for_task).await })
-    }
-
-    /// A store holding `session`, and the passphrase when there is one.
-    async fn secrets_with(session: Option<&str>, passphrase: Option<&str>) -> Arc<FakeSecretStore> {
-        let secrets = Arc::new(FakeSecretStore::new());
-        for (key, secret) in [(SESSION_KEY, session), (PASSPHRASE_KEY, passphrase)] {
-            if let Some(text) = secret {
-                secrets.set(key, text).await.unwrap();
-            }
-        }
-        secrets
-    }
-
-    fn both_deleted(secrets: &FakeSecretStore) -> bool {
-        secrets.value(SESSION_KEY).is_none() && secrets.value(PASSPHRASE_KEY).is_none()
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn nothing_stored_starts_signed_out() {
-        let secrets = secrets_with(None, Some("pass")).await;
-        let fake = FakeMatrix::new();
-        assert_eq!(state_after_start(&secrets, &fake).await, SessionState::SignedOut);
-        assert_eq!(fake.wipes(), 1);
-        assert_eq!(secrets.value(PASSPHRASE_KEY), None);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn stored_session_restores_signed_in() {
-        let secrets = secrets_with(Some(&stored().to_secret()), Some("pass")).await;
-        let fake = FakeMatrix::new();
-        let start = spawn_start(&secrets, &fake);
-        let restore = fake.next_restore().await;
-        assert_eq!(restore.session, stored());
-        assert_eq!(restore.passphrase, "pass");
-        yield_now().await;
-        assert!(!start.is_finished());
-        restore.reply(Ok(FakeAccount::new(&fake)));
-        assert_eq!(
-            start.await.unwrap(),
-            SessionState::SignedIn {
-                user: stored().user,
-                device: stored().device,
-            }
-        );
-        assert_eq!(fake.wipes(), 0);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn secret_store_error_signs_out_without_wiping() {
-        let secrets = secrets_with(Some(&stored().to_secret()), Some("pass")).await;
-        secrets.fail_gets();
-        let fake = FakeMatrix::new();
-        assert_eq!(state_after_start(&secrets, &fake).await, SessionState::SignedOut);
-        assert_eq!(fake.wipes(), 0);
-        assert!(secrets.value(SESSION_KEY).is_some());
-        assert!(secrets.value(PASSPHRASE_KEY).is_some());
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn corrupt_session_wipes() {
-        let secrets = secrets_with(Some("{"), Some("pass")).await;
-        let fake = FakeMatrix::new();
-        assert_eq!(state_after_start(&secrets, &fake).await, SessionState::SignedOut);
-        assert_eq!(fake.wipes(), 1);
-        assert!(both_deleted(&secrets));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn store_that_wont_restore_wipes() {
-        let secrets = secrets_with(Some(&stored().to_secret()), Some("pass")).await;
-        let fake = FakeMatrix::new();
-        let start = spawn_start(&secrets, &fake);
-        fake.next_restore().await.reply(Err(WontRestore));
-        assert_eq!(start.await.unwrap(), SessionState::SignedOut);
-        assert_eq!(fake.wipes(), 1);
-        assert!(both_deleted(&secrets));
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn only_the_newest_flow_claims_the_commit_and_begin_waits_for_it() {
-        let secrets = Arc::new(FakeSecretStore::new());
-        let keeping = Keeping::new(config(&secrets).platform, "Test".into(), FakeMatrix::new());
-        let first = keeping.begin_flow().unwrap();
-        let second = keeping.begin_flow().unwrap();
-        assert!(keeping.claim_commit(first).is_none());
-
-        let claim = keeping.claim_commit(second).unwrap();
-        assert!(keeping.claim_commit(second).is_none());
-        keeping.begin_flow().unwrap_err();
-        drop(claim);
-        keeping.begin_flow().unwrap();
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn state_subscriber_yields_current_state_first() {
-        let secrets = secrets_with(Some(&stored().to_secret()), Some("pass")).await;
-        let fake = FakeMatrix::new();
-        let start = tokio::spawn({
-            let secrets_for_task = Arc::clone(&secrets);
-            let fake_for_task = Arc::clone(&fake);
-            async move { Core::start_with(config(&secrets_for_task), fake_for_task).await }
-        });
-        fake.next_restore().await.reply(Ok(FakeAccount::new(&fake)));
-        let core = start.await.unwrap();
-        let mut state = core.session().state();
-        let first = timeout(Duration::from_secs(1), state.next()).await.unwrap();
-        assert_eq!(
-            first,
-            Some(SessionState::SignedIn {
-                user: stored().user,
-                device: stored().device,
-            })
-        );
     }
 }

@@ -12,24 +12,35 @@ pub(crate) const PASSPHRASE_KEY: &str = "store-passphrase";
 
 /// Everything needed to restore a signed-in account without the network.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredSession {
+pub(crate) struct StoredSession {
+    /// The base URL the client talks to.
     pub homeserver: Url,
+    /// The signed-in account.
     pub user: UserId,
+    /// This device's login on the server.
     pub device: DeviceId,
+    /// The tokens, by the kind of login.
     pub auth: StoredAuth,
 }
 
 /// The credentials a login produced, by the kind of login.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
-pub enum StoredAuth {
+pub(crate) enum StoredAuth {
+    /// A password or SSO login, with the Matrix API's own tokens.
     Matrix {
+        /// Sent with every request.
         access_token: String,
+        /// Gets a new access token; `None` for a server that issued none.
         refresh_token: Option<String>,
     },
+    /// An OAuth 2.0 login.
     OAuth {
+        /// What dynamic registration issued for this sign-in.
         client_id: String,
+        /// Sent with every request.
         access_token: String,
+        /// Gets a new access token; `None` for a server that issued none.
         refresh_token: Option<String>,
     },
 }
@@ -37,7 +48,7 @@ pub enum StoredAuth {
 /// The stored secret isn't a session this version can read.
 #[derive(Debug, thiserror::Error)]
 #[error("stored session is unreadable")]
-pub struct CorruptSession;
+pub(crate) struct CorruptSession;
 
 impl StoredSession {
     /// The text kept in the secret store.

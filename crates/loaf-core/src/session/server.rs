@@ -1,22 +1,45 @@
 use url::Url;
 
-use crate::ports::matrix::ServerOffer;
+/// What a homeserver's login endpoint and OAuth metadata offered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ServerOffer {
+    /// The server publishes OAuth 2.0 metadata.
+    pub oauth: bool,
+    /// `m.login.sso` is offered: `None` when it isn't, an empty list when it
+    /// is offered without naming providers.
+    pub sso: Option<Vec<IdentityProvider>>,
+    /// `m.login.password` is offered.
+    pub password: bool,
+}
+
+/// One single sign-on provider a server lists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IdentityProvider {
+    /// Sent to the server to pick this provider.
+    pub id: String,
+    /// What the person sees; `None` when the server sent an empty name.
+    pub name: Option<String>,
+}
 
 /// The ways to sign in that a server offers, in the order to show them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuthMethods {
+pub(crate) struct AuthMethods {
+    /// OAuth alone, or one per SSO provider in the server's order.
     pub browser: Vec<BrowserMethod>,
+    /// `m.login.password` is offered.
     pub password: bool,
 }
 
 /// A sign-in that happens in the system browser.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BrowserMethod {
+pub(crate) enum BrowserMethod {
+    /// OAuth 2.0 with the server's own authorization server.
     OAuth,
-    /// `provider` is the id sent to the server; `None` when the server lists
-    /// no providers. `name` is what the person sees.
+    /// Single sign-on through one provider, or the server's only page.
     Sso {
+        /// The id sent to the server; `None` when the server lists no providers.
         provider: Option<String>,
+        /// What the person sees; `None` when the server lists no providers.
         name: Option<String>,
     },
 }
@@ -29,6 +52,17 @@ pub(crate) fn parse_server(input: &str) -> Option<String> {
         return user_id_server(trimmed);
     }
     host_with_port(trimmed)
+}
+
+/// Whether to reach the server over plain http: only in debug builds, and
+/// only when the input starts with `http://`, as a homeserver on the local
+/// network or a test's mock server does. Release builds always use https.
+pub(crate) fn typed_http(input: &str) -> bool {
+    cfg!(debug_assertions)
+        && input
+            .trim()
+            .get(..7)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("http://"))
 }
 
 /// The server named by a full user id typed into the username field, so a
@@ -105,7 +139,6 @@ pub(crate) fn auth_methods(offer: &ServerOffer) -> AuthMethods {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::matrix::IdentityProvider;
 
     #[test]
     fn names_urls_and_user_ids_give_the_host() {
@@ -146,6 +179,14 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn only_a_typed_http_scheme_in_a_debug_build_is_http() {
+        assert_eq!(typed_http(" HTTP://localhost:8008"), cfg!(debug_assertions));
+        for input in ["https://loaf.moe", "loaf.moe", "http:/x", ""] {
+            assert!(!typed_http(input), "{input:?}");
         }
     }
 

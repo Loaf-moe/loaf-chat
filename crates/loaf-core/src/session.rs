@@ -1,23 +1,27 @@
 //! Signing in, keeping the session across launches and signing out.
 
-/// The sign-in flow: discovery, its state and its stale answers.
-mod flow;
-/// Restoring at start, and later the refresh and sign-out that keep the session.
+/// Every way discovery and signing in can fail.
+mod error;
+/// Signing in on a fresh store, restoring at start, refresh and sign-out.
 pub(crate) mod keeping;
+/// Everything that touches matrix-sdk's types.
+mod sdk;
 /// Server input and the sign-in methods a server offers.
 mod server;
+/// A discovered server and its sign-in handles.
+mod sign_in;
 /// The session as the secret store keeps it.
 mod stored;
+#[cfg(test)]
+mod tests;
 
-pub use flow::{Activity, ServerCheck, SignInFailure, SignInFlow, SignInState};
-pub use server::{AuthMethods, BrowserMethod};
-pub use stored::{CorruptSession, StoredAuth, StoredSession};
+pub use error::{AccountError, BrowserError, DiscoverError, EmptyFields, FinishError, PasswordError, Unreachable};
+pub use sign_in::{BrowserSignIn, Failed, PasswordSignIn, Server};
 
 use alloc::sync::Arc;
 
 use eyeball::Subscriber;
 use serde::{Deserialize, Serialize};
-use tokio::runtime::Handle;
 
 use keeping::Keeping;
 
@@ -64,24 +68,23 @@ pub enum SessionState {
     SignedIn { user: UserId, device: DeviceId },
 }
 
-/// `begin_sign_in` was called while an account is signed in.
-#[derive(Debug, thiserror::Error)]
-#[error("an account is already signed in")]
-pub struct NotSignedOut;
+/// The server a full user id names, such as `example.org` in
+/// `@alice:example.org`; `None` for anything else, a plain username included.
+#[must_use]
+pub fn server_in_user_id(text: &str) -> Option<String> {
+    server::user_id_server(text)
+}
 
 /// The handle a shell uses to watch and change the session.
 pub struct Session {
-    /// Holds the state and the secrets behind it.
+    /// Holds the state, the client and the secrets behind them.
     keeping: Arc<Keeping>,
-    /// The runtime the core started on; flows spawn their work there, so a
-    /// shell may call in, or drop a flow, from any thread.
-    runtime: Handle,
 }
 
 impl Session {
-    /// A handle over `keeping` whose flows run on `runtime`.
-    pub(crate) fn new(keeping: Arc<Keeping>, runtime: Handle) -> Self {
-        Self { keeping, runtime }
+    /// The handle over `keeping`.
+    pub(crate) const fn new(keeping: Arc<Keeping>) -> Self {
+        Self { keeping }
     }
 
     /// A subscriber whose first `next()` yields the current state at once;
@@ -90,18 +93,35 @@ impl Session {
         self.keeping.state()
     }
 
-    /// Starts signing in, probing the default server at once. Any earlier
-    /// flow becomes inert, so two flows can never both sign in.
+    /// Finds the server `input` names (a server name, URL or full user id)
+    /// and what it offers to sign in with.
     ///
     /// # Errors
     ///
-    /// [`NotSignedOut`] while an account is signed in or a sign-in is being kept.
-    pub fn begin_sign_in(&self) -> Result<SignInFlow, NotSignedOut> {
-        let generation = self.keeping.begin_flow()?;
-        Ok(SignInFlow::begin(
-            Arc::clone(&self.keeping),
-            self.runtime.clone(),
-            generation,
-        ))
+    /// See [`DiscoverError`].
+    pub async fn discover(&self, input: &str) -> Result<Server, DiscoverError> {
+        if !self.keeping.is_signed_out() {
+            return Err(DiscoverError::NotSignedOut);
+        }
+        let host = server::parse_server(input).ok_or(DiscoverError::NotAServer)?;
+        let address = if server::typed_http(input) {
+            format!("http://{host}")
+        } else {
+            host.clone()
+        };
+        let probe = sdk::probe(&address).await?;
+        Ok(Server::new(&self.keeping, host, probe))
+    }
+
+    /// Logs out on the server where it can, then always wipes this device's
+    /// data and publishes `SignedOut`.
+    pub async fn sign_out(&self) {
+        self.keeping.sign_out().await;
+    }
+
+    /// What keeps the session, for tests that drive the signed-in client.
+    #[cfg(test)]
+    pub(crate) fn keeping(&self) -> &Arc<Keeping> {
+        &self.keeping
     }
 }
