@@ -9,7 +9,6 @@ use tokio::fs::create_dir_all;
 use crate::ports::auth_browser::AuthBrowser;
 use crate::ports::secret_store::SecretStore;
 use crate::session::Session;
-use crate::session::keeping::Keeping;
 
 /// What the core needs from the shell to start.
 pub struct CoreConfig {
@@ -29,7 +28,7 @@ pub struct Platform {
 /// The core of the app; a shell starts one and keeps it.
 pub struct Core {
     /// Signing in, the session's state and signing out.
-    session: Session,
+    session: Arc<Session>,
 }
 
 /// The core couldn't start.
@@ -47,19 +46,17 @@ impl Core {
     /// [`StartError::DataDir`] when `data_dir` can't be created.
     pub async fn start(config: CoreConfig) -> Result<Arc<Self>, StartError> {
         create_dir_all(&config.data_dir).await.map_err(StartError::DataDir)?;
-        let keeping = Arc::new(Keeping::new(
+        let session = Arc::new(Session::new(
             config.platform,
             config.device_name,
             config.data_dir.join("matrix"),
         ));
-        keeping.restore().await;
-        Ok(Arc::new(Self {
-            session: Session::new(keeping),
-        }))
+        session.restore().await;
+        Ok(Arc::new(Self { session }))
     }
 
     #[must_use]
-    pub const fn session(&self) -> &Session {
+    pub const fn session(&self) -> &Arc<Session> {
         &self.session
     }
 }

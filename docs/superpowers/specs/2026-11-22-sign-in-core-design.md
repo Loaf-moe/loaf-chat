@@ -306,13 +306,15 @@ enum AuthBrowserError { Cancelled, CouldntOpen }
 
 ## Inside
 
-- `session.rs`: `Session`, `SessionState`, ids, `discover`.
+- `session.rs`: `SessionState`, ids, and the public re-exports.
 - `session/server.rs`: input parsing and the method rules (pure).
 - `session/sign_in.rs`: `Server`, `PasswordSignIn`, `BrowserSignIn`.
 - `session/error.rs`: every public error type.
 - `session/sdk.rs`: the only file that touches matrix-sdk types: building
   clients, discovery, the browser sign-ins, error mapping, session conversion.
-- `session/keeping.rs`: committing, restore, refresh persistence, sign-out.
+- `session/lifecycle.rs`: `Session` itself, the account on this device:
+  `discover`, committing a sign-in, restore, refresh persistence, sign-out.
+  `Core` holds it as `Arc<Session>`; the sign-in handles hold the same `Arc`.
 - `session/stored.rs`: the `session` secret.
 - `ports/`: `SecretStore`, `AuthBrowser`.
 

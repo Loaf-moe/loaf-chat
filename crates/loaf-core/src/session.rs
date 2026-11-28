@@ -2,8 +2,9 @@
 
 /// Every way discovery and signing in can fail.
 mod error;
-/// Signing in on a fresh store, restoring at start, refresh and sign-out.
-pub(crate) mod keeping;
+/// The session itself: discovery, signing in on a fresh store, restoring at
+/// start, refresh and sign-out.
+mod lifecycle;
 /// Everything that touches matrix-sdk's types.
 mod sdk;
 /// Server input and the sign-in methods a server offers.
@@ -16,14 +17,10 @@ mod stored;
 mod tests;
 
 pub use error::{AccountError, BrowserError, DiscoverError, EmptyFields, FinishError, PasswordError, Unreachable};
+pub use lifecycle::Session;
 pub use sign_in::{BrowserSignIn, Failed, PasswordSignIn, Server};
 
-use alloc::sync::Arc;
-
-use eyeball::Subscriber;
 use serde::{Deserialize, Serialize};
-
-use keeping::Keeping;
 
 /// A Matrix user id such as `@alice:example.org`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -73,55 +70,4 @@ pub enum SessionState {
 #[must_use]
 pub fn server_in_user_id(text: &str) -> Option<String> {
     server::user_id_server(text)
-}
-
-/// The handle a shell uses to watch and change the session.
-pub struct Session {
-    /// Holds the state, the client and the secrets behind them.
-    keeping: Arc<Keeping>,
-}
-
-impl Session {
-    /// The handle over `keeping`.
-    pub(crate) const fn new(keeping: Arc<Keeping>) -> Self {
-        Self { keeping }
-    }
-
-    /// A subscriber whose first `next()` yields the current state at once;
-    /// each later `next()` waits for a change.
-    pub fn state(&self) -> Subscriber<SessionState> {
-        self.keeping.state()
-    }
-
-    /// Finds the server `input` names (a server name, URL or full user id)
-    /// and what it offers to sign in with.
-    ///
-    /// # Errors
-    ///
-    /// See [`DiscoverError`].
-    pub async fn discover(&self, input: &str) -> Result<Server, DiscoverError> {
-        if !self.keeping.is_signed_out() {
-            return Err(DiscoverError::NotSignedOut);
-        }
-        let host = server::parse_server(input).ok_or(DiscoverError::NotAServer)?;
-        let address = if server::typed_http(input) {
-            format!("http://{host}")
-        } else {
-            host.clone()
-        };
-        let probe = sdk::probe(&address).await?;
-        Ok(Server::new(&self.keeping, host, probe))
-    }
-
-    /// Logs out on the server where it can, then always wipes this device's
-    /// data and publishes `SignedOut`.
-    pub async fn sign_out(&self) {
-        self.keeping.sign_out().await;
-    }
-
-    /// What keeps the session, for tests that drive the signed-in client.
-    #[cfg(test)]
-    pub(crate) fn keeping(&self) -> &Arc<Keeping> {
-        &self.keeping
-    }
 }

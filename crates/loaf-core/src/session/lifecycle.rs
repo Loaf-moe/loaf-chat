@@ -1,5 +1,5 @@
-//! Keeping the session: signing in on a fresh store, restoring at start,
-//! persisting refreshed tokens and signing out.
+//! The session: discovery, signing in on a fresh store, restoring at start,
+//! storing refreshed tokens and signing out.
 
 use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -19,10 +19,10 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use url::Url;
 
-use super::error::{BrowserError, FinishError, PasswordError};
-use super::sdk;
+use super::error::{BrowserError, DiscoverError, FinishError, PasswordError};
+use super::sign_in::Server;
 use super::stored::{PASSPHRASE_KEY, SESSION_KEY, StoredSession};
-use super::{DeviceId, SessionState, UserId};
+use super::{DeviceId, SessionState, UserId, sdk, server};
 use crate::core::Platform;
 use crate::ports::auth_browser::AuthBrowser;
 use crate::ports::secret_store::{SecretStore, SecretStoreError};
@@ -32,8 +32,9 @@ const LOGOUT_TIMEOUT: Duration = Duration::from_secs(15);
 /// Characters in the passphrase that encrypts the SDK store.
 const PASSPHRASE_LENGTH: usize = 32;
 
-/// Owns the session state, the signed-in client and the secrets behind them.
-pub(crate) struct Keeping {
+/// The account on this device: its state, the signed-in client and the
+/// secrets behind them. A shell watches and changes it through `Core`.
+pub struct Session {
     /// What the shell observes.
     state: SharedObservable<SessionState>,
     /// Where the session and the store passphrase are kept.
@@ -60,9 +61,9 @@ struct SignedIn {
     listener: JoinHandle<()>,
 }
 
-/// Why `Keeping::sign_in` didn't sign in.
+/// Why `Session::sign_in` didn't sign in.
 #[derive(Debug)]
-pub(crate) enum KeepError<E> {
+pub(crate) enum SignInError<E> {
     /// Another sign-in holds the guard.
     Busy,
     /// An account is signed in.
@@ -73,30 +74,30 @@ pub(crate) enum KeepError<E> {
     SignIn(E),
 }
 
-impl From<KeepError<PasswordError>> for PasswordError {
-    fn from(error: KeepError<Self>) -> Self {
+impl From<SignInError<PasswordError>> for PasswordError {
+    fn from(error: SignInError<Self>) -> Self {
         match error {
-            KeepError::Busy => Self::Busy,
-            KeepError::NotSignedOut => Self::NotSignedOut,
-            KeepError::CouldntFinish(finish) => finish.into(),
-            KeepError::SignIn(sign_in) => sign_in,
+            SignInError::Busy => Self::Busy,
+            SignInError::NotSignedOut => Self::NotSignedOut,
+            SignInError::CouldntFinish(finish) => finish.into(),
+            SignInError::SignIn(sign_in) => sign_in,
         }
     }
 }
 
-impl From<KeepError<BrowserError>> for BrowserError {
-    fn from(error: KeepError<Self>) -> Self {
+impl From<SignInError<BrowserError>> for BrowserError {
+    fn from(error: SignInError<Self>) -> Self {
         match error {
-            KeepError::Busy => Self::Busy,
-            KeepError::NotSignedOut => Self::NotSignedOut,
-            KeepError::CouldntFinish(finish) => finish.into(),
-            KeepError::SignIn(sign_in) => sign_in,
+            SignInError::Busy => Self::Busy,
+            SignInError::NotSignedOut => Self::NotSignedOut,
+            SignInError::CouldntFinish(finish) => finish.into(),
+            SignInError::SignIn(sign_in) => sign_in,
         }
     }
 }
 
-impl Keeping {
-    /// A keeper that starts signed out, before [`Self::restore`] has run.
+impl Session {
+    /// A session that starts signed out, before [`Self::restore`] has run.
     pub(crate) fn new(platform: Platform, device_name: String, store_dir: PathBuf) -> Self {
         Self {
             state: SharedObservable::new(SessionState::SignedOut),
@@ -110,15 +111,36 @@ impl Keeping {
         }
     }
 
+    /// A subscriber whose first `next()` yields the current state at once;
+    /// each later `next()` waits for a change.
+    pub fn state(&self) -> Subscriber<SessionState> {
+        self.state.subscribe_reset()
+    }
+
+    /// Finds the server `input` names (a server name, URL or full user id)
+    /// and what it offers to sign in with.
+    ///
+    /// # Errors
+    ///
+    /// See [`DiscoverError`].
+    pub async fn discover(self: &Arc<Self>, input: &str) -> Result<Server, DiscoverError> {
+        if !self.is_signed_out() {
+            return Err(DiscoverError::NotSignedOut);
+        }
+        let host = server::parse_server(input).ok_or(DiscoverError::NotAServer)?;
+        let address = if server::typed_http(input) {
+            format!("http://{host}")
+        } else {
+            host.clone()
+        };
+        let probe = sdk::probe(&address).await?;
+        Ok(Server::new(self, host, probe))
+    }
+
     /// A poisoned lock only means a panic elsewhere; the slot is assigned
     /// whole, so it stays consistent.
     fn signed_in(&self) -> MutexGuard<'_, Option<SignedIn>> {
         self.signed_in.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// A subscriber whose first `next()` yields the current state; later ones wait for a change.
-    pub(crate) fn state(&self) -> Subscriber<SessionState> {
-        self.state.subscribe_reset()
     }
 
     /// No account is signed in.
@@ -143,12 +165,12 @@ impl Keeping {
         self: &Arc<Self>,
         homeserver: &Url,
         sign_in: impl AsyncFnOnce(&Client, &str) -> Result<(), E>,
-    ) -> Result<(), KeepError<E>> {
+    ) -> Result<(), SignInError<E>> {
         let Ok(_guard) = self.signing_in.try_lock() else {
-            return Err(KeepError::Busy);
+            return Err(SignInError::Busy);
         };
         if !self.is_signed_out() {
-            return Err(KeepError::NotSignedOut);
+            return Err(SignInError::NotSignedOut);
         }
         // Signed out, so nothing in the store is worth keeping; a sign-in
         // dropped earlier may have left one behind.
@@ -159,13 +181,13 @@ impl Keeping {
             Err(error) => {
                 tracing::warn!(%error, "couldn't open a store to sign in on");
                 self.wipe_store().await;
-                return Err(KeepError::CouldntFinish(error));
+                return Err(SignInError::CouldntFinish(error));
             }
         };
         if let Err(error) = sign_in(&client, &self.device_name).await {
             close(client).await;
             self.wipe_store().await;
-            return Err(KeepError::SignIn(error));
+            return Err(SignInError::SignIn(error));
         }
         let written = match StoredSession::try_from(&client) {
             Ok(session) => self
@@ -185,7 +207,7 @@ impl Keeping {
                 log_out(&client).await;
                 close(client).await;
                 self.wipe_local().await;
-                Err(KeepError::CouldntFinish(error))
+                Err(SignInError::CouldntFinish(error))
             }
         }
     }
@@ -263,24 +285,24 @@ impl Keeping {
         self.state.set(SessionState::SignedOut);
     }
 
-    /// Logs out on the server (best effort), then wipes local data and
-    /// publishes `SignedOut`. Runs to the end even if the caller stops
-    /// waiting; a call while one is under way does nothing.
-    pub(crate) async fn sign_out(self: &Arc<Self>) {
+    /// Logs out on the server where it can, then always wipes this device's
+    /// data and publishes `SignedOut`. Runs to the end even if the caller
+    /// stops waiting; a call while one is under way does nothing.
+    pub async fn sign_out(self: &Arc<Self>) {
         if self.signing_out.swap(true, Ordering::SeqCst) {
             return;
         }
-        let keeping = Arc::clone(self);
+        let session = Arc::clone(self);
         let signing_out = tokio::spawn(async move {
-            let signed_in = keeping.signed_in().take();
+            let signed_in = session.signed_in().take();
             if let Some(SignedIn { client, listener }) = signed_in {
                 listener.abort();
                 log_out(&client).await;
                 close(client).await;
-                keeping.wipe_local().await;
-                keeping.state.set(SessionState::SignedOut);
+                session.wipe_local().await;
+                session.state.set(SessionState::SignedOut);
             }
-            keeping.signing_out.store(false, Ordering::SeqCst);
+            session.signing_out.store(false, Ordering::SeqCst);
         });
         if let Err(error) = signing_out.await {
             tracing::warn!(%error, "sign-out stopped early");
@@ -328,15 +350,15 @@ async fn log_out(client: &Client) {
 
 /// Follows the client's session changes for as long as it is kept: writes
 /// refreshed tokens, and signs out when the token is lost.
-async fn keep_tokens(weak: Weak<Keeping>, mut changes: Receiver<SessionChange>) {
+async fn keep_tokens(weak: Weak<Session>, mut changes: Receiver<SessionChange>) {
     loop {
         let change = changes.recv().await;
-        let Some(keeping) = weak.upgrade() else { return };
+        let Some(session) = weak.upgrade() else { return };
         match change {
             // A missed change may have been a refresh; the client's current
             // tokens are what to keep either way.
-            Ok(SessionChange::TokensRefreshed) | Err(RecvError::Lagged(_)) => keeping.store_refreshed().await,
-            Ok(SessionChange::UnknownToken(_)) => return keeping.lose_session().await,
+            Ok(SessionChange::TokensRefreshed) | Err(RecvError::Lagged(_)) => session.store_refreshed().await,
+            Ok(SessionChange::UnknownToken(_)) => return session.lose_session().await,
             Err(RecvError::Closed) => return,
         }
     }

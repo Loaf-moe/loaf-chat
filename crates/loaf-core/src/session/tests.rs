@@ -152,7 +152,7 @@ impl Env {
 
 /// Ends `core` as quitting the app does: its stores released, then dropped.
 async fn quit(core: Arc<Core>) {
-    if let Some(client) = core.session().keeping().client() {
+    if let Some(client) = core.session().client() {
         client.pause().await.unwrap();
     }
     drop(core);
@@ -792,7 +792,7 @@ async fn sign_in_after_success_with_another_handle_is_not_signed_out() {
     );
 }
 
-// ---- Keeping the session ----
+// ---- Keeping the session across launches ----
 
 #[tokio::test]
 async fn nothing_stored_starts_signed_out() {
@@ -805,7 +805,7 @@ async fn nothing_stored_starts_signed_out() {
 async fn stored_session_restores_offline_with_the_keys_made_at_sign_in() {
     let env = Env::new().await;
     let first_core = env.signed_in().await;
-    let first_client = first_core.session().keeping().client().unwrap();
+    let first_client = first_core.session().client().unwrap();
     let key = first_client.encryption().ed25519_key().await.unwrap();
     drop(first_client);
     quit(first_core).await;
@@ -817,7 +817,7 @@ async fn stored_session_restores_offline_with_the_keys_made_at_sign_in() {
 
     let core = env.start().await;
     assert_eq!(state(&core), alice());
-    let client = core.session().keeping().client().unwrap();
+    let client = core.session().client().unwrap();
     assert_eq!(client.encryption().ed25519_key().await.unwrap(), key);
 }
 
@@ -913,7 +913,7 @@ async fn refreshed_tokens_reach_the_secret_store() {
     let core = env.signed_in().await;
     expire_first_token(&env, refreshed_tokens()).await;
 
-    let client = core.session().keeping().client().unwrap();
+    let client = core.session().client().unwrap();
     client.whoami().await.unwrap();
 
     eventually(|| {
@@ -935,7 +935,7 @@ async fn unrefreshable_token_signs_out_and_wipes() {
     let core = env.signed_in().await;
     expire_first_token(&env, matrix_error(401, "M_UNKNOWN_TOKEN", "Refresh token revoked")).await;
 
-    let client = core.session().keeping().client().unwrap();
+    let client = core.session().client().unwrap();
     client.whoami().await.unwrap_err();
     drop(client);
 
@@ -1010,7 +1010,7 @@ async fn logs_of_sign_in_refresh_and_sign_out_carry_no_secrets() {
     let core = env.signed_in().await;
     let passphrase = env.secrets.value(PASSPHRASE_KEY).unwrap();
     expire_first_token(&env, refreshed_tokens()).await;
-    core.session().keeping().client().unwrap().whoami().await.unwrap();
+    core.session().client().unwrap().whoami().await.unwrap();
     eventually(|| {
         env.stored().is_some_and(|stored| {
             matches!(&stored.auth, StoredAuth::Matrix { access_token, refresh_token: _ } if access_token == "syt_refreshed_secret")

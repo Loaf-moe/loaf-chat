@@ -6,8 +6,8 @@ use core::fmt;
 
 use url::Url;
 
+use super::Session;
 use super::error::{BrowserError, EmptyFields, PasswordError};
-use super::keeping::Keeping;
 use super::sdk::{self, Probe};
 use super::server::{BrowserMethod, auth_methods};
 
@@ -24,13 +24,13 @@ pub struct Server {
 
 impl Server {
     /// The sign-ins `probe` found on the server typed as `name`.
-    pub(crate) fn new(keeping: &Arc<Keeping>, name: String, probe: Probe) -> Self {
+    pub(crate) fn new(session: &Arc<Session>, name: String, probe: Probe) -> Self {
         let methods = auth_methods(&probe.offer);
         let browser = methods
             .browser
             .into_iter()
             .map(|method| BrowserSignIn {
-                keeping: Arc::clone(keeping),
+                session: Arc::clone(session),
                 homeserver: probe.homeserver.clone(),
                 name: match &method {
                     BrowserMethod::Sso {
@@ -47,7 +47,7 @@ impl Server {
             })
             .collect();
         let password = methods.password.then(|| PasswordSignIn {
-            keeping: Arc::clone(keeping),
+            session: Arc::clone(session),
             homeserver: probe.homeserver,
         });
         Self {
@@ -90,7 +90,7 @@ pub struct Failed<H, E> {
 #[derive(Clone)]
 pub struct PasswordSignIn {
     /// Signs in and keeps the session.
-    keeping: Arc<Keeping>,
+    session: Arc<Session>,
     /// The base URL discovery resolved.
     homeserver: Url,
 }
@@ -114,7 +114,7 @@ impl PasswordSignIn {
         }
         let trimmed = user.trim();
         let signed_in = self
-            .keeping
+            .session
             .sign_in(&self.homeserver, async |client, device_name| {
                 sdk::password_sign_in(client, trimmed, password, device_name).await
             })
@@ -139,7 +139,7 @@ impl fmt::Debug for PasswordSignIn {
 #[derive(Clone)]
 pub struct BrowserSignIn {
     /// Signs in and keeps the session.
-    keeping: Arc<Keeping>,
+    session: Arc<Session>,
     /// The base URL discovery resolved.
     homeserver: Url,
     /// The provider's name, or the server's for OAuth.
@@ -165,9 +165,9 @@ impl BrowserSignIn {
         reason = "the handle comes back by value so the UI can retry; it is returned once per attempt"
     )]
     pub async fn sign_in(self) -> Result<(), Failed<Self, BrowserError>> {
-        let browser = self.keeping.auth_browser();
+        let browser = self.session.auth_browser();
         let signed_in = self
-            .keeping
+            .session
             .sign_in(&self.homeserver, async |client, device_name| match &self.method {
                 BrowserMethod::OAuth => sdk::oauth_sign_in(client, browser.as_ref()).await,
                 BrowserMethod::Sso { provider, name: _ } => {
