@@ -1,0 +1,272 @@
+use url::Url;
+
+use super::UserId;
+
+/// What a homeserver's login endpoint and OAuth metadata offered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ServerOffer {
+    /// The server publishes OAuth 2.0 metadata.
+    pub oauth: bool,
+    /// `m.login.sso` is offered: `None` when it isn't, an empty list when it
+    /// is offered without naming providers.
+    pub sso: Option<Vec<IdentityProvider>>,
+    /// `m.login.password` is offered.
+    pub password: bool,
+}
+
+/// One single sign-on provider a server lists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IdentityProvider {
+    /// Sent to the server to pick this provider.
+    pub id: String,
+    /// What the person sees; `None` when the server sent an empty name.
+    pub name: Option<String>,
+}
+
+/// The ways to sign in that a server offers, in the order to show them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AuthMethods {
+    /// OAuth alone, or one per SSO provider in the server's order.
+    pub browser: Vec<BrowserMethod>,
+    /// `m.login.password` is offered.
+    pub password: bool,
+}
+
+/// A sign-in that happens in the system browser.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BrowserMethod {
+    /// OAuth 2.0 with the server's own authorization server.
+    OAuth,
+    /// Single sign-on through one provider, or the server's only page.
+    Sso {
+        /// The id sent to the server; `None` when the server lists no providers.
+        provider: Option<String>,
+        /// What the person sees; `None` when the server lists no providers.
+        name: Option<String>,
+    },
+}
+
+/// The host (with any port, lowercased) in a server name, URL or full user id,
+/// or `None` while the input isn't a plausible host yet.
+pub(crate) fn parse_server_name(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.starts_with('@') {
+        let user = UserId::try_from(trimmed).ok()?;
+        return host_with_port(user.server_name());
+    }
+    host_with_port(trimmed)
+}
+
+/// Whether to reach the server over plain http: only in debug builds, and
+/// only when the input starts with `http://`, as a homeserver on the local
+/// network or a test's mock server does. Release builds always use https.
+pub(crate) fn typed_http(input: &str) -> bool {
+    cfg!(debug_assertions)
+        && input
+            .trim()
+            .get(..7)
+            .is_some_and(|scheme| scheme.eq_ignore_ascii_case("http://"))
+}
+
+/// Goes through `Url` so half-typed input can't become an error: whatever it
+/// rejects, or that isn't a plausible host yet, is `None`.
+fn host_with_port(text: &str) -> Option<String> {
+    if text.is_empty() || text.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let with_scheme;
+    let candidate = if text.contains("://") {
+        text
+    } else {
+        with_scheme = format!("https://{text}");
+        &with_scheme
+    };
+    let url = Url::parse(candidate).ok()?;
+    let host = url.host_str()?.to_lowercase();
+    if !(host.contains('.') || host == "localhost") {
+        return None;
+    }
+    // `Url::port` is `None` for a scheme's default port, and `http://host:80`
+    // would then be resolved as https on 443; the typed port is read from the
+    // text instead.
+    Some(match typed_port(candidate) {
+        Some(port) => format!("{host}:{port}"),
+        None => host,
+    })
+}
+
+/// The port written in the authority of an already validated URL.
+fn typed_port(url_text: &str) -> Option<&str> {
+    let after_scheme = url_text.split_once("://").map_or(url_text, |(_, rest)| rest);
+    let authority = after_scheme.split(['/', '?', '#']).next().unwrap_or(after_scheme);
+    let host_and_port = authority.rsplit_once('@').map_or(authority, |(_, rest)| rest);
+    let (_, port) = host_and_port.rsplit_once(':')?;
+    (!port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit())).then_some(port)
+}
+
+/// OAuth is the one browser method when published; otherwise SSO, one per
+/// provider in the server's order.
+pub(crate) fn auth_methods(offer: &ServerOffer) -> AuthMethods {
+    let browser = if offer.oauth {
+        vec![BrowserMethod::OAuth]
+    } else {
+        match &offer.sso {
+            None => Vec::new(),
+            Some(providers) if providers.is_empty() => vec![BrowserMethod::Sso {
+                provider: None,
+                name: None,
+            }],
+            Some(providers) => providers
+                .iter()
+                .map(|provider| BrowserMethod::Sso {
+                    provider: Some(provider.id.clone()),
+                    name: Some(provider.name.clone().unwrap_or_else(|| provider.id.clone())),
+                })
+                .collect(),
+        }
+    };
+    AuthMethods {
+        browser,
+        password: offer.password,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_urls_and_user_ids_give_the_host() {
+        for (input, host) in [
+            ("loaf.moe", "loaf.moe"),
+            ("https://loaf.moe/", "loaf.moe"),
+            ("https://matrix.loaf.moe:8448/path", "matrix.loaf.moe:8448"),
+            ("@alice:Loaf.Moe", "loaf.moe"),
+            ("  LOAF.moe ", "loaf.moe"),
+            ("localhost:8008", "localhost:8008"),
+            ("https://loaf.moe:443", "loaf.moe:443"),
+            ("loaf.moe:443", "loaf.moe:443"),
+            ("http://loaf.moe:80", "loaf.moe:80"),
+            ("@a:loaf.moe:443", "loaf.moe:443"),
+        ] {
+            assert_eq!(parse_server_name(input).as_deref(), Some(host), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn implausible_input_gives_nothing() {
+        for input in ["", "loaf", "loaf moe", "@alice", "https://"] {
+            assert_eq!(parse_server_name(input), None, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn every_prefix_is_none_or_plausible() {
+        for full in ["https://matrix.loaf.moe:8448", "@alice:loaf.moe"] {
+            for end in 0..=full.len() {
+                let Some(prefix) = full.get(..end) else {
+                    continue;
+                };
+                if let Some(host) = parse_server_name(prefix) {
+                    assert!(
+                        host.contains('.') || host.starts_with("localhost"),
+                        "{prefix:?} gave {host:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn only_a_typed_http_scheme_in_a_debug_build_is_http() {
+        assert_eq!(typed_http(" HTTP://localhost:8008"), cfg!(debug_assertions));
+        for input in ["https://loaf.moe", "loaf.moe", "http:/x", ""] {
+            assert!(!typed_http(input), "{input:?}");
+        }
+    }
+
+    fn provider(id: &str, name: Option<&str>) -> IdentityProvider {
+        IdentityProvider {
+            id: id.to_owned(),
+            name: name.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn oauth_hides_sso() {
+        let offer = ServerOffer {
+            oauth: true,
+            sso: Some(vec![provider("a", None), provider("b", None)]),
+            password: true,
+        };
+        let methods = auth_methods(&offer);
+        assert_eq!(methods.browser, vec![BrowserMethod::OAuth]);
+        assert!(methods.password);
+    }
+
+    #[test]
+    fn sso_keeps_order_and_falls_back_to_id() {
+        let offer = ServerOffer {
+            oauth: false,
+            sso: Some(vec![provider("gh", Some("GitHub")), provider("kanidm", None)]),
+            password: false,
+        };
+        assert_eq!(
+            auth_methods(&offer).browser,
+            vec![
+                BrowserMethod::Sso {
+                    provider: Some("gh".into()),
+                    name: Some("GitHub".into())
+                },
+                BrowserMethod::Sso {
+                    provider: Some("kanidm".into()),
+                    name: Some("kanidm".into())
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn sso_without_providers_is_one_method() {
+        let offer = ServerOffer {
+            oauth: false,
+            sso: Some(Vec::new()),
+            password: false,
+        };
+        assert_eq!(
+            auth_methods(&offer).browser,
+            vec![BrowserMethod::Sso {
+                provider: None,
+                name: None
+            }]
+        );
+    }
+
+    #[test]
+    fn password_only_when_offered() {
+        let mut offer = ServerOffer {
+            oauth: false,
+            sso: None,
+            password: true,
+        };
+        assert!(auth_methods(&offer).password);
+        offer.password = false;
+        assert!(!auth_methods(&offer).password);
+    }
+
+    #[test]
+    fn nothing_usable_is_empty() {
+        let offer = ServerOffer {
+            oauth: false,
+            sso: None,
+            password: false,
+        };
+        assert_eq!(
+            auth_methods(&offer),
+            AuthMethods {
+                browser: Vec::new(),
+                password: false
+            }
+        );
+    }
+}

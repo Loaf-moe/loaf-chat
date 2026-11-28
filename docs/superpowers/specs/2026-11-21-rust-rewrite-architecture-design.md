@@ -38,10 +38,15 @@ renders BT.709 video with BT.601 colours.
   easier to support. `docs/mscs.md` is the full list of MSCs the apps use,
   each marked required of the homeserver or optional, with the feature that
   brought it in.
-- **Ports and adapters.** The core is pure logic. Every I/O, the Matrix SDK
-  and livekit included, sits behind a port: a trait the core defines in its
-  own types. Adapters implement ports; core logic sees only the ports, so it
-  is tested against fakes and an adapter can be replaced without touching it.
+- **Platform ports.** What differs per platform (keychain, browser,
+  notifications, sound, push, CallKit, updates) sits behind a port: a small
+  trait the core defines in its own types, which each shell implements. The
+  Matrix SDK and livekit are used directly; the core is tested against
+  matrix-sdk's own mock server rather than a trait of ours.
+- **States are types.** The core reports valid state and offers only the
+  transitions that state allows, so invalid states are unrepresentable where
+  the types can manage it. It does no waiting or queuing for the UI: the UI
+  reacts to state and calls transitions.
 
 ## Stack
 
@@ -104,28 +109,26 @@ The core uses it for sync and for the notifier.
 
 One account per install.
 
-**Signing in.** `core.session().begin_sign_in()` returns a `SignInFlow` that
-starts discovering **loaf.moe** at once, so the screen opens on loaf.moe's
-ways in: "continue with loaf.moe" (SSO through Kanidm), and the password form
-behind a link because loaf.moe advertises `m.login.password`.
+**Signing in.** `core.session().discover(input)` returns a `Server`: its
+name as typed and its ways in, each a handle that can sign in. There is no
+way to sign in without discovering first. The screen discovers **loaf.moe**
+on open, so it shows "continue with loaf.moe" (SSO through Kanidm), and the
+password form behind a link because loaf.moe advertises `m.login.password`.
 
-- **Another server** is `flow.set_server(input)`: a name, a URL, or a full
-  user id of which only the domain is kept. A full id typed into the username
-  field re-points the server after a debounce. The screen shows the name typed,
-  never the delegated base URL. A server that can't be found or used is one
-  failure, "couldn't reach <name>".
-- **Ways in** come from the server: OAuth 2.0 (MSC3861) where advertised; SSO
-  with its identity providers; password only where `m.login.password` is
-  offered.
+- **Another server** is another `discover`: a name, a URL, or a full user id
+  of which only the domain is kept. Re-pointing to the server in a typed user
+  id, and debouncing it, is the UI's. A server that can't be found or used is
+  one failure, "couldn't reach <name>".
+- **Ways in** come from the server: OAuth 2.0 where advertised; SSO with its
+  identity providers; password only where `m.login.password` is offered.
 - **The browser step** goes through `AuthBrowser`:
   `ASWebAuthenticationSession` on iOS and macOS; the system browser and a
   loopback listener on Linux and Windows, with "finish in your browser" while
   waiting.
 - **Password errors** are typed: `M_FORBIDDEN` → wrong credentials;
-  `M_LIMIT_EXCEEDED` carries `retry_after` for the countdown.
-- **Stale answers are dropped.** Every flow and attempt has an identity. An
-  answer arriving after cancel, a server change or a newer attempt changes
-  nothing and never signs in.
+  `M_LIMIT_EXCEEDED` carries `retry_after`, which the UI counts down.
+- **One sign-in at a time.** A sign-in that starts during another, or after
+  signing in, fails at once. Dropping a sign-in cancels it.
 
 **Keeping the session.** Access and refresh tokens are kept in the platform
 keychain (`SecretStore`); on iOS in a keychain group shared with the
@@ -142,8 +145,7 @@ out.
 
 | State | Meaning |
 |---|---|
-| `SignedOut` | |
-| `SigningIn(step)` | discovery, choosing a way in, browser wait, password busy |
+| `SignedOut` | sign-in progress lives in the UI, which awaits the handles |
 | `SignedIn { user, device, trust }` | `trust` is `Unknown`, `Unverified` or `Verified`. `Unknown` while keys load is never read as "no identity", so recovery is never offered over a real identity |
 | `SoftLoggedOut { user }` | `soft_logout: true`: the device's keys are kept; sign-in is locked to that account ("sign in again as …"). Signing out instead is a separate, confirmed command |
 | `SessionRevoked` | the server ended the session; shown, then signed out |
@@ -223,7 +225,10 @@ validation of the shaders the renderer compiles, ported from the PoC's
 ## 4. iOS
 
 **`loaf-ffi`** is UniFFI over `loaf-core`, with no logic of its own.
-Commands become `async throws`; area errors become Swift error enums.
+Commands become `async throws`; area errors become Swift error enums. Core
+handles that are consumed by a transition (the sign-in handles) are wrapped
+here, each in an object holding `Mutex<Option<_>>`, since UniFFI objects are
+shared `Arc`s; a used one throws.
 Subscriptions are `subscribe(listener) -> TaskHandle`, the listener a Swift
 callback interface receiving values or `VectorDiff`s; dropping the handle
 unsubscribes. It builds static libraries for `aarch64-apple-ios` and
@@ -257,24 +262,19 @@ starts none of the app's services, and its peak memory is tested.
 
 The push gateway URL is a build setting, `LOAF_PUSH_GATEWAY`.
 
-## 5. Ports and adapters
+## 5. Platform ports
 
 Ports are defined in `loaf-core::ports` and handed to `Core::start` as
 `Arc<dyn Trait + Send + Sync>`. Each is a small async trait in the core's own
-types, added only when the feature needing it is ported.
-
-**Matrix.** The Matrix adapter is a module of `loaf-core` over matrix-sdk and
-matrix-sdk-ui, built by `Core::start` from `data_dir`. Its only other
-implementation is the test fake. The ports' shape is set by each feature's
-spec, starting with sign-in. The adapter maps SDK types and errors into port
-types; core logic never sees the SDK. livekit gets its own adapter with calls.
-
-**Platform.**
+types, added only when the feature needing it is ported. matrix-sdk and
+livekit are not behind ports: the core uses them directly and maps their
+types and errors into its own at the boundary, so no SDK type reaches a
+shell.
 
 | Trait | Calls | Arrives with |
 |---|---|---|
 | `SecretStore` | `get`, `set`, `delete` | sign-in |
-| `AuthBrowser` | `authenticate(url, callback) -> Result<Url, AuthCancelled>` | sign-in |
+| `AuthBrowser` | `redirect_uri()`, `authenticate(url) -> Result<Url, AuthBrowserError>` | sign-in |
 | `Notifications` | `permission() -> Granted / Denied / NotApplicable`, `show(Notice)`, `withdraw(room)`, `open_settings()` | notifications |
 | `Sound` | `chime()` | notifications |
 | `PushRegistration` | `register() -> Option<PushToken>`, `unregister()` | iOS push |
@@ -294,13 +294,13 @@ types; core logic never sees the SDK. livekit gets its own adapter with calls.
   restored.
 - Swift implements them as UniFFI foreign traits
   (`#[uniffi::export(with_foreign)]`); desktop in `loaf-desktop/platform/`.
-- `loaf-core` ships a fake for every port, Matrix included, so every
-  decision is tested headless.
+- `loaf-core` has a test double for every port, and tests Matrix behaviour
+  on matrix-sdk's `MatrixMockServer`, so every decision is tested headless.
 
 ## 6. Errors and tests
 
-**Errors and logs.** SDK errors are mapped into port errors in the adapter,
-and into area enums in the core.
+**Errors and logs.** SDK errors are mapped into area enums in the core, in
+one place per area.
 Every crate denies `clippy::unwrap_used`, `expect_used`, `panic` and
 `indexing_slicing` outside tests; UniFFI turns a panic that escapes into an
 error rather than a Swift crash. Logging is `tracing`, a span per area, to
@@ -337,9 +337,8 @@ Each feature gets its own spec, plan and PR.
 
 1. **Sign-in and session** (section 2), on the scaffolded workspace, in four
    steps, each its own spec, plan and PR:
-   1. **Core:** the session area in `loaf-core`, its Matrix ports and the
-      `SecretStore` and `AuthBrowser` ports with their fakes, and the
-      Matrix adapter for sign-in and session.
+   1. **Core:** the session area in `loaf-core` over matrix-sdk, and the
+      `SecretStore` and `AuthBrowser` ports with their test doubles.
    2. **Desktop:** the sign-in screens and the desktop `SecretStore` and
       `AuthBrowser`.
    3. **iOS:** `loaf-ffi`, the iOS project, the sign-in screens and the Swift

@@ -21,10 +21,9 @@ run = "cargo fetch --locked"
 description = "Build every crate"
 run = "cargo build --workspace --all-targets --locked"
 
-# --no-tests=warn only while the workspace has no tests.
 [tasks.test]
 description = "Run every test"
-run = "cargo nextest run --workspace --locked --no-tests=warn"
+run = "cargo nextest run --workspace --locked"
 
 [tasks.fmt]
 description = "Format the workspace and the hooks"

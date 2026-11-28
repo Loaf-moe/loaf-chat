@@ -39,3 +39,29 @@ todo = "deny"
 # Output goes through tracing.
 print_stdout = "deny"
 print_stderr = "deny"
+
+# Restriction lints that reject idiomatic code, allowed with the reason each
+# one is wrong for this workspace.
+# The shells and the core build together; there is no downstream semver to guard.
+exhaustive_structs = "allow"
+exhaustive_enums = "allow"
+# The compiler inlines within a crate and LTO handles the rest.
+missing_inline_in_public_items = "allow"
+# Short helpers called once are how a function stays readable.
+single_call_fn = "allow"
+# Modules re-export their public types so callers don't spell the file layout.
+pub_use = "allow"
+# Declaration order follows the reader's story, not the alphabet.
+arbitrary_source_item_ordering = "allow"
+# One side of a contradicting pair; named module files (ports.rs + ports/) are the layout, so mod_module_files stays on.
+self_named_module_files = "allow"
+# One side of a contradicting pair; pub(crate) is the idiom, so pub_without_shorthand stays on.
+pub_with_shorthand = "allow"
+# Port and type names carry their module's name where the spec fixes them (SecretStoreError).
+module_name_repetitions = "allow"
+# Matching on a reference with default binding modes is idiomatic.
+pattern_type_mismatch = "allow"
+# One side of a contradicting pair; naming the ignored fields (rest_pattern_accessible_field) keeps new fields from slipping past a match.
+unneeded_field_pattern = "allow"
+# `?` is how Rust propagates None and Err; the alternative is a match per call.
+question_mark_used = "allow"
